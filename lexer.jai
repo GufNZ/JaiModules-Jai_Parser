@@ -1,8 +1,9 @@
 // @Cleanup: Explicitly check against end-of-input for all sub-lexers.
-// @Cleanup: We have all these no_checks in here because end-of-input is -1.  We probably want to be cleaner about that in some way.
+// @Cleanup: We have all these no_checks in here because end-of-input is EOF.  We probably want to be cleaner about that in some way.
 
 //TODO: review & convert casts.  Leverage xx where we can if we can't unify the param type.  Use postfix cast otherwise.
 //LATER: transcribe the C++ SIMD stuff and turn it on if available.
+//TODO: @Cleanup: Move this function, make it user-overridable.
 
 #import "Basic";
 #import "Pool";
@@ -12,6 +13,7 @@
 
 USE_SIMD :: false;
 
+EOF :: -1;
 MAX_IDENTIFIER_LENGTH :: 512;
 MAX_CONCURRENT_TOKENS :: 8;		// Must be a power of two!	// @Cleanup: explain why or change.
 LEXER_SIMD_WIDTH :: 16;
@@ -68,7 +70,6 @@ Token_Type :: enum s16 {
 	LOGICAL_AND_EQUALS	:: 297;
 	LOGICAL_OR_EQUALS	:: 298;
 
-	POINTER_DEREFERENCE	:: 310;
 	POSTFIX_DEREFERENCE	:: 311;
 	PREFIX_DEREFERENCE	:: 312;
 
@@ -143,6 +144,146 @@ Note_Flags :: enum_flags u8 {
 }
 
 Table_String :: #type,isa string;
+
+#if ENABLE_TRIVIA {
+	Trivia_Kind :: enum u8 {
+		WHITESPACE;
+		LINE_COMMENT;
+		BLOCK_COMMENT;
+		SHEBANG;
+		IGNORED;
+	}
+
+	Trivia :: struct {
+		kind: Trivia_Kind;
+		text: string;
+		offset: s64;
+	}
+
+	Trivia_Iterator :: struct {
+		source: string;
+		cursor: s64;
+	}
+
+	make_trivia_iterator :: inline (source: string) -> Trivia_Iterator {
+		return .{source=source};
+	}
+
+	for_expansion :: (iterator: Trivia_Iterator, body: Code, flags: For_Flags) #expand {
+		#assert(flags == 0);
+
+		while true {
+			success, `it := next_trivia(*iterator);
+			if !success		break;
+
+			`it_index := it.offset;
+			#insert body;
+		}
+	}
+
+	next_trivia :: (iterator: *Trivia_Iterator) -> bool, Trivia {
+		if iterator.cursor >= iterator.source.count {
+			return false, .{};
+		}
+
+		trivia: Trivia;
+		start := iterator.cursor;
+		first := iterator.source[start];
+
+		if is_space(first) {
+			trivia.kind = .WHITESPACE;
+			iterator.cursor += 1;
+			while iterator.cursor < iterator.source.count && is_space(iterator.source[iterator.cursor]) {
+				iterator.cursor += 1;
+			}
+
+			trivia.text = slice(iterator.source, start, iterator.cursor - start);
+			trivia.offset = start;
+			return true, trivia;
+		}
+
+
+		if iterator.cursor + 1 >= iterator.source.count {
+			trivia.kind = .IGNORED;
+			iterator.cursor += 1;
+			trivia.text = slice(iterator.source, start, iterator.cursor - start);
+			trivia.offset = start;
+			return true, trivia;
+		}
+
+
+		second := iterator.source[iterator.cursor + 1];
+		if first == #char "/" {
+			if second == #char "/" {
+				trivia.kind = .LINE_COMMENT;
+				iterator.cursor += 2;
+				while (iterator.cursor < iterator.source.count
+					&& iterator.source[iterator.cursor] != #char "\r"
+					&& iterator.source[iterator.cursor] != #char "\n"
+				) {
+					iterator.cursor += 1;
+				}
+			} else if second == #char "*" {
+				trivia.kind = .BLOCK_COMMENT;
+				iterator.cursor += 2;
+				depth: s64 = 1;
+				while iterator.cursor < iterator.source.count && depth {
+					if (iterator.cursor + 1 < iterator.source.count
+						&& iterator.source[iterator.cursor] == #char "/"
+						&& iterator.source[iterator.cursor + 1] == #char "*"
+					) {
+						depth += 1;
+						iterator.cursor += 2;
+					} else if (iterator.cursor + 1 < iterator.source.count
+						&& iterator.source[iterator.cursor] == #char "*"
+						&& iterator.source[iterator.cursor + 1] == #char "/"
+					) {
+						depth -= 1;
+						iterator.cursor += 2;
+					} else {
+						iterator.cursor += 1;
+					}
+				}
+			} else {
+				assert(false, "Unexpected '/' in trivia.");
+				trivia.kind = .IGNORED;
+			}
+		} else if first == #char "#" && second == #char "!" {
+			trivia.kind = .SHEBANG;
+			iterator.cursor += 2;
+			while (iterator.cursor < iterator.source.count
+				&& iterator.source[iterator.cursor] != #char "\r"
+				&& iterator.source[iterator.cursor] != #char "\n"
+			) {
+				iterator.cursor += 1;
+			}
+		} else {
+			trivia.kind = .IGNORED;
+		}
+
+		if trivia.kind == .IGNORED {
+			iterator.cursor += 1;
+			while iterator.cursor < iterator.source.count {
+				cursor := iterator.cursor;
+				character := iterator.source[cursor];
+				starts_comment := (character == #char "/"
+					&& cursor + 1 < iterator.source.count
+					&& (iterator.source[cursor + 1] == #char "/" || iterator.source[cursor + 1] == #char "*")
+				);
+				starts_shebang := (character == #char "#"
+					&& cursor + 1 < iterator.source.count
+					&& iterator.source[cursor + 1] == #char "!"
+				);
+				if is_space(character) || starts_comment || starts_shebang	break;
+				iterator.cursor += 1;
+			}
+		}
+
+		trivia.text = slice(iterator.source, start, iterator.cursor - start);
+		trivia.offset = start;
+		return true, trivia;
+	}
+}
 
 Value_Flags :: enum_flags u32 {
 	HERE_STRING		:: 0x1;
@@ -276,7 +417,7 @@ eat_character :: (using lexer: *Lexer) {
 
 peek_next_character :: (lexer: *Lexer) -> s16 {
 	if (lexer.input_cursor >= lexer.input.count) {
-		return -1;
+		return EOF;
 	}
 
 
@@ -454,37 +595,38 @@ parse_ident :: (lexer: *Lexer, result: *Token) -> string {
 
 	// For now we punt and go into slow mode on a backslash:
 	c := peek_next_character(lexer);
-	if (!mask) || (c == #char "\\") while 1 {
-		if scratch_pos - buffer == MAX_IDENTIFIER_LENGTH - 1 {
-			// :IdentTooLong
-			// @Robustness: Report an error here about ident too long and maybe just eat the rest of the ident.
-			break;
-		}
-
-
-		c := peek_next_character(lexer);
-		if continues_identifier(c) {
-			eat_character(lexer);
-			scratch_pos.* = cast,no_check(u8) c;
-			scratch_pos += 1;
-			continue;
-		} else if c == #char "\\" {
-			eat_character(lexer);
-			while 1 {
-				c := peek_next_character(lexer);
-				if c == #char " " {
-					eat_character(lexer);
-				} else {
-					break;
+	reported_identifier_too_long := false;
+	if !mask || c == #char "\\" {
+		while 1 {
+			c := peek_next_character(lexer);
+			if continues_identifier(c) {
+				eat_character(lexer);
+				if scratch_pos - buffer < MAX_IDENTIFIER_LENGTH - 1 {
+					scratch_pos.* = cast,no_check(u8) c;
+					scratch_pos += 1;
+				} else if !reported_identifier_too_long {
+					report_parse_error(lexer, "Identifier exceeds the maximum length of % bytes.\n", MAX_IDENTIFIER_LENGTH - 1);
+					reported_identifier_too_long = true;
 				}
+				continue;
+			} else if c == #char "\\" {
+				eat_character(lexer);
+				while 1 {
+					c := peek_next_character(lexer);
+					if c == #char " " {
+						eat_character(lexer);
+					} else {
+						break;
+					}
+				}
+
+
+				continue;
 			}
 
 
-			continue;
+			break;
 		}
-
-
-		break;
 	}
 
 	set_end_of_token(lexer, result);
@@ -502,68 +644,59 @@ parse_ident :: (lexer: *Lexer, result: *Token) -> string {
 	return s;
 }
 
-parse_here_string :: (lexer: *Lexer) -> *Token {
+eat_comment_if_present :: (lexer: *Lexer) -> bool {
+	if lexer.input_cursor + 1 >= lexer.input.count {
+		return false;
+	}
+
+
+	if lexer.input.data[lexer.input_cursor] != #char "/" {
+		return false;
+	}
+
+
+	second := lexer.input.data[lexer.input_cursor + 1];
+	if second == #char "/" {
+		eat_character(lexer);
+		eat_character(lexer);
+		eat_until_newline(lexer);
+		return true;
+	}
+
+
+	if second == #char "*" {
+		eat_character(lexer);
+		eat_character(lexer);
+		eat_input_due_to_block_comment(lexer);
+		return true;
+	}
+
+
+	return false;
+}
+
+parse_here_string_body :: (lexer: *Lexer, terminator: string, want_cr := false) -> *Token {
 	assert(lexer.num_incoming_tokens == 0);		// The parser should not be in a state where later characters have been processed into tokens.
+	assert(terminator.count > 0);
 
-	c := peek_next_character(lexer);
-
-	// Eat whitespace.
-	while is_space(cast,no_check(u8) c) {
-		eat_character(lexer);
-		c = peek_next_character(lexer);
+	#if ENABLE_TRIVIA {
+		trivia_start := lexer.input_cursor;
 	}
-
-	want_cr := false;
-	if c == #char "," {
-		eat_character(lexer);
-		ident_token := peek_next_token(lexer);
-		if ident_token.type != .IDENT {
-			report_parse_error(lexer, ident_token, "Expected an identifier after ','\n");
-			return null;
-		}
-
-
-		name := ident_token.ident_value.name;
-		if name == "cr" {
-			want_cr = true;
-		} else {
-			report_parse_error(lexer, ident_token, "Invalid #string modifier after ','\n");
-			return null;
-		}
-
-
-		eat_token(lexer);
-		assert(lexer.num_incoming_tokens == 0);		// The parser should not be in a state where later characters have been processed into tokens.
-
-		c = peek_next_character(lexer);
-
-		// Eat whitespace.
-		while is_space(cast,no_check(u8) c) {
-			eat_character(lexer);
-			c = peek_next_character(lexer);
-		}
-	}
-
-	if !starts_identifier(cast,no_check(u8) c) {
-		report_parse_error(lexer, "Expected identifier after #string.\n");
-		return null;
-	}
-
-
-	result := get_unused_token(lexer);
-	ident := parse_ident(lexer, result);
-
-	ident_len := ident.count;
-	assert(ident_len > 0);
 
 	// Eat whitespace until newline.
 	while 1 {
 		c := peek_next_character(lexer);
 
-		if c == -1 {
+		if c == EOF {
 			report_parse_error(lexer, "Reached end-of-file in #string.\n");
 			return null;
 		}
+
+
+		if eat_comment_if_present(lexer) {
+			continue;
+		}
+
 
 		if !is_space(cast(u8) c) {
 			report_parse_error(lexer, "Unexpected non-whitespace characters after #string identifier.\n");
@@ -579,6 +712,16 @@ parse_here_string :: (lexer: *Lexer) -> *Token {
 		}
 	}
 
+	#if ENABLE_TRIVIA {
+		token_start := lexer.input_cursor;
+	}
+
+	result := get_unused_token(lexer);
+	ident := terminator;
+	ident_len := ident.count;
+	result.l1 = lexer.current_line_number - 1;
+	result.c1 = lexer.current_character_index;
+
 	// Now we are reading the actual string:
 	cursor := lexer.input_cursor;
 
@@ -588,7 +731,6 @@ parse_here_string :: (lexer: *Lexer) -> *Token {
 	result.l0 = lexer.current_line_number;
 	result.c0 = lexer.current_character_index;
 
-	got_terminating_ident    := false;
 	contains_carriage_return := false;
 	while 1 {
 		// Keep reading lines.
@@ -605,7 +747,7 @@ parse_here_string :: (lexer: *Lexer) -> *Token {
 		cursor_at_start_of_line := cursor;
 
 		// IC: I"d like to skip whitespaces at the beginning of the line that contains the terminator so that it can be indented.
-		while 1 {
+		while cursor < lexer.input.count {
 			c := lexer.input.data[cursor];
 			if c == #char "\n"	break;	// exit the loop at the first newline to ensure current_line_number gets updated!
 			if !is_space(xx c)	break;
@@ -618,15 +760,12 @@ parse_here_string :: (lexer: *Lexer) -> *Token {
 		remaining := lexer.input.count - cursor;
 		if remaining >= ident_len {
 			// @Speed...
-			input_remaining := lexer.input.count - cursor;
-			if input_remaining >= ident_len {
-				if memcmp(lexer.input.data + cursor, ident.data, ident_len) == 0 {
-					cursor += ident_len;
-					if (remaining == ident_len) || !continues_identifier((lexer.input.data + cursor).*) {
-						got_terminating_ident = true;
-						lexer.current_character_index = cast(s32)(ident_len) + 1;
-						break;
-					}
+			if memcmp(lexer.input.data + cursor, ident.data, ident_len) == 0 {
+				after_ident := cursor + ident_len;
+				if (after_ident == lexer.input.count) || !continues_identifier(lexer.input.data[after_ident]) {
+					cursor = cursor_at_start_of_line;
+					lexer.current_character_index = 1;
+					break;
 				}
 			}
 		}
@@ -667,7 +806,7 @@ parse_here_string :: (lexer: *Lexer) -> *Token {
 
 	net_lines := count_herestring_lines(lexer, result);		// @Speed: Why are we counting in a post-pass, when we already had to look at each character??
 
-	// The here-string goes from string_start to string_end.  (cursor is where we resume afterward).
+	// The here-string body goes from string_start to string_end.  The closing terminator is lexed next.
 
 	assert(cursor >= string_start);
 	len := string_end - string_start;
@@ -734,7 +873,10 @@ parse_here_string :: (lexer: *Lexer) -> *Token {
 	assert(result_string.count >= len);	// I hope we had enough space!
 	result_string.count = len;		// :ZeroTermination
 
-	lexer.input_cursor = cursor;
+	lexer.input_cursor = string_end;
+	#if ENABLE_TRIVIA {
+		set_token_source(lexer, result, trivia_start, token_start, lexer.input_cursor);
+	}
 
 	result.type = .STRING;
 	result.string_value.count = len;
@@ -1259,6 +1401,8 @@ make_string_constant :: (lexer: *Lexer) -> *Token {
 	result.type = .STRING;
 
 	eat_character(lexer);	// We only get here if we saw a single quote.
+	source_start := lexer.input_cursor;
+	source_end := source_start;
 
 	builder: String_Builder;
 	while 1 {
@@ -1266,17 +1410,20 @@ make_string_constant :: (lexer: *Lexer) -> *Token {
 		eat_character(lexer);
 
 		if c == #char "\"" {
+			source_end = lexer.input_cursor - 1;
 			break;
 		}
 
 
-		if c == -1 {
+		if c == EOF {
+			source_end = lexer.input.count;
 			report_parse_error(lexer, "End of file during string constant!\n");
 			break;
 		}
 
 
 		if c == #char "\n" {
+			source_end = lexer.input_cursor - 1;
 			report_parse_error(lexer, "Newline in string constant!\n");
 			break;
 		}
@@ -1324,8 +1471,7 @@ make_string_constant :: (lexer: *Lexer) -> *Token {
 								l1 := l0;
 								c0 := lexer.current_character_index - 3;
 								c1 := lexer.current_character_index;
-								// @Cleanup report_error(*lexer, l0, c0, l1, c1, lexer.active_load, "Decimal value of %d exceeds the limit of 255.\n", c);
-								lexer.reported_error = true;	// @Hack
+								report_parse_error(lexer, "Decimal value of %d exceeds the limit of 255.\n", c);
 							}
 						}
 					}
@@ -1357,6 +1503,7 @@ make_string_constant :: (lexer: *Lexer) -> *Token {
 
 					character_utf32_to_utf8(value, *s);
 					append(*builder, s);
+					source_end = lexer.input_cursor;
 
 					continue;	// NOTE: Do not fall through to the bottom.
 				case #char "\"";
@@ -1369,23 +1516,30 @@ make_string_constant :: (lexer: *Lexer) -> *Token {
 					c = 31;
 					eat_character(lexer);
 				case;
-					// @Cleanup reporinterp.report(REPORT_WARNING, lexer, null, "Unknown escape sequence '\\%c' in string constant!", next);
+					report_parse_error(lexer, "Unknown escape sequence '\\%c' in string constant!", next);
 					c = next;
 					eat_character(lexer);
 			}
 		}
 
+		source_end = lexer.input_cursor;
 		// NOTE: In the case of Unicode characters, we continue rather than falling through to the bottom, so don't depend on that!
 		append(*builder, cast(u8) c);
 	}
 
-	append(*builder, 0);	// Zero-terminate the string!
+	#if EVALUATE_STRING_ESCAPES {
+		append(*builder, 0);	// Zero-terminate the string!
 
-	data := builder_to_string(*builder);
-	data.count -= 1;	// Don't count the zero-termination in the length.
+		data := builder_to_string(*builder);
+		data.count -= 1;	// Don't count the zero-termination in the length.
 
-	if data {
-		result.string_value = data;
+		if data.count {
+			result.string_value = data;
+		} else {
+			// :EmptyStringLiteral
+			// Later stages of the compiler require string literals to have null data pointers, so let's start early.
+			result.string_value = "";
+		}
 	} else {
 		// :EmptyStringLiteral
 		// Later stages of the compiler require string literals to have null data pointers, so let's start early.
@@ -1406,6 +1560,13 @@ make_one_character_token :: (lexer: *Lexer, c: Token_Type) -> *Token {
 
 	set_end_of_token(lexer, result);
 
+	return result;
+}
+
+make_end_of_input_token :: (lexer: *Lexer) -> *Token {
+	result := get_unused_token(lexer);
+	result.type = .END_OF_INPUT;
+	set_end_of_token(lexer, result);
 	return result;
 }
 
@@ -1472,7 +1633,7 @@ eat_input_due_to_block_comment :: (lexer: *Lexer) {
 	while comment_depth {
 		c := peek_next_character(lexer);
 
-		if c == -1 {	// End of input!
+		if c == EOF {
 			report_parse_error(lexer, "End of input from within a comment.\n");		// XXX Do a real error message here...
 			return;
 		}
@@ -1530,7 +1691,7 @@ eat_until_newline :: (lexer: *Lexer) {
 		c = peek_next_character(lexer);
 		if c == 0			break;
 		if c == #char "\n"	break;
-		if c == -1			break;
+		if c == EOF			break;
 		eat_character(lexer);
 	}
 }
@@ -1556,7 +1717,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 
 		c := peek_next_character(lexer);
 
-		while (c != -1) && is_space(cast(u8) c) {	// @Cleanup
+		while (c != EOF) && is_space(cast(u8) c) {	// @Cleanup
 			eat_character(lexer);
 			c = peek_next_character(lexer);
 		}
@@ -1565,8 +1726,8 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 			token_start = lexer.input_cursor;
 		}
 
-		if c == -1 {
-			result = make_one_character_token(lexer, .END_OF_INPUT);
+		if c == EOF {
+			result = make_end_of_input_token(lexer);
 			return result;
 		}
 
@@ -1677,10 +1838,11 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 
 				if conv_result == .CONVERSION_OK {
 					lexer.input_cursor += consumed_length;
+					lexer.current_character_index += cast(s32) consumed_length;
 
 					if u == {
 						case 0x200B;
-							// @Cleanup interp.report(REPORT_WARNING, lexer, null, "Illegal Unicode zero-width space found in the program text. This could be a problem with pasting the data from another source.\n");
+							// @Cleanup interp.report(REPORT_WARNING, lexer, null, "Illegal Unicode zero-width space found in the program text.  This could be a problem with pasting the data from another source.\n");
 							continue;
 						case 0x2066; #through;
 						case 0x2067; #through;
@@ -1691,7 +1853,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 						case 0x202E; #through;
 						case 0x2069; #through;
 						case 0x202C;
-							// @Cleanup interp.report(REPORT_WARNING, lexer, null, "Illegal Unicode directional-formatting character found in the program text. This could be a problem with pasting the data from another source.\n");
+							// @Cleanup interp.report(REPORT_WARNING, lexer, null, "Illegal Unicode directional-formatting character found in the program text.  This could be a problem with pasting the data from another source.\n");
 							continue;
 						case;
 							report_parse_error(lexer, "Unicode characters in this range are not supported by the parser at lexer time. (Offending character code was U+%x.\n", u);
@@ -1717,22 +1879,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 				}
 
 
-				potential_result := make_one_character_token(lexer, cast(Token_Type) c);
-				#if ENABLE_TRIVIA {
-					set_token_source(lexer, potential_result, trivia_start, token_start, lexer.input_cursor);
-				}
-				lexer.token_array_cursor += 1;	// The Lexer doesn't expect us to do what we are about to do, so juice the number of incoming tokens so that when we call peek_next_token() it puts it into the right slot.
-				next := peek_next_token(lexer);
-				lexer.token_array_cursor -= 1;
-				if (next.type == .IDENT) && (next.ident_value.name == "string") {
-					// In the C++ version of the Lexer, the Parser actually invokes lexing of a here-string when it sees '#' followed by 'string'.
-					//TODO: Since we don't have a Parser here, we do this ourselves.
-					eat_token(lexer);	// Eat the "string".
-					result = parse_here_string(lexer);
-					lexer.previous_token_line_number = result.l1;	// @Cleanup @Hack
-				} else {
-					result = potential_result;
-				}
+				result = make_one_character_token(lexer, cast(Token_Type) c);
 
 			case #char "&";
 				eat_character(lexer);
@@ -1788,6 +1935,19 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 
 			case #char "%";
 				result = check_for_equals(lexer, cast(Token_Type) c, .MODEQUALS);
+
+			case #char "\\"; {
+				eat_character(lexer);
+				next := peek_next_character(lexer);
+				if next == #char "%" {
+					eat_character(lexer);
+					result = make_one_character_token(lexer, .IDENT);
+					result.c0 -= 1;
+					cached_make_atom(lexer, "\\%", result);
+				} else {
+					result = make_one_character_token(lexer, cast(Token_Type) c);
+				}
+			}
 
 			case #char "/";
 				eat_character(lexer);
