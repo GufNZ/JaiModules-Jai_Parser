@@ -79,7 +79,7 @@ Materialized tokens can also be navigated with `token_at`, `previous_token`, and
 
 ## Type And Declaration Parsing
 
-`parse_declaration(source)` parses typed, inferred, constant, uninitialized, and compound declarations. Compound declarations preserve their left-hand names as parser-owned comma-separated arguments and represent multiple initializer expressions with a `Parser_Comma_Separated_Arguments` node.
+`parse_declaration(source)` parses typed, inferred, constant, uninitialised, and compound declarations. Compound declarations preserve their left-hand names as parser-owned comma-separated arguments and represent multiple initializer expressions with a `Parser_Comma_Separated_Arguments` node.
 
 Supported types include named types, pointers, fixed arrays, array views, resizable arrays, procedure types, polymorphic variables with restrictions, and `#type` with `distinct` or `isa`. Declaration metadata includes `$` and `$$` auto-bake flags, backticked scope modifiers, `#align` expressions, placeholder initialization flags, and trailing notes.
 

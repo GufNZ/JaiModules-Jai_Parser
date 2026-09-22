@@ -132,21 +132,41 @@ Parsed_Source :: struct {
 
 //LATER: codegen these based on what's in Preload.  Consider alt layouts that allow for direct conversion between subclasses, e.g. put the trivia fields first?
 Parser_Node :: struct {
-	#as using code_node: Code_Node;
-
 	#if ENABLE_TRIVIA {
 		first_token: Token_Index;
 		one_past_last_token: Token_Index;
 	}
+
+	#as using code_node: Code_Node;
 }
 
-Parser_Ident :: struct {
-	#as using base: Parser_Node;
-	kind = .IDENT;
+TYPES :: Type.[Code_Ident];
+NODES :: #run {
+	t: [..]Type_Info_Struct;
+	for NODES {
+		array_add(t, get_type_info(it));
+	}
+}
+//BUG: why is this not firing?
+#insert -> string {
+	debug_break();
+	print(">>>Generating parser nodes...\n");
+	printNode :: (t: Type_Info_Struct, b: *String_Builder) {
+		p := replace(t.name, "Code", "Parser");
+		print(b, "% :: {\t#as using base: Parser_Node;\n", p);
+		print(b, "\t_padding: [%]u8;\n", t.runtime_size - size_of(Code_Node) - 6);
+		print(b, "\t#overlay(code_node) #as using _%: %1;\n", t.name);
+		print(b, "}\n");
 
-	name: string;
-	resolved_declaration: *Code_Declaration;
-	flags: type_of(Code_Ident.flags);
+	}
+
+	b: String_Builder;
+	#insert -> string {
+		for NODES {
+			printNode(it, *b);
+		}
+	}
+	return builder_to_string(*b);
 }
 
 Parser_Type_Instantiation :: struct {

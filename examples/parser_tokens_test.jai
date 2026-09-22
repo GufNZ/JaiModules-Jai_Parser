@@ -1056,10 +1056,10 @@ test_compiler_binary_shapes :: () {
 	assert_expression_tree_fixture("a << b & c == d && e || f");
 }
 
-#run test_compiler_identifier_shape("identifier");
-#run test_compiler_literal_shapes();
-#run test_compiler_parenthesized_shape("(identifier)");
-#run test_compiler_null_shape("null");
-#run test_compiler_context_shape("context");
-#run test_compiler_prefix_shapes();
-#run test_compiler_binary_shapes();
+#run,stallable test_compiler_identifier_shape("identifier");
+#run,stallable test_compiler_literal_shapes();
+#run,stallable test_compiler_parenthesized_shape("(identifier)");
+#run,stallable test_compiler_null_shape("null");
+#run,stallable test_compiler_context_shape("context");
+#run,stallable test_compiler_prefix_shapes();
+#run,stallable test_compiler_binary_shapes();
