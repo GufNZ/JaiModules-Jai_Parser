@@ -4,3 +4,4 @@
 );
 
 #load "lexer.jai";
+#load "parser.jai";

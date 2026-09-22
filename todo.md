@@ -18,6 +18,8 @@ The first milestone is expression parsing, followed by declarations and complete
 - Copy lexer token values into `Parser_Token`. Source text, original token text, and trivia may remain string views into the retained source buffer.
 - Give each parser token a stable array index. Use indices rather than next/previous pointers because growing a dynamic array can invalidate pointers to its elements.
 - In trivia mode, associate each syntax node with a token span.
+- Allocate AST nodes and child arrays from a `Pool` embedded in `Parsed_Source`; release them together with `release_parser_tree`.
+- Synchronize recovery at context-specific expression, statement, declaration, and block boundaries, with a progress guard for every recovery loop.
 - Initially match syntactic AST information. Add name resolution, types, overload resolution, constant evaluation, and compiler-generated nodes in later semantic phases.
 
 ## Token Spans
@@ -68,99 +70,104 @@ Raw struct memory is not a useful equality test: compiler nodes contain semantic
 
 ### 1. Define Public Contracts
 
-- [ ] Define `Parsed_Source`, parse results, diagnostics, and source ownership.
-- [ ] Specify the lifetime of token lexemes and trivia views.
-- [ ] Decide whether callers may provide immutable borrowed source or request an owned copy.
-- [ ] Define complete, incomplete, recovered, and fatal parse statuses.
+- [x] Define the initial `Parsed_Source` and parse status types.
+- [x] Specify the lifetime of token lexemes and trivia views.
+- [x] Require callers to provide immutable, long-lived borrowed source; do not provide an owned-copy mode.
+- [x] Define complete, incomplete, recovered, and fatal parse statuses.
 - [ ] Classify every public `Compiler.Code_*` field as syntactic, semantic, compiler-generated, or export-only.
 
 ### 2. Prototype AST Representation
 
-- [ ] Prototype `Parser_Node`, two leaf nodes, and two container nodes.
-- [ ] Test aliases to compiler types when no parser-only data is required.
-- [ ] Test extended parser structs when `ENABLE_TRIVIA` is enabled.
-- [ ] Verify `#as using`, casts, allocation, size/layout, and generic traversal.
-- [ ] Verify that child pointers and generic `*Parser_Node` traversal remain type-safe.
-- [ ] Compare concrete-node extensions, a full parallel hierarchy, and a node-span side table.
-- [ ] Freeze the representation only after a compile-time layout and traversal test passes.
+- [x] Prototype trivia metadata with two leaf nodes and two container nodes.
+- [x] Test aliases to compiler types when no parser-only data is required.
+- [x] Define a parser-owned hierarchy whose common `Parser_Node` base embeds public `Code_Node` fields.
+- [x] Verify casts, allocation, size/layout, and generic traversal with parser-owned nodes.
+- [x] Verify that child pointers and generic `*Parser_Node` traversal remain type-safe.
+- [x] Compare concrete-node extensions, a full parallel hierarchy, and a node-span side table; adopt the parallel hierarchy.
+- [x] Store trivia-only half-open token boundaries directly in `Parser_Node`.
 
 ### 3. Materialize Tokens
 
-- [ ] Define `Parser_Token` containing the lexer token, stable index, and byte span.
-- [ ] Drain the lexer ring buffer into `[..] Parser_Token`.
-- [ ] Retain the source buffer for the lifetime of all token string views.
-- [ ] Preserve `original_text`, preceding trivia, and EOF trailing trivia when enabled.
-- [ ] Define synthetic and missing tokens for error recovery.
-- [ ] Add neighbour helpers using stable indices.
-- [ ] Test exact byte-for-byte reconstruction, including comments, ignored Unicode, here strings, and EOF trivia.
+- [x] Define `Parser_Token` containing the lexer token, stable index, and byte span in trivia mode; alias it to `Token` otherwise.
+- [x] Drain the lexer ring buffer into `[..] Parser_Token`, including context-sensitive here-string bodies.
+- [x] Retain a borrowed source reference for the lifetime of all token string views.
+- [x] Preserve `original_text`, preceding trivia, and EOF trailing trivia when enabled.
+- [x] Define zero-width synthetic missing tokens separately from immutable source tokens.
+- [x] Add neighbour helpers using stable indices.
+- [x] Test exact byte-for-byte reconstruction, including comments, ignored Unicode, here strings, and EOF trivia.
 
 ### 4. Build Parser Infrastructure
 
-- [ ] Add parser cursor, arbitrary lookahead over materialized tokens, checkpoints, rollback, and progress guards.
-- [ ] Choose arena or pool ownership for nodes and child arrays.
-- [ ] Add node-span construction helpers.
-- [ ] Add structured diagnostics containing source span, expected tokens, and recovery action.
-- [ ] Define synchronization points for expressions, statements, declarations, and blocks.
+- [x] Add parser cursor, arbitrary lookahead over materialized tokens, checkpoints, and rollback.
+- [x] Add progress guards for recovery loops.
+- [x] Choose arena or pool ownership for nodes and child arrays.
+- [x] Add node-span construction helpers.
+- [x] Add structured diagnostics containing source span, expected tokens, and recovery action.
+- [x] Define synchronization points for expressions, statements, declarations, and blocks.
 
 ### 5. Build the Differential Test Harness
 
-- [ ] Normalize parser nodes and compiler `Code_*` nodes.
-- [ ] Produce useful structural diffs rather than boolean failures.
-- [ ] Add helpers for paired source/`#code` fixtures.
-- [ ] Add workspace-based fixtures for file-level and typechecked constructs.
-- [ ] Separate syntactic comparisons from future semantic comparisons.
-- [ ] Add round-trip helpers for trivia-enabled imports.
+- [x] Normalize parser nodes and compiler `Code_*` nodes.
+- [x] Produce useful structural diffs rather than boolean failures.
+- [x] Add helpers for paired source/`#code` fixtures.
+- [x] Add workspace-based fixtures for file-level and typechecked constructs.
+- [x] Separate syntactic comparisons from future semantic comparisons.
+- [x] Add round-trip helpers for trivia-enabled imports.
+- [x] For invalid input rejected by the parser, shell out to the compiler, always passing `-x64` for speed, and capture its error messages for comparison.
 
 ### 6. Parse Primary Expressions
 
-- [ ] Parse identifiers, numbers, strings, booleans, null, and context.
-- [ ] Parse grouped expressions while preserving parenthesisation.
-- [ ] Parse array, struct, and unary-dot literals.
-- [ ] Parse placeholders and here strings.
-- [ ] Compare each form with `compiler_get_nodes`.
+- [x] Parse identifiers, numbers, strings, and booleans.
+- [x] Parse null and context.
+- [x] Parse grouped expressions while preserving parenthesisation.
+- [x] Parse array, struct, and unary-dot literals.
+- [x] Parse placeholders and here strings.
+- [x] Compare each currently supported primary form with `compiler_get_nodes`.
 
 ### 7. Parse Prefix and Postfix Expressions
 
-- [ ] Parse unary operators.
-- [ ] Parse calls and named arguments.
-- [ ] Parse array subscripts, member access, and pointer dereference forms.
-- [ ] Parse casts, expression queries, and type queries.
-- [ ] Parse expression-level directives.
+- [x] Parse prefix unary operators.
+- [x] Parse calls and named arguments.
+- [x] Parse array subscripts, member access, and pointer dereference forms.
+- [x] Parse casts, expression queries, and type queries.
+- [x] Parse expression-level directives.
 
 ### 8. Implement Operator Precedence
 
-- [ ] Implement a Pratt or precedence-climbing expression parser.
-- [ ] Cover every unary, binary, comparison, logical, shift, rotate, and assignment operator.
-- [ ] Match compiler precedence and associativity with differential fixtures.
-- [ ] Cover ambiguous prefix/postfix and parenthesized cases.
+- [x] Implement a precedence-climbing expression parser.
+- [x] Cover every unary, binary, comparison, logical, shift, rotate, and assignment operator.
+- [x] Use `../../print_precedences.jai` to derive the compiler's relative precedence classes rather than maintaining an assumed ordering.
+- [x] Match compiler precedence with pairwise differential fixtures.
+- [x] Test associativity separately by inspecting the nesting of repeated and mixed operators from the same precedence class.
+- [x] Cover ambiguous prefix/postfix and parenthesized cases.
 
 ### 9. Parse Types and Declarations
 
-- [ ] Parse `:`, `::`, `:=`, compound declarations, and multiple declarations.
-- [ ] Parse pointer, array, view, resizable-array, and procedure types.
-- [ ] Parse polymorphic variables, restrictions, and `#type` forms.
-- [ ] Parse notes, declaration flags, scope modifiers, and alignment expressions.
+- [x] Parse `:`, `::`, `:=`, compound declarations, and multiple declarations.
+- [x] Parse pointer, array, view, resizable-array, and procedure types.
+- [x] Parse polymorphic variables, restrictions, and `#type` forms.
+- [x] Parse notes, declaration flags, scope modifiers, and alignment expressions.
 
 ### 10. Parse Statements and Blocks
 
-- [ ] Parse imperative and declaration blocks.
-- [ ] Parse return, while, for, if, ifx, and switch-style case forms.
-- [ ] Parse defer, using, push-context, and loop-control statements.
-- [ ] Recover at semicolons, closing delimiters, and statement starts.
+- [x] Parse imperative and declaration blocks.
+- [x] Parse return, while, for, if, ifx, and switch-style case forms.
+- [x] Parse defer, using, push-context, and loop-control statements.
+- [x] Recover at semicolons, closing delimiters, and statement starts.
 
 ### 11. Parse Procedures and Aggregate Types
 
-- [ ] Parse procedure headers, arguments, returns, bodies, and procedure flags.
-- [ ] Parse quick procedures and macros.
-- [ ] Parse structs, unions, enums, enum flags, and interfaces.
-- [ ] Parse aggregate parameters, constants, notes, and modifiers.
+- [x] Parse procedure headers, arguments, returns, bodies, and procedure flags.
+- [x] Parse quick procedures and macros.
+- [x] Parse structs, unions, enums, enum flags, and interfaces.
+- [x] Parse aggregate parameters, constants, notes, and modifiers.
 
 ### 12. Parse Directives
 
-- [ ] Inventory every directive represented by public `Code_*` nodes.
-- [ ] Parse imports, loads, runs, code, insert, modify, bake, and overlay.
-- [ ] Parse scope, module parameters, context, location, wildcard, and existence directives.
-- [ ] Add a differential fixture for each directive and flag combination.
+- [x] Inventory every directive represented by public `Code_*` nodes.
+- [x] Parse imports, loads, runs, code, insert, modify, bake, and overlay.
+- [x] Parse scope, module parameters, context, location, wildcard, and existence directives.
+- [x] Add differential or focused fixtures for every source-spelled directive and flag combination, documenting compiler-generated states.
 
 ### 13. Parse Complete Files
 
