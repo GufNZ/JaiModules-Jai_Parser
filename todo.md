@@ -14,12 +14,12 @@ The first milestone is expression parsing, followed by declarations and complete
 ## Current Design Decisions
 
 - Expose parser-owned names such as `Parser_Node` and `Parser_If`, keeping them distinct from `Compiler.Code_Node` and `Compiler.Code_If` for now.
-- Materialize the lexer's ring-buffer output into a parser-owned `[..] Parser_Token` array.
+- Materialise the lexer's ring-buffer output into a parser-owned `[..] Parser_Token` array.
 - Copy lexer token values into `Parser_Token`. Source text, original token text, and trivia may remain string views into the retained source buffer.
 - Give each parser token a stable array index. Use indices rather than next/previous pointers because growing a dynamic array can invalidate pointers to its elements.
 - In trivia mode, associate each syntax node with a token span.
 - Allocate AST nodes and child arrays from a `Pool` embedded in `Parsed_Source`; release them together with `release_parser_tree`.
-- Synchronize recovery at context-specific expression, statement, declaration, and block boundaries, with a progress guard for every recovery loop.
+- Synchronise recovery at context-specific expression, statement, declaration, and block boundaries, with a progress guard for every recovery loop.
 - Initially match syntactic AST information. Add name resolution, types, overload resolution, constant evaluation, and compiler-generated nodes in later semantic phases.
 
 ## Token Spans
@@ -41,7 +41,7 @@ Reasons to prefer this over an inclusive end-token index:
 - Extending a parent over a child usually means copying the child's one-past-end boundary.
 - EOF and insertion points are natural boundaries, rather than requiring a special token to be considered included.
 
-An inclusive `end_token` is slightly more direct when asking for the final concrete token. With a half-open span that token is `tokens[one_past_last_token - 1]` for a non-empty span.  If early API prototypes show that this operation dominates and empty spans are not useful, revisit the convention before stabilizing the public API.
+An inclusive `end_token` is slightly more direct when asking for the final concrete token. With a half-open span that token is `tokens[one_past_last_token - 1]` for a non-empty span.  If early API prototypes show that this operation dominates and empty spans are not useful, revisit the convention before stabilising the public API.
 
 Token records should also contain absolute byte offsets. Exact source reconstruction should use byte boundaries in the retained source, while token spans support syntax navigation and edits.
 
@@ -58,7 +58,7 @@ For each fixture:
 
 1. Parse `SOURCE` with this module.
 2. Obtain the compiler tree with `compiler_get_nodes(EXPECTED_CODE)`.
-3. Normalize both trees into a comparison representation.
+3. Normalise both trees into a comparison representation.
 4. Compare node kinds, child ordering, operators, literal values, syntax flags, and relevant locations.
 5. Ignore semantic, resolved, export-only, and compiler-generated fields until the corresponding parser phase exists.
 
@@ -86,7 +86,7 @@ Raw struct memory is not a useful equality test: compiler nodes contain semantic
 - [x] Compare concrete-node extensions, a full parallel hierarchy, and a node-span side table; adopt the parallel hierarchy.
 - [x] Store trivia-only half-open token boundaries directly in `Parser_Node`.
 
-### 3. Materialize Tokens
+### 3. Materialise Tokens
 
 - [x] Define `Parser_Token` containing the lexer token, stable index, and byte span in trivia mode; alias it to `Token` otherwise.
 - [x] Drain the lexer ring buffer into `[..] Parser_Token`, including context-sensitive here-string bodies.
@@ -98,16 +98,16 @@ Raw struct memory is not a useful equality test: compiler nodes contain semantic
 
 ### 4. Build Parser Infrastructure
 
-- [x] Add parser cursor, arbitrary lookahead over materialized tokens, checkpoints, and rollback.
+- [x] Add parser cursor, arbitrary lookahead over materialised tokens, checkpoints, and rollback.
 - [x] Add progress guards for recovery loops.
 - [x] Choose arena or pool ownership for nodes and child arrays.
 - [x] Add node-span construction helpers.
 - [x] Add structured diagnostics containing source span, expected tokens, and recovery action.
-- [x] Define synchronization points for expressions, statements, declarations, and blocks.
+- [x] Define synchronisation points for expressions, statements, declarations, and blocks.
 
 ### 5. Build the Differential Test Harness
 
-- [x] Normalize parser nodes and compiler `Code_*` nodes.
+- [x] Normalise parser nodes and compiler `Code_*` nodes.
 - [x] Produce useful structural diffs rather than boolean failures.
 - [x] Add helpers for paired source/`#code` fixtures.
 - [x] Add workspace-based fixtures for file-level and typechecked constructs.
@@ -139,7 +139,7 @@ Raw struct memory is not a useful equality test: compiler nodes contain semantic
 - [x] Use `../../print_precedences.jai` to derive the compiler's relative precedence classes rather than maintaining an assumed ordering.
 - [x] Match compiler precedence with pairwise differential fixtures.
 - [x] Test associativity separately by inspecting the nesting of repeated and mixed operators from the same precedence class.
-- [x] Cover ambiguous prefix/postfix and parenthesized cases.
+- [x] Cover ambiguous prefix/postfix and parenthesised cases.
 
 ### 9. Parse Types and Declarations
 
@@ -171,10 +171,132 @@ Raw struct memory is not a useful equality test: compiler nodes contain semantic
 
 ### 13. Parse Complete Files
 
-- [ ] Represent the top-level source block and source metadata.
-- [ ] Continue after multiple syntax errors.
-- [ ] Produce a stable partial AST for truncated source.
-- [ ] Parse all files under `how_to` as an initial compatibility corpus.
+- [x] Represent the top-level source block and source metadata.
+- [x] Continue after multiple syntax errors.
+- [x] Produce a stable partial AST for truncated source.
+- [x] Parse all files under `how_to` as an initial compatibility corpus.
+
+#### 13.1 Close `how_to` Compatibility Gaps
+
+Baseline measured 2026-09-23: all 84 files parse non-fatally and round-trip, but 80 files recover with 5,631 diagnostics.
+Only the first diagnostic in each file should be treated as the likely grammar gap; later diagnostics are often recovery cascades.
+The current initiating categories account for the full diagnostic total:
+
+- Block-bodied declaration termination: 41 files, 2,098 diagnostics.
+- Pointer, address-of, dereference, and other `*` forms: 9 files, 817 diagnostics.
+- Defaulted procedure or aggregate parameter comma ambiguity: 4 files, 702 diagnostics.
+- Compile-time `#if`, `#as`, `#placeholder`, and `#asm` forms: 7 files, 660 diagnostics.
+- Expression directives `#char`, `#this`, `#filepath`, and `#caller_code`: 5 files, 344 diagnostics.
+- Struct member assignment shorthand such as `w = 1`: 1 file, 270 diagnostics.
+- `operator` declarations: 2 files, 224 diagnostics.
+- Array types in expression/type-valued contexts: 2 files, 182 diagnostics.
+- `using` declarations and `using #as` aggregate fields: 4 files, 115 diagnostics.
+- A declaration payload inside `#code`: 1 file, 73 diagnostics.
+- The `#run,host` modifier: 1 file, 73 diagnostics.
+- Iterator expansion syntax such as `for :utf8_iter`: 1 file, 45 diagnostics.
+- Default `case;` termination: 2 files, 28 diagnostics.
+
+Implement and validate these gaps in leverage order:
+
+- [ ] Fix `statement_requires_semicolon` for normal procedure bodies, block-form quick procedures, expression-form quick procedures, structs, and enums.  Add top-level and nested fixtures followed by an identifier, a directive, and EOF.
+- [ ] Audit the lexer/parser contract for `*`.  Verify token streams for pointer types, prefix address-of, postfix dereference, pointer literals, casts such as `cast(*u8)`, and pointer-valued generic arguments; change lexer classification only where the parser cannot determine the role from grammar context.
+- [ ] Parse type-valued cast and call arguments through `parse_type_instantiation` where appropriate, including pointer and array forms such as `cast(*u8)` and `New([3] int)`, without regressing multiplication or dereference expressions.
+- [ ] Give parameter declarations a delimiter-aware initialiser mode, so a default value stops at the parameter comma instead of becoming a multi-value declaration expression.  Cover procedure, aggregate, polymorphic, and named-return lists.
+- [ ] Inventory compiler AST behaviour for `#if`, `#as`, `#placeholder`, and `#asm`; add parser-owned syntax nodes or explicitly documented preservation nodes where no public `Code_*` counterpart exists.  Cover each form in declaration, statement, and aggregate-member positions where legal.
+- [ ] Add expression-directive parsing and compiler comparisons for `#char`, `#this`, `#filepath`, and `#caller_code`, including their legal constant/default-argument contexts.
+- [ ] Parse aggregate member assignment shorthand such as `w = 1` and retain its relationship to the previously declared field.
+- [ ] Parse `operator` declarations, including unary/binary signatures, compound declarations, procedure flags, and bodies; add differential fixtures for operator names and argument forms.
+- [ ] Parse `using` declarations and `using #as` aggregate fields without routing them through ordinary expression recovery.
+- [ ] Allow declaration payloads in `#code` and preserve whether the payload was an expression, declaration, or block.
+- [ ] Parse source-spelled `#run` modifiers, beginning with `#run,host`, and compare their textual flags with compiler nodes.
+- [ ] Parse named iterator expansions such as `for :utf8_iter expression`, including combinations with index/value names and existing pointer/reverse modifiers.
+- [ ] Allow a default `case;` arm to terminate at the enclosing `}` without synthesising another `case`; cover both `if`-case and switch-style case blocks.
+
+Keep recovery measurements separate from grammar support:
+
+- [ ] Extend the corpus report with aggregates by diagnostic kind, expected/actual token, recovery action, and first diagnostic per file.  Render ASCII-backed token values as source spellings rather than `enum out of range`.
+- [ ] After each grammar fix, record both newly complete files and removed diagnostics; use the first diagnostic per file to select the next fix rather than optimising the largest secondary skip-token count.
+- [ ] Once the initiating gaps are handled, tighten expression, statement, and declaration synchronisation so one local failure does not reinterpret a procedure body as top-level declarations.
+- [ ] Add focused malformed and truncated variants for every new construct before changing synchronisation behaviour, preserving stable partial trees and forward progress.
+- [ ] Consider this compatibility backlog complete when all valid `how_to` files return `COMPLETE` with zero diagnostics, retain exact trivia round-trips, and pass focused or differential fixtures for every category above.
+
+#### 13.2 Parse Inline `#asm`
+
+`how_to/900_inline_assembly.jai` defines a context-specific assembly grammar rather than an ordinary imperative block.  The public compiler API exposes `Code_Asm`, but deliberately keeps its three payload fields opaque; compiler comparison can therefore verify the `.ASM` envelope, location, and surrounding tree placement, but not reinterpret the opaque payload.  Preserve the source-spelled structure in parser-owned nodes and leave instruction selection, register allocation, feature validation, and machine encoding to later semantic work.
+
+Define the representation and lexer contract first:
+
+- [ ] Add `Parser_Asm` as the parser-owned counterpart to `Code_Asm`, with parser-owned feature names and assembly statements rather than overlays for the compiler's opaque `b1`, `b2`, and `b3` fields.
+- [ ] Define parser-owned assembly statement and operand nodes for instructions, register declarations, register pinning, memory operands, and source-spelled operand modifiers.  Keep unknown mnemonics and register-class names as identifiers, so parsing does not depend on the current x86 instruction database.
+- [ ] Audit tokenisation, spans, and exact trivia round-tripping for `#asm`, `===`, mnemonic dots, `?`, `!`, `&`, `&*`, brackets, inferred declarations ending in `:`, signed immediates, and comments.  Add lexer behaviour only where the ordinary token stream loses information needed by the assembly parser.
+- [ ] Decide whether mnemonic suffixes are assembled from ordinary tokens or materialised as contextual assembly tokens.  Cover fixed sizes such as `mov.8` and polymorphic sizes such as `popcnt?BITS` and `popcnt?T` without changing ordinary member-access or query tokenisation outside `#asm`.
+
+Parse the block header and its scope behaviour:
+
+- [ ] Parse `#asm { ... }` and optional comma-separated per-block feature names such as `#asm AVX, AVX2 { ... }`, preserving their order and token spans.
+- [ ] Represent an assembly block as belonging to the enclosing high-level scope rather than introducing a new lexical scope.  Preserve register declarations across multiple `#asm` blocks in that scope; defer binding those names until semantic analysis.
+- [ ] Support `#asm` wherever a statement is legal, including blocks selected directly by compile-time control flow such as `#if BITS == 8 #asm { ... } else #asm { ... }`.
+
+Parse assembly statements and operands:
+
+- [ ] Parse instruction statements as a mnemonic, optional fixed or polymorphic size, comma-separated operands, and a required semicolon.  Examples include `mov apple:, 10`, `mov.64 banana, 17`, and `popcnt?BITS result, value`.
+- [ ] Parse inferred register operands such as `apple:` and explicit register declarations such as `banana: gpr`, both as standalone statements and inline instruction operands such as `mov w: gpr === 15, 10`.
+- [ ] Parse register pinning with `===`, including declaration pinning (`t: gpr === a`, `v: vec === 9`) and existing-value pinning (`x === a`).
+- [ ] Parse signed integer and floating-point immediates without imposing instruction-specific width or range rules in the syntax phase.
+- [ ] Parse memory operands using brackets and preserve their rigid source structure: required base, optional index and scale, optional signed displacement, and parenthesised high-level constant expressions.  Cover forms from `[b]` through `[base + index*8 - 10]` and vector-index forms used by gathers.
+- [ ] Parse memory broadcast suffix `!`, SAE and explicit rounding suffixes `!`, `!n`, `!d`, `!u`, and `!z`, plus mask merge/zero forms `& mask` and `&* mask`.
+- [ ] Allow high-level identifiers, constants, types, macro parameters of `__reg`, and parenthesised high-level expressions where the assembly grammar permits them, while retaining enough node distinction for later binding.
+
+Validate syntax separately from machine semantics:
+
+- [ ] Add focused fixtures for every source form in `how_to/900_inline_assembly.jai`, including feature headers, macros receiving registers, compile-time execution, VSIB addressing, EVEX broadcast/rounding/masking, and polymorphic mnemonic sizes.
+- [ ] Compare valid fixtures with the compiler for node kind, source location, and enclosing-tree placement.  Document that `Code_Asm` payload equality is impossible while its public fields remain opaque.
+- [ ] Compile valid and intentionally invalid assembly fixtures with the Jai compiler to capture semantic diagnostics, but do not duplicate mnemonic lookup, operand-form matching, immediate ranges, feature gates, register allocation, or encoding in the parser.
+- [ ] Recover malformed assembly at the next semicolon or closing `}` without handing instruction operands to the high-level statement parser.  Add missing-semicolon, missing-comma, malformed memory operand, malformed modifier, and truncated-block tests with stable partial assembly nodes.
+- [ ] Require `how_to/900_inline_assembly.jai` to parse as `COMPLETE` with zero diagnostics and round-trip byte-for-byte before marking inline assembly parsing complete.
+
+#### 13.3 Parse For-Expansion Syntax
+
+`how_to/730_for_expansions.jai` uses the normal `Code_For` node with additional source-level controls.  The public AST already exposes `want_replacement_for_expansion`, `want_pointer_expression`, `want_reverse_expression`, and `for_flags`; parse those fields now, but defer lookup and execution of the expansion macro until semantic analysis.  `macro_expansion_procedure_call`, `ident_decl`, and `index_decl` are typechecked/generated fields and must remain unset during syntax parsing.
+
+Parse the complete `for` prefix grammar:
+
+- [ ] Parse an optional named expansion selector immediately after `for`, as in `for :positive_vibes_only value, index: holder`, and store its expression in `want_replacement_for_expansion`.  Preserve the absence of a selector so semantic lookup can use the conventional `for_expansion` name.
+- [ ] Parse literal reverse and pointer flags independently and in combination: `for < value`, `for * value`, `for < * value`, and `for <* value`.  Set `.REVERSE` and `.POINTER` in `for_flags`; do not use mutually exclusive parsing for the two flags.
+- [ ] Allow a named selector after literal flags, as in `for < :polite dummy`, and define one canonical parse order while accepting the spaced and adjacent forms shown in the guide.
+- [ ] Parse controlled flags `<=expression` and `*=expression` into `want_reverse_expression` and `want_pointer_expression`.  Support either flag alone and both together, including the comma-disambiguated form `for *=pointer_expression, <=reverse_expression collection`.
+- [ ] Define where a controlled-flag expression stops without consuming the iteration expression.  Use the separating comma when both controlled flags are present and add targeted ambiguity tests for comparison and assignment operators.
+- [ ] Reject or recover duplicate literal/controlled forms of the same flag deterministically, while preserving all source tokens for round-tripping.
+
+Preserve iterator bindings and loop shape:
+
+- [ ] Parse implicit `it`/`it_index`, a renamed value (`for value: collection`), and renamed value/index pairs (`for value, index: collection`) with the selected expansion syntax.
+- [ ] Preserve iterator identifiers marked with Jai's backtick syntax, as in the source form `` for `it, `it_index: collection ``, by setting their source-spelled identifier flags, so expansion macros can deliberately export the bindings to their caller.
+- [ ] Retain existing range-loop parsing separately from for-expansion selection, including `iteration_expression_right`, and add ambiguity fixtures proving that selector/flag syntax does not consume range operators or the loop body.
+- [ ] Parse both single-statement and braced bodies for all selector and flag combinations, retaining parent/owning-statement links and exact token spans.
+
+Preserve syntax used inside expansion procedures:
+
+- [ ] Differentially verify the `for_expansion :: (value, body: Code, flags: For_Flags) #expand` declaration shape, including value and pointer receiver forms.  Treat the conventional procedure name and signature as ordinary declarations during syntax parsing.
+- [ ] Preserve declarations exported with Jai's backtick syntax, including `` `it ``, `` `it_index ``, and additional user-defined names such as `` `visited_index ``.
+- [ ] Complete `#insert` replacement parsing for `#insert(break=statement, continue=statement, remove=statement) body`, populating `break_replacement`, `continue_replacement`, and `remove_replacement`.  Cover targeted loop controls such as `break y` and explicit rejection replacements such as `#assert(false)`.
+- [ ] Verify that a plain `#insert body` remains distinct from replacement-bearing insertion and that inserted expansion output remains a semantic/generated field rather than syntax-owned AST.
+
+Validate and recover at the syntax layer:
+
+- [ ] Add focused and compiler-differential fixtures for every loop spelling in `how_to/730_for_expansions.jai`: default and named selectors; renamed iterators; `<`, `*`, `< *`, and `<*`; controlled `<=` and `*=` flags; combined controlled flags; and backticked iterator bindings.
+- [ ] Compare parser fields with raw compiler `Code_For` nodes before typechecking.  Exclude `ident_decl`, `index_decl`, and `macro_expansion_procedure_call` until semantic expansion is implemented.
+- [ ] Add malformed fixtures for a missing selector, missing controlled-flag expression, duplicate flags, missing comma between controlled flags, missing iterator after a comma, missing binding colon, and truncated body.
+- [ ] Synchronise malformed prefixes at the iteration expression or loop body without reinterpreting the body as top-level declarations, and keep partial `Parser_For` nodes stable.
+- [ ] Require `how_to/730_for_expansions.jai` to parse as `COMPLETE` with zero diagnostics and round-trip byte-for-byte before marking for-expansion syntax complete.
+
+Implement expansion semantics later:
+
+- [ ] During name resolution, resolve the default `for_expansion` or selected expansion procedure using the iteration value's pointer form and Jai's auto-dereference rules.
+- [ ] Evaluate controlled pointer/reverse expressions as compile-time booleans, combine them with literal `for_flags`, and provide the resulting `For_Flags` value to the expansion macro.
+- [ ] Expand the loop body as `Code`, remap exported `it` and `it_index` to the source-spelled iterator names, retain additional exported names, and populate `macro_expansion_procedure_call` plus generated declaration fields.
+- [ ] Apply `#insert` break/continue/remove replacements to loop-control nodes in the inserted body, preserving labelled targets such as `break y`; report unsupported controls when the expansion deliberately substitutes a compile-time assertion.
+- [ ] Add semantic fixtures using value and pointer receivers, nested-loop break replacement, extra exported variables, and the real `Unicode.utf8_iter`, `Bit_Array`, `Hash_Table`, and `Bucket_Array` expansions.
 
 ### 14. Add Semantic Analysis
 
@@ -205,7 +327,7 @@ Raw struct memory is not a useful equality test: compiler nodes contain semantic
 ## First Implementation Slice
 
 1. Complete the public-contract and AST-layout prototypes.
-2. Materialize tokens with stable indices and byte spans.
+2. Materialise tokens with stable indices and byte spans.
 3. Prove exact round-tripping in trivia mode.
 4. Parse identifiers and literals.
 5. Add prefix, postfix, and binary expression parsing.

@@ -433,20 +433,20 @@ peek_next_character :: (lexer: *Lexer) -> s16 {
 }
 
 
-report_parse_error :: (lexer: *Lexer, format: string, arguments: .. Any) {
-	log(format, .. arguments);		// @Cleanup: Move this function, make it user-overridable.
-	log("... at line %, character %.\n", lexer.current_line_number, lexer.current_character_index);
+report_parse_error :: (lexer: *Lexer, format: string, arguments: ..Any) {
+	log(format, ..arguments);		//FIXME: @Cleanup: Move this function, make it user-overridable.
+	log("...at line %, character %.\n", lexer.current_line_number, lexer.current_character_index);
 	lexer.reported_error = true;
 } @PrintLike
 
-report_parse_error :: (lexer: *Lexer, token: *Token, format: string, arguments: .. Any) {
-	log(format, .. arguments);		// @Cleanup: Move this function, make it user-overridable.
-	log("... at line %, character %.\n", token.l0, token.c0);
+report_parse_error :: (lexer: *Lexer, token: *Token, format: string, arguments: ..Any) {
+	log(format, ..arguments);		// @Cleanup: Move this function, make it user-overridable.
+	log("...at line %, character %.\n", token.l0, token.c0);
 	lexer.reported_error = true;
 } @PrintLike
 
-report_detail :: (lexer: *Lexer, format: string, arguments: .. Any) {
-	log(format, .. arguments);		// @Cleanup: Move this function, make it user-overridable.
+report_detail :: (lexer: *Lexer, format: string, arguments: ..Any) {
+	log(format, ..arguments);		// @Cleanup: Move this function, make it user-overridable.
 } @PrintLike
 
 get_hex_digit :: (lexer: *Lexer, type: Hex_Digit_Type) -> (value: u8, success: bool) {
@@ -542,7 +542,7 @@ parse_ident :: (lexer: *Lexer, result: *Token) -> string {
 
 	/*
 #if USE_SIMD
-	__m128i zero   = _mm_set1_epi8("0"-1); // Because we don"t have le and ge in SSE2? We just have lt and gt??
+	__m128i zero   = _mm_set1_epi8("0"-1); // Because we don"t have le and ge in SSE2?  We just have lt and gt??
 	__m128i nine   = _mm_set1_epi8("9"+1);
 	__m128i under  = _mm_set1_epi8("_");
 	__m128i a      = _mm_set1_epi8("A"-1);
@@ -569,7 +569,7 @@ parse_ident :: (lexer: *Lexer, result: *Token) -> string {
 
 		mask               = _mm_movemask_epi8(is_ident);
 
-		// This mask xor is probably wasteful. We can DeMorgan all this later, or something.
+		// This mask xor is probably wasteful.  We can DeMorgan all this later, or something.
 		// We"re doing this because we detected what *is* in an identifier, rather than what
 		// is not.
 		mask ^= 0xffff;
@@ -585,8 +585,7 @@ parse_ident :: (lexer: *Lexer, result: *Token) -> string {
 		assert(advance >= 0);
 
 		// @Speed: Instead of this memcpy, can we just do a move into the
-		// scratch buffer? (Don"t even need a partial move if we give the
-		// scratch buffer LEXER_SIMD_WIDTH extra padding.)
+		// scratch buffer?  (Don"t even need a partial move if we give the scratch buffer LEXER_SIMD_WIDTH extra padding.)
 		memcpy(scratch_pos, lexer.input.data + lexer.input_cursor, advance);
 		scratch_pos  += advance;
 		lexer.input_cursor += advance;
@@ -961,7 +960,7 @@ check_for_keyword :: (token: *Token) -> Token_Type {	// Returns Token_Type 0 if 
 	name   := token.ident_value.name;
 	length := name.count;
 
-	// @Speed: Since we already have the atom, then instead of doing strcmps, we could just have a bunch of pre-looked-up atoms: atom_if, atom_then, etc... then we just do a pointer compare and we know which keyword it is.
+	// @Speed: Since we already have the atom, then instead of doing strcmps, we could just have a bunch of pre-looked-up atoms: atom_if, atom_then, e.t.c., then we just do a pointer compare and we know which keyword it is.
 
 	if length == {
 		case 2;
@@ -1060,7 +1059,7 @@ make_hexfloat :: (lexer: *Lexer, result: *Token) -> *Token {
 		eat_character(lexer);
 
 		if num_digits == DIGITS_MAX {
-			report_parse_error(lexer, "Hexfloat is too long! (16 character maximum.)\n");
+			report_parse_error(lexer, "Hexfloat is too long!  (16 character maximum.)\n");
 		}
 
 		digit_accumulator *= 16;
@@ -1094,7 +1093,7 @@ make_hexfloat :: (lexer: *Lexer, result: *Token) -> *Token {
 		};
 
 		_u32 = digit_accumulator.(u32);
-		result.float64_value = _f32;	// We store it in a float64, but the float32 information is exact ... hopefully.
+		result.float64_value = _f32;	// We store it in a float64, but the float32 information is exact...hopefully.
 	} else {
 		union {
 			_f32: float32;
@@ -1102,7 +1101,7 @@ make_hexfloat :: (lexer: *Lexer, result: *Token) -> *Token {
 		};
 
 		_u32 = digit_accumulator.(u32);
-		result.float64_value = _f32;	// We store it in a float64, but the float32 information is exact ... hopefully.
+		result.float64_value = _f32;	// We store it in a float64, but the float32 information is exact...hopefully.
 	}
 
 	set_end_of_token(lexer, result);
@@ -1168,7 +1167,7 @@ make_number :: (lexer: *Lexer) -> *Token {
 
 			c = peek_next_character(lexer);
 			if c == #char "." {
-				// Uhh.. this isn"t a decimal, it's part of an integer range specifier, e.g.: (1..3)
+				// Uhh, this isn"t a decimal, it's part of an integer range specifier, e.g.: (1..3)
 				//  so we are going to return an integer here and push a #char ".." token into the token queue.
 
 				unwind_one_character(lexer);
@@ -1363,7 +1362,7 @@ make_number :: (lexer: *Lexer) -> *Token {
 		// Remove trailing zeroes.
 
 		use_float64 := false;
-		if significant_figures > 8 {	// @Hack! Find the right thing here. @Cleanup.
+		if significant_figures > 8 {	//HACK: Find the right thing here.  @Cleanup.
 			use_float64 = true;
 			result.value_flags |= .REQUIRES_FLOAT64_DUE_TO_SIGNIFICANT_DIGITS;
 		} else {
@@ -1401,7 +1400,7 @@ make_number :: (lexer: *Lexer) -> *Token {
 	set_end_of_token(lexer, result);
 
 	if (numeric_flags & .OVERFLOWED) && !(numeric_flags & .FLOAT) {
-		report_parse_error(lexer, result, "Integer literal is too big. All integer literals must fit into 64 bits.\n");
+		report_parse_error(lexer, result, "Integer literal is too big.  All integer literals must fit into 64 bits.\n");
 	}
 
 	return result;
@@ -1623,7 +1622,7 @@ eat_token :: (lexer: *Lexer) {
 }
 
 check_for_equals :: (lexer: *Lexer, c: Token_Type, augmented: Token_Type, eat := true, subtractor: s32 = 0) -> *Token {
-	// subtractor is the base token width minus one, for ... reasons ... @Cleanup.
+	// subtractor is the base token width minus one, for ...reasons...  @Cleanup.
 	result: *Token;
 	if eat	eat_character(lexer);
 
@@ -1641,7 +1640,7 @@ check_for_equals :: (lexer: *Lexer, c: Token_Type, augmented: Token_Type, eat :=
 }
 
 //
-// @Robustness: We might want to modify eat_input_due_to_block_comment so that characters in front of comment items need to be clear... e.g. right now it considers the string "/////*" to be a nested open-comment... not sure if we want that.
+// @Robustness: We might want to modify eat_input_due_to_block_comment so that characters in front of comment items need to be clear...e.g. right now it considers the string "/////*" to be a nested open-comment...not sure if we want that.
 //
 eat_input_due_to_block_comment :: (lexer: *Lexer) {
 	comment_depth: s32 = 1;
@@ -1775,7 +1774,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 		}
 
 		if c == #char "." {
-			// Check for double-dot... but if it is not specifically double-dot then it might be a single-dot, and it might be a floating-point number...
+			// Check for double-dot...but if it is not specifically double-dot then it might be a single-dot, and it might be a floating-point number...
 
 			eat_character(lexer);
 			c = peek_next_character(lexer);
@@ -1869,7 +1868,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 							// @Cleanup interp.report(REPORT_WARNING, lexer, null, "Illegal Unicode directional-formatting character found in the program text.  This could be a problem with pasting the data from another source.\n");
 							continue;
 						case;
-							report_parse_error(lexer, "Unicode characters in this range are not supported by the parser at lexer time. (Offending character code was U+%x.\n", u);
+							report_parse_error(lexer, "Unicode characters in this range are not supported by the parser at lexer time.  (Offending character code was U+%x.\n", u);
 							continue;
 					}
 
@@ -2119,7 +2118,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 					/*
 					if (!did_nbsp_warning) {	//LATER: decide if we want these errors as an option?
 						// Don't spam!
-						interp.report(REPORT_WARNING, this, null, "A Unicode non-breaking space character is here, outside of a string. S kipping.\n");
+						interp.report(REPORT_WARNING, this, null, "A Unicode non-breaking space character is here, outside of a string.  Skipping.\n");
 						did_nbsp_warning = true;
 					}
 					*/

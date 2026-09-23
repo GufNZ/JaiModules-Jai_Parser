@@ -32,6 +32,7 @@ main :: () {
 	test_token_navigation();
 	test_parser_node_pool();
 	test_recovery_synchronization();
+	test_complete_file_parsing();
 	test_parenthesized_expression();
 	test_missing_close_parenthesis();
 	test_null_and_context();
@@ -55,7 +56,7 @@ main :: () {
 }
 
 test_default_tokens :: () {
-	parsed := Default.materialize_tokens("a + b * c");
+	parsed := Default.materialise_tokens("a + b * c");
 	assert(parsed.status == .COMPLETE);
 	assert(parsed.tokens.count == 6);
 	assert(parsed.tokens[0].type == .IDENT);
@@ -64,7 +65,7 @@ test_default_tokens :: () {
 
 test_trivia_round_trip :: () {
 	source :: "\xC2\xA0str :: #string /**/ , /**/ cr END\n123\nEND; // tail";
-	parsed := Extended.materialize_tokens(source);
+	parsed := Extended.materialise_tokens(source);
 	assert(parsed.status == .COMPLETE);
 
 	for token: parsed.tokens {
@@ -83,7 +84,7 @@ test_trivia_round_trip :: () {
 }
 
 test_token_navigation :: () {
-	parsed := Extended.materialize_tokens("a + b");
+	parsed := Extended.materialise_tokens("a + b");
 	first := Extended.token_at(*parsed, xx 0);
 	second := Extended.next_token(*parsed, first.index);
 	third := Extended.next_token(*parsed, second.index);
@@ -115,7 +116,7 @@ test_token_navigation :: () {
 	assert(Extended.parser_expect(*parser, .IDENT, #char "+"));
 	assert(parser.cursor == 2);
 
-	missing := Extended.materialize_tokens("a + b");
+	missing := Extended.materialise_tokens("a + b");
 	missing_parser := Extended.Parser.{parsed=*missing};
 	assert(!Extended.parser_expect(*missing_parser, .IDENT, #char "-"));
 	assert(missing_parser.cursor == 1);
@@ -141,10 +142,10 @@ test_parser_node_pool :: () {
 }
 
 test_recovery_synchronization :: () {
-	parsed := Extended.materialize_tokens("bad + value; next } tail");
+	parsed := Extended.materialise_tokens("bad + value; next } tail");
 	parser := Extended.Parser.{parsed=*parsed, cursor=1};
 
-	expression_span := Extended.parser_synchronize(*parser, .EXPRESSION);
+	expression_span := Extended.parser_synchronise(*parser, .EXPRESSION);
 	assert(expression_span.first == xx 1);
 	assert(expression_span.one_past_last == xx 3);
 	assert(Extended.parser_peek(*parser).type == #char ";");
@@ -153,12 +154,12 @@ test_recovery_synchronization :: () {
 	assert(Extended.parser_ensure_progress(*parser, guard));
 	assert(parser.cursor == 4);
 
-	statement_span := Extended.parser_synchronize(*parser, .STATEMENT);
-	declaration_span := Extended.parser_synchronize(*parser, .DECLARATION);
+	statement_span := Extended.parser_synchronise(*parser, .STATEMENT);
+	declaration_span := Extended.parser_synchronise(*parser, .DECLARATION);
 	assert(statement_span.first == statement_span.one_past_last);
 	assert(declaration_span.first == declaration_span.one_past_last);
 
-	block_span := Extended.parser_synchronize(*parser, .BLOCK);
+	block_span := Extended.parser_synchronise(*parser, .BLOCK);
 	assert(block_span.first == xx 4);
 	assert(block_span.one_past_last == xx 5);
 	assert(Extended.parser_peek(*parser).type == #char "}");
@@ -167,6 +168,41 @@ test_recovery_synchronization :: () {
 	Extended.parser_eat(*parser);
 	guard = Extended.parser_progress_guard(*parser);
 	assert(!Extended.parser_ensure_progress(*parser, guard));
+}
+
+test_complete_file_parsing :: () {
+	source :: "first :: 1;\nsecond: s64 = 2;\ntyped_constant: s64 : 3;\n#scope_file\nmain :: () { value := cast,no_check(s32) 1; }\nthird := 3;";
+	parsed := Extended.parse_file(source, "fixture.jai");
+	root := parsed.root.(*Extended.Parser_Block);
+	if parsed.status != .COMPLETE {
+		diagnostic := parsed.diagnostics[0];
+		diagnostic_token := Extended.token_at(*parsed, diagnostic.span.first);
+		assert(false, "Status %, diagnostics %, kind %, expected %, actual %, token '%'.", parsed.status, parsed.diagnostics.count, diagnostic.kind, diagnostic.expected_token, diagnostic.actual_token, diagnostic_token.original_text);
+	}
+	assert(parsed.fully_pathed_filename == "fixture.jai");
+	assert(root.block_type == .DATA_DECLARATIONS);
+	assert(!(root.node_flags & .IS_PARENTHESIZED));
+	assert(root.statements.count == 6);
+	assert((root.statements[2].(*Extended.Parser_Declaration).flags & .IS_CONSTANT) != 0);
+	assert(Extended.reconstruct_source(*parsed) == source);
+
+	recovered := Extended.parse_file("first :: 1;\nbad: ;\nsecond :: 2;\nworse := ;\nthird :: 3;");
+	recovered_root := recovered.root.(*Extended.Parser_Block);
+	assert(recovered.status == .RECOVERED);
+	assert(recovered.diagnostics.count == 2);
+	assert(recovered_root.statements.count == 5);
+
+	truncated := Extended.parse_file("first :: 1;\nsecond :: struct { value: s64;");
+	truncated_root := truncated.root.(*Extended.Parser_Block);
+	assert(truncated.status == .INCOMPLETE);
+	assert(truncated_root.statements.count == 2);
+	assert(truncated_root.statements[1].kind == .DECLARATION);
+
+	empty := Extended.parse_file("", "empty.jai");
+	empty_root := empty.root.(*Extended.Parser_Block);
+	assert(empty.status == .COMPLETE);
+	assert(empty_root.statements.count == 0);
+	assert(empty_root.first_token == empty_root.one_past_last_token);
 }
 
 test_node_token_spans :: () {
@@ -957,11 +993,11 @@ test_conditional_statements :: () {
 	assert(default_case.condition == null);
 	assert(default_case.owning_if == switch_node);
 
-	unmatched_parenthesis := Extended.materialize_tokens("value) == {");
+	unmatched_parenthesis := Extended.materialise_tokens("value) == {");
 	unmatched_parenthesis_parser := Extended.Parser.{parsed=*unmatched_parenthesis};
 	assert(!Extended.has_switch_case_block(*unmatched_parenthesis_parser));
 
-	unmatched_bracket := Extended.materialize_tokens("value] == {");
+	unmatched_bracket := Extended.materialise_tokens("value] == {");
 	unmatched_bracket_parser := Extended.Parser.{parsed=*unmatched_bracket};
 	assert(!Extended.has_switch_case_block(*unmatched_bracket_parser));
 }

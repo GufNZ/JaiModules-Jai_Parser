@@ -1,7 +1,7 @@
 # Jai_Parser
 ## Lexer
 
-This module starts from `Jai_Lexer` and adds current parser-oriented tokenization.
+This module starts from `Jai_Lexer` and adds current parser-oriented tokenisation.
 
 The default import retains the original `Token` and `Lexer` memory layouts:
 
@@ -36,15 +36,15 @@ for trivia, offset: make_trivia_iterator(token.preceding_trivia) {
 Trivia kinds are `WHITESPACE`, `LINE_COMMENT`, `BLOCK_COMMENT`, `SHEBANG`, and `IGNORED`.
 `IGNORED` represents source bytes deliberately skipped by the lexer outside the other categories, such as NBSP, zero-width space, and bidi formatting controls.
 
-## Materialized Parser Tokens
+## Materialised Parser Tokens
 
-`materialize_tokens(source)` copies the lexer's ring-buffer tokens into a stable parser-owned array.
-It also recognizes `#string` directives, so their bodies are represented by the same string token the parser will consume.
+`materialise_tokens(source)` copies the lexer's ring-buffer tokens into a stable parser-owned array.
+It also recognises `#string` directives, so their bodies are represented by the same string token the parser will consume.
 
 The returned `Parsed_Source` borrows `source`.
 Parser callers are expected to keep the source allocation alive and unchanged while using its tokens and syntax tree; the parser does not provide an owned-copy mode.
 
-With `ENABLE_TRIVIA=false`, `Parser_Token` aliases `Token`. With trivia enabled, it extends the lexer token with a stable index and absolute, half-open byte boundaries. `reconstruct_source` rebuilds the original source from the materialized token and trivia views.
+With `ENABLE_TRIVIA=false`, `Parser_Token` aliases `Token`. With trivia enabled, it extends the lexer token with a stable index and absolute, half-open byte boundaries. `reconstruct_source` rebuilds the original source from the materialised token and trivia views.
 
 ## Syntax Tree Source Spans
 
@@ -56,7 +56,15 @@ When trivia is enabled, every parser node directly contains `first_token` and `o
 Together these fields identify the node's half-open token span without a table lookup.
 
 AST nodes and parser-created child arrays share the `Pool` embedded in `Parsed_Source`.
-Use `parser_node_allocator` for child arrays and `release_parser_tree` to invalidate and release the complete tree while retaining the materialized tokens and diagnostics.
+Use `parser_node_allocator` for child arrays and `release_parser_tree` to invalidate and release the complete tree while retaining the materialised tokens and diagnostics.
+
+## Complete File Parsing
+
+`parse_file(source, fully_pathed_filename="")` parses declarations through end of input and returns an unparenthesised `Parser_Block` with block type `DATA_DECLARATIONS`. `Parsed_Source.fully_pathed_filename` preserves the caller-provided source identity; like `source` and token text, it is borrowed and must outlive the parsed result.
+
+File parsing retains successful declarations around multiple malformed regions. Truncated declarations remain in the partial tree and produce `INCOMPLETE`; recoverable syntax errors produce `RECOVERED`. Empty input still returns a non-null, zero-width file block.
+
+`examples/parse_how_to.jai` is the initial compatibility corpus. It parses every `.jai` file under `how_to`, asserts a non-fatal file root and exact trivia round trip, and reports files that currently require recovery so unsupported syntax remains visible as parser coverage expands.
 
 ## Expression Parsing
 
@@ -72,26 +80,26 @@ The compiler exports `value := ---` with a null declaration expression, so place
 Binary parsing uses the precedence classes derived by `../../print_precedences.jai`.
 The expression parser preserves assignment-operator trees for compiler AST comparison and recovery; later statement parsing will own their statement-level semantics.
 The differential suite covers every binary and assignment operator exposed by `Operator_Type`, compares every pair of precedence classes in both operand orders, and checks same-class associativity.
-Ambiguous prefix, postfix, and parenthesized combinations are compared separately; unary dot binds to its immediate primary before later postfix access, as in `(.member).field`.
+Ambiguous prefix, postfix, and parenthesised combinations are compared separately; unary dot binds to its immediate primary before later postfix access, as in `(.member).field`.
 
 `parser_peek`, `parser_eat`, `parser_checkpoint`, and `parser_restore` provide the initial cursor API.
-Materialized tokens can also be navigated with `token_at`, `previous_token`, and `next_token`.
+Materialised tokens can also be navigated with `token_at`, `previous_token`, and `next_token`.
 
 ## Type And Declaration Parsing
 
-`parse_declaration(source)` parses typed, inferred, constant, uninitialised, and compound declarations. Compound declarations preserve their left-hand names as parser-owned comma-separated arguments and represent multiple initializer expressions with a `Parser_Comma_Separated_Arguments` node.
+`parse_declaration(source)` parses typed, inferred, constant, uninitialised, and compound declarations. Compound declarations preserve their left-hand names as parser-owned comma-separated arguments and represent multiple initialiser expressions with a `Parser_Comma_Separated_Arguments` node.
 
-Supported types include named types, pointers, fixed arrays, array views, resizable arrays, procedure types, polymorphic variables with restrictions, and `#type` with `distinct` or `isa`. Declaration metadata includes `$` and `$$` auto-bake flags, backticked scope modifiers, `#align` expressions, placeholder initialization flags, and trailing notes.
+Supported types include named types, pointers, fixed arrays, array views, resizable arrays, procedure types, polymorphic variables with restrictions, and `#type` with `distinct` or `isa`. Declaration metadata includes `$` and `$$` auto-bake flags, backticked scope modifiers, `#align` expressions, placeholder initialisation flags, and trailing notes.
 
-Declaration and type normalizers compare parser nodes with compiler nodes inside intercepted child workspaces. Context-generated flags such as `IS_GLOBAL` are intentionally excluded from syntax comparisons.
+Declaration and type normalisers compare parser nodes with compiler nodes inside intercepted child workspaces. Context-generated flags such as `IS_GLOBAL` are intentionally excluded from syntax comparisons.
 
 ## Statement And Block Parsing
 
-`parse_block(source)` parses imperative brace blocks, while `parse_declaration_block(source)` restricts a brace block to declarations and marks it as `DATA_DECLARATIONS`. Explicit braces carry the compiler-compatible `IS_PARENTHESIZED` node flag; single-statement control-flow bodies are represented by unparenthesized parser-owned blocks.
+`parse_block(source)` parses imperative brace blocks, while `parse_declaration_block(source)` restricts a brace block to declarations and marks it as `DATA_DECLARATIONS`. Explicit braces carry the compiler-compatible `IS_PARENTHESIZED` node flag; single-statement control-flow bodies are represented by unparenthesised parser-owned blocks.
 
 Supported statements include expressions, declarations, multi-value returns, `while`, collection and range `for`, `if`, expression-form `ifx`, switch-style `case`, `defer`, `using`, `push_context`, `break`, `continue`, and `remove`. This includes named loop conditions and iterators, reverse and pointer iteration, `#complete`, `#through`, backticked return/defer, and `push_context,defer_pop` forms.
 
-Blocks retain parent and owning-statement links. Statement recovery inserts missing semicolons without consuming the next statement, synchronizes at statement starts and closing braces, and synthesizes a closing brace for truncated input.
+Blocks retain parent and owning-statement links. Statement recovery inserts missing semicolons without consuming the next statement, synchronises at statement starts and closing braces, and synthesises a closing brace for truncated input.
 
 ## Procedure And Aggregate Parsing
 
@@ -99,7 +107,7 @@ Procedure definitions reuse the procedure-type header parser and attach parser-o
 
 `Parser_Struct` represents both structs and unions, with `.UNION` in `textual_flags`. Parameterized aggregates retain their parameter declarations in a `STRUCT_ARGUMENTS` block, while fields and constants remain in the `DATA_DECLARATIONS` body. `Parser_Enum` represents enums and enum flags, including underlying types, `#complete`, `#specified`, explicit values, and bare members. Interface constraints use the compiler's `$T/interface Constraint` type-instantiation form and set `.INTERFACE`.
 
-Aggregate layout modifiers preserve the compiler's textual flags. Trailing notes remain attached to the containing declaration, matching the raw compiler AST. Direct differential comparisons omit asynchronous procedure body pointers and semantically finalized aggregate alignment; focused parser tests cover those parser-owned fields.
+Aggregate layout modifiers preserve the compiler's textual flags. Trailing notes remain attached to the containing declaration, matching the raw compiler AST. Direct differential comparisons omit asynchronous procedure body pointers and semantically finalised aggregate alignment; focused parser tests cover those parser-owned fields.
 
 ## Directive Parsing
 
@@ -124,7 +132,7 @@ Differential fixtures compare every compiler-accepted expression or contextual f
 
 ## Error Recovery
 
-The source token array is immutable after materialization.
+The source token array is immutable after materialisation.
 When a required token is absent, the parser records a zero-width `Synthetic_Token` at the current token boundary and adds a `Parse_Diagnostic` describing the expected and actual token and the recovery action.
 Synthetic tokens are kept separately from source tokens, so token indices remain stable and `reconstruct_source` always reproduces only the original input.
 
@@ -134,13 +142,13 @@ Its `related_information` slice can contain zero or more additional span/message
 
 Recovery loops use `parser_progress_guard` and `parser_ensure_progress` so a failed parse cannot repeatedly inspect the same non-EOF token.
 `parser_synchronize` defines restart boundaries for expression, statement, declaration, and block contexts.
-Synchronization stops before the boundary token so its enclosing parser remains responsible for consuming delimiters such as `,`, `;`, `)`, `]`, and `}`.
+Synchronisation stops before the boundary token so its enclosing parser remains responsible for consuming delimiters such as `,`, `;`, `)`, `]`, and `}`.
 
 ## Differential Tests
 
-`examples/differential_test.jai` normalizes parser and compiler ASTs into path-keyed syntax fields and reports every structural mismatch.
+`examples/differential_test.jai` normalises parser and compiler ASTs into path-keyed syntax fields and reports every structural mismatch.
 Its `assert_expression_fixture` macro accepts source text once and generates the matching `#code` argument with `#insert`, preventing the parser input and compiler oracle from drifting apart.
-The harness keeps syntax and semantic normalization separate, provides trivia round-trip fixtures, and includes intercepted child-workspace fixtures for typechecked declarations and file-level constructs.
+The harness keeps syntax and semantic normalisation separate, provides trivia round-trip fixtures, and includes intercepted child-workspace fixtures for typechecked declarations and file-level constructs.
 
 For invalid-source fixtures, `capture_compiler_error` writes the supplied code to a temporary fixture, invokes `jai -x64`, and returns structured primary diagnostics with their related information.
 `assert_compiler_error_message` and `assert_invalid_expression_compiler_message` provide concise assertions for common cases; pass `log_output=true` to `capture_compiler_error` when the complete compiler rendering is useful.

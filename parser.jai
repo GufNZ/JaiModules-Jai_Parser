@@ -120,6 +120,7 @@ render_diagnostic_line :: (source_line: string, c0: s64, c1: s64, tab_size: s64 
 Parsed_Source :: struct {
 	// Source and all token text are borrowed - they must outlive this value.
 	source: string;
+	fully_pathed_filename: string;
 	tokens: [..]Parser_Token;
 	synthetic_tokens: [..]Synthetic_Token;
 	diagnostics: [..]Parse_Diagnostic;
@@ -363,9 +364,10 @@ next_token :: inline (parsed: *Parsed_Source, index: Token_Index) -> *Parser_Tok
 
 #scope_file
 
-parseInit :: (source: string, rootParser: (*Parser) -> *Parser_Node) -> *Parsed_Source, Parser #expand {
+parseInit :: (source: string, rootParser: (*Parser) -> *Parser_Node, fully_pathed_filename: string = "") -> *Parsed_Source, Parser #expand {
 	parser: Parser;
 	parser.parsed = *materialise_tokens(source);
+	parser.parsed.fully_pathed_filename = fully_pathed_filename;
 	set_allocators(*parser.parsed.node_pool);
 	parser.parsed.root = rootParser(*parser);
 	return parser.parsed, parser;
@@ -434,6 +436,46 @@ parse_declaration_block :: (source: string) -> Parsed_Source {
 	return result;
 }
 
+parse_file :: (source: string, fully_pathed_filename: string = "") -> Parsed_Source {
+	result, parser := parseInit(source, parse_file_node, fully_pathed_filename);
+	return result;
+}
+
+parse_file_node :: (parser: *Parser) -> *Parser_Node {
+	first := parser.cursor;
+	result := new_parser_node(parser, Parser_Block);
+	result.kind = .BLOCK;
+	result.block_type = .DATA_DECLARATIONS;
+
+	statements: [..]*Parser_Node;
+	statements.allocator = parser_node_allocator(parser.parsed);
+
+	while parser_peek(parser).type != .END_OF_INPUT {
+		guard := parser_progress_guard(parser);
+		declaration := parse_declaration_node(parser);
+		if declaration {
+			array_add(*statements, declaration);
+			finish_statement(parser, declaration);
+		} else {
+			add_unexpected_token(parser);
+			parser_synchronise(parser, .DECLARATION);
+		}
+
+		if !parser_ensure_progress(parser, guard) {
+			break;
+		}
+	}
+
+	result.statements = statements;
+	if parser.cursor > first {
+		finish_node(parser, result, first);
+	} else {
+		set_empty_node_location(parser, result, first);
+	}
+
+	return result;
+}
+
 parse_block_node :: (parser: *Parser, parent: *Parser_Block = null, block_type := Code_Block.block_type.IMPERATIVE) -> *Parser_Block {
 	first := parser.cursor;
 	if !parser_eat_if(parser, #char "{") {
@@ -493,6 +535,24 @@ finish_statement :: (parser: *Parser, statement: *Parser_Node) {
 statement_requires_semicolon :: (statement: *Parser_Node) -> bool {
 	if statement.kind == .IF {
 		return ((statement.(*Parser_If).if_flags & .IS_IFX) != 0);
+	}
+
+
+	if statement.kind == .DECLARATION {
+		expression := statement.(*Parser_Declaration).expression;
+		if expression {
+			if expression.kind == .STRUCT || expression.kind == .ENUM {
+				return false;
+			}
+
+
+			if expression.kind == .PROCEDURE_HEADER {
+				header := expression.(*Parser_Procedure_Header);
+				if header.body_or_null {
+					return ((header.procedure_flags & (.QUICK | .QUICK_IN_BLOCK_FORM)) == 0);
+				}
+			}
+		}
 	}
 
 
@@ -1194,7 +1254,11 @@ parse_declaration_properties :: (parser: *Parser, result: *Parser_Declaration) {
 		}
 
 
-		if parser_eat_if(parser, #char "=") {
+		if parser_eat_if(parser, #char ":") {
+			result.flags |= .IS_CONSTANT;
+			result.expression = parse_declaration_expression(parser);
+			if !result.expression	add_expected_expression(parser);
+		} else if parser_eat_if(parser, #char "=") {
 			result.expression = parse_declaration_expression(parser);
 			if !result.expression	add_expected_expression(parser);
 		}
@@ -2537,6 +2601,30 @@ parse_prefix :: (parser: *Parser) -> *Parser_Node {
 
 
 	if parser_eat_if(parser, .KEYWORD_CAST) {
+		cast_flags: type_of(Code_Cast.cast_flags);
+		while parser_eat_if(parser, #char ",") {
+			modifier := parser_peek(parser);
+			if modifier.type != .IDENT {
+				parser_expect(parser, .IDENT);
+				break;
+			}
+
+
+			modifier_name: string = modifier.ident_value.name;
+			if modifier_name == {
+				case "no_check";	cast_flags |= .NO_BOUNDS_CHECK;
+				case "truncate";	cast_flags |= .TRUNCATE;
+				case "force";		cast_flags |= .FORCE;
+				case "very_force";	cast_flags |= .VERY_FORCE;
+				case;
+					add_unexpected_token(parser);
+					break;
+			}
+
+
+			parser_eat(parser);
+		}
+
 		parser_expect(parser, #char "(");
 
 		type_expression := parse_binary(parser);
@@ -2559,6 +2647,7 @@ parse_prefix :: (parser: *Parser) -> *Parser_Node {
 		result.kind = .CAST;
 		result.target_type = make_type_instantiation(parser, type_expression);
 		result.expression = expression;
+		result.cast_flags = cast_flags;
 		finish_node(parser, result, first);
 		return result;
 	}

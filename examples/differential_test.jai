@@ -206,13 +206,13 @@ test_compiler_related_diagnostics :: () {
 	diagnostic := result.diagnostics[0];
 	assert(diagnostic.location.l0 == 2 && diagnostic.location.c0 == 28);
 	assert(diagnostic.location.l1 == 2 && diagnostic.location.c1 == 34);
-	assert(diagnostic.message == "Type mismatch. Type wanted: s64; type given: string.");
+	assert(diagnostic.message == "Type mismatch.  Type wanted: s64; type given: string.");
 	assert(diagnostic.related_information.count == 1);
 	assert(diagnostic.related_information[0].location.l0 == 1);
 	assert(diagnostic.related_information[0].location.c0 == 18);
 	assert(diagnostic.related_information[0].location.l1 == 1);
 	assert(diagnostic.related_information[0].location.c1 == 30);
-	assert(diagnostic.related_information[0].message == "... in checking argument 1 of call to takes_integer.");
+	assert(diagnostic.related_information[0].message == "...in checking argument 1 of call to takes_integer.");
 }
 
 test_structural_difference_reporting :: () {
@@ -1108,7 +1108,7 @@ assert_all_precedence_pairs :: () #expand {
 }
 
 assert_trivia_round_trip :: (source: string) {
-	parsed := Parser.materialize_tokens(source);
+	parsed := Parser.materialise_tokens(source);
 	reconstructed := Parser.reconstruct_source(*parsed);
 	assert(reconstructed == source, "Trivia round trip differed for source:\n%", source);
 }
