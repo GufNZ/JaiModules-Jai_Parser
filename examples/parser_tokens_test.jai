@@ -5,6 +5,10 @@
 Default  :: #import "Jai_Parser";
 Extended :: #import "Jai_Parser"(ENABLE_TRIVIA=true);
 
+COMPILER_PERCENT_HERE_STRING :: #string,\% END
+%\%
+END
+
 compiler_node_for_source :: ($source: string) -> *Code_Node #expand {
 	#insert -> string {
 		return tprint("return compiler_get_nodes(#code %);", source);
@@ -96,6 +100,28 @@ test_token_navigation :: () {
 	assert(parser.cursor == 1);
 	Extended.parser_restore(*parser, checkpoint);
 	assert(parser.cursor == 0);
+
+	assert(Extended.parser_peek_if(*parser, .IDENT, #char "+"));
+	assert(!Extended.parser_peek_if(*parser, .IDENT, #char "-"));
+	assert(parser.cursor == 0);
+
+	assert(Extended.parser_eat_if(*parser, .IDENT, #char "+"));
+	assert(parser.cursor == 2);
+	Extended.parser_restore(*parser, checkpoint);
+
+	assert(!Extended.parser_eat_if(*parser, .IDENT, #char "-"));
+	assert(parser.cursor == 0);
+
+	assert(Extended.parser_expect(*parser, .IDENT, #char "+"));
+	assert(parser.cursor == 2);
+
+	missing := Extended.materialize_tokens("a + b");
+	missing_parser := Extended.Parser.{parsed=*missing};
+	assert(!Extended.parser_expect(*missing_parser, .IDENT, #char "-"));
+	assert(missing_parser.cursor == 1);
+	assert(missing.diagnostics.count == 1);
+	assert(missing.diagnostics[0].expected_token == #char "-");
+	assert(missing.diagnostics[0].actual_token == #char "+");
 }
 
 test_parser_node_pool :: () {
@@ -270,6 +296,17 @@ test_placeholder_and_here_string :: () {
 	assert(cr_here_string.status == .COMPLETE);
 	assert(cr_here_string.root.(*Extended.Parser_Literal)._string == "body\r\n");
 	assert(Extended.reconstruct_source(*cr_here_string) == cr_source);
+
+	percent_source :: "#string,\\% END\n%\\%\nEND";
+	percent_here_string := Extended.parse_expression(percent_source);
+	assert(percent_here_string.status == .COMPLETE);
+	percent_value := percent_here_string.root.(*Extended.Parser_Literal)._string;
+	assert(percent_value.count == 3);
+	assert(percent_value[0] == #char "%");
+	assert(percent_value[1] == 31);
+	assert(percent_value[2] == #char "\n");
+	assert(percent_value == COMPILER_PERCENT_HERE_STRING);
+	assert(Extended.reconstruct_source(*percent_here_string) == percent_source);
 }
 
 test_parenthesized_expression :: () {
@@ -919,6 +956,14 @@ test_conditional_statements :: () {
 	default_case := switch_node.then_block.statements[3].(*Extended.Parser_Case);
 	assert(default_case.condition == null);
 	assert(default_case.owning_if == switch_node);
+
+	unmatched_parenthesis := Extended.materialize_tokens("value) == {");
+	unmatched_parenthesis_parser := Extended.Parser.{parsed=*unmatched_parenthesis};
+	assert(!Extended.has_switch_case_block(*unmatched_parenthesis_parser));
+
+	unmatched_bracket := Extended.materialize_tokens("value] == {");
+	unmatched_bracket_parser := Extended.Parser.{parsed=*unmatched_bracket};
+	assert(!Extended.has_switch_case_block(*unmatched_bracket_parser));
 }
 
 test_statement_recovery :: () {
@@ -973,9 +1018,15 @@ assert_literal_fixture :: ($source: string) #expand {
 
 test_compiler_literal_shapes :: () {
 	assert_literal_fixture("42");
+	assert_literal_fixture("-42");
 	assert_literal_fixture("0xff");
+	assert_literal_fixture("-0xff");
 	assert_literal_fixture("0b101");
 	assert_literal_fixture("1.25");
+	assert_literal_fixture("-1.25");
+	assert_literal_fixture("1.2345678");
+	assert_literal_fixture("1.23456789");
+	assert_literal_fixture("1.0e100");
 	assert_literal_fixture("\"hello\\n\"");
 	assert_literal_fixture("true");
 	assert_literal_fixture("false");

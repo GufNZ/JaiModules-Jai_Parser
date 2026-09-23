@@ -56,6 +56,7 @@ consume_here_string :: (lexer: *Parser_Lexer.Lexer, source_cursor: *s64, total_t
 	assert(name.type == .IDENT && name.ident_value.name == "string");
 
 	want_cr := false;
+	want_percent := false;
 	while Parser_Lexer.peek_next_token(lexer).type == #char "," {
 		consume_source_token(lexer, source_cursor, total_tokens);
 		modifier := consume_source_token(lexer, source_cursor, total_tokens);
@@ -63,12 +64,13 @@ consume_here_string :: (lexer: *Parser_Lexer.Lexer, source_cursor: *s64, total_t
 			want_cr = true;
 		} else {
 			assert(modifier.type == .IDENT && modifier.ident_value.name == "\\%");
+			want_percent = true;
 		}
 	}
 
 	delimiter := consume_source_token(lexer, source_cursor, total_tokens);
 	assert(delimiter.type == .IDENT);
-	body := Parser_Lexer.parse_here_string_body(lexer, delimiter.ident_value.name, want_cr);
+	body := Parser_Lexer.parse_here_string_body(lexer, delimiter.ident_value.name, want_cr, want_percent);
 	assert(body != null);
 	consume_source_span(lexer.input, source_cursor, body.preceding_trivia);
 	consume_source_span(lexer.input, source_cursor, body.original_text);

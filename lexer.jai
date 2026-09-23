@@ -675,7 +675,7 @@ eat_comment_if_present :: (lexer: *Lexer) -> bool {
 	return false;
 }
 
-parse_here_string_body :: (lexer: *Lexer, terminator: string, want_cr := false) -> *Token {
+parse_here_string_body :: (lexer: *Lexer, terminator: string, want_cr := false, want_percent := false) -> *Token {
 	assert(lexer.num_incoming_tokens == 0);		// The parser should not be in a state where later characters have been processed into tokens.
 	assert(terminator.count > 0);
 
@@ -869,6 +869,25 @@ parse_here_string_body :: (lexer: *Lexer, terminator: string, want_cr := false) 
 		// No need to normalize, just copy everything at once:
 		result_string = alloc_string(len+1);	// We waste a few bytes here but we don't want to do a pre-pass to figure out how many we can save.
 		memcpy(result_string.data, lexer.input.data + string_start, len);
+	}
+
+	if want_percent {
+		source := result_string.data;
+		dest := result_string.data;
+		end := source + len;
+		while source < end {
+			if source.* == #char "\\" && source + 1 < end && (source + 1).* == #char "%" {
+				dest.* = 31;
+				source += 2;
+			} else {
+				dest.* = source.*;
+				source += 1;
+			}
+
+			dest += 1;
+		}
+
+		len = dest - result_string.data;
 	}
 
 	result_string[len]  = 0;			// :ZeroTermination

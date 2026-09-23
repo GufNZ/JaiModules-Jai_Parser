@@ -511,7 +511,7 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 			for declaration.comma_separated_assignment.arguments {
 				normalize_parser_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
 			}
-			normalize_parser_declaration(*declaration.declaration_properties, tprint("%.properties", path), layer, result);
+			normalize_parser_declaration(declaration.declaration_properties, tprint("%.properties", path), layer, result);
 			normalize_parser_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
 			add_normalized_field(result, path, "note_count", tprint("%", declaration.notes.count));
 			for declaration.notes {

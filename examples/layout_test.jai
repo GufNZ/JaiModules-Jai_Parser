@@ -210,12 +210,12 @@ test_here_string_percent_modifier :: () {
 	modifier := eat_expected_token(*lexer, .IDENT);
 	assert(modifier.ident_value.name == "\\%");
 	delimiter := eat_expected_token(*lexer, .IDENT);
-	token := Extended.parse_here_string_body(*lexer, delimiter.ident_value.name);
+	token := Extended.parse_here_string_body(*lexer, delimiter.ident_value.name, want_percent=true);
 	assert(token.type == .STRING);
-	assert(token.string_value == "value % \\% unchanged\n");
+	assert(token.string_value == "value % \x1f unchanged\n");
 	assert(!lexer.reported_error);
 
-	combined_input :: "#string,cr,\\% END\nvalue %\nEND";
+	combined_input :: "#string,cr,\\% END\nvalue % \\%\nEND";
 	Extended.set_input_from_string(*lexer, combined_input);
 	eat_expected_token(*lexer, #char "#");
 	eat_expected_token(*lexer, .IDENT);
@@ -225,9 +225,9 @@ test_here_string_percent_modifier :: () {
 	modifier = eat_expected_token(*lexer, .IDENT);
 	assert(modifier.ident_value.name == "\\%");
 	delimiter = eat_expected_token(*lexer, .IDENT);
-	token = Extended.parse_here_string_body(*lexer, delimiter.ident_value.name, want_cr=true);
+	token = Extended.parse_here_string_body(*lexer, delimiter.ident_value.name, want_cr=true, want_percent=true);
 	assert(token.type == .STRING);
-	assert(token.string_value == "value %\r\n");
+	assert(token.string_value == "value % \x1f\r\n");
 	assert(!lexer.reported_error);
 }
 
@@ -250,7 +250,7 @@ test_directive_trivia_round_trip :: () {
 	assert(modifier.ident_value.name == "\\%");
 	delimiter := eat_expected_source_token(*lexer, source, *source_cursor, .IDENT, "END", " ");
 
-	body := Extended.parse_here_string_body(*lexer, delimiter.ident_value.name, want_cr=true);
+	body := Extended.parse_here_string_body(*lexer, delimiter.ident_value.name, want_cr=true, want_percent=true);
 	assert(body.type == .STRING);
 	assert(body.string_value == "123\r\n");
 	assert(body.preceding_trivia == "\n");
