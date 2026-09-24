@@ -220,6 +220,18 @@ Keep recovery measurements separate from grammar support:
 - [x] Add focused malformed and truncated variants for every new construct before changing synchronisation behaviour, preserving stable partial trees and forward progress.  The runtime suite now covers truncated block-bodied declarations, pointer/type forms, casts, parameter defaults, `#if`/`#as`/`#placeholder`/`#asm`, expression directives, aggregate assignments, operators, `using`, `#code`, `#run`, `#insert`, named iterator expansions, and default cases.  Assertions retain outer nodes and syntax flags, verify stable child arrays and diagnostics, and preserve following declarations across recovery.
 - [ ] Consider this compatibility backlog complete when all valid `how_to` files return `COMPLETE` with zero diagnostics, retain exact trivia round-trips, and pass focused or differential fixtures for every category above.
 
+Audit follow-ups (2026-09-25; corpus baseline: 84 files, 38 recovering, 381 diagnostics):
+
+- [ ] Fix `next_trivia` so ignored NBSP bytes produce `IGNORED` trivia without asserting; run the full `layout_test` executable.
+- [ ] Diagnose and fix the compiler diagnostic-location assertion in the runtime `differential_test` executable; require both compile-time AST fixtures and runtime checks to pass.
+- [ ] Surface lexer errors as structured diagnostics in `Parsed_Source`, or explicitly handle `RECOVERED` results with no diagnostics in the corpus harness; add malformed-input coverage for that case.
+- [ ] Investigate `DOUBLE_COMMA` recovery in `how_to/200_memory_management.jai` and `how_to/225_comma_comma.jai`; add grammar and differential fixtures once the compiler-accepted forms are identified.
+- [ ] Parse and compare advanced `using,except` and `using,only` forms, including fixtures from `how_to/044_using_advanced/main.jai`.
+- [ ] Triage the remaining recovering `how_to` files by first diagnostic, record their unsupported source forms as separate tasks, and track zero-diagnostic progress independently of recovery-cascade counts.
+- [ ] Reconcile the section 13.3 checkboxes with implemented named selectors and combined literal `<`/`*` flags; keep controlled `<=`/`*=` flags and missing fixture combinations unchecked.
+- [ ] Update historical baseline wording and the README assembly description to distinguish current instruction envelopes from unparsed operand internals; qualify past differential-suite claims until its runtime checks pass.
+- [ ] Audit the section 13.1 malformed-variant claim against the actual fixtures and add missing malformed cases or narrow the claim to tested truncations.
+
 #### 13.2 Parse Inline `#asm`
 
 `how_to/900_inline_assembly.jai` defines a context-specific assembly grammar rather than an ordinary imperative block.  The public compiler API exposes `Code_Asm`, but deliberately keeps its three payload fields opaque; compiler comparison can therefore verify the `.ASM` envelope, location, and surrounding tree placement, but not reinterpret the opaque payload.  Preserve the source-spelled structure in parser-owned nodes and leave instruction selection, register allocation, feature validation, and machine encoding to later semantic work.
@@ -233,13 +245,13 @@ Define the representation and lexer contract first:
 
 Parse the block header and its scope behaviour:
 
-- [ ] Parse `#asm { ... }` and optional comma-separated per-block feature names such as `#asm AVX, AVX2 { ... }`, preserving their order and token spans.
-- [ ] Represent an assembly block as belonging to the enclosing high-level scope rather than introducing a new lexical scope.  Preserve register declarations across multiple `#asm` blocks in that scope; defer binding those names until semantic analysis.
-- [ ] Support `#asm` wherever a statement is legal, including blocks selected directly by compile-time control flow such as `#if BITS == 8 #asm { ... } else #asm { ... }`.
+- [x] Parse `#asm { ... }` and optional comma-separated per-block feature names such as `#asm AVX, AVX2 { ... }`, preserving their order and token spans.  `Parser_Asm.features` contains ordered pool-owned `Parser_Asm_Feature` records with a fully formed `Parser_Ident` and explicit `Token_Span`; bare assembly blocks retain an empty list and an empty body span.
+- [x] Represent an assembly block as belonging to the enclosing high-level scope rather than introducing a new lexical scope.  `Parser_Asm.enclosing_scope` records the surrounding `Parser_Block`; sibling blocks share that owner, while assembly nested inside a real high-level block receives the nested owner.  Statement spans preserve declarations and later uses across blocks, but no syntax-phase binding or assembly-local scope is created.
+- [x] Support `#asm` wherever a statement is legal, including blocks selected directly by compile-time control flow such as `#if BITS == 8 #asm { ... } else #asm { ... }`.  Existing generic single-statement branch dispatch already accepts assembly nodes; focused coverage verifies both branches, statement spans, static-if flags, and ownership by the surrounding real scope rather than the synthetic branch wrappers.
 
 Parse assembly statements and operands:
 
-- [ ] Parse instruction statements as a mnemonic, optional fixed or polymorphic size, comma-separated operands, and a required semicolon.  Examples include `mov apple:, 10`, `mov.64 banana, 17`, and `popcnt?BITS result, value`.
+- [x] Parse instruction statements as a mnemonic, optional fixed or polymorphic size, comma-separated operands, and a required semicolon.  Identifier-led statements now produce `Parser_Asm_Instruction` with an open-ended mnemonic, optional `Parser_Asm_Mnemonic_Size` (`FIXED` token span or `POLYMORPHIC` identifier), and ordered operand envelopes split at top-level commas while respecting nested delimiters.  Operand internals remain `UNPARSED` for the following checkboxes, and nonterminated trailing instructions produce an expected-`;` diagnostic without escaping the assembly block.
 - [ ] Parse inferred register operands such as `apple:` and explicit register declarations such as `banana: gpr`, both as standalone statements and inline instruction operands such as `mov w: gpr === 15, 10`.
 - [ ] Parse register pinning with `===`, including declaration pinning (`t: gpr === a`, `v: vec === 9`) and existing-value pinning (`x === a`).
 - [ ] Parse signed integer and floating-point immediates without imposing instruction-specific width or range rules in the syntax phase.

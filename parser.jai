@@ -9,6 +9,11 @@ Token_Span :: struct {
 	one_past_last: Token_Index;
 }
 
+Parser_Asm_Feature :: struct {
+	span: Token_Span;
+	name: *Parser_Ident;
+}
+
 Parser_Asm_Statement_Kind :: enum u8 {
 	UNPARSED;
 	INSTRUCTION;
@@ -22,6 +27,17 @@ Parser_Asm_Operand_Kind :: enum u8 {
 	REGISTER_DECLARATION;
 	REGISTER_PINNING;
 	MEMORY;
+}
+
+Parser_Asm_Mnemonic_Size_Kind :: enum u8 {
+	FIXED;
+	POLYMORPHIC;
+}
+
+Parser_Asm_Mnemonic_Size :: struct {
+	kind: Parser_Asm_Mnemonic_Size_Kind;
+	span: Token_Span;
+	polymorphic_name: *Parser_Ident;
 }
 
 Parser_Asm_Operand_Modifier_Kind :: enum u8 {
@@ -80,6 +96,7 @@ Parser_Asm_Operand :: struct {
 Parser_Asm_Instruction :: struct {
 	span: Token_Span;
 	mnemonic: *Parser_Ident;
+	size: *Parser_Asm_Mnemonic_Size;
 	operands: []*Parser_Asm_Operand;
 }
 
@@ -367,7 +384,7 @@ TYPES :: Type.[
 		} else if t.name == "Code_Directive_Poke_Name" {
 			print(b, "\t#overlay(_Code_Directive_Poke_Name.module_struct) module_expression: *Parser_Node;\n");
 		} else if t.name == "Code_Asm" {
-			print(b, "\tfeature_names: [] string;\n\tstatements: []*Parser_Asm_Statement;\n\tbody_span: Token_Span;\n");
+			print(b, "\tfeatures: []*Parser_Asm_Feature;\n\tstatements: []*Parser_Asm_Statement;\n\tbody_span: Token_Span;\n\tenclosing_scope: *Parser_Block;\n");
 		} else if t.name == "Code_Placeholder" {
 			print(b, "\tname: string;\n");
 		}
@@ -664,7 +681,7 @@ parse_statement :: (parser: *Parser, parent: *Parser_Block = null) -> *Parser_No
 
 
 	if parser_peek_if(parser, #char "#", .IDENT) && parser_peek(parser, 1).ident_value.name == "asm" {
-		return parse_asm_statement(parser);
+		return parse_asm_statement(parser, parent);
 	}
 
 
@@ -706,14 +723,148 @@ parse_statement :: (parser: *Parser, parent: *Parser_Block = null) -> *Parser_No
 		else parse_binary(parser);
 }
 
-parse_asm_statement :: (parser: *Parser) -> *Parser_Asm {
+new_asm_ident :: (parser: *Parser, token_index: s64) -> *Parser_Ident {
+	token := parser.parsed.tokens[token_index];
+	assert(token.type == .IDENT);
+
+	result := new_parser_node(parser, Parser_Ident);
+	result.kind = .IDENT;
+	result.name = token.ident_value.name;
+	result.l0 = token.l0;
+	result.c0 = token.c0;
+	result.l1 = token.l1;
+	result.c1 = token.c1;
+	#if ENABLE_TRIVIA {
+		result.first_token = xx token_index;
+		result.one_past_last_token = xx (token_index + 1);
+	}
+
+	return result;
+}
+
+asm_tokens_are_adjacent :: (parser: *Parser, left_index: s64, right_index: s64) -> bool {
+	left := parser.parsed.tokens[left_index];
+	right := parser.parsed.tokens[right_index];
+	return (left.l1 == right.l0 && left.c1 == right.c0);
+}
+
+add_asm_operand :: (parser: *Parser, operands: *[..]*Parser_Asm_Operand, first: s64, one_past_last: s64) {
+	if first >= one_past_last {
+		return;
+	}
+
+
+	operand := New(Parser_Asm_Operand,, parser_node_allocator(parser.parsed));
+	operand.span = make_token_span(first, one_past_last);
+	array_add(operands, operand);
+}
+
+parse_asm_instruction_span :: (parser: *Parser, statement: *Parser_Asm_Statement, content_first: s64, content_one_past_last: s64) {
+	if content_first >= content_one_past_last {
+		return;
+	}
+
+
+	if parser.parsed.tokens[content_first].type != .IDENT {
+		return;
+	}
+
+
+	after_mnemonic := content_first + 1;
+	if after_mnemonic < content_one_past_last {
+		next_type := parser.parsed.tokens[after_mnemonic].type;
+		if next_type == #char ":" || next_type == .TRIPLE_EQUALS {
+			return;
+		}
+	}
+
+
+	instruction := New(Parser_Asm_Instruction,, parser_node_allocator(parser.parsed));
+	instruction.span = statement.span;
+	instruction.mnemonic = new_asm_ident(parser, content_first);
+
+	operand_first := after_mnemonic;
+	if (operand_first < content_one_past_last
+		&& parser.parsed.tokens[operand_first].type == .NUMBER
+		&& asm_tokens_are_adjacent(parser, content_first, operand_first)
+	) {
+		size := New(Parser_Asm_Mnemonic_Size,, parser_node_allocator(parser.parsed));
+		size.kind = .FIXED;
+		size.span = make_token_span(operand_first, operand_first + 1);
+		instruction.size = size;
+		operand_first += 1;
+	} else if (
+		operand_first + 1 < content_one_past_last
+		&& parser.parsed.tokens[operand_first].type == #char "?"
+		&& parser.parsed.tokens[operand_first + 1].type == .IDENT
+		&& asm_tokens_are_adjacent(parser, content_first, operand_first)
+		&& asm_tokens_are_adjacent(parser, operand_first, operand_first + 1)
+	) {
+		size := New(Parser_Asm_Mnemonic_Size,, parser_node_allocator(parser.parsed));
+		size.kind = .POLYMORPHIC;
+		size.span = make_token_span(operand_first, operand_first + 2);
+		size.polymorphic_name = new_asm_ident(parser, operand_first + 1);
+		instruction.size = size;
+		operand_first += 2;
+	}
+
+	operands: [..]*Parser_Asm_Operand;
+	operands.allocator = parser_node_allocator(parser.parsed);
+	parenthesis_depth: s64;
+	bracket_depth: s64;
+	brace_depth: s64;
+	index := operand_first;
+	while index < content_one_past_last {
+		token_type := parser.parsed.tokens[index].type;
+		at_top_level := (!parenthesis_depth && !bracket_depth && !brace_depth);
+		if token_type == {
+			case #char ",";
+				if at_top_level {
+					add_asm_operand(parser, *operands, operand_first, index);
+					operand_first = index + 1;
+				}
+			case #char "("; parenthesis_depth += 1;
+			case #char ")"; if parenthesis_depth	parenthesis_depth -= 1;
+			case #char "["; bracket_depth += 1;
+			case #char "]"; if bracket_depth  		bracket_depth -= 1;
+			case #char "{"; brace_depth += 1;
+			case #char "}"; if brace_depth			brace_depth -= 1;
+		}
+		index += 1;
+	}
+
+	add_asm_operand(parser, *operands, operand_first, content_one_past_last);
+	instruction.operands = operands;
+
+	statement.kind = .INSTRUCTION;
+	statement.instruction = instruction;
+}
+
+new_asm_statement :: (parser: *Parser, first: s64, one_past_last: s64, content_one_past_last: s64) -> *Parser_Asm_Statement {
+	result := New(Parser_Asm_Statement,, parser_node_allocator(parser.parsed));
+	result.span = make_token_span(first, one_past_last);
+	parse_asm_instruction_span(parser, result, first, content_one_past_last);
+	return result;
+}
+
+parse_asm_statement :: (parser: *Parser, enclosing_scope: *Parser_Block) -> *Parser_Asm {
 	first := parser.cursor;
 	parser_eat(parser, 2);
 
-	features: [..]string;
+	features: [..]*Parser_Asm_Feature;
 	features.allocator = parser_node_allocator(parser.parsed);
 	while parser_peek(parser).type == .IDENT {
-		array_add(*features, parser_eat(parser).ident_value.name);
+		feature_first := parser.cursor;
+		feature_token := parser_eat(parser);
+		feature_name := new_parser_node(parser, Parser_Ident);
+		feature_name.kind = .IDENT;
+		feature_name.name = feature_token.ident_value.name;
+		finish_node(parser, feature_name, feature_first);
+
+		feature := New(Parser_Asm_Feature,, parser_node_allocator(parser.parsed));
+		feature.span = make_token_span(feature_first, parser.cursor);
+		feature.name = feature_name;
+		array_add(*features, feature);
 		if !parser_eat_if(parser, #char ",") {
 			break;
 		}
@@ -721,7 +872,8 @@ parse_asm_statement :: (parser: *Parser) -> *Parser_Asm {
 
 	result := new_parser_node(parser, Parser_Asm);
 	result.kind = .ASM;
-	result.feature_names = features;
+	result.features = features;
+	result.enclosing_scope = enclosing_scope;
 	statements: [..]*Parser_Asm_Statement;
 	statements.allocator = parser_node_allocator(parser.parsed);
 
@@ -742,9 +894,9 @@ parse_asm_statement :: (parser: *Parser) -> *Parser_Asm {
 			brace_depth -= 1;
 			if !brace_depth {
 				if parser.cursor > statement_first {
-					statement := New(Parser_Asm_Statement,, parser_node_allocator(parser.parsed));
-					statement.span = make_token_span(statement_first, parser.cursor);
+					statement := new_asm_statement(parser, statement_first, parser.cursor, parser.cursor);
 					array_add(*statements, statement);
+					add_missing_token(parser, #char ";");
 				}
 
 				result.body_span = make_token_span(body_first, parser.cursor);
@@ -753,8 +905,7 @@ parse_asm_statement :: (parser: *Parser) -> *Parser_Asm {
 			}
 		} else if token.type == #char ";" && brace_depth == 1 {
 			parser_eat(parser);
-			statement := New(Parser_Asm_Statement,, parser_node_allocator(parser.parsed));
-			statement.span = make_token_span(statement_first, parser.cursor);
+			statement := new_asm_statement(parser, statement_first, parser.cursor, parser.cursor - 1);
 			array_add(*statements, statement);
 			statement_first = parser.cursor;
 			continue;
@@ -766,9 +917,9 @@ parse_asm_statement :: (parser: *Parser) -> *Parser_Asm {
 
 	if brace_depth {
 		if parser.cursor > statement_first {
-			statement := New(Parser_Asm_Statement,, parser_node_allocator(parser.parsed));
-			statement.span = make_token_span(statement_first, parser.cursor);
+			statement := new_asm_statement(parser, statement_first, parser.cursor, parser.cursor);
 			array_add(*statements, statement);
+			add_missing_token(parser, #char ";");
 		}
 
 		result.body_span = make_token_span(body_first, parser.cursor);
