@@ -44,7 +44,9 @@ It also recognises `#string` directives, so their bodies are represented by the 
 The returned `Parsed_Source` borrows `source`.
 Parser callers are expected to keep the source allocation alive and unchanged while using its tokens and syntax tree; the parser does not provide an owned-copy mode.
 
-With `ENABLE_TRIVIA=false`, `Parser_Token` aliases `Token`. With trivia enabled, it extends the lexer token with a stable index and absolute, half-open byte boundaries. `reconstruct_source` rebuilds the original source from the materialised token and trivia views.
+With `ENABLE_TRIVIA=false`, `Parser_Token` aliases `Token`.
+With trivia enabled, it extends the lexer token with a stable index and absolute, half-open byte boundaries.
+`reconstruct_source` rebuilds the original source from the materialised token and trivia views.
 
 ## Syntax Tree Source Spans
 
@@ -62,9 +64,12 @@ Use `parser_node_allocator` for child arrays and `release_parser_tree` to invali
 
 `parse_file(source, fully_pathed_filename="")` parses declarations through end of input and returns an unparenthesised `Parser_Block` with block type `DATA_DECLARATIONS`. `Parsed_Source.fully_pathed_filename` preserves the caller-provided source identity; like `source` and token text, it is borrowed and must outlive the parsed result.
 
-File parsing retains successful declarations around multiple malformed regions. Truncated declarations remain in the partial tree and produce `INCOMPLETE`; recoverable syntax errors produce `RECOVERED`. Empty input still returns a non-null, zero-width file block.
+File parsing retains successful declarations around multiple malformed regions.
+Truncated declarations remain in the partial tree and produce `INCOMPLETE`; recoverable syntax errors produce `RECOVERED`.
+Empty input still returns a non-null, zero-width file block.
 
-`examples/parse_how_to.jai` is the initial compatibility corpus. It parses every `.jai` file under `how_to`, asserts a non-fatal file root and exact trivia round trip, and reports files that currently require recovery so unsupported syntax remains visible as parser coverage expands.
+`examples/parse_how_to.jai` is the initial compatibility corpus.
+It parses every `.jai` file under `how_to`, asserts a non-fatal file root and exact trivia round trip, and reports files that currently require recovery so unsupported syntax remains visible as parser coverage expands.
 
 ## Expression Parsing
 
@@ -87,27 +92,44 @@ Materialised tokens can also be navigated with `token_at`, `previous_token`, and
 
 ## Type And Declaration Parsing
 
-`parse_declaration(source)` parses typed, inferred, constant, uninitialised, and compound declarations. Compound declarations preserve their left-hand names as parser-owned comma-separated arguments and represent multiple initialiser expressions with a `Parser_Comma_Separated_Arguments` node.
+`parse_declaration(source)` parses typed, inferred, constant, uninitialised, and compound declarations.
+Compound declarations preserve their left-hand names as parser-owned comma-separated arguments and represent multiple initialiser expressions with a `Parser_Comma_Separated_Arguments` node.
 
-Supported types include named types, pointers, fixed arrays, array views, resizable arrays, procedure types, polymorphic variables with restrictions, and `#type` with `distinct` or `isa`. Declaration metadata includes `$` and `$$` auto-bake flags, backticked scope modifiers, `#align` expressions, placeholder initialisation flags, and trailing notes.
+Supported types include named types, pointers, fixed arrays, array views, resizable arrays, procedure types, polymorphic variables with restrictions, and `#type` with `distinct` or `isa`.
+Declaration metadata includes `$` and `$$` auto-bake flags, backticked scope modifiers, `#align` expressions, placeholder initialisation flags, and trailing notes.
 
-Declaration and type normalisers compare parser nodes with compiler nodes inside intercepted child workspaces. Context-generated flags such as `IS_GLOBAL` are intentionally excluded from syntax comparisons.
+Declaration and type normalisers compare parser nodes with compiler nodes inside intercepted child workspaces.
+Context-generated flags such as `IS_GLOBAL` are intentionally excluded from syntax comparisons.
 
 ## Statement And Block Parsing
 
-`parse_block(source)` parses imperative brace blocks, while `parse_declaration_block(source)` restricts a brace block to declarations and marks it as `DATA_DECLARATIONS`. Explicit braces carry the compiler-compatible `IS_PARENTHESIZED` node flag; single-statement control-flow bodies are represented by unparenthesised parser-owned blocks.
+`parse_block(source)` parses imperative brace blocks, while `parse_declaration_block(source)` restricts a brace block to declarations and marks it as `DATA_DECLARATIONS`.
+Explicit braces carry the compiler-compatible `IS_PARENTHESIZED` node flag; single-statement control-flow bodies are represented by unparenthesised parser-owned blocks.
 
-Supported statements include expressions, declarations, multi-value returns, `while`, collection and range `for`, `if`, expression-form `ifx`, switch-style `case`, `defer`, `using`, `push_context`, `break`, `continue`, and `remove`. This includes named loop conditions and iterators, reverse and pointer iteration, `#complete`, `#through`, backticked return/defer, and `push_context,defer_pop` forms.
+Supported statements include expressions, declarations, multi-value returns, `while`, collection and range `for`, `if`, expression-form `ifx`, switch-style `case`, `defer`, `using`, `push_context`, `break`, `continue`, and `remove`.
+This includes named loop conditions and iterators, reverse and pointer iteration, `#complete`, `#through`, backticked return/defer, and `push_context,defer_pop` forms.
 
-Blocks retain parent and owning-statement links. Statement recovery inserts missing semicolons without consuming the next statement, synchronises at statement starts and closing braces, and synthesises a closing brace for truncated input.
+Blocks retain parent and owning-statement links.
+Statement recovery inserts missing semicolons without consuming the next statement, synchronises at statement starts and closing braces, and synthesises a closing brace for truncated input.
 
 ## Procedure And Aggregate Parsing
 
-Procedure definitions reuse the procedure-type header parser and attach parser-owned `Parser_Procedure_Body` and `Parser_Block` nodes. Headers preserve named, polymorphic, `using`, defaulted, and vararg parameters; named or unnamed returns; foreign library and symbol names; and written flags such as `inline`, `#expand`, `#compile_time`, `#no_context`, and `#c_call`. Quick procedures support zero, one, or multiple inferred parameters and both expression and block bodies; expression bodies contain a synthetic return marked `AUTO_INSERTED_FOR_QUICK_LAMBDA`.
+Procedure definitions reuse the procedure-type header parser and attach parser-owned `Parser_Procedure_Body` and `Parser_Block` nodes.
+Headers preserve named, polymorphic, `using`, defaulted, and vararg parameters; named or unnamed returns; foreign library and symbol names; and written flags such as `inline`, `#expand`, `#compile_time`, `#no_context`, and `#c_call`.
+Operator declarations use the same declaration and procedure nodes, retaining exact names for unary and binary operators, compound assignments, and `[]`, `[]=`, or `*[]`; procedure modifiers and bodies follow the ordinary header path.
+Focused and compiler differential fixtures cover all 39 overloadable lexer spellings: the single-character arithmetic, comparison, logical, and bitwise operators; equality, ordered comparison, logical, shift, and rotate operators; every corresponding assignment token; and the three subscript forms.
+User overloads of `=` and `.` are the two excluded spellings.
+Quick procedures support zero, one, or multiple inferred parameters and both expression and block bodies; expression bodies contain a synthetic return marked `AUTO_INSERTED_FOR_QUICK_LAMBDA`.
 
-`Parser_Struct` represents both structs and unions, with `.UNION` in `textual_flags`. Parameterized aggregates retain their parameter declarations in a `STRUCT_ARGUMENTS` block, while fields and constants remain in the `DATA_DECLARATIONS` body. `Parser_Enum` represents enums and enum flags, including underlying types, `#complete`, `#specified`, explicit values, and bare members. Interface constraints use the compiler's `$T/interface Constraint` type-instantiation form and set `.INTERFACE`.
+`Parser_Struct` represents both structs and unions, with `.UNION` in `textual_flags`.
+Parameterized aggregates retain their parameter declarations in a `STRUCT_ARGUMENTS` block, while fields and constants remain in the `DATA_DECLARATIONS` body.
+Aggregate field default assignments such as `w: float; w = 1;` remain ordered binary-expression statements, and the assignment identifier links back to its matching parser-owned field declaration.
+`Parser_Enum` represents enums and enum flags, including underlying types, `#complete`, `#specified`, explicit values, and bare members.
+Interface constraints use the compiler's `$T/interface Constraint` type-instantiation form and set `.INTERFACE`.
 
-Aggregate layout modifiers preserve the compiler's textual flags. Trailing notes remain attached to the containing declaration, matching the raw compiler AST. Direct differential comparisons omit asynchronous procedure body pointers and semantically finalised aggregate alignment; focused parser tests cover those parser-owned fields.
+Aggregate layout modifiers preserve the compiler's textual flags.
+Trailing notes remain attached to the containing declaration, matching the raw compiler AST.
+Direct differential comparisons omit asynchronous procedure body pointers and semantically finalised aggregate alignment; focused parser tests cover those parser-owned fields.
 
 ## Directive Parsing
 
@@ -115,6 +137,12 @@ The parser has a parser-owned counterpart for each of the 20 public `Code_Direct
 
 Source parsing covers:
 
+- `#char "x"` as the compiler-compatible numeric `Parser_Literal`, using the lexer's evaluated string byte; `#filepath` as a string literal containing the directory of `fully_pathed_filename`; and payload-free `#this` as the compiler's `DIRECTIVE_THIS` node kind.
+- `#caller_code` as `Parser_Directive_Code` with the compiler's unnamed caller-code flag and a null expression.  It is accepted as a primary expression, so legal macro default arguments retain the compiler AST shape.
+- `#if` in imperative, file, and aggregate declaration contexts, represented by `Parser_If` with `IS_STATIC`; its branch blocks retain the surrounding block mode.
+- `#placeholder Name` file declarations, represented by `Parser_Placeholder` with the source-spelled name.  This is distinct from the `---` uninitialised-value placeholder.
+- Prefix `#as using name: Type` aggregate fields, represented by `Parser_Using` around a declaration marked `IS_MARKED_AS_AS`.  The `using #as` spelling remains part of the broader using-declaration work.
+- `#asm` statement blocks with optional feature names.  `Parser_Asm` preserves the feature list and balanced body token span without interpreting assembly instructions.
 - `#code`, `#code,null`, and `#code,typed`, with expression or block payloads.
 - `#run` and `#run,stallable`, with expression or block payloads.
 - `#insert`, optional scope and loop-control replacements, and `-> Return_Type { ... }` implicit-run bodies.
@@ -124,11 +152,22 @@ Source parsing covers:
 - `#through`, `#overlay`, `#add_context`, `#modify`, `#scope_export`, `#scope_file`, and `#module_parameters`.
 - `#bake_constants` and `#bake_arguments` call forms.
 
-The raw compiler AST exposes a few distinctions that are not named source flags. File and directory imports set an unnamed `0x4` bit, while string imports set `UNSHARED`. `link_always` is accepted but does not set `LINK_ALWAYS` in raw syntax trees. `DYNAMIC_LIBRARY_UNAVAILABLE`, implicit code, run assertion metadata, insert expansion, wildcard indices, and internal scope are assigned during later compiler processing.
+The raw compiler AST exposes a few distinctions that are not named source flags.
+File and directory imports set an unnamed `0x4` bit, while string imports set `UNSHARED`. `link_always` is accepted but does not set `LINK_ALWAYS` in raw syntax trees.
+`DYNAMIC_LIBRARY_UNAVAILABLE`, implicit code, run assertion metadata, insert expansion, wildcard indices, and internal scope are assigned during later compiler processing.
 
-`Code_Directive_Context_Type` has no source payload and the compiler rejects `#context_type` as a source directive. Standalone `#wildcard` and generic `#bake` are likewise rejected by the current compiler; parser-owned forms remain available for editor recovery and public-node handling. `DIRECTIVE_THIS`, `DIRECTIVE_PLACE`, and `DIRECTIVE_COMPILE_TIME` have no corresponding public `Code_Directive_*` structure; their syntax is represented through other nodes or compiler processing.
+`Code_Asm` is public only as an opaque layout containing `b1`, `b2`, and `b3`; instruction, operand, and register data are not exposed to high-level metaprogramming.
+The parser therefore treats the assembly body as preserved source until the dedicated assembly grammar is implemented.
+Differential tests compare the node kind and placement only.
 
-Differential fixtures compare every compiler-accepted expression or contextual form available through `compiler_get_nodes`. Scope and add-context use child workspaces because they are file-only. Module parameters are validated by compiling the parser module itself, since compiler-added strings are not module-file scope. Focused tests cover parser-owned fields that compiler messages omit, including modify ownership, poke-name source expressions, module-parameter bodies, wildcard placeholders, and implicit insert-run procedure headers.
+`Code_Directive_Context_Type` has no source payload and the compiler rejects `#context_type` as a source directive.
+Standalone `#wildcard` and generic `#bake` are likewise rejected by the current compiler; parser-owned forms remain available for editor recovery and public-node handling.
+`DIRECTIVE_THIS`, `DIRECTIVE_PLACE`, and `DIRECTIVE_COMPILE_TIME` have no corresponding public `Code_Directive_*` structure; their syntax is represented through other nodes or compiler processing.
+
+Differential fixtures compare every compiler-accepted expression or contextual form available through `compiler_get_nodes`.
+Scope and add-context use child workspaces because they are file-only.
+Module parameters are validated by compiling the parser module itself, since compiler-added strings are not module-file scope.
+Focused tests cover parser-owned fields that compiler messages omit, including modify ownership, poke-name source expressions, module-parameter bodies, wildcard placeholders, and implicit insert-run procedure headers.
 
 ## Error Recovery
 

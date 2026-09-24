@@ -140,6 +140,7 @@ Parser_Node :: struct {
 }
 
 TYPES :: Type.[
+	Code_Asm,
 	Code_Binary_Operator,
 	Code_Block,
 	Code_Case,
@@ -283,6 +284,10 @@ TYPES :: Type.[
 			print(b, "\texpression: *Parser_Node;\n");
 		} else if t.name == "Code_Directive_Poke_Name" {
 			print(b, "\t#overlay(_Code_Directive_Poke_Name.module_struct) module_expression: *Parser_Node;\n");
+		} else if t.name == "Code_Asm" {
+			print(b, "\tfeature_names: [] string;\n\tbody_span: Token_Span;\n");
+		} else if t.name == "Code_Placeholder" {
+			print(b, "\tname: string;\n");
 		}
 		print(b, "}\n\n");
 	}
@@ -375,8 +380,8 @@ parseInit :: (source: string, rootParser: (*Parser) -> *Parser_Node, fully_pathe
 
 #scope_export
 
-parse_expression :: (source: string) -> Parsed_Source {
-	result, parser := parseInit(source, p => parse_binary(p));
+parse_expression :: (source: string, fully_pathed_filename: string = "") -> Parsed_Source {
+	result, parser := parseInit(source, p => parse_binary(p), fully_pathed_filename);
 
 	if !result.root && !result.diagnostics.count {
 		add_expected_expression(*parser);
@@ -387,8 +392,8 @@ parse_expression :: (source: string) -> Parsed_Source {
 	return result;
 }
 
-parse_declaration :: (source: string) -> Parsed_Source {
-	result, parser := parseInit(source, parse_declaration_node);
+parse_declaration :: (source: string, fully_pathed_filename: string = "") -> Parsed_Source {
+	result, parser := parseInit(source, p => parse_declaration_node(p), fully_pathed_filename);
 
 	if !result.root && !result.diagnostics.count {
 		add_expected_expression(*parser);
@@ -409,8 +414,8 @@ parse_declaration :: (source: string) -> Parsed_Source {
 	return result;
 }
 
-parse_block :: (source: string) -> Parsed_Source {
-	result, parser := parseInit(source, p => parse_block_node(p).(*Parser_Node));
+parse_block :: (source: string, fully_pathed_filename: string = "") -> Parsed_Source {
+	result, parser := parseInit(source, p => parse_block_node(p).(*Parser_Node), fully_pathed_filename);
 
 	if !result.root && !result.diagnostics.count {
 		add_expected_expression(*parser);
@@ -421,10 +426,11 @@ parse_block :: (source: string) -> Parsed_Source {
 	return result;
 }
 
-parse_declaration_block :: (source: string) -> Parsed_Source {
+parse_declaration_block :: (source: string, fully_pathed_filename: string = "") -> Parsed_Source {
 	result, parser := parseInit(
 		source,
-		(parser) => parse_block_node(parser, block_type=.DATA_DECLARATIONS).(*Parser_Node)
+		(parser) => parse_block_node(parser, block_type=.DATA_DECLARATIONS).(*Parser_Node),
+		fully_pathed_filename
 	);
 
 	if !result.root && !result.diagnostics.count {
@@ -549,7 +555,8 @@ statement_requires_semicolon :: (statement: *Parser_Node) -> bool {
 			if expression.kind == .PROCEDURE_HEADER {
 				header := expression.(*Parser_Procedure_Header);
 				if header.body_or_null {
-					return ((header.procedure_flags & (.QUICK | .QUICK_IN_BLOCK_FORM)) == 0);
+					return (header.procedure_flags & .QUICK) != 0
+						&& (header.procedure_flags & .QUICK_IN_BLOCK_FORM) == 0;
 				}
 			}
 		}
@@ -563,11 +570,22 @@ statement_requires_semicolon :: (statement: *Parser_Node) -> bool {
 		&& statement.kind != .FOR
 		&& statement.kind != .DEFER
 		&& statement.kind != .PUSH_CONTEXT
+		&& statement.kind != .ASM
 		&& statement.kind != .BLOCK;
 }
 
 parse_statement :: (parser: *Parser, parent: *Parser_Block = null) -> *Parser_Node {
 	token := parser_peek(parser);
+	if parser_peek_if(parser, #char "#", .KEYWORD_IF) {
+		return parse_static_if_statement(parser, parent, .IMPERATIVE);
+	}
+
+
+	if parser_peek_if(parser, #char "#", .IDENT) && parser_peek(parser, 1).ident_value.name == "asm" {
+		return parse_asm_statement(parser);
+	}
+
+
 	if token.type == #char "#" {
 		directive := parse_declaration_directive(parser);
 		if directive {
@@ -606,14 +624,65 @@ parse_statement :: (parser: *Parser, parent: *Parser_Block = null) -> *Parser_No
 		else parse_binary(parser);
 }
 
-parse_statement_block :: (parser: *Parser, parent: *Parser_Block) -> *Parser_Block {
+parse_asm_statement :: (parser: *Parser) -> *Parser_Asm {
+	first := parser.cursor;
+	parser_eat(parser, 2);
+
+	features: [..]string;
+	features.allocator = parser_node_allocator(parser.parsed);
+	while parser_peek(parser).type == .IDENT {
+		array_add(*features, parser_eat(parser).ident_value.name);
+		if !parser_eat_if(parser, #char ",") {
+			break;
+		}
+	}
+
+	result := new_parser_node(parser, Parser_Asm);
+	result.kind = .ASM;
+	result.feature_names = features;
+
+	if !parser_expect(parser, #char "{") {
+		return finish_node(parser, result, first);
+	}
+
+
+	body_first := parser.cursor;
+	brace_depth: s64 = 1;
+	while brace_depth && parser_peek(parser).type != .END_OF_INPUT {
+		token := parser_peek(parser);
+		if token.type == #char "{" {
+			brace_depth += 1;
+		} else if token.type == #char "}" {
+			brace_depth -= 1;
+			if !brace_depth {
+				result.body_span = make_token_span(body_first, parser.cursor);
+				parser_eat(parser);
+				break;
+			}
+		}
+
+
+		parser_eat(parser);
+	}
+
+	if brace_depth {
+		result.body_span = make_token_span(body_first, parser.cursor);
+		parser_expect(parser, #char "}");
+	}
+
+	return finish_node(parser, result, first);
+}
+
+parse_statement_block :: (parser: *Parser, parent: *Parser_Block, block_type := Code_Block.block_type.IMPERATIVE) -> *Parser_Block {
 	if parser_peek(parser).type == #char "{" {
-		return parse_block_node(parser, parent);
+		return parse_block_node(parser, parent, block_type);
 	}
 
 
 	first := parser.cursor;
-	statement := parse_statement(parser, parent);
+	statement := ifx block_type == .DATA_DECLARATIONS
+		then parse_declaration_node(parser)
+		else parse_statement(parser, parent);
 	if !statement {
 		add_expected_expression(parser);
 		return null;
@@ -661,7 +730,14 @@ parse_condition :: (parser: *Parser) -> *Parser_Node {
 		else parse_binary(parser);
 }
 
-parse_if_statement :: (parser: *Parser, parent: *Parser_Block, is_ifx: bool) -> *Parser_If {
+parse_static_if_statement :: (parser: *Parser, parent: *Parser_Block, block_type: type_of(Code_Block.block_type)) -> *Parser_If {
+	parser_eat(parser);
+	result := parse_if_statement(parser, parent, false, block_type);
+	result.if_flags |= .IS_STATIC;
+	return result;
+}
+
+parse_if_statement :: (parser: *Parser, parent: *Parser_Block, is_ifx: bool, block_type := Code_Block.block_type.IMPERATIVE) -> *Parser_If {
 	first := parser.cursor;
 	parser_eat(parser);
 
@@ -706,7 +782,7 @@ parse_if_statement :: (parser: *Parser, parent: *Parser_Block, is_ifx: bool) -> 
 
 	result.then_block = ifx is_ifx
 		then parse_ifx_branch(parser, parent)
-		else parse_statement_block(parser, parent);
+		else parse_statement_block(parser, parent, block_type);
 
 	if result.then_block {
 		result.then_block.owning_statement = result;
@@ -715,7 +791,7 @@ parse_if_statement :: (parser: *Parser, parent: *Parser_Block, is_ifx: bool) -> 
 	if parser_eat_if(parser, .KEYWORD_ELSE) {
 		result.else_block = ifx is_ifx
 			then parse_ifx_branch(parser, parent)
-			else parse_statement_block(parser, parent);
+			else parse_statement_block(parser, parent, block_type);
 
 		if result.else_block {
 			result.else_block.owning_statement = result;
@@ -1006,6 +1082,11 @@ parse_using_statement :: (parser: *Parser) -> *Parser_Using {
 	first := parser.cursor;
 	parser_eat(parser);
 
+	result := parse_using_statement_after_keyword(parser, first);
+	return result;
+}
+
+parse_using_statement_after_keyword :: (parser: *Parser, first: s64) -> *Parser_Using {
 	result := new_parser_node(parser, Parser_Using);
 	result.kind = .USING;
 	result.expression = ifx looks_like_declaration(parser)
@@ -1055,6 +1136,11 @@ parse_push_context_statement :: (parser: *Parser, parent: *Parser_Block) -> *Par
 looks_like_declaration :: (parser: *Parser) -> bool {
 	lookahead: s64;
 	token := parser_peek(parser, lookahead);
+	if token.type == .KEYWORD_OPERATOR {
+		return true;
+	}
+
+
 	if token.type == #char "$" || token.type == .DOUBLE_DOLLAR {
 		lookahead += 1;
 		token = parser_peek(parser, lookahead);
@@ -1138,8 +1224,27 @@ parse_loop_control_statement :: (parser: *Parser) -> *Parser_Loop_Control {
 	return result;
 }
 
-parse_declaration_node :: (parser: *Parser) -> *Parser_Node {
+parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true) -> *Parser_Node {
 	first := parser.cursor;
+	if parser_peek_if(parser, #char "#", .KEYWORD_IF) {
+		return parse_static_if_statement(parser, null, .DATA_DECLARATIONS);
+	}
+
+
+	if parser_peek_if(parser, #char "#", .IDENT) && parser_peek(parser, 1).ident_value.name == "placeholder" {
+		parser_eat(parser, 2);
+		name := parser_peek(parser);
+		if !parser_eat_if(parser, .IDENT) {
+			parser_expect(parser, .IDENT);
+		}
+
+		result := new_parser_node(parser, Parser_Placeholder);
+		result.kind = .PLACEHOLDER;
+		result.name = name.ident_value.name;
+		return finish_node(parser, result, first);
+	}
+
+
 	if parser_peek(parser).type == #char "#" {
 		return parse_declaration_directive(parser);
 	}
@@ -1153,8 +1258,14 @@ parse_declaration_node :: (parser: *Parser) -> *Parser_Node {
 		declaration_flags |= .AUTO_VALUE_BAKE;
 	}
 
+	operator_declaration := parser_eat_if(parser, .KEYWORD_OPERATOR);
 	name_token := parser_peek(parser);
-	if !parser_eat_if(parser, .IDENT) {
+	declaration_name := ifx operator_declaration
+		then parse_operator_declaration_name(parser)
+		else ifx parser_eat_if(parser, .IDENT)
+			then name_token.ident_value.name
+			else "";
+	if !declaration_name {
 		return null;
 	}
 
@@ -1206,7 +1317,7 @@ parse_declaration_node :: (parser: *Parser) -> *Parser_Node {
 		result.declaration_properties.kind = .DECLARATION;
 		result.declaration_properties.flags = declaration_flags;
 
-		parse_declaration_properties(parser, result.declaration_properties);
+		parse_declaration_properties(parser, result.declaration_properties, allow_multi_value_expression);
 		parse_declaration_metadata(parser, result.declaration_properties, *result.alignment_expression);
 
 		finish_node(parser, result, first);
@@ -1221,13 +1332,13 @@ parse_declaration_node :: (parser: *Parser) -> *Parser_Node {
 
 	result := new_parser_node(parser, Parser_Declaration);
 	result.kind = .DECLARATION;
-	result.name = name_token.ident_value.name;
+	result.name = declaration_name;
 	result.flags = declaration_flags;
 	if name_token.ident_is_backticked {
 		result.flags |= .HAS_SCOPE_MODIFIER;
 	}
 
-	parse_declaration_properties(parser, result);
+	parse_declaration_properties(parser, result, allow_multi_value_expression);
 	if result.expression && result.expression.kind == .PROCEDURE_HEADER {
 		result.expression.(*Parser_Procedure_Header).name = result.name;
 	}
@@ -1238,13 +1349,83 @@ parse_declaration_node :: (parser: *Parser) -> *Parser_Node {
 	return result;
 }
 
-parse_declaration_properties :: (parser: *Parser, result: *Parser_Declaration) {
+parse_operator_declaration_name :: (parser: *Parser) -> string {
+	token := parser_peek(parser);
+	if token.type == #char "*" && parser_peek(parser, 1).type == #char "[" {
+		parser_eat(parser, 2);
+		parser_expect(parser, #char "]");
+		return "*[]";
+	}
+
+
+	if token.type == #char "[" {
+		parser_eat(parser);
+		parser_expect(parser, #char "]");
+		return ifx parser_eat_if(parser, #char "=")
+			then "[]="
+			else "[]";
+	}
+
+
+	name: string;
+	if token.type == {
+		case #char "+";				name = "+";
+		case #char "-";				name = "-";
+		case #char "*";				name = "*";
+		case #char "/";				name = "/";
+		case #char "%";				name = "%";
+		case #char "<";				name = "<";
+		case #char ">";				name = ">";
+		case #char "=";				name = "=";
+		case #char ".";				name = ".";
+		case #char "!";				name = "!";
+		case #char "~";				name = "~";
+		case #char "&";				name = "&";
+		case #char "|";				name = "|";
+		case #char "^";				name = "^";
+		case .ISEQUAL;				name = "==";
+		case .ISNOTEQUAL;			name = "!=";
+		case .LESSEQUALS;			name = "<=";
+		case .GREATEREQUALS;		name = ">=";
+		case .LOGICAL_AND;			name = "&&";
+		case .LOGICAL_OR;			name = "||";
+		case .SHIFT_LEFT;			name = "<<";
+		case .SHIFT_RIGHT;			name = ">>";
+		case .ROTATE_LEFT;			name = "<<<";
+		case .ROTATE_RIGHT;			name = ">>>";
+		case .PLUSEQUALS;			name = "+=";
+		case .MINUSEQUALS;			name = "-=";
+		case .TIMESEQUALS;			name = "*=";
+		case .DIVEQUALS;			name = "/=";
+		case .MODEQUALS;			name = "%=";
+		case .SHIFT_LEFT_EQUALS;	name = "<<=";
+		case .SHIFT_RIGHT_EQUALS;	name = ">>=";
+		case .ROTATE_LEFT_EQUALS;	name = "<<<=";
+		case .ROTATE_RIGHT_EQUALS;	name = ">>>=";
+		case .BITWISE_AND_EQUALS;	name = "&=";
+		case .BITWISE_OR_EQUALS;	name = "|=";
+		case .BITWISE_XOR_EQUALS;	name = "^=";
+		case .LOGICAL_AND_EQUALS;	name = "&&=";
+		case .LOGICAL_OR_EQUALS;	name = "||=";
+	}
+
+	if !name {
+		add_unexpected_token(parser);
+		return "";
+	}
+
+
+	parser_eat(parser);
+	return name;
+}
+
+parse_declaration_properties :: (parser: *Parser, result: *Parser_Declaration, allow_multi_value_expression := true) {
 	if parser_eat_if(parser, #char ":") {
 		result.flags |= .IS_CONSTANT;
-		result.expression = parse_declaration_expression(parser);
+		result.expression = parse_declaration_expression(parser, allow_multi_value_expression);
 		if !result.expression	add_expected_expression(parser);
 	} else if parser_eat_if(parser, #char "=") {
-		result.expression = parse_declaration_expression(parser);
+		result.expression = parse_declaration_expression(parser, allow_multi_value_expression);
 		if !result.expression	add_expected_expression(parser);
 	} else {
 		result.type_inst = parse_type_instantiation(parser);
@@ -1256,10 +1437,10 @@ parse_declaration_properties :: (parser: *Parser, result: *Parser_Declaration) {
 
 		if parser_eat_if(parser, #char ":") {
 			result.flags |= .IS_CONSTANT;
-			result.expression = parse_declaration_expression(parser);
+			result.expression = parse_declaration_expression(parser, allow_multi_value_expression);
 			if !result.expression	add_expected_expression(parser);
 		} else if parser_eat_if(parser, #char "=") {
-			result.expression = parse_declaration_expression(parser);
+			result.expression = parse_declaration_expression(parser, allow_multi_value_expression);
 			if !result.expression	add_expected_expression(parser);
 		}
 	}
@@ -1339,10 +1520,10 @@ parse_declaration_notes :: (parser: *Parser, declaration: *Parser_Node) {
 	finish_node(parser, declaration, declaration.first_token.(s64));
 }
 
-parse_declaration_expression :: (parser: *Parser) -> *Parser_Node {
+parse_declaration_expression :: (parser: *Parser, allow_multi_value_expression := true) -> *Parser_Node {
 	first := parser.cursor;
 	first_expression := parse_binary(parser);
-	if !first_expression || parser_peek(parser).type != #char "," {
+	if !allow_multi_value_expression || !first_expression || parser_peek(parser).type != #char "," {
 		return first_expression;
 	}
 
@@ -1566,7 +1747,7 @@ parse_procedure_type_header :: (parser: *Parser, parse_body := false) -> *Parser
 			argument.name = token.ident_value.name;
 			finish_node(parser, argument, argument_first);
 		} else {
-			argument_node := parse_declaration_node(parser);
+			argument_node := parse_declaration_node(parser, false);
 			if !argument_node || argument_node.kind != .DECLARATION {
 				add_expected_expression(parser);
 				break;
@@ -1604,7 +1785,7 @@ parse_procedure_type_header :: (parser: *Parser, parse_body := false) -> *Parser
 			token := parser_peek(parser);
 			named_return := (token.type == .IDENT && parser_peek(parser, 1).type == #char ":");
 			if named_return {
-				declaration = parse_declaration_node(parser).(*Parser_Declaration);
+				declaration = parse_declaration_node(parser, false).(*Parser_Declaration);
 			} else {
 				return_type := parse_type_instantiation(parser);
 				if !return_type {
@@ -1698,7 +1879,7 @@ parse_arrow_procedure_header :: (parser: *Parser, first: s64) -> *Parser_Procedu
 		token := parser_peek(parser);
 		named_return := (token.type == .IDENT && parser_peek(parser, 1).type == #char ":");
 		if named_return {
-			declaration_node := parse_declaration_node(parser);
+			declaration_node := parse_declaration_node(parser, false);
 			if declaration_node && declaration_node.kind == .DECLARATION {
 				declaration = declaration_node.(*Parser_Declaration);
 			}
@@ -2046,7 +2227,7 @@ parse_aggregate_parameter_block :: (parser: *Parser) -> *Parser_Block {
 
 	token := parser_peek(parser);
 	while token.type != #char ")" && token.type != .END_OF_INPUT {
-		parameter := parse_declaration_node(parser);
+		parameter := parse_declaration_node(parser, false);
 		if !parameter {
 			add_expected_expression(parser);
 			parser_synchronise(parser, .DECLARATION);
@@ -2106,6 +2287,25 @@ parse_aggregate_block :: (parser: *Parser, enum_members: bool) -> *Parser_Block 
 			ident.name = token.ident_value.name;
 			finish_node(parser, ident, member_first);
 			member = ident;
+		} else if !enum_members && token.type == .IDENT && parser_peek(parser, 1).type == #char "=" {
+			member = parse_binary(parser);
+			if member && member.kind == .BINARY_OPERATOR {
+				assignment := member.(*Parser_Binary_Operator);
+				if assignment.operator_type == #char "=" && assignment.left.kind == .IDENT {
+					left := assignment.left.(*Parser_Ident);
+					for statements {
+						if it.kind != .DECLARATION {
+							continue;
+						}
+
+
+						declaration := it.(*Parser_Declaration);
+						if declaration.name == left.name {
+							left.resolved_declaration = declaration;
+						}
+					}
+				}
+			}
 		} else {
 			member = parse_declaration_node(parser);
 		}
@@ -2179,6 +2379,20 @@ parse_declaration_directive :: (parser: *Parser) -> *Parser_Node {
 	directive := parser_peek(parser, 1);
 	name: string = directive.ident_value.name;
 	if name == {
+		case "as";
+			parser_eat(parser, 2);
+			if !parser_expect(parser, .KEYWORD_USING) {
+				return null;
+			}
+
+
+			result := parse_using_statement_after_keyword(parser, first);
+			if result.expression && result.expression.kind == .DECLARATION {
+				result.expression.(*Parser_Declaration).flags |= .IS_MARKED_AS_AS;
+			}
+
+			return result;
+
 		case "scope_export"; #through;
 		case "scope_file";
 			parser_eat(parser, 2);
@@ -2565,6 +2779,15 @@ parse_prefix :: (parser: *Parser) -> *Parser_Node {
 	first := parser.cursor;
 	token := parser_peek(parser);
 	negative_number := parser_peek_if(parser, #char "-", .NUMBER);
+	starts_explicit_type := token.type == #char "["
+		|| token.type == .DOUBLE_DOT
+		|| token.type == #char "$"
+		|| (token.type == #char "*" && parser_peek(parser, 1).type == #char "[");
+	if starts_explicit_type {
+		return parse_type_instantiation(parser);
+	}
+
+
 	if parser_eat_if(parser, #char ".") {
 		subexpression := parse_primary(parser);
 		if !subexpression {
@@ -2627,8 +2850,8 @@ parse_prefix :: (parser: *Parser) -> *Parser_Node {
 
 		parser_expect(parser, #char "(");
 
-		type_expression := parse_binary(parser);
-		if !type_expression {
+		target_type := parse_type_instantiation(parser);
+		if !target_type {
 			add_expected_expression(parser);
 			return null;
 		}
@@ -2645,7 +2868,7 @@ parse_prefix :: (parser: *Parser) -> *Parser_Node {
 
 		result := new_parser_node(parser, Parser_Cast);
 		result.kind = .CAST;
-		result.target_type = make_type_instantiation(parser, type_expression);
+		result.target_type = target_type;
 		result.expression = expression;
 		result.cast_flags = cast_flags;
 		finish_node(parser, result, first);
@@ -2657,6 +2880,7 @@ parse_prefix :: (parser: *Parser) -> *Parser_Node {
 	if token.type == {
 		case #char "+"; #through;
 		case #char "-"; #through;
+		case #char "*"; #through;
 		case #char "!"; #through;
 		case #char "~";
 			operator_type = token.type.(Operator_Type);
@@ -2741,8 +2965,8 @@ parse_postfix_suffixes :: (parser: *Parser, result: *Parser_Node, first: s64) ->
 			case #char ".";
 				parser_eat(parser);
 				if parser_eat_if(parser, #char "(") {
-					type_expression := parse_binary(parser);
-					if !type_expression {
+					target_type := parse_type_instantiation(parser);
+					if !target_type {
 						add_expected_expression(parser);
 						return result;
 					}
@@ -2752,7 +2976,7 @@ parse_postfix_suffixes :: (parser: *Parser, result: *Parser_Node, first: s64) ->
 
 					cast_node := new_parser_node(parser, Parser_Cast);
 					cast_node.kind = .CAST;
-					cast_node.target_type = make_type_instantiation(parser, type_expression);
+					cast_node.target_type = target_type;
 					cast_node.expression = result;
 					cast_node.cast_flags |= .HAS_POSTFIX_SYNTAX;
 					result = finish_node(parser, cast_node, first);
@@ -3185,6 +3409,59 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 
 parse_expression_directive :: (parser: *Parser, first: s64, name: string) -> *Parser_Node {
 	if name == {
+		case "char";
+			parser_eat(parser, 2);
+
+			character := parser_peek(parser);
+			if !parser_eat_if(parser, .STRING) {
+				parser_expect(parser, .STRING);
+			}
+
+			result := new_parser_node(parser, Parser_Literal);
+			result.kind = .LITERAL;
+			result.value_type = .NUMBER;
+			result.value_flags |= .IS_A_NUMBER;
+			if character.type == .STRING && character.string_value.count {
+				result._u64 = character.string_value[0];
+			}
+
+			finish_node(parser, result, first);
+			return result;
+
+		case "this";
+			parser_eat(parser, 2);
+
+			result := new_parser_node(parser, Parser_Node);
+			result.kind = .DIRECTIVE_THIS;
+			finish_node(parser, result, first);
+			return result;
+
+		case "filepath";
+			parser_eat(parser, 2);
+
+			directory_end: s64;
+			for parser.parsed.fully_pathed_filename {
+				if it == #char "/" || it == #char "\\" {
+					directory_end = it_index + 1;
+				}
+			}
+
+			result := new_parser_node(parser, Parser_Literal);
+			result.kind = .LITERAL;
+			result.value_type = .STRING;
+			result._string = slice(parser.parsed.fully_pathed_filename, 0, directory_end);
+			finish_node(parser, result, first);
+			return result;
+
+		case "caller_code";
+			parser_eat(parser, 2);
+
+			result := new_parser_node(parser, Parser_Directive_Code);
+			result.kind = .DIRECTIVE_CODE;
+			result.code_flags |= xx 0x4; // Unnamed CALLER_CODE bit in the public compiler enum.
+			finish_node(parser, result, first);
+			return result;
+
 		case "load";
 			parser_eat(parser, 2);
 

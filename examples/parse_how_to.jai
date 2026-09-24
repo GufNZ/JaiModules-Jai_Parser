@@ -10,6 +10,13 @@ main :: () {
 	how_to_path := path_to_string(reduce_path(parse_path(path)));
 
 	filenames: [..]string;
+
+	visit_jai_file :: (info: *File_Visit_Info, results: *[..]string) {
+		if ends_with(info.short_name, ".jai") {
+			array_add(results, copy_string(info.full_name));
+		}
+	}
+
 	visit_files(how_to_path, true, *filenames, visit_jai_file);
 
 	files_with_diagnostics: s64;
@@ -35,10 +42,4 @@ main :: () {
 	}
 
 	print("Parsed % how_to files; % files produced % diagnostics.\n", filenames.count, files_with_diagnostics, total_diagnostics);
-}
-
-visit_jai_file :: (info: *File_Visit_Info, results: *[..]string) {
-	if ends_with(info.short_name, ".jai") {
-		array_add(results, copy_string(info.full_name));
-	}
 }

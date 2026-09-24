@@ -23,11 +23,13 @@ compiler_node_for_source :: ($source: string) -> *Code_Node #expand {
 
 main :: () {
 	test_default_tokens();
+	test_star_token_contract();
 	test_trivia_round_trip();
 	test_node_token_spans();
 	test_identifier_expression();
 	test_literal_expressions();
 	test_aggregate_literals();
+	test_operator_declarations();
 	test_placeholder_and_here_string();
 	test_token_navigation();
 	test_parser_node_pool();
@@ -41,6 +43,9 @@ main :: () {
 	test_prefix_expressions();
 	test_postfix_expressions();
 	test_casts_and_queries();
+	test_parameter_default_delimiters();
+	test_static_if_directives();
+	test_preserved_directive_forms();
 	test_expression_directives();
 	test_binary_expressions();
 	test_basic_declarations();
@@ -61,6 +66,51 @@ test_default_tokens :: () {
 	assert(parsed.tokens.count == 6);
 	assert(parsed.tokens[0].type == .IDENT);
 	assert(parsed.tokens[5].type == .END_OF_INPUT);
+}
+
+test_star_token_contract :: () {
+	pointer_type := Extended.materialise_tokens("*u8");
+	assert(pointer_type.tokens.count == 3);
+	assert(pointer_type.tokens[0].type == #char "*");
+	assert(pointer_type.tokens[1].type == .IDENT);
+
+	address_of := Extended.materialise_tokens("*value");
+	assert(address_of.tokens.count == 3);
+	assert(address_of.tokens[0].type == #char "*");
+	assert(address_of.tokens[1].type == .IDENT);
+
+	pointer_literal := Extended.materialise_tokens("*[123] int");
+	assert(pointer_literal.tokens.count == 6);
+	assert(pointer_literal.tokens[0].type == #char "*");
+	assert(pointer_literal.tokens[1].type == #char "[");
+	assert(pointer_literal.tokens[2].type == .NUMBER);
+	assert(pointer_literal.tokens[3].type == #char "]");
+	assert(pointer_literal.tokens[4].type == .IDENT);
+
+	cast_type := Extended.materialise_tokens("cast(*u8)");
+	assert(cast_type.tokens.count == 6);
+	assert(cast_type.tokens[0].type == .KEYWORD_CAST);
+	assert(cast_type.tokens[1].type == #char "(");
+	assert(cast_type.tokens[2].type == #char "*");
+	assert(cast_type.tokens[3].type == .IDENT);
+	assert(cast_type.tokens[4].type == #char ")");
+
+	generic_type := Extended.materialise_tokens("Table(*Message, Info)");
+	assert(generic_type.tokens.count == 8);
+	assert(generic_type.tokens[0].type == .IDENT);
+	assert(generic_type.tokens[2].type == #char "*");
+	assert(generic_type.tokens[3].type == .IDENT);
+
+	multiplication := Extended.materialise_tokens("left * right");
+	assert(multiplication.tokens[1].type == #char "*");
+
+	postfix_dereference := Extended.materialise_tokens("value.*");
+	assert(postfix_dereference.tokens.count == 3);
+	assert(postfix_dereference.tokens[1].type == .POSTFIX_DEREFERENCE);
+
+	prefix_dereference := Extended.materialise_tokens("(.*)value");
+	assert(prefix_dereference.tokens.count == 3);
+	assert(prefix_dereference.tokens[0].type == .PREFIX_DEREFERENCE);
 }
 
 test_trivia_round_trip :: () {
@@ -203,6 +253,16 @@ test_complete_file_parsing :: () {
 	assert(empty.status == .COMPLETE);
 	assert(empty_root.statements.count == 0);
 	assert(empty_root.first_token == empty_root.one_past_last_token);
+
+	terminators_source :: "normal :: () {}\nafter_normal :: 1;\nquick_block :: () => {}\n#scope_file\nquick_expression :: value => value + 1;\nRecord :: struct {}\nafter_struct :: 2;\nChoice :: enum { ONLY; }\nouter :: () { nested :: () {}\nnext := 3;\nNested_Record :: struct {}\nNested_Choice :: enum { ONLY; } }\nfinal :: () {}";
+	terminators := Extended.parse_file(terminators_source);
+	terminators_root := terminators.root.(*Extended.Parser_Block);
+	assert(terminators.status == .COMPLETE);
+	assert(terminators.diagnostics.count == 0);
+	assert(terminators_root.statements.count == 10);
+	outer := terminators_root.statements[8].(*Extended.Parser_Declaration);
+	outer_block := outer.expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+	assert(outer_block.statements.count == 4);
 }
 
 test_node_token_spans :: () {
@@ -500,6 +560,37 @@ test_casts_and_queries :: () {
 	assert(cast_node.target_type.type_valued_expression.(*Extended.Parser_Ident).name == "s32");
 	assert(cast_node.expression.(*Extended.Parser_Ident).name == "value");
 
+	pointer_cast := Extended.parse_expression("cast(*u8) value");
+	assert(pointer_cast.status == .COMPLETE);
+	pointer_target := pointer_cast.root.(*Extended.Parser_Cast).target_type;
+	assert(pointer_target.pointer_to.type_valued_expression.(*Extended.Parser_Ident).name == "u8");
+
+	array_cast := Extended.parse_expression("cast([3] int) value");
+	assert(array_cast.status == .COMPLETE);
+	array_target := array_cast.root.(*Extended.Parser_Cast).target_type;
+	assert(array_target.array_dimension.(*Extended.Parser_Literal)._u64 == 3);
+	assert(array_target.array_element_type.type_valued_expression.(*Extended.Parser_Ident).name == "int");
+
+	type_argument := Extended.parse_expression("New([3] int)");
+	assert(type_argument.status == .COMPLETE);
+	type_argument_node := type_argument.root.(*Extended.Parser_Procedure_Call).arguments_unsorted[0].expression.(*Extended.Parser_Type_Instantiation);
+	assert(type_argument_node.array_dimension.(*Extended.Parser_Literal)._u64 == 3);
+	assert(type_argument_node.array_element_type.type_valued_expression.(*Extended.Parser_Ident).name == "int");
+
+	pointer_array_type := Extended.parse_expression("*[123] int");
+	assert(pointer_array_type.status == .COMPLETE);
+	pointer_array_node := pointer_array_type.root.(*Extended.Parser_Type_Instantiation);
+	assert(pointer_array_node.pointer_to.array_dimension.(*Extended.Parser_Literal)._u64 == 123);
+
+	address_argument := Extended.parse_expression("consume(*value)");
+	assert(address_argument.status == .COMPLETE);
+	address_node := address_argument.root.(*Extended.Parser_Procedure_Call).arguments_unsorted[0].expression.(*Extended.Parser_Unary_Operator);
+	assert(address_node.operator_type == #char "*");
+
+	multiplication := Extended.parse_expression("left * right");
+	assert(multiplication.status == .COMPLETE);
+	assert(multiplication.root.(*Extended.Parser_Binary_Operator).operator_type == #char "*");
+
 	postfix_cast := Extended.parse_expression("value.(s32).field");
 	access := postfix_cast.root.(*Extended.Parser_Binary_Operator);
 	assert((access.left.(*Extended.Parser_Cast).cast_flags & .HAS_POSTFIX_SYNTAX) != 0);
@@ -525,7 +616,69 @@ test_casts_and_queries :: () {
 	assert(initializer_query.root.(*Extended.Parser_Type_Query).query_kind == .INITIALIZER_OF);
 }
 
+test_parameter_default_delimiters :: () {
+	procedure := Extended.parse_declaration("configure :: (width: s64 = 640, height: s64 = 480) {}");
+	assert(procedure.status == .COMPLETE);
+	procedure_header := procedure.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
+	assert(procedure_header.arguments.count == 2);
+	assert(procedure_header.arguments[0].expression.(*Extended.Parser_Literal)._u64 == 640);
+	assert(procedure_header.arguments[1].expression.(*Extended.Parser_Literal)._u64 == 480);
+
+	aggregate := Extended.parse_declaration("Dimensions :: struct (width: s64 = 640, height: s64 = 480) {}");
+	assert(aggregate.status == .COMPLETE);
+	aggregate_parameters := aggregate.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).arguments_block.statements;
+	assert(aggregate_parameters.count == 2);
+	assert(aggregate_parameters[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Literal)._u64 == 640);
+	assert(aggregate_parameters[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Literal)._u64 == 480);
+
+	polymorphic := Extended.parse_declaration("choose :: (value: $T = 1, fallback: T = 2) -> T { return value; }");
+	assert(polymorphic.status == .COMPLETE);
+	polymorphic_header := polymorphic.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
+	assert(polymorphic_header.arguments.count == 2);
+	assert((polymorphic_header.procedure_flags & .POLYMORPHIC) != 0);
+
+	named_returns := Extended.parse_declaration("result :: () -> (value: s64 = 0, valid: bool = false) { return; }");
+	assert(named_returns.status == .COMPLETE);
+	named_return_header := named_returns.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
+	assert(named_return_header.returns.count == 2);
+	assert(named_return_header.returns[0].expression.(*Extended.Parser_Literal)._u64 == 0);
+	assert(named_return_header.returns[1].expression.(*Extended.Parser_Literal)._u64 == 0);
+
+	multi_value := Extended.parse_declaration("values := 1, 2;");
+	assert(multi_value.status == .COMPLETE);
+	assert(multi_value.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Comma_Separated_Arguments).arguments.count == 2);
+}
+
 test_expression_directives :: () {
+	character := Extended.parse_expression("#char \"A\"");
+	assert(character.status == .COMPLETE);
+	character_literal := character.root.(*Extended.Parser_Literal);
+	assert(character_literal.value_type == .NUMBER);
+	assert((character_literal.value_flags & .IS_A_NUMBER) != 0);
+	assert(character_literal._u64 == #char "A");
+
+	this := Extended.parse_expression("#this");
+	assert(this.status == .COMPLETE);
+	assert(this.root.kind == .DIRECTIVE_THIS);
+
+	filepath := Extended.parse_expression("#filepath", "D:/project/source/fixture.jai");
+	assert(filepath.status == .COMPLETE);
+	assert(filepath.root.(*Extended.Parser_Literal)._string == "D:/project/source/");
+
+	caller_code := Extended.parse_expression("#caller_code");
+	assert(caller_code.status == .COMPLETE);
+	caller_code_node := caller_code.root.(*Extended.Parser_Directive_Code);
+	assert((caller_code_node.code_flags & xx 0x4) != 0);
+	assert(caller_code_node.expression == null);
+
+	constant_context := Extended.parse_declaration("CHARACTER :: #char \"A\";");
+	assert(constant_context.status == .COMPLETE);
+	filepath_context := Extended.parse_declaration("SOURCE_DIRECTORY :: #filepath;", "D:/project/source/fixture.jai");
+	assert(filepath_context.status == .COMPLETE);
+	assert(filepath_context.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Literal)._string == "D:/project/source/");
+	default_context := Extended.parse_declaration("macro :: (call := #caller_code) #expand {}");
+	assert(default_context.status == .COMPLETE);
+
 	code := Extended.parse_expression("#code value + 1");
 	assert(code.status == .COMPLETE);
 	assert(code.root.(*Extended.Parser_Directive_Code).expression.kind == .BINARY_OPERATOR);
@@ -800,6 +953,16 @@ test_procedure_types :: () {
 	assert((struct_node.textual_flags & .NO_PADDING) != 0);
 	assert(structure.root.(*Extended.Parser_Declaration).notes[0].text == "Serializable");
 
+	defaulted_field := Extended.parse_declaration("Defaulted :: struct { w: float; w = 1; }");
+	assert(defaulted_field.status == .COMPLETE);
+	defaulted_statements := defaulted_field.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements;
+	assert(defaulted_statements.count == 2);
+	field := defaulted_statements[0].(*Extended.Parser_Declaration);
+	assignment := defaulted_statements[1].(*Extended.Parser_Binary_Operator);
+	assert(assignment.operator_type == #char "=");
+	assert(assignment.left.(*Extended.Parser_Ident).name == "w");
+	assert(assignment.left.(*Extended.Parser_Ident).resolved_declaration == field);
+
 	union_result := Extended.parse_declaration("Value :: union { integer: s64; text: string; }");
 	assert(union_result.status == .COMPLETE);
 	assert((union_result.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).textual_flags & .UNION) != 0);
@@ -876,6 +1039,80 @@ test_declaration_metadata :: () {
 	optional_bake := Extended.parse_declaration("$$T: Type;").root.(*Extended.Parser_Declaration);
 	assert((optional_bake.flags & .AUTO_VALUE_BAKE) != 0);
 	assert((optional_bake.flags & .AUTO_VALUE_BAKE_IS_REQUIRED) == 0);
+}
+
+Operator_Declaration_Fixture :: struct {
+	source: string;
+	name: string;
+}
+
+test_operator_declarations :: () {
+	binary := Extended.parse_declaration("operator + :: (left: s64, right: s64) -> s64 #symmetric { return left + right; }");
+	assert(binary.status == .COMPLETE);
+	binary_declaration := binary.root.(*Extended.Parser_Declaration);
+	assert(binary_declaration.name == "+");
+	binary_header := binary_declaration.expression.(*Extended.Parser_Procedure_Header);
+	assert(binary_header.arguments.count == 2);
+	assert(binary_header.returns.count == 1);
+	assert((binary_header.procedure_flags & .SYMMETRIC) != 0);
+	assert(binary_header.body_or_null.block.statements.count == 1);
+
+	unary := Extended.parse_declaration("operator - :: (value: s64) -> s64 { return -value; }");
+	assert(unary.status == .COMPLETE);
+	assert(unary.root.(*Extended.Parser_Declaration).name == "-");
+	assert(unary.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).arguments.count == 1);
+
+	compound := Extended.parse_declaration("operator += :: (left: *s64, right: s64) { left.* += right; }");
+	assert(compound.status == .COMPLETE);
+	assert(compound.root.(*Extended.Parser_Declaration).name == "+=");
+
+	fixtures := Operator_Declaration_Fixture.[
+		.{source="operator + :: (left: s64, right: s64) -> s64 {}", name="+"},
+		.{source="operator - :: (left: s64, right: s64) -> s64 {}", name="-"},
+		.{source="operator * :: (left: s64, right: s64) -> s64 {}", name="*"},
+		.{source="operator / :: (left: s64, right: s64) -> s64 {}", name="/"},
+		.{source="operator % :: (left: s64, right: s64) -> s64 {}", name="%"},
+		.{source="operator < :: (left: s64, right: s64) -> bool {}", name="<"},
+		.{source="operator > :: (left: s64, right: s64) -> bool {}", name=">"},
+		.{source="operator ! :: (value: s64) -> bool {}", name="!"},
+		.{source="operator ~ :: (value: s64) -> s64 {}", name="~"},
+		.{source="operator & :: (left: s64, right: s64) -> s64 {}", name="&"},
+		.{source="operator | :: (left: s64, right: s64) -> s64 {}", name="|"},
+		.{source="operator ^ :: (left: s64, right: s64) -> s64 {}", name="^"},
+		.{source="operator == :: (left: s64, right: s64) -> bool {}", name="=="},
+		.{source="operator != :: (left: s64, right: s64) -> bool {}", name="!="},
+		.{source="operator <= :: (left: s64, right: s64) -> bool {}", name="<="},
+		.{source="operator >= :: (left: s64, right: s64) -> bool {}", name=">="},
+		.{source="operator && :: (left: s64, right: s64) -> bool {}", name="&&"},
+		.{source="operator || :: (left: s64, right: s64) -> bool {}", name="||"},
+		.{source="operator << :: (left: s64, right: s64) -> s64 {}", name="<<"},
+		.{source="operator >> :: (left: s64, right: s64) -> s64 {}", name=">>"},
+		.{source="operator <<< :: (left: s64, right: s64) -> s64 {}", name="<<<"},
+		.{source="operator >>> :: (left: s64, right: s64) -> s64 {}", name=">>>"},
+		.{source="operator += :: (left: *s64, right: s64) {}", name="+="},
+		.{source="operator -= :: (left: *s64, right: s64) {}", name="-="},
+		.{source="operator *= :: (left: *s64, right: s64) {}", name="*="},
+		.{source="operator /= :: (left: *s64, right: s64) {}", name="/="},
+		.{source="operator %= :: (left: *s64, right: s64) {}", name="%="},
+		.{source="operator <<= :: (left: *s64, right: s64) {}", name="<<="},
+		.{source="operator >>= :: (left: *s64, right: s64) {}", name=">>="},
+		.{source="operator <<<= :: (left: *s64, right: s64) {}", name="<<<="},
+		.{source="operator >>>= :: (left: *s64, right: s64) {}", name=">>>="},
+		.{source="operator &= :: (left: *s64, right: s64) {}", name="&="},
+		.{source="operator |= :: (left: *s64, right: s64) {}", name="|="},
+		.{source="operator ^= :: (left: *s64, right: s64) {}", name="^="},
+		.{source="operator &&= :: (left: *s64, right: s64) {}", name="&&="},
+		.{source="operator ||= :: (left: *s64, right: s64) {}", name="||="},
+		.{source="operator [] :: (value: s64, index: s64) -> s64 {}", name="[]"},
+		.{source="operator []= :: (value: *s64, index: s64, replacement: s64) {}", name="[]="},
+		.{source="operator *[] :: (value: *s64, index: s64) -> *s64 {}", name="*[]"},
+	];
+	assert(fixtures.count == 39);
+	for fixtures {
+		parsed := Extended.parse_declaration(it.source);
+		assert(parsed.status == .COMPLETE, "Operator declaration did not parse: %", it.source);
+		assert(parsed.root.(*Extended.Parser_Declaration).name == it.name);
+	}
 }
 
 test_basic_statements_and_blocks :: () {
@@ -1000,6 +1237,65 @@ test_conditional_statements :: () {
 	unmatched_bracket := Extended.materialise_tokens("value] == {");
 	unmatched_bracket_parser := Extended.Parser.{parsed=*unmatched_bracket};
 	assert(!Extended.has_switch_case_block(*unmatched_bracket_parser));
+}
+
+test_static_if_directives :: () {
+	static_statement := Extended.parse_block("{ #if true { enabled := 1; } else #if false disabled := 2; else fallback := 3; }");
+	assert(static_statement.status == .COMPLETE);
+	static_if := static_statement.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
+	assert((static_if.if_flags & .IS_STATIC) != 0);
+	assert(static_if.then_block.block_type == .IMPERATIVE);
+	nested_static_if := static_if.else_block.statements[0].(*Extended.Parser_If);
+	assert((nested_static_if.if_flags & .IS_STATIC) != 0);
+	assert(nested_static_if.else_block.statements[0].kind == .DECLARATION);
+
+	static_file := Extended.parse_file("#if true { first :: 1; } else second :: 2;\nafter :: 3;");
+	assert(static_file.status == .COMPLETE);
+	file_if := static_file.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
+	assert((file_if.if_flags & .IS_STATIC) != 0);
+	assert(file_if.then_block.block_type == .DATA_DECLARATIONS);
+	assert(file_if.else_block.statements[0].kind == .DECLARATION);
+	assert(static_file.root.(*Extended.Parser_Block).statements.count == 2);
+
+	static_member := Extended.parse_declaration("Conditional :: struct { #if true { enabled: s64; } else disabled: s64; }");
+	assert(static_member.status == .COMPLETE);
+	member_if := static_member.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements[0].(*Extended.Parser_If);
+	assert((member_if.if_flags & .IS_STATIC) != 0);
+	assert(member_if.then_block.block_type == .DATA_DECLARATIONS);
+}
+
+test_preserved_directive_forms :: () {
+	placeholder_source :: "#placeholder Apple;\nafter :: 1;";
+	placeholder := Extended.parse_file(placeholder_source);
+	assert(placeholder.status == .COMPLETE);
+	placeholder_node := placeholder.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Placeholder);
+	assert(placeholder_node.name == "Apple");
+	assert(Extended.reconstruct_source(*placeholder) == placeholder_source);
+
+	as_fields := Extended.parse_declaration("Container :: struct { #as using base: Base; }");
+	assert(as_fields.status == .COMPLETE);
+	as_members := as_fields.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements;
+	assert(as_members.count == 1);
+	for as_members {
+		using_node := it.(*Extended.Parser_Using);
+		assert((using_node.expression.(*Extended.Parser_Declaration).flags & .IS_MARKED_AS_AS) != 0);
+	}
+
+	asm_source :: "{ #asm AVX, AVX2 { mov apple:, 10; nested { ignored; } } after(); }";
+	assembly := Extended.parse_block(asm_source);
+	assert(assembly.status == .COMPLETE);
+	assembly_block := assembly.root.(*Extended.Parser_Block);
+	assert(assembly_block.statements.count == 2);
+	asm_node := assembly_block.statements[0].(*Extended.Parser_Asm);
+	assert(asm_node.feature_names.count == 2);
+	assert(asm_node.feature_names[0] == "AVX");
+	assert(asm_node.feature_names[1] == "AVX2");
+	assert(asm_node.body_span.one_past_last > asm_node.body_span.first);
+	assert(Extended.reconstruct_source(*assembly) == asm_source);
+
+	truncated_asm := Extended.parse_block("{ #asm { mov value:, 1;");
+	assert(truncated_asm.status == .INCOMPLETE);
+	assert(truncated_asm.root.(*Extended.Parser_Block).statements[0].kind == .ASM);
 }
 
 test_statement_recovery :: () {

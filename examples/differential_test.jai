@@ -564,6 +564,7 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 			if_node := node.(*Parser.Parser_If);
 			add_normalized_field(result, path, "switch", tprint("%", (if_node.if_flags & .IS_SWITCH_STATEMENT) != 0));
 			add_normalized_field(result, path, "ifx", tprint("%", (if_node.if_flags & .IS_IFX) != 0));
+			add_normalized_field(result, path, "static", tprint("%", (if_node.if_flags & .IS_STATIC) != 0));
 			add_normalized_field(result, path, "complete", tprint("%", (if_node.if_flags & .MARKED_AS_COMPLETE) != 0));
 			normalize_parser_node(if_node.condition, tprint("%.condition", path), layer, result);
 			normalize_parser_node(if_node.then_block, tprint("%.then", path), layer, result);
@@ -594,7 +595,9 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 			normalize_parser_node(push.block, tprint("%.block", path), layer, result);
 
 		case .CONTEXT;
+		case .DIRECTIVE_THIS;
 		case .PLACEHOLDER;
+		case .ASM;
 
 		case;
 			add_normalized_field(result, path, "unsupported", "true");
@@ -917,6 +920,7 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 			if_node := node.(*Code_If);
 			add_normalized_field(result, path, "switch", tprint("%", (if_node.if_flags & .IS_SWITCH_STATEMENT) != 0));
 			add_normalized_field(result, path, "ifx", tprint("%", (if_node.if_flags & .IS_IFX) != 0));
+			add_normalized_field(result, path, "static", tprint("%", (if_node.if_flags & .IS_STATIC) != 0));
 			add_normalized_field(result, path, "complete", tprint("%", (if_node.if_flags & .MARKED_AS_COMPLETE) != 0));
 			normalize_node(if_node.condition, tprint("%.condition", path), layer, result);
 			normalize_node(if_node.then_block, tprint("%.then", path), layer, result);
@@ -947,7 +951,9 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 			normalize_node(push.block, tprint("%.block", path), layer, result);
 
 		case .CONTEXT;
+		case .DIRECTIVE_THIS;
 		case .PLACEHOLDER;
+		case .ASM;
 
 		case;
 			add_normalized_field(result, path, "unsupported", "true");
@@ -957,6 +963,7 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 normalize_parser_declaration :: (declaration: *Parser.Parser_Declaration, path: string, layer: Comparison_Layer, result: *Normalized_Tree) {
 	add_normalized_field(result, path, "name", declaration.name);
 	add_normalized_field(result, path, "constant", tprint("%", (declaration.flags & .IS_CONSTANT) != 0));
+	add_normalized_field(result, path, "as", tprint("%", (declaration.flags & .IS_MARKED_AS_AS) != 0));
 	add_normalized_field(result, path, "uninitialized", tprint("%", (declaration.flags & .IS_UNINITIALIZED) != 0));
 	add_normalized_field(result, path, "auto_bake", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE) != 0));
 	add_normalized_field(result, path, "auto_bake_required", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE_IS_REQUIRED) != 0));
@@ -973,6 +980,7 @@ normalize_parser_declaration :: (declaration: *Parser.Parser_Declaration, path: 
 normalize_declaration :: (declaration: *Code_Declaration, path: string, layer: Comparison_Layer, result: *Normalized_Tree) {
 	add_normalized_field(result, path, "name", declaration.name);
 	add_normalized_field(result, path, "constant", tprint("%", (declaration.flags & .IS_CONSTANT) != 0));
+	add_normalized_field(result, path, "as", tprint("%", (declaration.flags & .IS_MARKED_AS_AS) != 0));
 	add_normalized_field(result, path, "uninitialized", tprint("%", (declaration.flags & .IS_UNINITIALIZED) != 0));
 	add_normalized_field(result, path, "auto_bake", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE) != 0));
 	add_normalized_field(result, path, "auto_bake_required", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE_IS_REQUIRED) != 0));
@@ -1027,8 +1035,8 @@ format_structural_differences :: (result: Differential_Result) -> string {
 	return builder_to_string(*builder);
 }
 
-assert_expression_matches_code :: (source: string, expected_code: Code, layer := Comparison_Layer.SYNTAX) {
-	parsed := Parser.parse_expression(source);
+assert_expression_matches_code :: (source: string, expected_code: Code, layer := Comparison_Layer.SYNTAX, fully_pathed_filename: string = "") {
+	parsed := Parser.parse_expression(source, fully_pathed_filename);
 	defer Parser.release_parser_tree(*parsed);
 	assert(parsed.status == .COMPLETE, "Parser did not complete fixture '%'.", source);
 
@@ -1247,13 +1255,69 @@ test_declaration_workspace_fixtures :: () {
 	assert_declaration_workspace_fixture("fixture_noted: s64; @FixtureNote");
 	assert_declaration_workspace_fixture("fixture_inline :: inline () {}");
 	assert_declaration_workspace_fixture("fixture_no_inline :: no_inline () {}");
+	assert_declaration_workspace_fixture("fixture_parameter_defaults :: (width: s64 = 640, height: s64 = 480) {}");
+	assert_declaration_workspace_fixture("Fixture_Aggregate_Defaults :: struct (width: s64 = 640, height: s64 = 480) {}");
+	assert_declaration_workspace_fixture("fixture_polymorphic_defaults :: (value: $T = 1, fallback: T = 2) -> T { return value; }");
+	assert_declaration_workspace_fixture("fixture_named_return_defaults :: () -> (value: s64 = 0, valid: bool = false) { return; }");
 	assert_declaration_workspace_fixture("fixture_modify :: (value: $T) -> T #modify { return true; } { return value; }");
 	assert_declaration_workspace_fixture("Fixture_Modified_Struct :: struct (T: Type) #modify { return true; } { value: T; }");
 	assert_declaration_workspace_fixture("Fixture_Struct :: struct { CONSTANT :: 1; }; @Serializable");
+	assert_declaration_workspace_fixture("Fixture_Defaulted_Field :: struct { w: s64; w = 1; }");
+	assert_declaration_workspace_fixture("operator + :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint #symmetric { return .{}; }");
+	assert_declaration_workspace_fixture("operator - :: (value: Fixture_Constraint) -> Fixture_Constraint { return value; }");
+	assert_declaration_workspace_fixture("operator * :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }");
+	assert_declaration_workspace_fixture("operator / :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }");
+	assert_declaration_workspace_fixture("operator % :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }");
+	assert_declaration_workspace_fixture("operator < :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
+	assert_declaration_workspace_fixture("operator > :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
+	assert_declaration_workspace_fixture("operator ! :: (value: Fixture_Constraint) -> bool { return false; }");
+	assert_declaration_workspace_fixture("operator ~ :: (value: Fixture_Constraint) -> Fixture_Constraint { return value; }");
+	assert_declaration_workspace_fixture("operator & :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }");
+	assert_declaration_workspace_fixture("operator | :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }");
+	assert_declaration_workspace_fixture("operator ^ :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }");
+	assert_declaration_workspace_fixture("operator == :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return true; }");
+	assert_declaration_workspace_fixture("operator != :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
+	assert_declaration_workspace_fixture("operator <= :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
+	assert_declaration_workspace_fixture("operator >= :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
+	assert_declaration_workspace_fixture("operator && :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
+	assert_declaration_workspace_fixture("operator || :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
+	assert_declaration_workspace_fixture("operator << :: (left: Fixture_Constraint, amount: s64) -> Fixture_Constraint { return left; }");
+	assert_declaration_workspace_fixture("operator >> :: (left: Fixture_Constraint, amount: s64) -> Fixture_Constraint { return left; }");
+	assert_declaration_workspace_fixture("operator <<< :: (left: Fixture_Constraint, amount: s64) -> Fixture_Constraint { return left; }");
+	assert_declaration_workspace_fixture("operator >>> :: (left: Fixture_Constraint, amount: s64) -> Fixture_Constraint { return left; }");
+	assert_declaration_workspace_fixture("operator += :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
+	assert_declaration_workspace_fixture("operator -= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
+	assert_declaration_workspace_fixture("operator *= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
+	assert_declaration_workspace_fixture("operator /= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
+	assert_declaration_workspace_fixture("operator %= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
+	assert_declaration_workspace_fixture("operator <<= :: (left: *Fixture_Constraint, amount: s64) {}");
+	assert_declaration_workspace_fixture("operator >>= :: (left: *Fixture_Constraint, amount: s64) {}");
+	assert_declaration_workspace_fixture("operator <<<= :: (left: *Fixture_Constraint, amount: s64) {}");
+	assert_declaration_workspace_fixture("operator >>>= :: (left: *Fixture_Constraint, amount: s64) {}");
+	assert_declaration_workspace_fixture("operator &= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
+	assert_declaration_workspace_fixture("operator |= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
+	assert_declaration_workspace_fixture("operator ^= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
+	assert_declaration_workspace_fixture("operator &&= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
+	assert_declaration_workspace_fixture("operator ||= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
+	assert_declaration_workspace_fixture("operator [] :: (value: Fixture_Constraint, index: s64) -> s64 { return value.value; }");
+	assert_declaration_workspace_fixture("operator []= :: (value: *Fixture_Constraint, index: s64, replacement: s64) { value.value = replacement; }");
+	assert_declaration_workspace_fixture("operator *[] :: (value: *Fixture_Constraint, index: s64) -> *s64 { return *value.value; }");
 	assert_declaration_workspace_fixture("fixture_uninitialized: s64 = ---;");
+	assert_declaration_workspace_fixture("fixture_character_default :: (value: u8 = #char \"A\") {}");
+	assert_declaration_workspace_fixture("fixture_this_constant :: #this;");
+	assert_declaration_workspace_fixture("fixture_caller_code_default :: (call := #caller_code) #expand {}");
 }
 
+test_directive_workspace_fixtures :: () {
+	assert_declaration_workspace_fixture("Fixture_As_Member :: struct { #as using base: Fixture_Constraint; }");
+	assert_declaration_workspace_fixture("Fixture_Static_Member :: struct { #if true { enabled: s64; } else { disabled: s64; } }");
+}
+
+#run,stallable test_directive_workspace_fixtures();
+
 #run {
+	assert_statement_fixture("#if true { enabled := 1; } else { disabled := 2; }");
+	assert_statement_fixture("#asm { nop; }");
 	assert_all_operator_fixtures();
 	assert_all_precedence_pairs();
 	assert_expression_fixture("identifier");
@@ -1272,12 +1336,20 @@ test_declaration_workspace_fixtures :: () {
 	assert_expression_fixture("Foo.{1, 2, 3}");
 	assert_expression_fixture(".member");
 	assert_expression_fixture("#string END\nbody\nEND");
+	assert_expression_fixture("#char \"A\"");
+	assert_expression_fixture("#this");
+	assert_expression_matches_code("#filepath", #code #filepath, fully_pathed_filename=tprint("%fixture.jai", #filepath));
+	assert_expression_fixture("#caller_code");
 	assert_expression_fixture("(identifier)");
 	assert_expression_fixture("!~flag");
 	assert_expression_fixture("foo()");
 	assert_expression_fixture("foo(1, named = value)");
 	assert_expression_fixture("object.method(1)[index].*");
 	assert_expression_fixture("cast(s32) value");
+	assert_expression_fixture("cast(*u8) value");
+	assert_expression_fixture("cast([3] int) value");
+	assert_expression_fixture("New([3] int)");
+	assert_expression_fixture("consume(*value)");
 	assert_expression_fixture("value.(s32)");
 	assert_expression_fixture("xx value");
 	assert_expression_fixture("type_of(a + b)");
