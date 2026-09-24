@@ -554,6 +554,7 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 		case .FOR;
 			for_node := node.(*Parser.Parser_For);
 			add_normalized_field(result, path, "flags", tprint("%", for_node.for_flags));
+			normalize_parser_node(for_node.want_replacement_for_expansion, tprint("%.selector", path), layer, result);
 			normalize_parser_node(for_node.ident_it, tprint("%.iterator", path), layer, result);
 			normalize_parser_node(for_node.ident_it_index, tprint("%.index", path), layer, result);
 			normalize_parser_node(for_node.iteration_expression, tprint("%.iteration", path), layer, result);
@@ -910,6 +911,7 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 		case .FOR;
 			for_node := node.(*Code_For);
 			add_normalized_field(result, path, "flags", tprint("%", for_node.for_flags));
+			normalize_node(for_node.want_replacement_for_expansion, tprint("%.selector", path), layer, result);
 			normalize_node(for_node.ident_it, tprint("%.iterator", path), layer, result);
 			normalize_node(for_node.ident_it_index, tprint("%.index", path), layer, result);
 			normalize_node(for_node.iteration_expression, tprint("%.iteration", path), layer, result);
@@ -1309,7 +1311,9 @@ test_declaration_workspace_fixtures :: () {
 }
 
 test_directive_workspace_fixtures :: () {
+	assert_declaration_workspace_fixture("Fixture_Using_Member :: struct { using member: Fixture_Constraint; }");
 	assert_declaration_workspace_fixture("Fixture_As_Member :: struct { #as using base: Fixture_Constraint; }");
+	assert_declaration_workspace_fixture("Fixture_Suffix_As_Member :: struct { using #as base: Fixture_Constraint; }");
 	assert_declaration_workspace_fixture("Fixture_Static_Member :: struct { #if true { enabled: s64; } else { disabled: s64; } }");
 }
 
@@ -1361,11 +1365,17 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("#code value + 1");
 	assert_expression_fixture("#code,null");
 	assert_expression_fixture("#code,typed value");
+	assert_expression_fixture("#code value := 1");
+	assert_expression_fixture("#code value: s64 = 1");
+	assert_expression_fixture("#code VALUE :: 1");
+	assert_expression_fixture("#code,typed value: s64 = 1");
 	assert_expression_fixture("#code { value := 1; use(value); }");
 	assert_expression_fixture("#code,typed { value := 1; use(value); }");
 	assert_expression_fixture("#run compute()");
 	assert_expression_fixture("#run,stallable compute()");
 	assert_expression_fixture("#run,stallable { value := compute(); return value; }");
+	assert_expression_fixture("#run,host compute()");
+	assert_expression_fixture("#run,host { value := compute(); return value; }");
 	assert_expression_fixture("#insert generated_code");
 	assert_expression_fixture("#insert -> string { return \"generated\"; }");
 	assert_expression_fixture("#insert,scope(caller) (break=break outer, continue=continue outer, remove=remove outer) body");
@@ -1431,9 +1441,13 @@ test_directive_workspace_fixtures :: () {
 	assert_statement_fixture("for 1..3 defer tick();");
 	assert_statement_fixture("for < values process(it);");
 	assert_statement_fixture("for * values process(it);");
+	assert_statement_fixture("for :utf8_iter value, index: text process(value);");
+	assert_statement_fixture("for < * :utf8_iter value, index: text process(value);");
+	assert_statement_fixture("for <* :utf8_iter text process(it);");
 	assert_statement_fixture("if ready then run(); else stop();");
 	assert_statement_fixture("if value == { case 1; return; case; break; }");
 	assert_statement_fixture("if #complete value == { case 1; #through; case 2; return; case; return; }");
+	assert_statement_fixture("#if OS == { case .WINDOWS; return; case; }");
 	assert_statement_fixture("defer cleanup();");
 	assert_statement_fixture("`defer cleanup();");
 	assert_statement_fixture("defer { cleanup(); }");

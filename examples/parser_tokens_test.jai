@@ -24,6 +24,7 @@ compiler_node_for_source :: ($source: string) -> *Code_Node #expand {
 main :: () {
 	test_default_tokens();
 	test_star_token_contract();
+	test_asm_token_contract();
 	test_trivia_round_trip();
 	test_node_token_spans();
 	test_identifier_expression();
@@ -58,6 +59,8 @@ main :: () {
 	test_loop_and_scoped_statements();
 	test_conditional_statements();
 	test_statement_recovery();
+	test_section_13_recovery();
+	test_assembly_node_model();
 }
 
 test_default_tokens :: () {
@@ -111,6 +114,108 @@ test_star_token_contract :: () {
 	prefix_dereference := Extended.materialise_tokens("(.*)value");
 	assert(prefix_dereference.tokens.count == 3);
 	assert(prefix_dereference.tokens[0].type == .PREFIX_DEREFERENCE);
+}
+
+test_asm_token_contract :: () {
+	source :: "#asm AVX, AVX2 {\n\t// declaration and pinning\n\tmov.8 apple:, -10;\n\tt: future_class === source;\n\tpopcnt?BITS result, value;\n\tcvtps2dq destination:, [base + index*8 - (-10.5)]!z &* mask; /* tail */\n}";
+	parsed := Extended.materialise_tokens(source);
+	assert(parsed.status == .COMPLETE);
+	assert(Extended.reconstruct_source(*parsed) == source);
+
+	expected_types := Extended.Token_Type.[
+		#char "#", .IDENT, .IDENT, #char ",", .IDENT, #char "{",
+		.IDENT, .NUMBER, .IDENT, #char ":", #char ",", #char "-", .NUMBER, #char ";",
+		.IDENT, #char ":", .IDENT, .TRIPLE_EQUALS, .IDENT, #char ";",
+		.IDENT, #char "?", .IDENT, .IDENT, #char ",", .IDENT, #char ";",
+		.IDENT, .IDENT, #char ":", #char ",", #char "[", .IDENT, #char "+", .IDENT, #char "*", .NUMBER, #char "-", #char "(", #char "-", .NUMBER, #char ")", #char "]", #char "!", .IDENT, .BITWISE_AND, #char "*", .IDENT, #char ";",
+		#char "}",
+		.END_OF_INPUT,
+	];
+	expected_spellings := string.[
+		"#", "asm", "AVX", ",", "AVX2", "{",
+		"mov", ".8", "apple", ":", ",", "-", "10", ";",
+		"t", ":", "future_class", "===", "source", ";",
+		"popcnt", "?", "BITS", "result", ",", "value", ";",
+		"cvtps2dq", "destination", ":", ",", "[", "base", "+", "index", "*", "8", "-", "(", "-", "10.5", ")", "]", "!", "z", "&", "*", "mask", ";",
+		"}",
+		"",
+	];
+
+	assert(parsed.tokens.count == expected_types.count);
+	assert(parsed.tokens.count == expected_spellings.count);
+	for token: parsed.tokens {
+		assert(token.type == expected_types[it_index], "Assembly token % ('%') has type %, expected %.", it_index, token.original_text, token.type, expected_types[it_index]);
+		assert(token.original_text == expected_spellings[it_index], "Assembly token % has spelling '%', expected '%'.", it_index, token.original_text, expected_spellings[it_index]);
+		assert(token.byte_end - token.byte_start == token.original_text.count);
+		assert(slice(source, token.byte_start, token.byte_end - token.byte_start) == token.original_text);
+	}
+
+	assert(parsed.tokens[6].preceding_trivia == "\n\t// declaration and pinning\n\t");
+	assert(parsed.tokens[parsed.tokens.count - 2].preceding_trivia == " /* tail */\n");
+
+	modifier_source :: "value! value!n value!d value!u value!z value & mask value &* mask -10 +20 -10.5 +20.5";
+	modifiers := Extended.materialise_tokens(modifier_source);
+	expected_modifier_spellings := string.[
+		"value", "!", "value", "!", "n", "value", "!", "d", "value", "!", "u", "value", "!", "z",
+		"value", "&", "mask", "value", "&", "*", "mask",
+		"-", "10", "+", "20", "-", "10.5", "+", "20.5", "",
+	];
+	assert(modifiers.tokens.count == expected_modifier_spellings.count);
+	for token: modifiers.tokens {
+		assert(token.original_text == expected_modifier_spellings[it_index]);
+		assert(slice(modifier_source, token.byte_start, token.byte_end - token.byte_start) == token.original_text);
+	}
+
+	assert(modifiers.tokens[1].type == #char "!");
+	assert(modifiers.tokens[15].type == .BITWISE_AND);
+	assert(modifiers.tokens[18].type == .BITWISE_AND);
+	assert(modifiers.tokens[19].type == #char "*");
+	assert(modifiers.tokens[21].type == #char "-");
+	assert(modifiers.tokens[22].type == .NUMBER);
+	assert(modifiers.tokens[23].type == #char "+");
+	assert(modifiers.tokens[24].type == .NUMBER);
+	assert(Extended.reconstruct_source(*modifiers) == modifier_source);
+
+	suffix_source :: "mov.8 mov.64 popcnt?BITS popcnt?T";
+	suffixes := Extended.materialise_tokens(suffix_source);
+	expected_suffix_types := Extended.Token_Type.[
+		.IDENT, .NUMBER,
+		.IDENT, .NUMBER,
+		.IDENT, #char "?", .IDENT,
+		.IDENT, #char "?", .IDENT,
+		.END_OF_INPUT,
+	];
+	expected_suffix_spellings := string.[
+		"mov", ".8",
+		"mov", ".64",
+		"popcnt", "?", "BITS",
+		"popcnt", "?", "T",
+		"",
+	];
+
+	assert(suffixes.tokens.count == expected_suffix_types.count);
+	for token: suffixes.tokens {
+		assert(token.type == expected_suffix_types[it_index]);
+		assert(token.original_text == expected_suffix_spellings[it_index]);
+	}
+
+	assert(Extended.reconstruct_source(*suffixes) == suffix_source);
+
+	ordinary_source :: "object.member value?T";
+	ordinary := Extended.materialise_tokens(ordinary_source);
+	expected_ordinary_types := Extended.Token_Type.[
+		.IDENT, #char ".", .IDENT,
+		.IDENT, #char "?", .IDENT,
+		.END_OF_INPUT,
+	];
+	assert(ordinary.tokens.count == expected_ordinary_types.count);
+	for token: ordinary.tokens {
+		assert(token.type == expected_ordinary_types[it_index]);
+	}
+
+	assert(ordinary.tokens[1].original_text == ".");
+	assert(ordinary.tokens[4].original_text == "?");
+	assert(Extended.reconstruct_source(*ordinary) == ordinary_source);
 }
 
 test_trivia_round_trip :: () {
@@ -199,6 +304,12 @@ test_recovery_synchronization :: () {
 	assert(expression_span.first == xx 1);
 	assert(expression_span.one_past_last == xx 3);
 	assert(Extended.parser_peek(*parser).type == #char ";");
+
+	nested_parsed := Extended.materialise_tokens("bad(inner; still_inner); next");
+	nested_parser := Extended.Parser.{parsed=*nested_parsed};
+	Extended.parser_synchronise(*nested_parser, .EXPRESSION);
+	assert(nested_parser.cursor == 6);
+	assert(Extended.parser_peek(*nested_parser).type == #char ";");
 
 	guard := Extended.parser_progress_guard(*parser);
 	assert(Extended.parser_ensure_progress(*parser, guard));
@@ -293,6 +404,53 @@ test_node_token_spans :: () {
 	assert(ident.one_past_last_token == xx 1);
 	assert(block.statements[0].first_token == xx 0);
 	assert(block.statements[0].one_past_last_token == xx 3);
+}
+
+test_assembly_node_model :: () {
+	unknown_mnemonic: Extended.Parser_Ident;
+	unknown_mnemonic.name = "future_instruction";
+	unknown_register_class: Extended.Parser_Ident;
+	unknown_register_class.name = "future_register_class";
+	register_name: Extended.Parser_Ident;
+	register_name.name = "destination";
+
+	pinning: Extended.Parser_Asm_Register_Pinning;
+	pinning.source.span = .{first=xx 1, one_past_last=xx 2};
+	pinning.target.span = .{first=xx 4, one_past_last=xx 5};
+
+	declaration: Extended.Parser_Asm_Register_Declaration;
+	declaration.name = *register_name;
+	declaration.register_class = *unknown_register_class;
+	declaration.pinning = *pinning;
+
+	memory: Extended.Parser_Asm_Memory_Operand;
+	memory.base.span = .{first=xx 7, one_past_last=xx 8};
+	memory.index.span = .{first=xx 9, one_past_last=xx 10};
+	memory.scale.span = .{first=xx 11, one_past_last=xx 12};
+	memory.displacement.span = .{first=xx 13, one_past_last=xx 14};
+
+	modifier: Extended.Parser_Asm_Operand_Modifier;
+	modifier.kind = .AMPERSAND_STAR;
+	modifier.span = .{first=xx 15, one_past_last=xx 18};
+
+	operand: Extended.Parser_Asm_Operand;
+	operand.kind = .MEMORY;
+	operand.memory = *memory;
+	operand.modifiers = (*Extended.Parser_Asm_Operand_Modifier).[*modifier];
+
+	instruction: Extended.Parser_Asm_Instruction;
+	instruction.mnemonic = *unknown_mnemonic;
+	instruction.operands = (*Extended.Parser_Asm_Operand).[*operand];
+
+	statement: Extended.Parser_Asm_Statement;
+	statement.kind = .INSTRUCTION;
+	statement.instruction = *instruction;
+
+	assert(statement.instruction.mnemonic.name == "future_instruction");
+	assert(declaration.register_class.name == "future_register_class");
+	assert(declaration.pinning.target.span.first == xx 4);
+	assert(statement.instruction.operands[0].memory.scale.span.first == xx 11);
+	assert(statement.instruction.operands[0].modifiers[0].kind == .AMPERSAND_STAR);
 }
 
 test_identifier_expression :: () {
@@ -689,6 +847,16 @@ test_expression_directives :: () {
 	assert((typed_code.root.(*Extended.Parser_Directive_Code).code_flags & .TYPED) != 0);
 	block_code := Extended.parse_expression("#code { value := 1; use(value); }");
 	assert(block_code.root.(*Extended.Parser_Directive_Code).expression.(*Extended.Parser_Block).statements.count == 2);
+	declaration_code := Extended.parse_expression("#code value: s64 = 1");
+	assert(declaration_code.status == .COMPLETE);
+	declaration_payload := declaration_code.root.(*Extended.Parser_Directive_Code).expression.(*Extended.Parser_Declaration);
+	assert(declaration_payload.name == "value");
+	assert(declaration_payload.type_inst.type_valued_expression.(*Extended.Parser_Ident).name == "s64");
+	assert(declaration_payload.expression.(*Extended.Parser_Literal)._u64 == 1);
+	constant_code := Extended.parse_expression("#code VALUE :: 1");
+	constant_payload := constant_code.root.(*Extended.Parser_Directive_Code).expression.(*Extended.Parser_Declaration);
+	assert((constant_payload.flags & .IS_CONSTANT) != 0);
+	assert(constant_payload.name == "VALUE");
 
 	run := Extended.parse_expression("#run,stallable compute()");
 	run_node := run.root.(*Extended.Parser_Directive_Run);
@@ -700,6 +868,15 @@ test_expression_directives :: () {
 	assert((block_run_node.flags & .STALLABLE) != 0);
 	assert((block_run_node.flags & .HAS_IMPLICIT_RETURN_TYPES) == 0);
 	assert(block_run_node.expression.(*Extended.Parser_Block).statements.count == 2);
+	host_run := Extended.parse_expression("#run,host compute()");
+	host_run_node := host_run.root.(*Extended.Parser_Directive_Run);
+	assert((host_run_node.flags & xx 0x10) != 0);
+	assert((host_run_node.flags & .HAS_IMPLICIT_RETURN_TYPES) != 0);
+	host_block_run := Extended.parse_expression("#run,host { compute(); }");
+	host_block_run_node := host_block_run.root.(*Extended.Parser_Directive_Run);
+	assert((host_block_run_node.flags & xx 0x10) != 0);
+	assert((host_block_run_node.flags & .HAS_IMPLICIT_RETURN_TYPES) == 0);
+	assert(host_block_run_node.expression.(*Extended.Parser_Block).statements.count == 1);
 
 	insert := Extended.parse_expression("#insert generated_code");
 	assert(insert.root.(*Extended.Parser_Directive_Insert).expression.(*Extended.Parser_Ident).name == "generated_code");
@@ -1173,6 +1350,19 @@ test_loop_and_scoped_statements :: () {
 	pointer_for := Extended.parse_block("{ for * values process(it); }").root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert((pointer_for.for_flags & .POINTER) != 0);
 	assert(pointer_for.want_pointer_expression == null);
+	named_expansion := Extended.parse_block("{ for :utf8_iter value, index: text process(value); }").root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
+	assert(named_expansion.want_replacement_for_expansion.(*Extended.Parser_Ident).name == "utf8_iter");
+	assert(named_expansion.ident_it.name == "value");
+	assert(named_expansion.ident_it_index.name == "index");
+	assert(named_expansion.iteration_expression.(*Extended.Parser_Ident).name == "text");
+	combined_flags := Extended.parse_block("{ for < * :utf8_iter value, index: text process(value); }").root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
+	assert((combined_flags.for_flags & .REVERSE) != 0);
+	assert((combined_flags.for_flags & .POINTER) != 0);
+	assert(combined_flags.want_replacement_for_expansion.(*Extended.Parser_Ident).name == "utf8_iter");
+	compact_flags := Extended.parse_block("{ for <* :utf8_iter text process(it); }").root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
+	assert((compact_flags.for_flags & (.REVERSE | .POINTER)) == (.REVERSE | .POINTER));
+	assert(compact_flags.ident_it == null);
+	assert(compact_flags.ident_it_index == null);
 
 	using_expression := block.statements[3].(*Extended.Parser_Using);
 	assert(using_expression.expression.(*Extended.Parser_Ident).name == "state");
@@ -1230,6 +1420,14 @@ test_conditional_statements :: () {
 	assert(default_case.condition == null);
 	assert(default_case.owning_if == switch_node);
 
+	empty_default := Extended.parse_block("{ if value == { case 1; return; case; } }");
+	assert(empty_default.status == .COMPLETE);
+	assert(empty_default.synthetic_tokens.count == 0);
+	empty_default_cases := empty_default.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block.statements;
+	assert(empty_default_cases.count == 2);
+	assert(empty_default_cases[1].(*Extended.Parser_Case).condition == null);
+	assert(empty_default_cases[1].(*Extended.Parser_Case).then_block.statements.count == 0);
+
 	unmatched_parenthesis := Extended.materialise_tokens("value) == {");
 	unmatched_parenthesis_parser := Extended.Parser.{parsed=*unmatched_parenthesis};
 	assert(!Extended.has_switch_case_block(*unmatched_parenthesis_parser));
@@ -1262,6 +1460,13 @@ test_static_if_directives :: () {
 	member_if := static_member.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements[0].(*Extended.Parser_If);
 	assert((member_if.if_flags & .IS_STATIC) != 0);
 	assert(member_if.then_block.block_type == .DATA_DECLARATIONS);
+
+	static_empty_default := Extended.parse_block("{ #if OS == { case .WINDOWS; return; case; } }");
+	assert(static_empty_default.status == .COMPLETE);
+	assert(static_empty_default.synthetic_tokens.count == 0);
+	static_cases := static_empty_default.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block.statements;
+	assert(static_cases.count == 2);
+	assert(static_cases[1].(*Extended.Parser_Case).then_block.statements.count == 0);
 }
 
 test_preserved_directive_forms :: () {
@@ -1281,6 +1486,17 @@ test_preserved_directive_forms :: () {
 		assert((using_node.expression.(*Extended.Parser_Declaration).flags & .IS_MARKED_AS_AS) != 0);
 	}
 
+	using_declarations := Extended.parse_file("using Global: State;\nContainer :: struct { using local: State; using #as base: Base; }");
+	assert(using_declarations.status == .COMPLETE);
+	file_statements := using_declarations.root.(*Extended.Parser_Block).statements;
+	assert(file_statements[0].(*Extended.Parser_Using).expression.(*Extended.Parser_Declaration).name == "Global");
+	container_members := file_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements;
+	assert(container_members.count == 2);
+	assert(container_members[0].(*Extended.Parser_Using).expression.(*Extended.Parser_Declaration).name == "local");
+	suffix_as := container_members[1].(*Extended.Parser_Using).expression.(*Extended.Parser_Declaration);
+	assert(suffix_as.name == "base");
+	assert((suffix_as.flags & .IS_MARKED_AS_AS) != 0);
+
 	asm_source :: "{ #asm AVX, AVX2 { mov apple:, 10; nested { ignored; } } after(); }";
 	assembly := Extended.parse_block(asm_source);
 	assert(assembly.status == .COMPLETE);
@@ -1290,12 +1506,18 @@ test_preserved_directive_forms :: () {
 	assert(asm_node.feature_names.count == 2);
 	assert(asm_node.feature_names[0] == "AVX");
 	assert(asm_node.feature_names[1] == "AVX2");
+	assert(asm_node.statements.count == 2);
+	assert(asm_node.statements[0].kind == .UNPARSED);
+	assert(Extended.token_at(*assembly, asm_node.statements[0].span.first).original_text == "mov");
+	assert(Extended.token_at(*assembly, asm_node.statements[1].span.first).original_text == "nested");
 	assert(asm_node.body_span.one_past_last > asm_node.body_span.first);
 	assert(Extended.reconstruct_source(*assembly) == asm_source);
 
 	truncated_asm := Extended.parse_block("{ #asm { mov value:, 1;");
 	assert(truncated_asm.status == .INCOMPLETE);
-	assert(truncated_asm.root.(*Extended.Parser_Block).statements[0].kind == .ASM);
+	truncated_asm_node := truncated_asm.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm);
+	assert(truncated_asm_node.statements.count == 1);
+	assert(truncated_asm_node.statements[0].span.one_past_last == truncated_asm_node.body_span.one_past_last);
 }
 
 test_statement_recovery :: () {
@@ -1319,6 +1541,128 @@ test_statement_recovery :: () {
 	assert(bad_expression.status == .RECOVERED);
 	assert(bad_expression.root.(*Extended.Parser_Block).statements.count == 2);
 	assert(bad_expression.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).name == "next");
+
+	nested_recovery := Extended.parse_file("outer :: () { #unknown { leaked := 1; } after := 2; }\nfinal :: 3;");
+	assert(nested_recovery.status == .RECOVERED);
+	nested_root := nested_recovery.root.(*Extended.Parser_Block);
+	assert(nested_root.statements.count == 2);
+	assert(nested_root.statements[0].(*Extended.Parser_Declaration).name == "outer");
+	assert(nested_root.statements[1].(*Extended.Parser_Declaration).name == "final");
+	outer_body := nested_root.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+	assert(outer_body.statements.count == 1);
+	assert(outer_body.statements[0].(*Extended.Parser_Declaration).name == "after");
+
+	declaration_recovery := Extended.parse_file("broken :: () #unknown { leaked := 1; }\nafter :: 2;");
+	assert(declaration_recovery.status == .RECOVERED);
+	declaration_root := declaration_recovery.root.(*Extended.Parser_Block);
+	assert(declaration_root.statements.count == 2);
+	assert(declaration_root.statements[0].(*Extended.Parser_Declaration).name == "broken");
+	assert(declaration_root.statements[1].(*Extended.Parser_Declaration).name == "after");
+}
+
+test_section_13_recovery :: () {
+	truncated_procedure := Extended.parse_file("broken :: () { value :=");
+	assert(truncated_procedure.status == .INCOMPLETE);
+	assert(truncated_procedure.diagnostics.count > 0);
+	procedure_declaration := truncated_procedure.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration);
+	assert(procedure_declaration.name == "broken");
+	procedure_body := procedure_declaration.expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+	assert(procedure_body.statements.count == 1);
+
+	truncated_pointer := Extended.parse_declaration("value: *");
+	assert(truncated_pointer.status == .INCOMPLETE);
+	assert(truncated_pointer.diagnostics.count > 0);
+	assert(truncated_pointer.root.(*Extended.Parser_Declaration).name == "value");
+
+	truncated_cast := Extended.parse_declaration("value := cast(*u8)");
+	assert(truncated_cast.status == .INCOMPLETE);
+	assert(truncated_cast.diagnostics.count > 0);
+	assert(truncated_cast.root.(*Extended.Parser_Declaration).name == "value");
+
+	truncated_parameters := Extended.parse_declaration("procedure :: (x: s64 = 1, y:");
+	assert(truncated_parameters.status != .COMPLETE && truncated_parameters.status != .FATAL);
+	assert(truncated_parameters.diagnostics.count > 0);
+	parameter_header := truncated_parameters.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
+	assert(parameter_header.arguments.count >= 1);
+
+	truncated_static_if := Extended.parse_block("{ #if true { enabled := 1;");
+	assert(truncated_static_if.status == .INCOMPLETE);
+	static_if := truncated_static_if.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
+	assert((static_if.if_flags & .IS_STATIC) != 0);
+	assert(static_if.then_block.statements.count == 1);
+
+	truncated_placeholder := Extended.parse_file("#placeholder");
+	assert(truncated_placeholder.status == .INCOMPLETE);
+	assert(truncated_placeholder.root.(*Extended.Parser_Block).statements[0].kind == .PLACEHOLDER);
+
+	truncated_as_using := Extended.parse_declaration("#as using base:");
+	assert(truncated_as_using.status == .INCOMPLETE);
+	as_declaration := truncated_as_using.root.(*Extended.Parser_Using).expression.(*Extended.Parser_Declaration);
+	assert(as_declaration.name == "base");
+	assert((as_declaration.flags & .IS_MARKED_AS_AS) != 0);
+
+	truncated_char := Extended.parse_expression("#char");
+	assert(truncated_char.status == .INCOMPLETE);
+	assert(truncated_char.root.kind == .LITERAL);
+	malformed_this := Extended.parse_expression("#this extra");
+	assert(malformed_this.status == .RECOVERED);
+	assert(malformed_this.root.kind == .DIRECTIVE_THIS);
+	malformed_filepath := Extended.parse_expression("#filepath extra", "fixture.jai");
+	assert(malformed_filepath.status == .RECOVERED);
+	assert(malformed_filepath.root.kind == .LITERAL);
+	malformed_caller_code := Extended.parse_expression("#caller_code extra");
+	assert(malformed_caller_code.status == .RECOVERED);
+	assert(malformed_caller_code.root.kind == .DIRECTIVE_CODE);
+
+	truncated_member_assignment := Extended.parse_declaration("Defaulted :: struct { w: s64; w =");
+	assert(truncated_member_assignment.status == .INCOMPLETE);
+	defaulted_block := truncated_member_assignment.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block;
+	assert(defaulted_block.statements.count >= 1);
+	assert(defaulted_block.statements[0].(*Extended.Parser_Declaration).name == "w");
+
+	truncated_operator := Extended.parse_declaration("operator + :: (left: s64,");
+	assert(truncated_operator.status != .COMPLETE && truncated_operator.status != .FATAL);
+	operator_declaration := truncated_operator.root.(*Extended.Parser_Declaration);
+	assert(operator_declaration.name == "+");
+	assert(truncated_operator.diagnostics.count > 0);
+
+	truncated_using := Extended.parse_declaration("using local:");
+	assert(truncated_using.status == .INCOMPLETE);
+	using_declaration := truncated_using.root.(*Extended.Parser_Using).expression.(*Extended.Parser_Declaration);
+	assert(using_declaration.name == "local");
+
+	truncated_code := Extended.parse_expression("#code value: s64 =");
+	assert(truncated_code.status == .INCOMPLETE);
+	code_directive := truncated_code.root.(*Extended.Parser_Directive_Code);
+	assert(code_directive.expression.kind == .DECLARATION);
+	assert(code_directive.expression.(*Extended.Parser_Declaration).name == "value");
+
+	truncated_run := Extended.parse_expression("#run,host { compute();");
+	assert(truncated_run.status == .INCOMPLETE);
+	run_directive := truncated_run.root.(*Extended.Parser_Directive_Run);
+	assert((run_directive.flags & xx 0x10) != 0);
+	assert(run_directive.expression.kind == .BLOCK);
+	assert(run_directive.expression.(*Extended.Parser_Block).statements.count == 1);
+
+	truncated_insert := Extended.parse_expression("#insert,scope(");
+	assert(truncated_insert.status == .INCOMPLETE);
+	assert(truncated_insert.root.kind == .DIRECTIVE_INSERT);
+
+	truncated_for := Extended.parse_block("{ for <* :utf8_iter text {");
+	assert(truncated_for.status == .INCOMPLETE);
+	for_node := truncated_for.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
+	assert((for_node.for_flags & (.REVERSE | .POINTER)) == (.REVERSE | .POINTER));
+	assert(for_node.want_replacement_for_expansion.(*Extended.Parser_Ident).name == "utf8_iter");
+	assert(for_node.iteration_expression.(*Extended.Parser_Ident).name == "text");
+	assert(for_node.block != null);
+
+	truncated_default_case := Extended.parse_block("{ if value == { case 1; return; case; value :=");
+	assert(truncated_default_case.status == .INCOMPLETE);
+	case_if := truncated_default_case.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
+	assert(case_if.then_block.statements.count == 2);
+	default_case := case_if.then_block.statements[1].(*Extended.Parser_Case);
+	assert(default_case.condition == null);
+	assert(default_case.then_block.statements.count == 1);
 }
 
 assert_literal_matches :: (source: string, expected: *Code_Node) {

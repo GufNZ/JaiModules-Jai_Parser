@@ -70,6 +70,10 @@ Empty input still returns a non-null, zero-width file block.
 
 `examples/parse_how_to.jai` is the initial compatibility corpus.
 It parses every `.jai` file under `how_to`, asserts a non-fatal file root and exact trivia round trip, and reports files that currently require recovery so unsupported syntax remains visible as parser coverage expands.
+Its summary aggregates diagnostic kinds, expected and actual tokens, and recovery actions, followed by the structured first diagnostic for each affected file.
+ASCII-backed token kinds are rendered as source spellings and absent token fields as `<none>`.
+The checked-in corpus baseline records relative filenames and diagnostic counts. Each run reports newly complete or newly recovering files, per-file improvements and regressions, and removed and added diagnostics separately.
+The suggested next grammar candidate groups only the first diagnostic from each recovering file, avoiding recovery-cascade counts when prioritising work.
 
 ## Expression Parsing
 
@@ -106,8 +110,8 @@ Context-generated flags such as `IS_GLOBAL` are intentionally excluded from synt
 `parse_block(source)` parses imperative brace blocks, while `parse_declaration_block(source)` restricts a brace block to declarations and marks it as `DATA_DECLARATIONS`.
 Explicit braces carry the compiler-compatible `IS_PARENTHESIZED` node flag; single-statement control-flow bodies are represented by unparenthesised parser-owned blocks.
 
-Supported statements include expressions, declarations, multi-value returns, `while`, collection and range `for`, `if`, expression-form `ifx`, switch-style `case`, `defer`, `using`, `push_context`, `break`, `continue`, and `remove`.
-This includes named loop conditions and iterators, reverse and pointer iteration, `#complete`, `#through`, backticked return/defer, and `push_context,defer_pop` forms.
+Supported statements include expressions, declarations, multi-value returns, `while`, collection and range `for`, `if`, expression-form `ifx`, switch-style `case` (including a terminal bare `case;`), `defer`, `using`, `push_context`, `break`, `continue`, and `remove`.
+This includes named loop conditions and iterators, named for-expansion selectors, independently combined literal reverse and pointer iteration flags, `#complete`, `#through`, backticked return/defer, and `push_context,defer_pop` forms.
 
 Blocks retain parent and owning-statement links.
 Statement recovery inserts missing semicolons without consuming the next statement, synchronises at statement starts and closing braces, and synthesises a closing brace for truncated input.
@@ -123,6 +127,9 @@ Quick procedures support zero, one, or multiple inferred parameters and both exp
 
 `Parser_Struct` represents both structs and unions, with `.UNION` in `textual_flags`.
 Parameterized aggregates retain their parameter declarations in a `STRUCT_ARGUMENTS` block, while fields and constants remain in the `DATA_DECLARATIONS` body.
+Declaration-form `using` fields retain the wrapped struct declaration whose subfields become accessible in the containing scope.
+Both `#as using field: Struct_Type` and `using #as field: Struct_Type` mark that declaration with `IS_MARKED_AS_AS`, preserving the field selected for implicit casts to and from the containing aggregate.
+Name-filter modifiers such as `using,except` and `using,only` are not yet parsed.
 Aggregate field default assignments such as `w: float; w = 1;` remain ordered binary-expression statements, and the assignment identifier links back to its matching parser-owned field declaration.
 `Parser_Enum` represents enums and enum flags, including underlying types, `#complete`, `#specified`, explicit values, and bare members.
 Interface constraints use the compiler's `$T/interface Constraint` type-instantiation form and set `.INTERFACE`.
@@ -141,10 +148,10 @@ Source parsing covers:
 - `#caller_code` as `Parser_Directive_Code` with the compiler's unnamed caller-code flag and a null expression.  It is accepted as a primary expression, so legal macro default arguments retain the compiler AST shape.
 - `#if` in imperative, file, and aggregate declaration contexts, represented by `Parser_If` with `IS_STATIC`; its branch blocks retain the surrounding block mode.
 - `#placeholder Name` file declarations, represented by `Parser_Placeholder` with the source-spelled name.  This is distinct from the `---` uninitialised-value placeholder.
-- Prefix `#as using name: Type` aggregate fields, represented by `Parser_Using` around a declaration marked `IS_MARKED_AS_AS`.  The `using #as` spelling remains part of the broader using-declaration work.
-- `#asm` statement blocks with optional feature names.  `Parser_Asm` preserves the feature list and balanced body token span without interpreting assembly instructions.
-- `#code`, `#code,null`, and `#code,typed`, with expression or block payloads.
-- `#run` and `#run,stallable`, with expression or block payloads.
+- Prefix `#as using name: Type` aggregate fields and the equivalent `using #as name: Type` spelling, represented by `Parser_Using` around a declaration marked `IS_MARKED_AS_AS` for implicit casting.
+- `#asm` statement blocks with optional feature names.  `Parser_Asm` stores parser-owned feature names, a balanced body token span, and ordered `Parser_Asm_Statement` nodes without overlaying the compiler's opaque payload fields.  Parser-owned instruction, register declaration, register pinning, memory operand, value, and source-spelled modifier records preserve exact token spans; mnemonics and register classes are open-ended `Parser_Ident` nodes.  The ordinary lexer stream is lossless for the assembly grammar: `===` is one token; fixed mnemonic suffixes such as `.8` and `.64` are leading-dot `NUMBER` tokens; polymorphic suffixes such as `?BITS` and `?T` are `?` plus `IDENT`; signs, `!`, `&`, `&*`, brackets, and declaration colons remain ordinary tokens; comments remain trivia.  No contextual assembly tokens are introduced, so ordinary member access and query tokenisation remain unchanged.  Statements remain `UNPARSED` until the assembly grammar is implemented.
+- `#code`, `#code,null`, and `#code,typed`, preserving expression, declaration, and block payload node kinds.
+- `#run`, `#run,stallable`, and `#run,host`, with expression or block payloads.  Expression payloads set `HAS_IMPLICIT_RETURN_TYPES`; block payloads do not.  `host` uses the compiler's unnamed `0x10` run flag and is mutually exclusive with `stallable`.
 - `#insert`, optional scope and loop-control replacements, and `-> Return_Type { ... }` implicit-run bodies.
 - `#import` with `file`, `dir`, or `string`, plus module and program parameter calls.
 - `#library` with `system`, `no_static_library`, and `link_always`.
@@ -182,6 +189,10 @@ Its `related_information` slice can contain zero or more additional span/message
 Recovery loops use `parser_progress_guard` and `parser_ensure_progress` so a failed parse cannot repeatedly inspect the same non-EOF token.
 `parser_synchronize` defines restart boundaries for expression, statement, declaration, and block contexts.
 Synchronisation stops before the boundary token so its enclosing parser remains responsible for consuming delimiters such as `,`, `;`, `)`, `]`, and `}`.
+Nested parentheses, brackets, and braces are traversed before testing their internal tokens as restart boundaries.
+Completing a recovered braced region returns control to the owning expression, statement, or declaration parser, preventing its contents from being reinterpreted in an enclosing scope.
+
+Focused recovery fixtures cover malformed or truncated forms of every section 13.1 construct and assert nonfatal status, retained outer nodes and source flags, stable child arrays, and forward progress through following declarations.
 
 ## Differential Tests
 
