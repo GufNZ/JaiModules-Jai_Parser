@@ -114,11 +114,16 @@ Materialised tokens can also be navigated with `token_at`, `previous_token`, and
 `parse_declaration(source)` parses typed, inferred, constant, uninitialised, and compound declarations.
 Compound declarations preserve their left-hand names as parser-owned comma-separated arguments and represent multiple initialiser expressions with a `Parser_Comma_Separated_Arguments` node.
 In statement blocks, `out1, out2 = hello(1)` also produces a `Parser_Compound_Declaration`, matching the compiler's AST: it has two names and one right-hand expression, unlike comma-separated declaration initialisers.
+Comma-separated assignment targets may also be indexed or member expressions, including compound operators such as `+=`; these use the same compiler-matching node shape.
+Multiple right-hand expressions are retained as comma-separated arguments.
 
 Supported types include named types, pointers, fixed arrays, array views, resizable arrays, procedure types, polymorphic variables with restrictions, and `#type` with `distinct` or `isa`.
 Procedure types accept unnamed parameter types (including nested procedure, pointer and array types), empty `-> ()` return lists, and the source-spelled `#Context` type directive.
 Procedure headers retain the source-spelled `#dump` modifier as `DEBUG_DUMP`.  The compiler emits a procedure's bytecode when compiling it; the parser only records the syntax flag.
 Declaration metadata includes `$` and `$$` auto-bake flags, backticked scope modifiers, `#align` expressions, placeholder initialisation flags, and trailing notes.
+Source-spelled `#no_reset` is a declaration attribute, not a scope directive: the parser records it as the compiler-matching `NO_RESET` flag.
+For global variables, it retains compile-time values at runtime.
+Truncated prefixes report an incomplete parse.
 
 Declaration and type normalisers compare parser nodes with compiler nodes inside intercepted child workspaces.
 Context-generated flags such as `IS_GLOBAL` are intentionally excluded from syntax comparisons.
@@ -129,6 +134,12 @@ Context-generated flags such as `IS_GLOBAL` are intentionally excluded from synt
 Explicit braces carry the compiler-compatible `IS_PARENTHESIZED` node flag; single-statement control-flow bodies are represented by unparenthesised parser-owned blocks.
 
 Supported statements include expressions, declarations, multi-value returns, `while`, collection and range `for`, `if`, expression-form `ifx`, switch-style `case` (including a terminal bare `case;`), `defer`, `using`, `push_context`, `break`, `continue`, and `remove`.
+Value-form `ifx` may omit its `else` branch; its parsed node retains a null `else_block`, so the compiler can supply the result type's default value.
+It may also omit the `then` branch when `else` follows the condition immediately; the parsed node then retains a null `then_block`.
+Both value branches may be omitted when the condition ends at an expression boundary; the parsed `ifx` retains null `then_block` and `else_block` nodes.
+Expression-form `#ifx` uses the same value branches and retains both `IS_STATIC` and `IS_IFX` flags.
+Statement-leading `#this(...)` calls use expression parsing, so their postfix arguments are retained, including inside block-bodied quick lambdas.
+Call-level `inline` and `no_inline` prefixes set `INLINE_YES` and `INLINE_NO` on procedure-call nodes, including calls inside static branches.
 Parenthesised `if` and `while` conditions remain expressions before a braced body, including comparisons, modulo and logical operations, and bare pointer truth tests; typed procedure headers retain their own syntax.
 Declarations initialised by `ifx` with braced `then` and `else` value branches can omit the trailing semicolon before the next statement; an explicit semicolon is also accepted.
 This includes named loop conditions and iterators, named for-expansion selectors, independently combined literal reverse and pointer iteration flags, `#complete`, `#through`, backticked return/defer, and `push_context,defer_pop` forms.
@@ -177,7 +188,7 @@ Source parsing covers:
 - `#code`, `#code,null`, and `#code,typed`, preserving expression, declaration, and block payload node kinds.
 - `#run`, `#run,stallable`, and `#run,host`, with expression or block payloads, including `-> Return_Type { ... }` bodies.  Expression payloads set `HAS_IMPLICIT_RETURN_TYPES`; block payloads do not.  Typed blocks retain their procedure header and return declaration.  A block-form `#run` ends at its closing brace in a statement or declaration; a semicolon is optional there but remains required for expression-form `#run` statements.  `host` uses the compiler's unnamed `0x10` run flag and is mutually exclusive with `stallable`.
 - `#assert condition` with an optional quoted message, lowered to `Parser_Directive_Run` with `ASSERTION` and `HAS_IMPLICIT_RETURN_TYPES`; the condition remains its expression and the message is retained in `assertion_string`.  This works in procedures, static branches, expansions, and module scope without executing assertions in the parser.
-- `#insert`, optional scope and loop-control replacements, and `-> Return_Type { ... }` implicit-run bodies.  An empty `scope()` retains a null scope redirection; `scope(expression)` retains the expression.
+- `#insert`, optional scope and loop-control replacements, and `-> Return_Type { ... }` implicit-run bodies.  An empty `scope()` retains a null scope redirection; `scope(expression)` retains the expression.  Block-bodied short-form inserts terminate at the closing brace without a required semicolon; expression-form inserts still require one as statements.
 - `#import` with `file`, `dir`, or `string`, plus module and program parameter calls.  `#import,string` accepts a quoted string or a `#string` here-string body; a standalone import requires a following semicolon, including after a here-string delimiter.
 - `#library` with `system`, `no_static_library`, and `link_always`.
 - `#load`, `#bytes`, `#procedure_name`, `#exists`, location and caller-location queries, and poke-name forms.

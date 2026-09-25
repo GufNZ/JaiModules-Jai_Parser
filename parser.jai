@@ -577,6 +577,12 @@ parse_file_node :: (parser: *Parser) -> *Parser_Node {
 			array_add(*statements, declaration);
 			finish_statement(parser, declaration);
 		} else {
+			if parser_peek(parser).type == .END_OF_INPUT {
+				add_expected_expression(parser);
+				break;
+			}
+
+
 			add_unexpected_token(parser);
 			parser_synchronise(parser, .DECLARATION);
 		}
@@ -661,65 +667,69 @@ finish_statement :: (parser: *Parser, statement: *Parser_Node) {
 }
 
 statement_requires_semicolon :: (statement: *Parser_Node) -> bool {
-	if statement.kind == .IF {
-		return ((statement.(*Parser_If).if_flags & .IS_IFX) != 0);
-	}
+	if statement.kind == {
+		case .IF;
+			return ((statement.(*Parser_If).if_flags & .IS_IFX) != 0);
 
+		case .DIRECTIVE_RUN;
+			return statement.(*Parser_Directive_Run).expression == null
+				|| statement.(*Parser_Directive_Run).expression.kind != .BLOCK;
 
-	if statement.kind == .DIRECTIVE_RUN {
-		return statement.(*Parser_Directive_Run).expression == null
-			|| statement.(*Parser_Directive_Run).expression.kind != .BLOCK;
-	}
-
-
-	if statement.kind == .USING {
-		expression := statement.(*Parser_Using).expression;
-		if expression && expression.kind == .ENUM {
-			return false;
-		}
-	}
-
-
-	if statement.kind == .DECLARATION {
-		expression := statement.(*Parser_Declaration).expression;
-		if expression {
-			if expression.kind == .IF {
-				conditional := expression.(*Parser_If);
-				if (conditional.if_flags & .IS_IFX) && conditional.then_block && conditional.else_block
-					&& (conditional.then_block.node_flags & .IS_PARENTHESIZED)
-					&& (conditional.else_block.node_flags & .IS_PARENTHESIZED
-				) {
-					return false;
-				}
-			}
-
-
-			if expression.kind == .LITERAL && (expression.(*Parser_Literal).value_flags & .HERE_STRING) {
-				return false;
-			}
-
-
-			if expression.kind == .DIRECTIVE_RUN {
+		case .DIRECTIVE_INSERT;
+			expression := statement.(*Parser_Directive_Insert).expression;
+			if expression && expression.kind == .DIRECTIVE_RUN {
 				run := expression.(*Parser_Directive_Run);
 				if run.procedure && run.expression && run.expression.kind == .BLOCK {
 					return false;
 				}
 			}
 
-
-			if expression.kind == .STRUCT || expression.kind == .ENUM {
+		case .USING;
+			expression := statement.(*Parser_Using).expression;
+			if expression && expression.kind == .ENUM {
 				return false;
 			}
 
+		case .DECLARATION;
+			expression := statement.(*Parser_Declaration).expression;
+			if expression {
+				if expression.kind == .IF {
+					conditional := expression.(*Parser_If);
+					if (conditional.if_flags & .IS_IFX) && conditional.then_block && conditional.else_block
+						&& (conditional.then_block.node_flags & .IS_PARENTHESIZED)
+						&& (conditional.else_block.node_flags & .IS_PARENTHESIZED
+					) {
+						return false;
+					}
+				}
 
-			if expression.kind == .PROCEDURE_HEADER {
-				header := expression.(*Parser_Procedure_Header);
-				if header.body_or_null {
-					return (header.procedure_flags & .QUICK) != 0
-						&& (header.procedure_flags & .QUICK_IN_BLOCK_FORM) == 0;
+
+				if expression.kind == .LITERAL && (expression.(*Parser_Literal).value_flags & .HERE_STRING) {
+					return false;
+				}
+
+
+				if expression.kind == .DIRECTIVE_RUN {
+					run := expression.(*Parser_Directive_Run);
+					if run.procedure && run.expression && run.expression.kind == .BLOCK {
+						return false;
+					}
+				}
+
+
+				if expression.kind == .STRUCT || expression.kind == .ENUM {
+					return false;
+				}
+
+
+				if expression.kind == .PROCEDURE_HEADER {
+					header := expression.(*Parser_Procedure_Header);
+					if header.body_or_null {
+						return (header.procedure_flags & .QUICK) != 0
+							&& (header.procedure_flags & .QUICK_IN_BLOCK_FORM) == 0;
+					}
 				}
 			}
-		}
 	}
 
 
@@ -746,7 +756,7 @@ parse_statement :: (parser: *Parser, parent: *Parser_Block = null) -> *Parser_No
 	}
 
 
-	if token.type == #char "#" {
+	if token.type == #char "#" && !(parser_peek_if(parser, #char "#", .IDENT, #char "(") && parser_peek(parser, 1).ident_value.name == "this") {
 		directive := parse_declaration_directive(parser);
 		if directive {
 			return directive;
@@ -779,9 +789,59 @@ parse_statement :: (parser: *Parser, parent: *Parser_Block = null) -> *Parser_No
 	}
 
 
-	return ifx looks_like_declaration(parser) || looks_like_compound_reassignment(parser)
-		then parse_declaration_node(parser)
-		else parse_binary(parser);
+	if looks_like_declaration(parser) || looks_like_compound_reassignment(parser) {
+		return parse_declaration_node(parser);
+	}
+
+
+	first := parser.cursor;
+	left := parse_binary(parser);
+	if !left || parser_peek(parser).type != #char "," {
+		return left;
+	}
+
+
+	comma := parser_checkpoint(parser);
+	arguments: [..]Parser_Comma_Separated_Argument;
+	arguments.allocator = parser_node_allocator(parser.parsed);
+	array_add(*arguments, .{ node = left });
+	while parser_eat_if(parser, #char ",") {
+		argument := parse_binary(parser, 2);
+		if !argument {
+			parser_restore(parser, comma);
+			return left;
+		}
+
+
+		array_add(*arguments, .{ node = argument });
+	}
+
+	is_binary, _, precedence, _ := binary_operator_info(parser_peek(parser).type);
+	if !is_binary || precedence != 1 {
+		parser_restore(parser, comma);
+		return left;
+	}
+
+
+	arguments_node := new_parser_node(parser, Parser_Comma_Separated_Arguments);
+	arguments_node.kind = .COMMA_SEPARATED_ARGUMENTS;
+	arguments_node.arguments = arguments;
+	arguments_node.one_past_last_token = xx parser.cursor;
+	finish_node(parser, arguments_node, first);
+	parser_eat(parser);
+	right := parse_declaration_expression(parser);
+	if !right {
+		add_expected_expression(parser);
+	}
+
+	result := new_parser_node(parser, Parser_Compound_Declaration);
+	result.kind = .COMPOUND_DECLARATION;
+	result.comma_separated_assignment = arguments_node;
+	result.declaration_properties = new_parser_node(parser, Parser_Declaration);
+	result.declaration_properties.kind = .DECLARATION;
+	result.declaration_properties.expression = right;
+	finish_node(parser, result, first);
+	return result;
 }
 
 new_asm_ident :: (parser: *Parser, token_index: s64) -> *Parser_Ident {
@@ -1110,13 +1170,13 @@ parse_if_statement :: (parser: *Parser, parent: *Parser_Block, is_ifx: bool, blo
 		add_expected_expression(parser);
 	}
 
-	if parser_peek(parser).type == .KEYWORD_THEN {
-		parser_eat(parser);
-	}
+	has_then_keyword := parser_eat_if(parser, .KEYWORD_THEN);
 
-	result.then_block = ifx is_ifx
-		then parse_ifx_branch(parser, parent)
-		else parse_statement_block(parser, parent, block_type, enum_members);
+	if !is_ifx || has_then_keyword || (parser_peek(parser).type != .KEYWORD_ELSE && !is_synchronization_point(parser_peek(parser).type, .EXPRESSION)) {
+		result.then_block = ifx is_ifx
+			then parse_ifx_branch(parser, parent)
+			else parse_statement_block(parser, parent, block_type, enum_members);
+	}
 
 	if result.then_block {
 		result.then_block.owning_statement = result;
@@ -1130,8 +1190,6 @@ parse_if_statement :: (parser: *Parser, parent: *Parser_Block, is_ifx: bool, blo
 		if result.else_block {
 			result.else_block.owning_statement = result;
 		}
-	} else if is_ifx {
-		parser_expect(parser, .KEYWORD_ELSE);
 	}
 
 	finish_node(parser, result, first);
@@ -1351,6 +1409,27 @@ parse_for_statement :: (parser: *Parser, parent: *Parser_Block) -> *Parser_For {
 		}
 	}
 
+	while true {
+		if parser_eat_if(parser, .LESSEQUALS) {
+			result.want_reverse_expression = parse_prefix(parser);
+			if !result.want_reverse_expression {
+				add_expected_expression(parser);
+			}
+		} else if parser_eat_if(parser, .TIMESEQUALS) {
+			result.want_pointer_expression = parse_prefix(parser);
+			if !result.want_pointer_expression {
+				add_expected_expression(parser);
+			}
+		} else {
+			break;
+		}
+
+
+		if parser_peek(parser).type == #char "," && (parser_peek(parser, 1).type == .LESSEQUALS || parser_peek(parser, 1).type == .TIMESEQUALS) {
+			parser_eat(parser);
+		}
+	}
+
 	// Named for-expansions are only valid after the any flags have been specified.
 	if parser_eat_if(parser, #char ":") {
 		result.want_replacement_for_expansion = parse_postfix(parser);
@@ -1465,6 +1544,8 @@ parse_using_filter :: (parser: *Parser, result: *Parser_Using) {
 		result.filter_type = .EXCEPT;
 	} else if modifier.type == .IDENT && modifier.ident_value.name == "only" {
 		result.filter_type = .ONLY;
+	} else if modifier.type == .IDENT && modifier.ident_value.name == "map" {
+		result.filter_type = .MAP;
 	} else {
 		if modifier.type == .IDENT {
 			add_unexpected_token(parser);
@@ -1477,6 +1558,22 @@ parse_using_filter :: (parser: *Parser, result: *Parser_Using) {
 
 
 	parser_eat(parser);
+
+	if result.filter_type == .MAP {
+		parenthesized := parser_expect(parser, #char "(");
+		result.filter_expression = parse_binary(parser);
+		if !result.filter_expression {
+			add_expected_expression(parser);
+		}
+
+		if parenthesized && result.filter_expression {
+			result.filter_expression.node_flags |= .IS_PARENTHESIZED;
+		}
+
+		parser_expect(parser, #char ")");
+		return;
+	}
+
 
 	if parser_eat_if(parser, #char "(") {
 		list_first := parser.cursor - 1;
@@ -1689,12 +1786,28 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 	}
 
 
+	marked_no_reset := parser_peek_if(parser, #char "#", .IDENT) && parser_peek(parser, 1).ident_value.name == "no_reset";
+	if marked_no_reset {
+		parser_eat(parser, 2);
+	}
+
+
 	if parser_peek(parser).type == #char "#" {
+		if marked_no_reset {
+			add_expected_expression(parser);
+			return null;
+		}
+
+
 		return parse_declaration_directive(parser);
 	}
 
 
 	declaration_flags: type_of(Code_Declaration.flags);
+	if marked_no_reset {
+		declaration_flags |= .NO_RESET;
+	}
+
 	if parser_eat_if(parser, #char "$") {
 		declaration_flags |= .AUTO_VALUE_BAKE;
 		declaration_flags |= .AUTO_VALUE_BAKE_IS_REQUIRED;
@@ -1765,7 +1878,7 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 		result.declaration_properties.flags = declaration_flags;
 
 		if reassignment {
-			result.declaration_properties.expression = parse_binary(parser);
+			result.declaration_properties.expression = parse_declaration_expression(parser);
 			if !result.declaration_properties.expression {
 				add_expected_expression(parser);
 			}
@@ -2926,15 +3039,18 @@ parse_declaration_directive :: (parser: *Parser) -> *Parser_Node {
 
 			return result;
 
+		case "scope_module"; #through;
 		case "scope_export"; #through;
 		case "scope_file";
 			parser_eat(parser, 2);
 
 			result := new_parser_node(parser, Parser_Directive_Scope);
 			result.kind = .DIRECTIVE_SCOPE;
-			result.scope_type = ifx name == "scope_export"
-				then .EXPORT
-				else .FILE;
+			if name == {
+				case "scope_module";	result.scope_type = .INTERNAL;
+				case "scope_export";	result.scope_type = .EXPORT;
+				case "scope_file";		result.scope_type = .FILE;
+			}
 
 			finish_node(parser, result, first);
 			return result;
@@ -3756,8 +3872,19 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 		case .KEYWORD_NO_INLINE;
 			parser_eat(parser);
 			if parser_peek(parser).type != #char "(" || !looks_like_procedure_header(parser) {
-				add_expected_expression(parser);
-				return null;
+				call := parse_postfix(parser);
+				if !call || call.kind != .PROCEDURE_CALL {
+					add_expected_expression(parser);
+					return null;
+				}
+
+
+				call.(*Parser_Procedure_Call).flags |= ifx token.type == .KEYWORD_INLINE
+					then .INLINE_YES
+					else .INLINE_NO;
+
+				finish_node(parser, call, first);
+				return call;
 			}
 
 
@@ -3831,6 +3958,15 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 
 		case #char "#";
 			directive_name := parser_peek(parser, 1);
+			if directive_name.type == .KEYWORD_IFX {
+				parser_eat(parser);
+				result := parse_if_statement(parser, null, true);
+				result.if_flags |= .IS_STATIC;
+				finish_node(parser, result, first);
+				return result;
+			}
+
+
 			if directive_name.type != .IDENT				return null;
 			if directive_name.ident_value.name == "type"	return parse_type_instantiation(parser);
 			if directive_name.ident_value.name != "string"	return parse_expression_directive(parser, first, directive_name.ident_value.name);

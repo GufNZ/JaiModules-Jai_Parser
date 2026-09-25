@@ -1099,8 +1099,8 @@ assert_expression_fixture :: ($source: string, $layer := Comparison_Layer.SYNTAX
 	}
 }
 
-assert_statement_matches_code :: (source: string, expected_code: Code) {
-	parsed := Parser.parse_block(tprint("{ % }", source));
+assert_statement_matches_code :: (source: string, expected_code: Code, file_scope := false) {
+	parsed := ifx file_scope then Parser.parse_file(source) else Parser.parse_block(tprint("{ % }", source));
 	defer Parser.release_parser_tree(*parsed);
 
 	assert(parsed.status == .COMPLETE, "Parser did not complete statement fixture '%'.", source);
@@ -1229,7 +1229,9 @@ assert_file_workspace_fixture :: (source: string, expected_declaration: string) 
 
 test_file_workspace_fixtures :: () {
 	assert_file_workspace_fixture("#scope_file\nfixture_file_scope :: 1;", "fixture_file_scope");
+	assert_file_workspace_fixture("#no_reset fixture_no_reset: s64;", "fixture_no_reset");
 	assert_file_workspace_fixture("#scope_export\nfixture_export_scope :: 1;", "fixture_export_scope");
+	assert_file_workspace_fixture("#scope_module\nfixture_module_scope :: 1;", "fixture_module_scope");
 	assert_file_workspace_fixture("#add_context fixture_context_value: s64;\nfixture_add_context :: 1;", "fixture_add_context");
 	assert_file_workspace_fixture("#assert true;\nfixture_assert_scope :: 1;", "fixture_assert_scope");
 }
@@ -1289,6 +1291,69 @@ assert_declaration_workspace_fixture :: (source: string) {
 	compiler_end_intercept(workspace);
 	assert(found, "Compiler did not expose declaration fixture '%'.", source);
 }
+
+assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude_name: string) {
+	parsed := Parser.parse_block(tprint("{ % }", source));
+	defer Parser.release_parser_tree(*parsed);
+
+	assert(parsed.status == .COMPLETE, "Parser did not complete assignment fixture '%'.", source);
+	actual_block := parsed.root.(*Parser.Parser_Block);
+	assert(actual_block.statements.count == 1);
+	actual := normalize_parser_tree(actual_block.statements[0]);
+
+	workspace := compiler_create_workspace("Jai_Parser assignment fixture");
+	options := get_build_options(workspace);
+	copy_commonly_propagated_fields(get_build_options(), *options);
+	options.output_type = .NO_OUTPUT;
+	options.write_added_strings = false;
+	set_build_options(options, workspace);
+	compiler_begin_intercept(workspace);
+	add_build_string(tprint("fixture_pair :: () -> (s64, s64) { return 1, 2; }\nfixture_procedure :: () {\n%\n%\n}\n", prelude, source), workspace);
+
+	found := false;
+	while true {
+		message := compiler_wait_for_message();
+		if message.workspace != workspace {
+			continue;
+		}
+
+
+		if message.kind == {
+			case .TYPECHECKED;
+				typechecked := message.(*Message_Typechecked);
+				for wrapped: typechecked.procedure_bodies {
+					statements := wrapped.expression.block.statements;
+					if statements.count != 2 || statements[0].kind != .DECLARATION {
+						continue;
+					}
+					if statements[0].(*Code_Declaration).name != prelude_name {
+						continue;
+					}
+
+
+					expected := normalize_tree(statements[1]);
+					difference := compare_normalized_trees(actual, expected);
+					assert(!difference.differences.count, "Assignment AST mismatch for '%':\n%", source, format_structural_differences(difference));
+					found = true;
+				}
+
+			case .COMPLETE;
+				complete := message.(*Message_Complete);
+				assert(complete.error_code == .NONE, "Compiler rejected assignment fixture '%'.", source);
+				break;
+		}
+	}
+
+	compiler_end_intercept(workspace);
+	assert(found, "Compiler did not expose assignment fixture '%'.", source);
+}
+
+test_assignment_workspace_fixtures :: () {
+	assert_assignment_workspace_fixture("array[0], array[1] += fixture_pair();", "array: [4] s64;", "array");
+	assert_assignment_workspace_fixture("v.x, v.y, v.z = 1, 4, 9;", "v: struct { x, y, z: s64; };", "v");
+}
+
+#run,stallable test_assignment_workspace_fixtures();
 
 test_declaration_workspace_fixtures :: () {
 	assert_declaration_workspace_fixture("fixture_typed: **s64 = null;");
@@ -1400,6 +1465,8 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("(identifier)");
 	assert_expression_fixture("!~flag");
 	assert_expression_fixture("foo()");
+	assert_expression_fixture("inline foo(1)");
+	assert_expression_fixture("no_inline foo(1)");
 	assert_expression_fixture("foo(1, named = value)");
 	assert_expression_fixture("join(strings,, allocator=temp)");
 	assert_expression_fixture("f(16, 8,, allocator = pool_allocator)");
@@ -1447,6 +1514,9 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("#insert generated_code");
 	assert_expression_fixture("#insert,scope() generated_code");
 	assert_expression_fixture("#insert -> string { return \"generated\"; }");
+	assert_expression_fixture("#insert -> Code { return #code x = x + 1; }");
+	assert_statement_fixture("#insert -> string { return \"generated\"; }");
+	assert_statement_fixture("#insert -> Code { return #code x = x + 1; }");
 	assert_expression_fixture("#insert,scope(caller) (break=break outer, continue=continue outer, remove=remove outer) body");
 	assert_expression_fixture("#location()");
 	assert_expression_fixture("#location(value)");
@@ -1483,7 +1553,12 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture(".member.field");
 	assert_expression_fixture("value.*.member[index]");
 	assert_expression_fixture("ifx ready then 1 else 2");
+	assert_expression_fixture("ifx ready then 1");
+	assert_expression_fixture("ifx ready else 1");
+	assert_expression_fixture("ifx ready");
 	assert_expression_fixture("ifx ready { prepare(); 1; } else { 2; }");
+	assert_expression_fixture("#ifx ready then 1 else 2");
+	assert_expression_fixture("#ifx ready { prepare(); 1; } else { 2; }");
 	assert_expression_fixture("() { return; }");
 	assert_expression_fixture("(value: $T) -> T #expand #compile_time { return value; }");
 	assert_expression_fixture("(items: ..Any) -> value: s64, found: bool { return 0, false; }");
@@ -1509,6 +1584,7 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("enum_flags u32 { FAST; SAFE; }");
 	assert_statement_fixture("return 1, 2;");
 	assert_statement_fixture("out1, out2 = hello(1);");
+	assert_statement_matches_code("#no_reset fixture_no_reset: s64;", #code { #no_reset fixture_no_reset: s64; }, file_scope=true);
 	assert_statement_fixture("{ value := 1; }");
 	assert_statement_fixture("`return 1;");
 	assert_statement_fixture("while ready { break; }");
@@ -1521,15 +1597,24 @@ test_directive_workspace_fixtures :: () {
 	assert_statement_fixture("for :utf8_iter value, index: text process(value);");
 	assert_statement_fixture("for < * :utf8_iter value, index: text process(value);");
 	assert_statement_fixture("for <* :utf8_iter text process(it);");
+	assert_statement_fixture("for <=reversed NAMES print(it);");
+	assert_statement_fixture("for *=pointer_mode values process(it);");
+	assert_statement_fixture("for *=cast(bool)(flags & .POINTER), <=cast(bool)(flags & .REVERSE) a.data { print(it); }");
 	assert_statement_fixture("if ready then run(); else stop();");
 	assert_statement_fixture("if (mode == .ALLOCATE) && (size == 42) { run(); }");
 	assert_statement_fixture("if (count % 2) { run(); }");
 	assert_statement_fixture("if (pointer) { run(); }");
+	assert_statement_fixture("if x > 0 then #this(x-1);");
 	assert_statement_fixture("value := ifx ready { prepare(); 1; } else { 2; }");
+	assert_statement_fixture("value := ifx ready then 1;");
+	assert_statement_fixture("value := ifx ready else 1;");
+	assert_statement_fixture("value := ifx ready;");
 	assert_statement_fixture("value := ifx ready { 1; } else { 2; };");
+	assert_statement_fixture("value := #ifx ready then 1 else 2;");
 	assert_statement_fixture("if value == { case 1; return; case; break; }");
 	assert_statement_fixture("if #complete value == { case 1; #through; case 2; return; case; return; }");
 	assert_statement_fixture("#if OS == { case .WINDOWS; return; case; }");
+	assert_statement_fixture("#if true { inline memcpy_v3(dest, source, bytes); }");
 	assert_statement_fixture("Fixture_Static_Enum :: enum { BASE; #if true { BLORPLE; #if false { HIDDEN; } else VISIBLE; } else FALLBACK; AFTER; }");
 	assert_statement_fixture("defer cleanup();");
 	assert_statement_fixture("`defer cleanup();");
@@ -1552,6 +1637,7 @@ test_directive_workspace_fixtures :: () {
 	assert_statement_fixture("using,only(w, y) orientation: Quaternion;");
 	assert_statement_fixture("using,only(w) q;");
 	assert_statement_fixture("using,except(Node) Trees :: #import,file \"trees.jai\";");
+	assert_statement_fixture("using,map(prefix_with_gl) procs: Procs;");
 	assert_statement_fixture("push_context new_context { return; }");
 	assert_statement_fixture("push_context { return; }");
 	assert_statement_fixture("`push_context,defer_pop remap_context();");
