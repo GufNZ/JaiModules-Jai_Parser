@@ -84,6 +84,7 @@ main :: () {
 		"Unable to parse an expression to the right of this binary operator."
 	);
 	test_compiler_related_diagnostics();
+	test_asm_semantic_diagnostics();
 	assert_trivia_round_trip("value /* comment */ + 42;\n");
 	assert_trivia_round_trip("text :: #string END\nbody\nEND; // tail");
 }
@@ -214,6 +215,27 @@ test_compiler_related_diagnostics :: () {
 	assert(diagnostic.related_information[0].location.l1 == 1);
 	assert(diagnostic.related_information[0].location.c1 == 30);
 	assert(diagnostic.related_information[0].message == "... in checking argument 1 of call to takes_integer.");
+}
+
+assert_asm_semantic_error :: (instruction: string, expected_message: string) {
+	source := tprint("main :: () {\n    #asm { % }\n}\n", instruction);
+	parsed := Parser.parse_file(source);
+	defer Parser.release_parser_tree(*parsed);
+	assert(parsed.status == .COMPLETE && parsed.diagnostics.count == 0);
+	asm_body := parsed.root.(*Parser.Parser_Block).statements[0].(*Parser.Parser_Declaration).expression.(*Parser.Parser_Procedure_Header).body_or_null.block;
+	assert(asm_body.statements[0].(*Parser.Parser_Asm).statements[0].kind == .INSTRUCTION);
+
+	result := capture_compiler_error(source);
+	assert(result.diagnostics.count == 1);
+	assert(result.diagnostics[0].location.l0 == 2 && result.diagnostics[0].location.c0 == 12);
+	assert(result.diagnostics[0].location.c1 > result.diagnostics[0].location.c0);
+	assert(starts_with(result.diagnostics[0].message, expected_message), "Unexpected compiler ASM diagnostic: %", result.diagnostics[0].message);
+}
+
+test_asm_semantic_diagnostics :: () {
+	assert_asm_semantic_error("not_a_mnemonic;", "Invalid instruction mnemonic");
+	assert_asm_semantic_error("mov.8 b3:, 256;", "A matching instruction form was not found.");
+	assert_asm_semantic_error("add 1, 2;", "A matching instruction form was not found.");
 }
 
 test_structural_difference_reporting :: () {
@@ -1124,6 +1146,50 @@ assert_statement_fixture :: ($source: string) #expand {
 	}
 }
 
+assert_asm_block_shape :: (parsed: *Parser.Parsed_Source, actual_block: *Parser.Parser_Block, expected_block: *Code_Block, actual_origin: *Parser.Parser_Block, expected_origin: *Code_Block, index: s64) {
+	assert(actual_block.statements.count == expected_block.statements.count);
+	actual_asm := actual_block.statements[index].(*Parser.Parser_Asm);
+	expected_asm := expected_block.statements[index].(*Code_Asm);
+	assert(actual_asm.enclosing_scope == actual_block);
+	assert(actual_asm.kind == expected_asm.kind);
+	// Compiler branch blocks anchor after '{', so compare directive starts from the shared outer block.
+	assert(actual_asm.l0 - actual_origin.l0 == expected_asm.l0 - expected_origin.l0);
+	if actual_asm.l0 == actual_origin.l0 {
+		assert(actual_asm.c0 - actual_origin.c0 == expected_asm.c0 - expected_origin.c0);
+	} else {
+		assert(actual_asm.c0 == expected_asm.c0);
+	}
+
+	// Code_Asm ends at '#asm'; Parser_Asm deliberately spans the entire assembly block.
+	assert(expected_asm.l1 - expected_asm.l0 == Parser.token_at(parsed, actual_asm.first_token + 1).l1 - actual_asm.l0);
+	assert(expected_asm.c1 - expected_asm.c0 == Parser.token_at(parsed, actual_asm.first_token + 1).c1 - actual_asm.c0);
+	assert(actual_asm.l1 >= actual_asm.l0 && actual_asm.c1 > actual_asm.c0);
+}
+
+assert_asm_compiler_shape :: (source: string, expected_code: Code) {
+	parsed := Parser.parse_block(source);
+	defer Parser.release_parser_tree(*parsed);
+
+	assert(parsed.status == .COMPLETE);
+	actual_block := parsed.root.(*Parser.Parser_Block);
+	expected_block := compiler_get_nodes(expected_code).(*Code_Block);
+	assert_asm_block_shape(*parsed, actual_block, expected_block, actual_block, expected_block, 0);
+}
+
+assert_nested_asm_compiler_shape :: (source: string, expected_code: Code) {
+	parsed := Parser.parse_block(source);
+	defer Parser.release_parser_tree(*parsed);
+
+	assert(parsed.status == .COMPLETE);
+	actual_root := parsed.root.(*Parser.Parser_Block);
+	expected_root := compiler_get_nodes(expected_code).(*Code_Block);
+	assert(actual_root.statements.count == 1 && expected_root.statements.count == 1);
+	actual_if := actual_root.statements[0].(*Parser.Parser_If);
+	expected_if := expected_root.statements[0].(*Code_If);
+	assert_asm_block_shape(*parsed, actual_if.then_block, expected_if.then_block, actual_root, expected_root, 0);
+	assert_asm_block_shape(*parsed, actual_if.else_block, expected_if.else_block, actual_root, expected_root, 0);
+}
+
 assert_all_operator_fixtures :: () #expand {
 	#insert -> string {
 		operators := string.[
@@ -1237,6 +1303,7 @@ test_file_workspace_fixtures :: () {
 	assert_file_workspace_fixture("fixture_asm_memory :: () { #asm { mov base:, 10; mov loaded:, [base]; } }", "fixture_asm_memory");
 	assert_file_workspace_fixture("fixture_asm_value :: () { CONSTANT :: 10; #asm { mov destination:, CONSTANT; } }", "fixture_asm_value");
 	assert_file_workspace_fixture("fixture_asm_macro :: (register_param: __reg) #expand { #asm { mov register_param, 10; } }", "fixture_asm_macro");
+	assert_file_workspace_fixture("fixture_asm_immediates :: () { #asm { mov.8 byte_max:, 255; mov.8 byte_negative:, -127; } }", "fixture_asm_immediates");
 	assert_file_workspace_fixture("#add_context fixture_context_value: s64;\nfixture_add_context :: 1;", "fixture_add_context");
 	assert_file_workspace_fixture("#assert true;\nfixture_assert_scope :: 1;", "fixture_assert_scope");
 }
@@ -1449,6 +1516,12 @@ test_directive_workspace_fixtures :: () {
 #run {
 	assert_statement_fixture("#if true { enabled := 1; } else { disabled := 2; }");
 	assert_statement_fixture("#asm { nop; }");
+	assert_asm_compiler_shape("{ #asm { nop; } }", #code { #asm { nop; } });
+	assert_asm_compiler_shape("{ #asm AVX, AVX2 {} }", #code { #asm AVX, AVX2 {} });
+	assert_asm_compiler_shape("{\n    #asm { nop; }\n}", #code {
+    #asm { nop; }
+});
+	assert_nested_asm_compiler_shape("{ if true { #asm { nop; } } else { #asm { nop; } } }", #code { if true { #asm { nop; } } else { #asm { nop; } } });
 	assert_all_operator_fixtures();
 	assert_all_precedence_pairs();
 	assert_expression_fixture("identifier");
@@ -1599,16 +1672,57 @@ test_directive_workspace_fixtures :: () {
 	assert_statement_fixture("while ready { break; }");
 	assert_statement_fixture("while (pointer) { break; }");
 	assert_statement_fixture("while loop := ready { break loop; }");
+
+	// Ranges keep their right endpoint even when flags and selectors precede the collection.
 	assert_statement_fixture("for item, index: values { continue; }");
 	assert_statement_fixture("for 1..3 defer tick();");
+	assert_statement_fixture("for value: first..last process(value);");
+	assert_statement_fixture("for < * :utf8_iter value: 1..3 { process(value); }");
+	assert_statement_fixture("for <=reverse :utf8_iter value: first..last { process(value); }");
+
+	// Compare implicit and renamed bindings under the default and named expansions.
+	assert_statement_fixture("for values process(it);");
 	assert_statement_fixture("for < values process(it);");
 	assert_statement_fixture("for * values process(it);");
+	assert_statement_fixture("for :utf8_iter text process(it_index);");
+	assert_statement_fixture("for < :utf8_iter value: text process(value);");
 	assert_statement_fixture("for :utf8_iter value, index: text process(value);");
+	assert_statement_fixture("for :utf8_iter `it, `it_index: text process(it);");
+
 	assert_statement_fixture("for < * :utf8_iter value, index: text process(value);");
 	assert_statement_fixture("for <* :utf8_iter text process(it);");
+	assert_statement_fixture("for <* :utf8_iter text { process(it); }");
+
+	// The comma separates controlled flags; the body must remain outside their expressions.
+	assert_statement_fixture("for *=pointer_mode, <=reverse_mode :utf8_iter value, index: text process(value);");
+	assert_statement_fixture("for <=reverse :utf8_iter text process(it);");
 	assert_statement_fixture("for <=reversed NAMES print(it);");
 	assert_statement_fixture("for *=pointer_mode values process(it);");
 	assert_statement_fixture("for *=cast(bool)(flags & .POINTER), <=cast(bool)(flags & .REVERSE) a.data { print(it); }");
+	assert_statement_fixture("for *=(left == right), <=reverse values process(it);");
+	assert_statement_fixture("for <=reverse, *=pointer_mode values process(it);");
+
+	// Parenthesized operators belong to flags; bare ones belong to the collection.
+	assert_statement_fixture("for <=(flag = enabled) values process(it);");
+	assert_statement_fixture("for <=reverse left == right process(it);");
+	assert_statement_fixture("for <=reverse target = source process(it);");
+
+	comparison_flags := compiler_get_nodes(#code { for *=(left == right), <=reverse values process(it); }).(*Code_Block).statements[0].(*Code_For);
+	assert(comparison_flags.want_pointer_expression.kind == .BINARY_OPERATOR);
+	assert(comparison_flags.want_reverse_expression.(*Code_Ident).name == "reverse");
+	assert(comparison_flags.iteration_expression.(*Code_Ident).name == "values");
+
+	assignment_flags := compiler_get_nodes(#code { for <=(flag = enabled) values process(it); }).(*Code_Block).statements[0].(*Code_For);
+	assert(assignment_flags.want_reverse_expression.kind == .BINARY_OPERATOR);
+	assert(assignment_flags.iteration_expression.(*Code_Ident).name == "values");
+
+	comparison_collection := compiler_get_nodes(#code { for <=reverse left == right process(it); }).(*Code_Block).statements[0].(*Code_For);
+	assert(comparison_collection.want_reverse_expression.(*Code_Ident).name == "reverse");
+	assert(comparison_collection.iteration_expression.(*Code_Binary_Operator).operator_type == .IS_EQUAL);
+
+	assignment_collection := compiler_get_nodes(#code { for <=reverse target = source process(it); }).(*Code_Block).statements[0].(*Code_For);
+	assert(assignment_collection.want_reverse_expression.(*Code_Ident).name == "reverse");
+	assert(assignment_collection.iteration_expression.(*Code_Binary_Operator).operator_type == #char "=");
 	assert_statement_fixture("if ready then run(); else stop();");
 	assert_statement_fixture("if (mode == .ALLOCATE) && (size == 42) { run(); }");
 	assert_statement_fixture("if (count % 2) { run(); }");

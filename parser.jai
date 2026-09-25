@@ -925,7 +925,7 @@ asm_memory_constant_end :: (parser: *Parser, first: s64, limit: s64) -> s64 {
 	}
 
 
-	if parser.parsed.tokens[first].type == .NUMBER {
+	if parser.parsed.tokens[first].type == .NUMBER || parser.parsed.tokens[first].type == .IDENT {
 		return first + 1;
 	}
 
@@ -1057,6 +1057,14 @@ parse_asm_memory_span :: (parser: *Parser, first: s64, one_past_last: s64) -> *P
 	return result;
 }
 
+add_asm_operand_diagnostic :: (parser: *Parser, first: s64, one_past_last: s64, message: string) {
+	// The block scanner has passed this operand; locate the error without moving its recovery point.
+	saved_cursor := parser.cursor;
+	parser.cursor = first;
+	add_expected_expression_at(parser, make_token_span(first, one_past_last), message);
+	parser.cursor = saved_cursor;
+}
+
 add_asm_operand :: (parser: *Parser, operands: *[..]*Parser_Asm_Operand, first: s64, one_past_last: s64) {
 	if first >= one_past_last {
 		return;
@@ -1109,6 +1117,7 @@ add_asm_operand :: (parser: *Parser, operands: *[..]*Parser_Asm_Operand, first: 
 					}
 
 					if modifier.kind == .BANG {
+						add_asm_operand_diagnostic(parser, modifier_first, one_past_last, "Malformed assembly operand modifier.");
 						array_add(operands, operand);
 						return;
 					}
@@ -1124,6 +1133,7 @@ add_asm_operand :: (parser: *Parser, operands: *[..]*Parser_Asm_Operand, first: 
 				}
 
 				if position >= one_past_last || parser.parsed.tokens[position].type != .IDENT {
+					add_asm_operand_diagnostic(parser, modifier_first, one_past_last, "Malformed assembly operand modifier.");
 					array_add(operands, operand);
 					return;
 				}
@@ -1133,6 +1143,7 @@ add_asm_operand :: (parser: *Parser, operands: *[..]*Parser_Asm_Operand, first: 
 				modifier.argument.expression = new_asm_ident(parser, position);
 				position += 1;
 			} else {
+				add_asm_operand_diagnostic(parser, modifier_first, one_past_last, "Malformed assembly operand modifier.");
 				array_add(operands, operand);
 				return;
 			}
@@ -1147,6 +1158,7 @@ add_asm_operand :: (parser: *Parser, operands: *[..]*Parser_Asm_Operand, first: 
 
 
 	if base_end == first {
+		add_asm_operand_diagnostic(parser, first, one_past_last, "Missing assembly operand before modifier.");
 		array_add(operands, operand);
 		return;
 	}
@@ -1166,6 +1178,8 @@ add_asm_operand :: (parser: *Parser, operands: *[..]*Parser_Asm_Operand, first: 
 		operand.memory = parse_asm_memory_span(parser, first, base_end);
 		if operand.memory {
 			operand.kind = .MEMORY;
+		} else {
+			add_asm_operand_diagnostic(parser, first, base_end, "Malformed assembly memory operand.");
 		}
 	}
 
@@ -1265,16 +1279,29 @@ parse_asm_instruction_span :: (parser: *Parser, statement: *Parser_Asm_Statement
 	while index < content_one_past_last {
 		token_type := parser.parsed.tokens[index].type;
 		at_top_level := (!parenthesis_depth && !bracket_depth && !brace_depth);
+		// Split only unambiguous adjacent values; other operand forms stay intact for syntax parsing.
+		if at_top_level && index == operand_first + 1 && parser.parsed.tokens[operand_first].type == .IDENT && (token_type == .IDENT || token_type == .NUMBER) {
+			add_asm_operand(parser, *operands, operand_first, index);
+			saved_cursor := parser.cursor;
+			parser.cursor = index;
+			add_missing_token(parser, #char ",");
+			parser.cursor = saved_cursor;
+			operand_first = index;
+		}
+
 		if token_type == {
 			case #char ",";
 				if at_top_level {
 					add_asm_operand(parser, *operands, operand_first, index);
 					operand_first = index + 1;
 				}
+
 			case #char "("; parenthesis_depth += 1;
 			case #char ")"; if parenthesis_depth	parenthesis_depth -= 1;
+
 			case #char "["; bracket_depth += 1;
 			case #char "]"; if bracket_depth  		bracket_depth -= 1;
+
 			case #char "{"; brace_depth += 1;
 			case #char "}"; if brace_depth			brace_depth -= 1;
 		}
@@ -1352,6 +1379,7 @@ parse_asm_statement :: (parser: *Parser, enclosing_scope: *Parser_Block) -> *Par
 				break;
 			}
 		} else if token.type == #char ";" && brace_depth == 1 {
+			// An unmatched operand bracket must not absorb the next assembly instruction.
 			parser_eat(parser);
 			statement := new_asm_statement(parser, statement_first, parser.cursor, parser.cursor - 1);
 			array_add(*statements, statement);
@@ -1721,6 +1749,17 @@ set_empty_node_location :: (parser: *Parser, node: *$T/Parser_Node, at: s64) {
 	}
 }
 
+add_duplicate_for_flag :: (parser: *Parser, first: s64) {
+	diagnostic := Parse_Diagnostic.{
+		kind = .UNEXPECTED_TOKEN,
+		span = make_token_span(first, parser.cursor),
+		actual_token = parser.parsed.tokens[first].type,
+		message = "Duplicate for-loop flag."
+	};
+	array_add(*parser.parsed.diagnostics, diagnostic);
+	mark_parse_error(parser, false);
+}
+
 parse_for_statement :: (parser: *Parser, parent: *Parser_Block) -> *Parser_For {
 	first := parser.cursor;
 	parser_eat(parser);
@@ -1728,27 +1767,57 @@ parse_for_statement :: (parser: *Parser, parent: *Parser_Block) -> *Parser_For {
 	result := new_parser_node(parser, Parser_For);
 	result.kind = .FOR;
 	while true {
+		flag_first := parser.cursor;
 		if parser_eat_if(parser, #char "<") {
-			result.for_flags |= .REVERSE;
+			if (result.for_flags & .REVERSE) != 0 {
+				add_duplicate_for_flag(parser, flag_first);
+			} else {
+				result.for_flags |= .REVERSE;
+			}
 		} else if parser_eat_if(parser, #char "*") {
-			result.for_flags |= .POINTER;
+			if (result.for_flags & .POINTER) != 0 {
+				add_duplicate_for_flag(parser, flag_first);
+			} else {
+				result.for_flags |= .POINTER;
+			}
 		} else {
 			break;
 		}
 	}
 
-	// A full binary parse here could consume the collection as part of a controlled flag.
+	// Without a delimiter before the collection, binary flag expressions need parentheses.
+	seen_reverse := ((result.for_flags & .REVERSE) != 0);
+	seen_pointer := ((result.for_flags & .POINTER) != 0);
 	while true {
+		flag_first := parser.cursor;
 		if parser_eat_if(parser, .LESSEQUALS) {
-			result.want_reverse_expression = parse_prefix(parser);
-			if !result.want_reverse_expression {
-				add_expected_expression(parser);
+			if seen_reverse {
+				add_duplicate_for_flag(parser, flag_first);
 			}
+
+			expression := parse_prefix(parser);
+			if !expression {
+				add_expected_expression(parser);
+			} else if !seen_reverse {
+				result.want_reverse_expression = expression;
+			}
+			seen_reverse = true;
 		} else if parser_eat_if(parser, .TIMESEQUALS) {
-			result.want_pointer_expression = parse_prefix(parser);
-			if !result.want_pointer_expression {
-				add_expected_expression(parser);
+			if seen_pointer {
+				add_duplicate_for_flag(parser, flag_first);
 			}
+
+			expression := parse_prefix(parser);
+			if !expression {
+				add_expected_expression(parser);
+			} else if !seen_pointer {
+				result.want_pointer_expression = expression;
+			}
+			seen_pointer = true;
+		} else if seen_reverse && parser_eat_if(parser, #char "<") {
+			add_duplicate_for_flag(parser, flag_first);
+		} else if seen_pointer && parser_eat_if(parser, #char "*") {
+			add_duplicate_for_flag(parser, flag_first);
 		} else {
 			break;
 		}
@@ -1756,6 +1825,8 @@ parse_for_statement :: (parser: *Parser, parent: *Parser_Block) -> *Parser_For {
 
 		if parser_peek(parser).type == #char "," && (parser_peek(parser, 1).type == .LESSEQUALS || parser_peek(parser, 1).type == .TIMESEQUALS) {
 			parser_eat(parser);
+		} else if parser_peek(parser).type == .LESSEQUALS || parser_peek(parser).type == .TIMESEQUALS {
+			add_missing_token(parser, #char ",");
 		}
 	}
 
@@ -1777,6 +1848,10 @@ parse_for_statement :: (parser: *Parser, parent: *Parser_Block) -> *Parser_For {
 			result.ident_it = new_parser_node(parser, Parser_Ident);
 			result.ident_it.kind = .IDENT;
 			result.ident_it.name = token.ident_value.name;
+			if token.ident_is_backticked {
+				result.ident_it.flags |= .HAS_SCOPE_MODIFIER;
+			}
+
 			finish_node(parser, result.ident_it, ident_first);
 
 			if parser_eat_if(parser, #char ",") {
@@ -1786,6 +1861,10 @@ parse_for_statement :: (parser: *Parser, parent: *Parser_Block) -> *Parser_For {
 					result.ident_it_index = new_parser_node(parser, Parser_Ident);
 					result.ident_it_index.kind = .IDENT;
 					result.ident_it_index.name = index_token.ident_value.name;
+					if index_token.ident_is_backticked {
+						result.ident_it_index.flags |= .HAS_SCOPE_MODIFIER;
+					}
+
 					finish_node(parser, result.ident_it_index, index_first);
 				} else {
 					add_expected_expression(parser);

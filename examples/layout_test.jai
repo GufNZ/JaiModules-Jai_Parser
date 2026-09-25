@@ -194,6 +194,8 @@ test_here_string_bounds :: () {
 
 	unterminated_input :: "\n    X";
 	Extended.set_input_from_string(*lexer, unterminated_input);
+
+	// Exercise the logical EOF before the end of the backing allocation.
 	lexer.input.count -= 2;
 	token = Extended.parse_here_string_body(*lexer, "END");
 	assert(token == null);
