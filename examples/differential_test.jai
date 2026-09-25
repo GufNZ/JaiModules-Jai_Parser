@@ -1232,6 +1232,11 @@ test_file_workspace_fixtures :: () {
 	assert_file_workspace_fixture("#no_reset fixture_no_reset: s64;", "fixture_no_reset");
 	assert_file_workspace_fixture("#scope_export\nfixture_export_scope :: 1;", "fixture_export_scope");
 	assert_file_workspace_fixture("#scope_module\nfixture_module_scope :: 1;", "fixture_module_scope");
+	assert_file_workspace_fixture("fixture_asm_registers :: () { #asm { mov apple:, 10; mov signed:, -10; banana: gpr; mov w: gpr === 15, 10; } }", "fixture_asm_registers");
+	assert_file_workspace_fixture("fixture_asm_pinning :: () { #asm { a: gpr === 9; t: gpr === a; x: gpr; x === a; } }", "fixture_asm_pinning");
+	assert_file_workspace_fixture("fixture_asm_memory :: () { #asm { mov base:, 10; mov loaded:, [base]; } }", "fixture_asm_memory");
+	assert_file_workspace_fixture("fixture_asm_value :: () { CONSTANT :: 10; #asm { mov destination:, CONSTANT; } }", "fixture_asm_value");
+	assert_file_workspace_fixture("fixture_asm_macro :: (register_param: __reg) #expand { #asm { mov register_param, 10; } }", "fixture_asm_macro");
 	assert_file_workspace_fixture("#add_context fixture_context_value: s64;\nfixture_add_context :: 1;", "fixture_add_context");
 	assert_file_workspace_fixture("#assert true;\nfixture_assert_scope :: 1;", "fixture_assert_scope");
 }
@@ -1254,7 +1259,9 @@ assert_declaration_workspace_fixture :: (source: string) {
 	found := false;
 	while true {
 		message := compiler_wait_for_message();
-		if message.workspace != workspace	continue;
+		if message.workspace != workspace {
+			continue;
+		}
 
 
 		if message.kind == {
@@ -1271,7 +1278,9 @@ assert_declaration_workspace_fixture :: (source: string) {
 							matches = actual_compound.comma_separated_assignment.arguments[0].node.(*Code_Ident).name == expected.comma_separated_assignment.arguments[0].node.(*Parser.Parser_Ident).name;
 						}
 
-						if !matches		continue;
+						if !matches {
+							continue;
+						}
 
 
 						expected := normalize_tree(statement);

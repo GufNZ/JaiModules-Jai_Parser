@@ -14,7 +14,7 @@ USE_SIMD :: false;
 
 EOF :: -1;
 MAX_IDENTIFIER_LENGTH :: 512;
-MAX_CONCURRENT_TOKENS :: 8;		// Must be a power of two!	// @Cleanup: explain why or change.
+MAX_CONCURRENT_TOKENS :: 8;		// Ring indices use a bit mask, so the capacity must be a power of two.
 LEXER_SIMD_WIDTH :: 16;
 
 // @Cleanup: Add zero-termination as an option?
@@ -267,6 +267,7 @@ Table_String :: #type,isa string;
 		}
 
 		if trivia.kind == .IGNORED {
+			// Retain unrecognised bytes without swallowing the next comment or whitespace run.
 			iterator.cursor += 1;
 			while iterator.cursor < iterator.source.count {
 				cursor := iterator.cursor;
@@ -527,6 +528,7 @@ get_unused_token :: (lexer: *Lexer) -> *Token {
 		token.preceding_trivia	= slice(lexer.input, trivia_start, token_start - trivia_start);
 		token.original_text		= slice(lexer.input, token_start, token_end - token_start);
 		if token.type == .END_OF_INPUT {
+			// EOF owns the final gap so reconstruction needs no token after it.
 			token.trailing_trivia = slice(lexer.input, trivia_start, token_end - trivia_start);
 			return;
 		}
@@ -762,6 +764,7 @@ parse_here_string_body :: (lexer: *Lexer, terminator: string, want_cr := false, 
 			if memcmp(lexer.input.data + cursor, ident.data, ident_len) == 0 {
 				after_ident := cursor + ident_len;
 				if (after_ident == lexer.input.count) || !continues_identifier(lexer.input.data[after_ident]) {
+					// Leave the terminator line for ordinary lexing, outside the body.
 					cursor = cursor_at_start_of_line;
 					lexer.current_character_index = 1;
 					break;
@@ -1166,8 +1169,7 @@ make_number :: (lexer: *Lexer) -> *Token {
 
 			c = peek_next_character(lexer);
 			if c == #char "." {
-				// Uhh, this isn"t a decimal, it's part of an integer range specifier, e.g.: (1..3)
-				//  so we are going to return an integer here and push a #char ".." token into the token queue.
+				// This is a for range, so preserve both dots for the range token instead of consuming one as a decimal point.
 
 				unwind_one_character(lexer);
 				break;

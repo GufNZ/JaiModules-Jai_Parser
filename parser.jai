@@ -869,6 +869,194 @@ asm_tokens_are_adjacent :: (parser: *Parser, left_index: s64, right_index: s64) 
 	return (left.l1 == right.l0 && left.c1 == right.c0);
 }
 
+parse_asm_register_pinning_span :: (parser: *Parser, first: s64, equals_index: s64, one_past_last: s64) -> *Parser_Asm_Register_Pinning {
+	if equals_index != one_past_last - 2 || parser.parsed.tokens[first].type != .IDENT || parser.parsed.tokens[equals_index].type != .TRIPLE_EQUALS {
+		return null;
+	}
+
+
+	target_type := parser.parsed.tokens[equals_index + 1].type;
+	if target_type != .IDENT && target_type != .NUMBER {
+		return null;
+	}
+
+
+	result := New(Parser_Asm_Register_Pinning,, parser_node_allocator(parser.parsed));
+	result.span = make_token_span(first, one_past_last);
+	result.source = parse_asm_value_span(parser, first, first + 1);
+	result.target = parse_asm_value_span(parser, equals_index + 1, one_past_last);
+	return result;
+}
+
+parse_asm_register_declaration_span :: (parser: *Parser, first: s64, one_past_last: s64) -> *Parser_Asm_Register_Declaration {
+	if first + 1 >= one_past_last || parser.parsed.tokens[first].type != .IDENT || parser.parsed.tokens[first + 1].type != #char ":" {
+		return null;
+	}
+
+
+	end := first + 2;
+	if end < one_past_last && parser.parsed.tokens[end].type == .IDENT {
+		end += 1;
+	}
+
+	if end < one_past_last && parser.parsed.tokens[end].type != .TRIPLE_EQUALS {
+		return null;
+	}
+
+
+	result := New(Parser_Asm_Register_Declaration,, parser_node_allocator(parser.parsed));
+	result.span = make_token_span(first, end);
+	result.name = new_asm_ident(parser, first);
+	result.is_inferred = end == first + 2;
+	if !result.is_inferred {
+		result.register_class = new_asm_ident(parser, first + 2);
+	}
+
+	if end < one_past_last {
+		result.pinning = parse_asm_register_pinning_span(parser, first, end, one_past_last);
+	}
+
+	return result;
+}
+
+asm_memory_constant_end :: (parser: *Parser, first: s64, limit: s64) -> s64 {
+	if first >= limit {
+		return first;
+	}
+
+
+	if parser.parsed.tokens[first].type == .NUMBER {
+		return first + 1;
+	}
+
+
+	if parser.parsed.tokens[first].type != #char "(" {
+		return first;
+	}
+
+
+	depth: s64;
+	for first..limit-1 {
+		token_type := parser.parsed.tokens[it].type;
+		if token_type == {
+			case #char "(";
+				depth += 1;
+
+			case #char ")";
+				depth -= 1;
+				if depth == 0 {
+					return it + 1;
+				}
+		}
+	}
+
+
+	return first;
+}
+
+parse_asm_value_span :: (parser: *Parser, first: s64, one_past_last: s64) -> Parser_Asm_Value {
+	result: Parser_Asm_Value;
+	result.span = make_token_span(first, one_past_last);
+	saved_cursor := parser.cursor;
+	parser.cursor = first;
+	result.expression = parse_prefix(parser);
+	assert(parser.cursor == one_past_last);
+	parser.cursor = saved_cursor;
+	return result;
+}
+
+parse_asm_memory_span :: (parser: *Parser, first: s64, one_past_last: s64) -> *Parser_Asm_Memory_Operand {
+	if (first + 2 >= one_past_last
+		|| parser.parsed.tokens[first + 1].type != .IDENT
+		|| parser.parsed.tokens[one_past_last - 1].type != #char "]"
+	) {
+		return null;
+	}
+
+
+	close := one_past_last - 1;
+	index_first: s64;
+	scale_first: s64;
+	scale_end: s64;
+	displacement_first: s64;
+	position := first + 2;
+	if position < close {
+		sign := parser.parsed.tokens[position].type;
+		if sign != #char "+" && sign != #char "-" {
+			return null;
+		}
+
+
+		position += 1;
+		if position >= close {
+			return null;
+		}
+
+
+		if sign == #char "+" && parser.parsed.tokens[position].type == .IDENT {
+			index_first = position;
+			position += 1;
+			if position < close && parser.parsed.tokens[position].type == #char "*" {
+				position += 1;
+				scale_first = position;
+				scale_end = asm_memory_constant_end(parser, position, close);
+				if scale_end == position {
+					return null;
+				}
+
+
+				position = scale_end;
+			}
+
+
+			if position < close {
+				sign = parser.parsed.tokens[position].type;
+				if sign != #char "+" && sign != #char "-" {
+					return null;
+				}
+
+
+				position += 1;
+			}
+		}
+
+
+		if position < close {
+			displacement_first = position - 1;
+			position = asm_memory_constant_end(parser, position, close);
+			if position == displacement_first + 1 {
+				return null;
+			}
+		}
+	}
+
+
+	if position != close {
+		return null;
+	}
+
+
+	result := New(Parser_Asm_Memory_Operand,, parser_node_allocator(parser.parsed));
+	result.span = make_token_span(first, one_past_last);
+	result.base.span = make_token_span(first + 1, first + 2);
+	result.base.expression = new_asm_ident(parser, first + 1);
+
+	if index_first {
+		result.index.span = make_token_span(index_first, index_first + 1);
+		result.index.expression = new_asm_ident(parser, index_first);
+	}
+
+	if scale_first {
+		result.scale = parse_asm_value_span(parser, scale_first, scale_end);
+	}
+
+	if displacement_first {
+		result.displacement = parse_asm_value_span(parser, displacement_first, close);
+	}
+
+	return result;
+}
+
 add_asm_operand :: (parser: *Parser, operands: *[..]*Parser_Asm_Operand, first: s64, one_past_last: s64) {
 	if first >= one_past_last {
 		return;
@@ -877,6 +1065,130 @@ add_asm_operand :: (parser: *Parser, operands: *[..]*Parser_Asm_Operand, first: 
 
 	operand := New(Parser_Asm_Operand,, parser_node_allocator(parser.parsed));
 	operand.span = make_token_span(first, one_past_last);
+	base_end := one_past_last;
+	parenthesis_depth: s64;
+	bracket_depth: s64;
+
+	for first..one_past_last-1 {
+		token_type := parser.parsed.tokens[it].type;
+		if !parenthesis_depth && !bracket_depth && (token_type == #char "!" || token_type == .BITWISE_AND) {
+			base_end = it;
+			break;
+		}
+
+
+		if token_type == {
+			case #char "(";		parenthesis_depth += 1;
+			case #char ")";		parenthesis_depth -= 1;
+			case #char "[";		bracket_depth += 1;
+			case #char "]";		bracket_depth -= 1;
+		}
+	}
+
+	if base_end < one_past_last {
+		modifiers: [..]*Parser_Asm_Operand_Modifier;
+		modifiers.allocator = parser_node_allocator(parser.parsed);
+		position := base_end;
+
+		while position < one_past_last {
+			modifier_first := position;
+			modifier := New(Parser_Asm_Operand_Modifier,, parser_node_allocator(parser.parsed));
+			token_type := parser.parsed.tokens[position].type;
+			position += 1;
+			if token_type == #char "!" {
+				modifier.kind = .BANG;
+				if position < one_past_last && parser.parsed.tokens[position].type == .IDENT && asm_tokens_are_adjacent(parser, modifier_first, position) {
+					name: string = parser.parsed.tokens[position].ident_value.name;
+					if name.count == 1 {
+						if name[0] == {
+							case #char "n";		modifier.kind = .BANG_N;
+							case #char "d";		modifier.kind = .BANG_D;
+							case #char "u";		modifier.kind = .BANG_U;
+							case #char "z";		modifier.kind = .BANG_Z;
+						}
+					}
+
+					if modifier.kind == .BANG {
+						array_add(operands, operand);
+						return;
+					}
+
+
+					position += 1;
+				}
+			} else if token_type == .BITWISE_AND {
+				modifier.kind = .AMPERSAND;
+				if position < one_past_last && parser.parsed.tokens[position].type == #char "*" && asm_tokens_are_adjacent(parser, modifier_first, position) {
+					modifier.kind = .AMPERSAND_STAR;
+					position += 1;
+				}
+
+				if position >= one_past_last || parser.parsed.tokens[position].type != .IDENT {
+					array_add(operands, operand);
+					return;
+				}
+
+
+				modifier.argument.span = make_token_span(position, position + 1);
+				modifier.argument.expression = new_asm_ident(parser, position);
+				position += 1;
+			} else {
+				array_add(operands, operand);
+				return;
+			}
+
+			modifier.span = make_token_span(modifier_first, position);
+			array_add(*modifiers, modifier);
+		}
+
+
+		operand.modifiers = modifiers;
+	}
+
+
+	if base_end == first {
+		array_add(operands, operand);
+		return;
+	}
+
+
+	operand.register_declaration = parse_asm_register_declaration_span(parser, first, base_end);
+	if operand.register_declaration {
+		operand.kind = .REGISTER_DECLARATION;
+	} else if first + 1 < base_end {
+		operand.register_pinning = parse_asm_register_pinning_span(parser, first, first + 1, base_end);
+		if operand.register_pinning {
+			operand.kind = .REGISTER_PINNING;
+		}
+	}
+
+	if operand.kind == .UNPARSED && parser.parsed.tokens[first].type == #char "[" {
+		operand.memory = parse_asm_memory_span(parser, first, base_end);
+		if operand.memory {
+			operand.kind = .MEMORY;
+		}
+	}
+
+	if operand.kind == .UNPARSED {
+		is_number := (base_end == first + 1 && parser.parsed.tokens[first].type == .NUMBER);
+		is_ident := (base_end == first + 1 && parser.parsed.tokens[first].type == .IDENT);
+		is_signed_number := (
+			base_end == first + 2
+			&& (parser.parsed.tokens[first].type == #char "+" || parser.parsed.tokens[first].type == #char "-")
+			&& parser.parsed.tokens[first + 1].type == .NUMBER
+		);
+		is_parenthesized := (
+			base_end > first + 2
+			&& parser.parsed.tokens[first].type == #char "("
+			&& asm_memory_constant_end(parser, first, base_end) == base_end
+		);
+
+		if is_number || is_signed_number || is_ident || is_parenthesized {
+			operand.value = parse_asm_value_span(parser, first, base_end);
+			operand.kind = .VALUE;
+		}
+	}
+
 	array_add(operands, operand);
 }
 
@@ -894,7 +1206,22 @@ parse_asm_instruction_span :: (parser: *Parser, statement: *Parser_Asm_Statement
 	after_mnemonic := content_first + 1;
 	if after_mnemonic < content_one_past_last {
 		next_type := parser.parsed.tokens[after_mnemonic].type;
-		if next_type == #char ":" || next_type == .TRIPLE_EQUALS {
+		if next_type == #char ":" {
+			statement.register_declaration = parse_asm_register_declaration_span(parser, content_first, content_one_past_last);
+			if statement.register_declaration {
+				statement.kind = .REGISTER_DECLARATION;
+			}
+
+			return;
+		}
+
+
+		if next_type == .TRIPLE_EQUALS {
+			statement.register_pinning = parse_asm_register_pinning_span(parser, content_first, after_mnemonic, content_one_past_last);
+			if statement.register_pinning {
+				statement.kind = .REGISTER_PINNING;
+			}
+
 			return;
 		}
 	}
@@ -1117,6 +1444,7 @@ parse_condition :: (parser: *Parser) -> *Parser_Node {
 	}
 
 
+	// Parenthesized conditions can otherwise look like procedure headers.
 	was_parsing_condition := parser.parsing_condition;
 	parser.parsing_condition = true;
 	result := parse_binary(parser);
@@ -1409,6 +1737,7 @@ parse_for_statement :: (parser: *Parser, parent: *Parser_Block) -> *Parser_For {
 		}
 	}
 
+	// A full binary parse here could consume the collection as part of a controlled flag.
 	while true {
 		if parser_eat_if(parser, .LESSEQUALS) {
 			result.want_reverse_expression = parse_prefix(parser);
@@ -2333,6 +2662,7 @@ parse_procedure_type_header :: (parser: *Parser, parse_body := false) -> *Parser
 			argument.type_inst = argument_type;
 			finish_node(parser, argument, argument_first);
 		} else {
+			// The comma separates parameters, not values in a parameter initializer.
 			argument_node := parse_declaration_node(parser, false);
 			if !argument_node || argument_node.kind != .DECLARATION {
 				add_expected_expression(parser);
@@ -2577,6 +2907,7 @@ looks_like_procedure_header :: (parser: *Parser) -> bool {
 		}
 
 
+		// Without a parameter declaration, a parenthesized condition is not a procedure body.
 		if parser.parsing_condition && !has_parameter_declaration && parser_peek(parser, 1).type != #char ")" {
 			return false;
 		}
@@ -2929,6 +3260,7 @@ parse_aggregate_block :: (parser: *Parser, enum_members: bool) -> *Parser_Block 
 		} else if enum_members && parser_peek_if(parser, #char "#", .KEYWORD_IF) {
 			member = parse_static_if_statement(parser, result, .DATA_DECLARATIONS, true);
 		} else if !enum_members && token.type == .IDENT && parser_peek(parser, assignment_lookahead).type == #char "=" {
+			// Field defaults, including dotted targets, assign to existing members rather than declare new ones.
 			member = parse_binary(parser);
 			if member && member.kind == .BINARY_OPERATOR {
 				assignment := member.(*Parser_Binary_Operator);
@@ -3308,6 +3640,7 @@ parser_synchronise :: (parser: *Parser, synchronization_context: Synchronization
 	while true {
 		token := parser_peek(parser);
 		at_top_level := !parenthesis_depth && !bracket_depth && !brace_depth;
+		// Delimiters inside a damaged construct are not safe restart points.
 		if at_top_level && is_synchronization_point(token.type, synchronization_context) {
 			break;
 		}
@@ -3333,6 +3666,7 @@ parser_synchronise :: (parser: *Parser, synchronization_context: Synchronization
 		}
 
 		parser_eat(parser);
+		// Stop after a complete nested block so its contents cannot become outer statements.
 		if completed_braced_region && synchronization_context != .BLOCK {
 			break;
 		}
@@ -4756,6 +5090,7 @@ materialise_tokens :: (source: string) -> Parsed_Source {
 
 	source_cursor: s64;
 
+	// The lexer reuses ring slots; retained spans and arbitrary lookahead need stable copies.
 	while true {
 		token := peek_next_token(*lexer);
 		if token.type == {
