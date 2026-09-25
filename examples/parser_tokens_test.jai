@@ -1,3 +1,4 @@
+// Parse focused valid and malformed source snippets under default and trivia-enabled imports; assert token spans, parser-owned AST fields, round trips, and recovery.
 #import "Basic";
 #import "Compiler";
 #import "String";
@@ -23,6 +24,7 @@ compiler_node_for_source :: ($source: string) -> *Code_Node #expand {
 
 main :: () {
 	test_default_tokens();
+	test_lexer_only_recovery();
 	test_star_token_contract();
 	test_asm_token_contract();
 	test_trivia_round_trip();
@@ -43,6 +45,7 @@ main :: () {
 	test_diagnostic_tab_rendering();
 	test_prefix_expressions();
 	test_postfix_expressions();
+	test_call_context_modification();
 	test_casts_and_queries();
 	test_parameter_default_delimiters();
 	test_static_if_directives();
@@ -69,6 +72,28 @@ test_default_tokens :: () {
 	assert(parsed.tokens.count == 6);
 	assert(parsed.tokens[0].type == .IDENT);
 	assert(parsed.tokens[5].type == .END_OF_INPUT);
+}
+
+test_lexer_only_recovery :: () {
+	identifier_length :: Extended.MAX_IDENTIFIER_LENGTH + 8;
+	suffix :: " :: 1;";
+
+	source := alloc_string(identifier_length + suffix.count);
+	defer free(source);
+
+	for index: 0..identifier_length-1 {
+		source.data[index] = #char "a";
+	}
+
+	memcpy(source.data + identifier_length, suffix.data, suffix.count);
+
+	parsed := Extended.parse_file(source);
+	defer Extended.release_parser_tree(*parsed);
+
+	assert(parsed.status == .RECOVERED);
+	assert(parsed.diagnostics.count == 0);
+	assert(parsed.root.(*Extended.Parser_Block).statements.count == 1);
+	assert(Extended.reconstruct_source(*parsed) == source);
 }
 
 test_star_token_contract :: () {
@@ -561,6 +586,16 @@ test_placeholder_and_here_string :: () {
 	assert(percent_value[2] == #char "\n");
 	assert(percent_value == COMPILER_PERCENT_HERE_STRING);
 	assert(Extended.reconstruct_source(*percent_here_string) == percent_source);
+
+	file_source :: "FIRST :: #string END\nfirst line\nEND\nSECOND :: #string,\\% DONE\n%\\%\nDONE\nafter :: 1;";
+	file := Extended.parse_file(file_source);
+	assert(file.status == .COMPLETE);
+	assert(file.root.(*Extended.Parser_Block).statements.count == 3);
+	assert(Extended.reconstruct_source(*file) == file_source);
+
+	plain_string := Extended.parse_file("first :: \"text\"\nsecond :: 1;");
+	assert(plain_string.status == .RECOVERED);
+	assert(plain_string.diagnostics[0].expected_token == #char ";");
 }
 
 test_parenthesized_expression :: () {
@@ -707,6 +742,49 @@ test_postfix_expressions :: () {
 	assert(incomplete_call.status == .INCOMPLETE);
 	assert(incomplete_call.synthetic_tokens.count == 1);
 	assert(incomplete_call.synthetic_tokens[0].token.type == #char ")");
+}
+
+test_call_context_modification :: () {
+	source :: "f(16, 8,, allocator = pool_allocator, logger = my_logger)";
+	parsed := Extended.parse_expression(source);
+	assert(parsed.status == .COMPLETE);
+	call := parsed.root.(*Extended.Parser_Procedure_Call);
+	assert(call.arguments_unsorted.count == 2);
+	assert(call.context_modification != null);
+	assert(call.context_modification.modification_expressions.count == 2);
+	first := call.context_modification.modification_expressions[0].(*Extended.Parser_Binary_Operator);
+	assert(first.operator_type == #char "=");
+	assert(first.left.(*Extended.Parser_Ident).name == "allocator");
+	assert(first.right.(*Extended.Parser_Ident).name == "pool_allocator");
+	second := call.context_modification.modification_expressions[1].(*Extended.Parser_Binary_Operator);
+	assert(second.operator_type == #char "=");
+	assert(second.left.(*Extended.Parser_Ident).name == "logger");
+	assert(second.right.(*Extended.Parser_Ident).name == "my_logger");
+	assert(Extended.reconstruct_source(*parsed) == source);
+
+	shorthand := Extended.parse_expression("f(1000, 3,, pool_allocator)");
+	assert(shorthand.status == .COMPLETE);
+	shorthand_call := shorthand.root.(*Extended.Parser_Procedure_Call);
+	assert(shorthand_call.arguments_unsorted.count == 2);
+	assert(shorthand_call.context_modification.modification_expressions.count == 1);
+	assert(shorthand_call.context_modification.modification_expressions[0].(*Extended.Parser_Ident).name == "pool_allocator");
+
+	context_only := Extended.parse_expression("f(,, pool_allocator)");
+	assert(context_only.status == .COMPLETE);
+	context_call := context_only.root.(*Extended.Parser_Procedure_Call);
+	assert(context_call.arguments_unsorted.count == 0);
+	assert(context_call.context_modification.modification_expressions.count == 1);
+	context_only_named := Extended.parse_expression("f(,, allocator = pool_allocator)");
+	assert(context_only_named.status == .COMPLETE);
+	context_named_call := context_only_named.root.(*Extended.Parser_Procedure_Call);
+	assert(context_named_call.arguments_unsorted.count == 0);
+	assert(context_named_call.context_modification.modification_expressions.count == 1);
+	assert(context_named_call.context_modification.modification_expressions[0].(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Ident).name == "allocator");
+
+	empty_context := Extended.parse_expression("f(1,,)");
+	assert(empty_context.status == .RECOVERED);
+	assert(empty_context.diagnostics.count > 0);
+	assert(empty_context.root.(*Extended.Parser_Procedure_Call).context_modification != null);
 }
 
 test_casts_and_queries :: () {
@@ -877,9 +955,70 @@ test_expression_directives :: () {
 	assert((host_block_run_node.flags & xx 0x10) != 0);
 	assert((host_block_run_node.flags & .HAS_IMPLICIT_RETURN_TYPES) == 0);
 	assert(host_block_run_node.expression.(*Extended.Parser_Block).statements.count == 1);
+	typed_run_source :: "VALUE :: #run -> [] string { return .[\"ready\"]; }\nafter :: 1;";
+	typed_run_file := Extended.parse_file(typed_run_source);
+	assert(typed_run_file.status == .COMPLETE);
+	typed_run_statements := typed_run_file.root.(*Extended.Parser_Block).statements;
+	assert(typed_run_statements.count == 2);
+	typed_run := typed_run_statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Directive_Run);
+	assert((typed_run.flags & .HAS_IMPLICIT_RETURN_TYPES) == 0);
+	assert(typed_run.procedure.returns.count == 1);
+	assert(typed_run.expression == typed_run.procedure.body_or_null.block);
+	assert(typed_run.expression.(*Extended.Parser_Block).statements.count == 1);
+	assert(Extended.reconstruct_source(*typed_run_file) == typed_run_source);
+	host_typed_run := Extended.parse_file("VALUE :: #run,host -> string { return \"ready\"; };\nafter :: 1;");
+	assert(host_typed_run.status == .COMPLETE);
+	host_typed_statements := host_typed_run.root.(*Extended.Parser_Block).statements;
+	assert(host_typed_statements.count == 2);
+	host_typed_directive := host_typed_statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Directive_Run);
+	assert((host_typed_directive.flags & xx 0x10) != 0);
+	assert((host_typed_directive.flags & .HAS_IMPLICIT_RETURN_TYPES) == 0);
+	assert(host_typed_directive.procedure.returns.count == 1);
+	assert(host_typed_directive.expression == host_typed_directive.procedure.body_or_null.block);
+	assert(Extended.parse_expression("#run -> string").status == .INCOMPLETE);
+	assert_source :: "{ #assert ready \"not ready\"; after(); }";
+	assert_parsed := Extended.parse_block(assert_source);
+	assert(assert_parsed.status == .COMPLETE);
+	assert_statements := assert_parsed.root.(*Extended.Parser_Block).statements;
+	assert(assert_statements.count == 2);
+	assert_run := assert_statements[0].(*Extended.Parser_Directive_Run);
+	assert((assert_run.flags & .ASSERTION) != 0);
+	assert((assert_run.flags & .HAS_IMPLICIT_RETURN_TYPES) != 0);
+	assert(assert_run.expression.(*Extended.Parser_Ident).name == "ready");
+	assert(assert_run.assertion_string == "not ready");
+	assert(Extended.reconstruct_source(*assert_parsed) == assert_source);
+	module_assert := Extended.parse_file("#assert(is_constant(VERBOSE));\nrender :: () {}");
+	assert(module_assert.status == .COMPLETE);
+	assert(module_assert.root.(*Extended.Parser_Block).statements[0].kind == .DIRECTIVE_RUN);
+	assert(Extended.parse_block("{ #assert; after(); }").status == .RECOVERED);
+	run_source :: "{ #run { compile_step(); } after(); #run compute(); }";
+	run_statements := Extended.parse_block(run_source);
+	assert(run_statements.status == .COMPLETE);
+	assert(run_statements.root.(*Extended.Parser_Block).statements.count == 3);
+	assert(run_statements.root.(*Extended.Parser_Block).statements[1].kind == .PROCEDURE_CALL);
+	assert(Extended.reconstruct_source(*run_statements) == run_source);
+	file_run_source :: "#run { compile_step(); }\nmain :: () {}";
+	file_run := Extended.parse_file(file_run_source);
+	assert(file_run.status == .COMPLETE);
+	assert(file_run.root.(*Extended.Parser_Block).statements.count == 2);
+	assert(Extended.reconstruct_source(*file_run) == file_run_source);
+	assert(Extended.parse_block("{ #run { compile_step(); }; after(); }").status == .COMPLETE);
+	assert(Extended.parse_block("{ #run compute() after(); }").status == .RECOVERED);
 
 	insert := Extended.parse_expression("#insert generated_code");
 	assert(insert.root.(*Extended.Parser_Directive_Insert).expression.(*Extended.Parser_Ident).name == "generated_code");
+	empty_scope_source :: "{ code :: #code { value := 1; }; #insert,scope() code; after(); }";
+	empty_scope := Extended.parse_block(empty_scope_source);
+	assert(empty_scope.status == .COMPLETE);
+	empty_statements := empty_scope.root.(*Extended.Parser_Block).statements;
+	assert(empty_statements.count == 3);
+	assert(empty_statements[0].(*Extended.Parser_Declaration).expression.kind == .DIRECTIVE_CODE);
+	empty_insert := empty_statements[1].(*Extended.Parser_Directive_Insert);
+	assert(empty_insert.scope_redirection == null);
+	assert(empty_insert.expression.(*Extended.Parser_Ident).name == "code");
+	assert(empty_statements[2].kind == .PROCEDURE_CALL);
+	assert(Extended.reconstruct_source(*empty_scope) == empty_scope_source);
+	assert(Extended.parse_expression("#insert,scope(code").status == .INCOMPLETE);
 	insert_options := Extended.parse_expression("#insert,scope(caller) (break=break outer, continue=continue outer, remove=remove outer) body");
 	insert_node := insert_options.root.(*Extended.Parser_Directive_Insert);
 	assert(insert_node.scope_redirection.(*Extended.Parser_Ident).name == "caller");
@@ -916,6 +1055,22 @@ test_expression_directives :: () {
 	assert(bytes.root.(*Extended.Parser_Directive_Bytes).expression.kind == .IDENT);
 	procedure_name := Extended.parse_expression("#procedure_name(target)");
 	assert(procedure_name.root.(*Extended.Parser_Directive_Procedure_Name).argument.kind == .IDENT);
+	procedure_source :: "{ selected := #procedure_of_call very_optional(\"Sailor?\", 2, 3, 4, **float); after(); }";
+	procedure_of_call := Extended.parse_block(procedure_source);
+	assert(procedure_of_call.status == .COMPLETE);
+	selected_statements := procedure_of_call.root.(*Extended.Parser_Block).statements;
+	assert(selected_statements.count == 2);
+	selected_call := selected_statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Call);
+	assert((selected_call.flags & .RETURNS_PROCEDURE_POINTER_ONLY) != 0);
+	assert(selected_call.procedure_expression.(*Extended.Parser_Ident).name == "very_optional");
+	assert(selected_call.arguments_unsorted.count == 5);
+	assert(selected_call.arguments_unsorted[4].expression.kind == .UNARY_OPERATOR);
+	assert(selected_statements[1].kind == .PROCEDURE_CALL);
+	assert(Extended.reconstruct_source(*procedure_of_call) == procedure_source);
+	assert(Extended.parse_expression("#procedure_of_call foo(1)").status == .COMPLETE);
+	malformed_procedure := Extended.parse_block("{ #procedure_of_call foo; after(); }");
+	assert(malformed_procedure.status == .RECOVERED);
+	assert(Extended.reconstruct_source(*malformed_procedure) == "{ #procedure_of_call foo; after(); }");
 	wildcard := Extended.parse_expression("#wildcard");
 	assert(wildcard.root.(*Extended.Parser_Directive_Wildcard).index == -1);
 	exists := Extended.parse_expression("#exists(value, ready)");
@@ -930,6 +1085,19 @@ test_expression_directives :: () {
 	assert(file_import.root.(*Extended.Parser_Directive_Import).import_type == .PATH_TO_FILE);
 	directory_import := Extended.parse_expression("#import,dir \"../module\"");
 	assert(directory_import.root.(*Extended.Parser_Directive_Import).import_type == .PATH_TO_DIRECTORY);
+	here_import_source :: "#import,string #string END\nVALUE :: 1;\nEND\n;\nafter :: 2;";
+	here_import := Extended.parse_file(here_import_source);
+	assert(here_import.status == .COMPLETE);
+	assert(here_import.root.(*Extended.Parser_Block).statements.count == 2);
+	here_import_node := here_import.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Directive_Import);
+	assert(here_import_node.import_type == .FULL_TEXT);
+	assert((here_import_node.flags & .UNSHARED) != 0);
+	assert(here_import_node.name == "VALUE :: 1;\n");
+	assert(here_import.root.(*Extended.Parser_Block).statements[1].kind == .DECLARATION);
+	assert(Extended.reconstruct_source(*here_import) == here_import_source);
+	missing_import_semicolon := Extended.parse_file("#import,string #string END\nVALUE :: 1;\nEND\nafter :: 2;");
+	assert(missing_import_semicolon.status == .RECOVERED);
+	assert(missing_import_semicolon.diagnostics[0].expected_token == #char ";");
 	bake_constants := Extended.parse_expression("#bake_constants specialize(value)");
 	assert(bake_constants.root.(*Extended.Parser_Directive_Bake).bake_type == .CONSTANTS_BAKE);
 	bake_arguments := Extended.parse_expression("#bake_arguments specialize(value)");
@@ -1009,6 +1177,27 @@ test_basic_declarations :: () {
 }
 
 test_compound_declarations :: () {
+	reassigned_source :: "{ out1, out2 = hello(1); out1 = 2; after(); }";
+	reassigned := Extended.parse_block(reassigned_source);
+	assert(reassigned.status == .COMPLETE);
+	reassigned_statements := reassigned.root.(*Extended.Parser_Block).statements;
+	assert(reassigned_statements.count == 3);
+	compound := reassigned_statements[0].(*Extended.Parser_Compound_Declaration);
+	assert(compound.comma_separated_assignment.arguments.count == 2);
+	assert(compound.comma_separated_assignment.arguments[0].node.(*Extended.Parser_Ident).name == "out1");
+	assert(compound.comma_separated_assignment.arguments[1].node.(*Extended.Parser_Ident).name == "out2");
+	assert(compound.declaration_properties.expression.kind == .PROCEDURE_CALL);
+	assert(reassigned_statements[1].kind == .BINARY_OPERATOR);
+	assert(reassigned_statements[2].kind == .PROCEDURE_CALL);
+	assert(Extended.reconstruct_source(*reassigned) == reassigned_source);
+
+	broken_reassignment := Extended.parse_block("{ out1, out2 =; after(); }");
+	assert(broken_reassignment.status == .RECOVERED);
+	assert(broken_reassignment.root.(*Extended.Parser_Block).statements.count == 2);
+	assert(broken_reassignment.root.(*Extended.Parser_Block).statements[1].kind == .PROCEDURE_CALL);
+	invalid_values := Extended.parse_block("{ out1, out2 = 1, 2; }");
+	assert(invalid_values.status == .RECOVERED);
+
 	typed := Extended.parse_declaration("x, y: int;");
 	assert(typed.status == .COMPLETE);
 	typed_node := typed.root.(*Extended.Parser_Compound_Declaration);
@@ -1075,6 +1264,17 @@ test_procedure_types :: () {
 	inlined := Extended.parse_declaration("fast :: inline () {}");
 	assert(inlined.status == .COMPLETE);
 	assert((inlined.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).procedure_flags & .SYNTACTICALLY_MARKED_AS_INLINE_YES) != 0);
+	dump_source :: "square_poly :: (value: $T) -> T #dump { return value; }\nafter :: 1;";
+	dumped := Extended.parse_file(dump_source);
+	assert(dumped.status == .COMPLETE);
+	dump_statements := dumped.root.(*Extended.Parser_Block).statements;
+	assert(dump_statements.count == 2);
+	dump_header := dump_statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
+	assert((dump_header.procedure_flags & .DEBUG_DUMP) != 0);
+	assert((dump_header.procedure_flags & .POLYMORPHIC) != 0);
+	assert(dump_header.body_or_null.block.statements[0].kind == .RETURN);
+	assert(Extended.reconstruct_source(*dumped) == dump_source);
+	assert(Extended.parse_declaration("square :: () #dump { return; ").status == .INCOMPLETE);
 
 	multiple_returns := Extended.parse_declaration("find :: (items: ..Any) -> value: s64, found: bool { return 0, false; }");
 	assert(multiple_returns.status == .COMPLETE);
@@ -1088,6 +1288,22 @@ test_procedure_types :: () {
 	using_header := using_parameter.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
 	assert(using_header.arguments.count == 1);
 	assert(using_header.parameter_usings.count == 1);
+
+	filtered_parameter := Extended.parse_declaration("inspect :: (using value: *Thing, using,except(x, y, z) q: Quaternion) {}");
+	assert(filtered_parameter.status == .COMPLETE);
+	filtered_header := filtered_parameter.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
+	assert(filtered_header.arguments.count == 2);
+	assert(filtered_header.parameter_usings.count == 2);
+	assert(filtered_header.parameter_usings[1].filter_type == .EXCEPT);
+	assert(filtered_header.parameter_usings[1].filter_expression.(*Extended.Parser_Literal).array_literal_info.array_members.count == 3);
+	assert(Extended.reconstruct_source(*filtered_parameter) == "inspect :: (using value: *Thing, using,except(x, y, z) q: Quaternion) {}");
+
+	missing_filter_name := Extended.parse_declaration("inspect :: (using,only(w, , y) q: Quaternion) {}");
+	assert(missing_filter_name.status == .RECOVERED);
+	assert(missing_filter_name.diagnostics.count > 0);
+	unsupported_filter := Extended.parse_block("{ using,map(prefix_with_gl) procs: Procs; }");
+	assert(unsupported_filter.status == .RECOVERED);
+	assert(unsupported_filter.diagnostics.count > 0);
 
 	foreign := Extended.parse_declaration("external :: () -> s64 #foreign kernel32 \"external_name\";");
 	assert(foreign.status == .COMPLETE);
@@ -1121,6 +1337,24 @@ test_procedure_types :: () {
 	assert(header.returns[1].name == "");
 	assert(header.returns[1].type_inst.type_valued_expression.(*Extended.Parser_Ident).name == "string");
 
+	unnamed_source :: "callback: (T) -> $R;";
+	unnamed := Extended.parse_declaration(unnamed_source);
+	assert(unnamed.status == .COMPLETE);
+	unnamed_header := unnamed.root.(*Extended.Parser_Declaration).type_inst.type_valued_expression.(*Extended.Parser_Procedure_Header);
+	assert(unnamed_header.arguments.count == 1);
+	assert(unnamed_header.arguments[0].name == "");
+	assert(unnamed_header.arguments[0].type_inst.type_valued_expression.(*Extended.Parser_Ident).name == "T");
+	assert(unnamed_header.returns[0].type_inst.type_valued_expression.(*Extended.Parser_Ident).name == "R");
+	assert(Extended.reconstruct_source(*unnamed) == unnamed_source);
+	assert(Extended.parse_declaration("callback: (T);").status == .COMPLETE);
+	assert(Extended.parse_declaration("SimpleProcedure :: #type () -> ();").status == .COMPLETE);
+	compound_type := Extended.parse_declaration("callback: *(**void, [3] [5] Code) -> ([..] #Context);");
+	assert(compound_type.status == .COMPLETE);
+	compound_header := compound_type.root.(*Extended.Parser_Declaration).type_inst.pointer_to.type_valued_expression.(*Extended.Parser_Procedure_Header);
+	assert(compound_header.arguments.count == 2);
+	assert(compound_header.returns[0].type_inst.array_element_type.type_valued_expression.kind == .DIRECTIVE_CONTEXT_TYPE);
+	assert(Extended.parse_declaration("callback: (T, -> R;").status == .RECOVERED);
+
 	structure := Extended.parse_declaration("Thing :: struct (T: Type, N := 2) { value: T; C :: N; } #no_padding; @Serializable");
 	assert(structure.status == .COMPLETE);
 	struct_node := structure.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct);
@@ -1139,6 +1373,26 @@ test_procedure_types :: () {
 	assert(assignment.operator_type == #char "=");
 	assert(assignment.left.(*Extended.Parser_Ident).name == "w");
 	assert(assignment.left.(*Extended.Parser_Ident).resolved_declaration == field);
+
+	dotted_source :: "Defaulted :: struct { info: Info; info.flavor = \"chocolate\"; position: Vector3; position.z = 1.5; brightness: float; brightness = 101.2; after: s64; }";
+	dotted := Extended.parse_declaration(dotted_source);
+	assert(dotted.status == .COMPLETE);
+	dotted_members := dotted.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements;
+	assert(dotted_members.count == 7);
+	flavor := dotted_members[1].(*Extended.Parser_Binary_Operator);
+	assert(flavor.operator_type == #char "=");
+	flavor_access := flavor.left.(*Extended.Parser_Binary_Operator);
+	assert(flavor_access.operator_type == #char ".");
+	assert(flavor_access.right.(*Extended.Parser_Ident).name == "flavor");
+	assert(flavor_access.left.(*Extended.Parser_Ident).resolved_declaration == dotted_members[0].(*Extended.Parser_Declaration));
+	assert(dotted_members[3].(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Binary_Operator).right.(*Extended.Parser_Ident).name == "z");
+	assert(dotted_members[6].(*Extended.Parser_Declaration).name == "after");
+	assert(Extended.reconstruct_source(*dotted) == dotted_source);
+	broken_dotted := Extended.parse_declaration("Defaulted :: struct { info: Info; info.flavor =; after: s64; }");
+	assert(broken_dotted.status == .RECOVERED);
+	broken_members := broken_dotted.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements;
+	assert(broken_members.count == 3);
+	assert(broken_members[2].(*Extended.Parser_Declaration).name == "after");
 
 	union_result := Extended.parse_declaration("Value :: union { integer: s64; text: string; }");
 	assert(union_result.status == .COMPLETE);
@@ -1393,6 +1647,22 @@ test_conditional_statements :: () {
 	nested_if := block.statements[1].(*Extended.Parser_If).then_block.statements[0].(*Extended.Parser_If);
 	assert(nested_if.else_block != null);
 
+	condition_source :: "{ if (mode == .ALLOCATE) && (size == 42) { run(); } if (count % 2) { run(); } if (pointer) { run(); } while (pointer) { break; } }";
+	conditions := Extended.parse_block(condition_source);
+	assert(conditions.status == .COMPLETE);
+	condition_statements := conditions.root.(*Extended.Parser_Block).statements;
+	assert(condition_statements.count == 4);
+	assert(condition_statements[0].(*Extended.Parser_If).condition.kind == .BINARY_OPERATOR);
+	assert(condition_statements[1].(*Extended.Parser_If).condition.kind == .BINARY_OPERATOR);
+	assert(condition_statements[2].(*Extended.Parser_If).condition.kind == .IDENT);
+	assert((condition_statements[2].(*Extended.Parser_If).condition.node_flags & .IS_PARENTHESIZED) != 0);
+	assert(condition_statements[3].(*Extended.Parser_While).condition.kind == .IDENT);
+	assert(Extended.reconstruct_source(*conditions) == condition_source);
+	assert(Extended.parse_expression("(value: s64) { return; }").status == .COMPLETE);
+	malformed_condition := Extended.parse_block("{ if (count ==) { run(); } after(); }");
+	assert(malformed_condition.status == .RECOVERED);
+	assert(Extended.reconstruct_source(*malformed_condition) == "{ if (count ==) { run(); } after(); }");
+
 	ifx_expression := Extended.parse_expression("ifx ready then 1 else 2");
 	assert(ifx_expression.status == .COMPLETE);
 	ifx_node := ifx_expression.root.(*Extended.Parser_If);
@@ -1403,6 +1673,16 @@ test_conditional_statements :: () {
 	block_ifx := Extended.parse_expression("ifx ready { prepare(); 1; } else { 2; }");
 	assert(block_ifx.status == .COMPLETE);
 	assert(block_ifx.root.(*Extended.Parser_If).then_block.statements.count == 2);
+	braced_source :: "{ value := ifx ready { prepare(); 1; } else { 2; } next(); }";
+	braced := Extended.parse_block(braced_source);
+	assert(braced.status == .COMPLETE);
+	braced_statements := braced.root.(*Extended.Parser_Block).statements;
+	assert(braced_statements.count == 2);
+	assert(braced_statements[0].(*Extended.Parser_Declaration).expression.kind == .IF);
+	assert(braced_statements[1].kind == .PROCEDURE_CALL);
+	assert(Extended.reconstruct_source(*braced) == braced_source);
+	assert(Extended.parse_block("{ value := ifx ready { 1; } else { 2; }; next(); }").status == .COMPLETE);
+	assert(Extended.parse_block("{ value := ifx ready then 1 else 2 next(); }").status == .RECOVERED);
 
 	switch_source :: "{ if #complete value == { case 1; return 1; case 2; #through; case 3; return 3; case; return 0; } }";
 	switch_parsed := Extended.parse_block(switch_source);
@@ -1460,6 +1740,20 @@ test_static_if_directives :: () {
 	member_if := static_member.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements[0].(*Extended.Parser_If);
 	assert((member_if.if_flags & .IS_STATIC) != 0);
 	assert(member_if.then_block.block_type == .DATA_DECLARATIONS);
+	enum_source :: "Spells :: enum { BASE; #if true { BLORPLE; #if false { HIDDEN; } else VISIBLE; } else FALLBACK; AFTER; }";
+	static_enum := Extended.parse_declaration(enum_source);
+	assert(static_enum.status == .COMPLETE);
+	enum_statements := static_enum.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Enum).block.statements;
+	assert(enum_statements.count == 3);
+	enum_if := enum_statements[1].(*Extended.Parser_If);
+	assert((enum_if.if_flags & .IS_STATIC) != 0);
+	assert(enum_if.then_block.block_type == .DATA_DECLARATIONS);
+	assert(enum_if.then_block.statements[0].(*Extended.Parser_Ident).name == "BLORPLE");
+	assert(enum_if.then_block.statements[1].(*Extended.Parser_If).else_block.statements[0].(*Extended.Parser_Ident).name == "VISIBLE");
+	assert(enum_if.else_block.statements[0].(*Extended.Parser_Ident).name == "FALLBACK");
+	assert(enum_statements[2].(*Extended.Parser_Ident).name == "AFTER");
+	assert(Extended.reconstruct_source(*static_enum) == enum_source);
+	assert(Extended.parse_declaration("Broken :: enum { #if true { NAME; ").status == .INCOMPLETE);
 
 	static_empty_default := Extended.parse_block("{ #if OS == { case .WINDOWS; return; case; } }");
 	assert(static_empty_default.status == .COMPLETE);
@@ -1496,6 +1790,20 @@ test_preserved_directive_forms :: () {
 	suffix_as := container_members[1].(*Extended.Parser_Using).expression.(*Extended.Parser_Declaration);
 	assert(suffix_as.name == "base");
 	assert((suffix_as.flags & .IS_MARKED_AS_AS) != 0);
+
+	using_enum_source :: "{ using enum u16 { CHOCOLATE :: 0; VANILLA; } after(); }";
+	using_enum := Extended.parse_block(using_enum_source);
+	assert(using_enum.status == .COMPLETE);
+	using_enum_statements := using_enum.root.(*Extended.Parser_Block).statements;
+	assert(using_enum_statements.count == 2);
+	assert(using_enum_statements[0].(*Extended.Parser_Using).expression.kind == .ENUM);
+	assert(using_enum_statements[0].(*Extended.Parser_Using).expression.(*Extended.Parser_Enum).block.statements.count == 2);
+	assert(using_enum_statements[1].kind == .PROCEDURE_CALL);
+	assert(Extended.reconstruct_source(*using_enum) == using_enum_source);
+	assert(Extended.parse_block("{ using enum u16 { VANILLA; }; after(); }").status == .COMPLETE);
+	ordinary_using := Extended.parse_block("{ using state after(); }");
+	assert(ordinary_using.status == .RECOVERED);
+	assert(ordinary_using.diagnostics[0].expected_token == #char ";");
 
 	asm_source :: "{ #asm AVX, AVX2 { mov apple:, 10; nested { ignored; }; } after(); }";
 	assembly := Extended.parse_block(asm_source);

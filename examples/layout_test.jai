@@ -1,3 +1,4 @@
+// Compare default lexer layouts with Jai_Lexer, then assert token and trivia behaviour using focused inputs under default, trivia-enabled, and raw-string imports.
 #import "Basic";
 #import "String";
 

@@ -1,3 +1,4 @@
+// Normalise parser and compiler ASTs from paired fixtures and compare their syntax; child workspaces cover contextual nodes, while invalid fixtures compare diagnostics.
 #import "Basic";
 #import "Compiler";
 #import "File";
@@ -206,13 +207,13 @@ test_compiler_related_diagnostics :: () {
 	diagnostic := result.diagnostics[0];
 	assert(diagnostic.location.l0 == 2 && diagnostic.location.c0 == 28);
 	assert(diagnostic.location.l1 == 2 && diagnostic.location.c1 == 34);
-	assert(diagnostic.message == "Type mismatch.  Type wanted: s64; type given: string.");
+	assert(diagnostic.message == "Type mismatch. Type wanted: s64; type given: string.");
 	assert(diagnostic.related_information.count == 1);
 	assert(diagnostic.related_information[0].location.l0 == 1);
 	assert(diagnostic.related_information[0].location.c0 == 18);
 	assert(diagnostic.related_information[0].location.l1 == 1);
 	assert(diagnostic.related_information[0].location.c1 == 30);
-	assert(diagnostic.related_information[0].message == "...in checking argument 1 of call to takes_integer.");
+	assert(diagnostic.related_information[0].message == "... in checking argument 1 of call to takes_integer.");
 }
 
 test_structural_difference_reporting :: () {
@@ -237,6 +238,16 @@ test_comparison_layers :: () {
 	assert(find_normalized_field(syntax.fields, "root.has_type") == null);
 	assert(find_normalized_field(semantic.fields, "root.has_type") != null);
 }
+
+test_context_modification_compiler_shape :: () {
+	call := compiler_get_nodes(#code f(5, 10,, allocator = temp)).(*Code_Procedure_Call);
+	assert(call.arguments_unsorted.count == 2);
+	assert(call.context_modification != null);
+	assert(call.context_modification.modification_expressions.count == 1);
+	assert(call.context_modification.modification_expressions[0].kind == .BINARY_OPERATOR);
+}
+
+#run test_context_modification_compiler_shape();
 
 normalize_tree :: (node: *Code_Node, layer := Comparison_Layer.SYNTAX) -> Normalized_Tree {
 	result: Normalized_Tree;
@@ -334,12 +345,21 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 
 		case .PROCEDURE_CALL;
 			call := node.(*Parser.Parser_Procedure_Call);
+			add_normalized_field(result, path, "flags", tprint("%", call.flags));
 			add_normalized_field(result, path, "argument_count", tprint("%", call.arguments_unsorted.count));
+			add_normalized_field(result, path, "has_context_modification", tprint("%", call.context_modification != null));
 			normalize_parser_node(call.procedure_expression, tprint("%.procedure", path), layer, result);
 			for call.arguments_unsorted {
 				argument_path := tprint("%.argument[%]", path, it_index);
 				add_normalized_field(result, argument_path, "name", ifx it.name then it.name.name else "<positional>");
 				normalize_parser_node(it.expression, tprint("%.expression", argument_path), layer, result);
+			}
+
+			if call.context_modification {
+				add_normalized_field(result, path, "context_count", tprint("%", call.context_modification.modification_expressions.count));
+				for call.context_modification.modification_expressions {
+					normalize_parser_node(it, tprint("%.context[%]", path, it_index), layer, result);
+				}
 			}
 
 		case .CAST;
@@ -368,6 +388,7 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 		case .DIRECTIVE_RUN;
 			directive := node.(*Parser.Parser_Directive_Run);
 			add_normalized_field(result, path, "flags", tprint("%", directive.flags));
+			add_normalized_field(result, path, "assertion_string", directive.assertion_string);
 			normalize_parser_node(directive.expression, tprint("%.expression", path), layer, result);
 
 		case .DIRECTIVE_INSERT;
@@ -463,6 +484,13 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 			add_normalized_field(result, path, "library", ifx header.library_identifier then header.library_identifier.name else "");
 			add_normalized_field(result, path, "deprecated", header.deprecation_string);
 			add_normalized_field(result, path, "using_count", tprint("%", header.parameter_usings.count));
+			for header.parameter_usings {
+				using_path := tprint("%.using[%]", path, it_index);
+				add_normalized_field(result, using_path, "filter_type", tprint("%", it.filter_type));
+				add_normalized_field(result, using_path, "no_parameters", tprint("%", it.no_parameters));
+				normalize_parser_node(it.filter_expression, tprint("%.filter", using_path), layer, result);
+			}
+
 			add_normalized_field(result, path, "modify_count", tprint("%", header.modify_directives.count));
 			add_normalized_field(result, path, "argument_count", tprint("%", header.arguments.count));
 			add_normalized_field(result, path, "return_count", tprint("%", header.returns.count));
@@ -689,12 +717,21 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 
 		case .PROCEDURE_CALL;
 			call := node.(*Code_Procedure_Call);
+			add_normalized_field(result, path, "flags", tprint("%", call.flags));
 			add_normalized_field(result, path, "argument_count", tprint("%", call.arguments_unsorted.count));
+			add_normalized_field(result, path, "has_context_modification", tprint("%", call.context_modification != null));
 			normalize_node(call.procedure_expression, tprint("%.procedure", path), layer, result);
 			for call.arguments_unsorted {
 				argument_path := tprint("%.argument[%]", path, it_index);
 				add_normalized_field(result, argument_path, "name", ifx it.name then it.name.name else "<positional>");
 				normalize_node(it.expression, tprint("%.expression", argument_path), layer, result);
+			}
+
+			if call.context_modification {
+				add_normalized_field(result, path, "context_count", tprint("%", call.context_modification.modification_expressions.count));
+				for call.context_modification.modification_expressions {
+					normalize_node(it, tprint("%.context[%]", path, it_index), layer, result);
+				}
 			}
 
 		case .CAST;
@@ -723,6 +760,7 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 		case .DIRECTIVE_RUN;
 			directive := node.(*Code_Directive_Run);
 			add_normalized_field(result, path, "flags", tprint("%", directive.flags));
+			add_normalized_field(result, path, "assertion_string", directive.assertion_string);
 			expression: *Code_Node;
 			if directive.procedure && directive.procedure.body_or_null {
 				body := directive.procedure.body_or_null.block;
@@ -826,6 +864,13 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 			add_normalized_field(result, path, "library", ifx header.library_identifier then header.library_identifier.name else "");
 			add_normalized_field(result, path, "deprecated", header.deprecation_string);
 			add_normalized_field(result, path, "using_count", tprint("%", header.parameter_usings.count));
+			for header.parameter_usings {
+				using_path := tprint("%.using[%]", path, it_index);
+				add_normalized_field(result, using_path, "filter_type", tprint("%", it.filter_type));
+				add_normalized_field(result, using_path, "no_parameters", tprint("%", it.no_parameters));
+				normalize_node(it.filter_expression, tprint("%.filter", using_path), layer, result);
+			}
+
 			add_normalized_field(result, path, "modify_count", tprint("%", header.modify_directives.count));
 			add_normalized_field(result, path, "argument_count", tprint("%", header.arguments.count));
 			add_normalized_field(result, path, "return_count", tprint("%", header.returns.count));
@@ -1186,6 +1231,7 @@ test_file_workspace_fixtures :: () {
 	assert_file_workspace_fixture("#scope_file\nfixture_file_scope :: 1;", "fixture_file_scope");
 	assert_file_workspace_fixture("#scope_export\nfixture_export_scope :: 1;", "fixture_export_scope");
 	assert_file_workspace_fixture("#add_context fixture_context_value: s64;\nfixture_add_context :: 1;", "fixture_add_context");
+	assert_file_workspace_fixture("#assert true;\nfixture_assert_scope :: 1;", "fixture_assert_scope");
 }
 
 assert_declaration_workspace_fixture :: (source: string) {
@@ -1250,12 +1296,19 @@ test_declaration_workspace_fixtures :: () {
 	assert_declaration_workspace_fixture("fixture_view: [] s64;");
 	assert_declaration_workspace_fixture("fixture_resizable: [..] s64;");
 	assert_declaration_workspace_fixture("fixture_callback: (value: s64) -> bool;");
+	assert_declaration_workspace_fixture("fixture_unnamed: (s64) -> bool;");
+	assert_declaration_workspace_fixture("fixture_bare: (s64);");
+	assert_declaration_workspace_fixture("fixture_polymorphic_callback :: (value: $T, f: (T) -> $R) -> R { return f(value); }");
+	assert_declaration_workspace_fixture("Fixture_Simple_Procedure :: #type () -> ();");
+	assert_declaration_workspace_fixture("fixture_compound: *(**void, [3] [5] Fixture_Constraint) -> ([..] #Context);");
 	assert_declaration_workspace_fixture("fixture_alias :: #type,distinct u32;");
 	assert_declaration_workspace_fixture("fixture_x, fixture_y: s64 = 7;");
 	assert_declaration_workspace_fixture("fixture_a, fixture_b := 1, 2;");
 	assert_declaration_workspace_fixture("fixture_aligned: s64 #align 16;");
 	assert_declaration_workspace_fixture("fixture_noted: s64; @FixtureNote");
 	assert_declaration_workspace_fixture("fixture_inline :: inline () {}");
+	assert_declaration_workspace_fixture("fixture_dump :: (value: s64) -> s64 #dump { return value; }");
+	assert_declaration_workspace_fixture("fixture_assert_macro :: (value: $T) #expand { #assert true \"supported\"; }");
 	assert_declaration_workspace_fixture("fixture_no_inline :: no_inline () {}");
 	assert_declaration_workspace_fixture("fixture_parameter_defaults :: (width: s64 = 640, height: s64 = 480) {}");
 	assert_declaration_workspace_fixture("Fixture_Aggregate_Defaults :: struct (width: s64 = 640, height: s64 = 480) {}");
@@ -1348,6 +1401,15 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("!~flag");
 	assert_expression_fixture("foo()");
 	assert_expression_fixture("foo(1, named = value)");
+	assert_expression_fixture("join(strings,, allocator=temp)");
+	assert_expression_fixture("f(16, 8,, allocator = pool_allocator)");
+	assert_expression_fixture("f(1000, 3,, logger = my_logger)");
+	assert_expression_fixture("f(5, 10,, some_value = 42)");
+	assert_expression_fixture("f(16, 8,, allocator = pool_allocator, logger = my_logger)");
+	assert_expression_fixture("f(5, 10,, pool_allocator, logger = my_logger)");
+	assert_expression_fixture("f(1000, 3,, pool_allocator)");
+	assert_expression_fixture("f(,, pool_allocator)");
+	assert_expression_fixture("f(,, allocator = pool_allocator)");
 	assert_expression_fixture("object.method(1)[index].*");
 	assert_expression_fixture("cast(s32) value");
 	assert_expression_fixture("cast(*u8) value");
@@ -1376,7 +1438,14 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("#run,stallable { value := compute(); return value; }");
 	assert_expression_fixture("#run,host compute()");
 	assert_expression_fixture("#run,host { value := compute(); return value; }");
+	assert_expression_fixture("#run -> string { return \"ready\"; }");
+	assert_expression_fixture("#run,host -> string { return \"ready\"; }");
+	assert_statement_fixture("VALUE :: #run -> string { return \"ready\"; }");
+	assert_statement_fixture("VALUE :: #run,host -> string { return \"ready\"; };");
+	assert_expression_fixture("#procedure_of_call foo(1)");
+	assert_expression_fixture("#procedure_of_call foo(**float)");
 	assert_expression_fixture("#insert generated_code");
+	assert_expression_fixture("#insert,scope() generated_code");
 	assert_expression_fixture("#insert -> string { return \"generated\"; }");
 	assert_expression_fixture("#insert,scope(caller) (break=break outer, continue=continue outer, remove=remove outer) body");
 	assert_expression_fixture("#location()");
@@ -1392,6 +1461,7 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("#import,file \"../module.jai\"");
 	assert_expression_fixture("#import,dir \"../module\"");
 	assert_expression_fixture("#import,string \"fixture_value :: 1;\"");
+	assert_statement_fixture("#import,string #string END\nVALUE :: 1;\nEND\n;");
 	assert_expression_fixture("#import,file \"../module.jai\"(DEBUG=true)(PROGRAM_DEBUG=false)");
 	assert_expression_fixture("#library,system \"Example\"");
 	assert_expression_fixture("#library,no_static_library \"Example\"");
@@ -1423,7 +1493,12 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("() #deprecated \"Use replacement instead.\" { return; }");
 	assert_expression_fixture("value => value + 1");
 	assert_expression_fixture("(left, right) => { return left + right; }");
+	assert_expression_fixture("(using v: Vector3_With_Length, using,except(x, y, z) q: Quaternion) { return; }");
 	assert_expression_fixture("struct { value: s64; }");
+	assert_expression_fixture("struct { info: Ice_Cream_Info; info.flavor = \"chocolate\"; position: Vector3; position.z = 1.5; brightness: float; brightness = 101.2; }");
+	assert_expression_fixture("struct { #as using base: Document; base.type = Executable_File; }");
+	assert_expression_fixture("struct { using,except(length) position: Vector3_With_Length; }");
+	assert_expression_fixture("struct { using,only(w, y) orientation: Quaternion; }");
 	assert_expression_fixture("struct { value: u64; #overlay (value) bits: u64; }");
 	assert_expression_fixture("struct (T: Type, N := 2) { value: T; CONSTANT :: N; }");
 	assert_expression_fixture("struct { value: s64; } #no_padding");
@@ -1433,9 +1508,11 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("enum #complete { READY; DONE; }");
 	assert_expression_fixture("enum_flags u32 { FAST; SAFE; }");
 	assert_statement_fixture("return 1, 2;");
+	assert_statement_fixture("out1, out2 = hello(1);");
 	assert_statement_fixture("{ value := 1; }");
 	assert_statement_fixture("`return 1;");
 	assert_statement_fixture("while ready { break; }");
+	assert_statement_fixture("while (pointer) { break; }");
 	assert_statement_fixture("while loop := ready { break loop; }");
 	assert_statement_fixture("for item, index: values { continue; }");
 	assert_statement_fixture("for 1..3 defer tick();");
@@ -1445,14 +1522,36 @@ test_directive_workspace_fixtures :: () {
 	assert_statement_fixture("for < * :utf8_iter value, index: text process(value);");
 	assert_statement_fixture("for <* :utf8_iter text process(it);");
 	assert_statement_fixture("if ready then run(); else stop();");
+	assert_statement_fixture("if (mode == .ALLOCATE) && (size == 42) { run(); }");
+	assert_statement_fixture("if (count % 2) { run(); }");
+	assert_statement_fixture("if (pointer) { run(); }");
+	assert_statement_fixture("value := ifx ready { prepare(); 1; } else { 2; }");
+	assert_statement_fixture("value := ifx ready { 1; } else { 2; };");
 	assert_statement_fixture("if value == { case 1; return; case; break; }");
 	assert_statement_fixture("if #complete value == { case 1; #through; case 2; return; case; return; }");
 	assert_statement_fixture("#if OS == { case .WINDOWS; return; case; }");
+	assert_statement_fixture("Fixture_Static_Enum :: enum { BASE; #if true { BLORPLE; #if false { HIDDEN; } else VISIBLE; } else FALLBACK; AFTER; }");
 	assert_statement_fixture("defer cleanup();");
 	assert_statement_fixture("`defer cleanup();");
 	assert_statement_fixture("defer { cleanup(); }");
+	assert_statement_fixture("#run { compile_step(); }");
+	assert_statement_fixture("#run { compile_step(); };");
+	assert_statement_fixture("#run compute();");
+	assert_statement_fixture("#assert(true);");
+	assert_statement_fixture("#assert ready \"not ready\";");
+	assert_statement_fixture("#if true { #assert !(flags & .REVERSE) \"reverse unsupported\"; }");
 	assert_statement_fixture("using state;");
+	assert_statement_fixture("using enum u16 { CHOCOLATE :: 0; VANILLA; }");
+	assert_statement_fixture("using enum u16 { VANILLA; };");
+	assert_statement_fixture("text :: #string END\nbody\nEND");
 	assert_statement_fixture("using local: State;");
+	assert_statement_fixture("using,except(x, y, z) orientation: Quaternion;");
+	assert_statement_fixture("using,except .[\"x\", \"y\", \"z\"] orientation: Quaternion;");
+	assert_statement_fixture("using,except SKIP_THESE orientation: Quaternion;");
+	assert_statement_fixture("using,except #run conflicting_names(Person, Business) business: Business;");
+	assert_statement_fixture("using,only(w, y) orientation: Quaternion;");
+	assert_statement_fixture("using,only(w) q;");
+	assert_statement_fixture("using,except(Node) Trees :: #import,file \"trees.jai\";");
 	assert_statement_fixture("push_context new_context { return; }");
 	assert_statement_fixture("push_context { return; }");
 	assert_statement_fixture("`push_context,defer_pop remap_context();");

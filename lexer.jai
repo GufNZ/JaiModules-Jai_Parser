@@ -263,7 +263,6 @@ Table_String :: #type,isa string;
 				iterator.cursor += 1;
 			}
 		} else {
-			assert(false, "Unexpected character in trivia: `%`", first);
 			trivia.kind = .IGNORED;
 		}
 

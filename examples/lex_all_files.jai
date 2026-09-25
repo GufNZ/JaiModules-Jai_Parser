@@ -1,3 +1,4 @@
+// Walk .jai files under modules with the trivia-enabled lexer; advance through each token and trivia slice, asserting exact byte coverage and no lexer errors.
 #import "Basic";
 #import "File_Utilities";
 #import "String";
