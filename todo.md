@@ -344,7 +344,23 @@ Validate and recover at the syntax layer:
 
 `cached_make_atom` currently copies every identifier spelling; its commented implementation depends on the compiler's `active_load.atom_table`, which this standalone lexer does not have.  A parser-owned table could share repeated spellings and provide canonical keys for later scope lookup, but pointer identity must not substitute for string equality across parses.  Table lookups, retained memory, and pool lifetime may outweigh savings on small or mostly unique inputs.
 
-- [ ] Establish a baseline for identifier allocations, peak retained memory, and lex/parse time on repeated-name, mostly unique-name, and `how_to` inputs; measure keyword-heavy inputs separately before changing storage.
+- [x] Establish a baseline for identifier allocations, peak retained memory, and lex/parse time on repeated-name, mostly unique-name, and `how_to` inputs; measure keyword-heavy inputs separately before changing storage.  Measurements and limitations follow.
+
+Baseline (Windows x64, current copying path): `examples/atom_baseline.jai` runs 1,000 `value := value + 1;` statements (repeated), 1,000 distinct `value_N := 1;` statements (unique), 1,000 `if true { while false { break; } }` statements inside a procedure (keywords), or all 84 `how_to/*.jai` files.  Input files/source strings are loaded before the timed region and before the memory snapshot.  Each phase runs in a fresh process; lex consumes tokens without building an AST, while parse calls `parse_file` and retains its result.  The count columns classify nonempty names copied by the lexer; the allocation column is the live Basic memory-debugger allocation delta from the `-x64` build, including non-name allocations.  Times are medians of five fresh-process runs of the `-o -llvm` build.  Keyword and note names use the same copying path and are shown separately.
+
+| Input | Phase | Identifier / keyword / note copies | Copied name bytes | Retained allocations | Retained bytes | Peak retained bytes at file checkpoints | Median time (ms) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Repeated | Lex | 2,000 / 0 / 0 | 10,000 | 2,000 | 10,000 | 10,000 | 0.247 |
+| Repeated | Parse | 2,000 / 0 / 0 | 10,000 | 2,009 | 1,591,071 | 1,591,071 | 1.662 |
+| Unique | Lex | 1,000 / 0 / 0 | 8,890 | 1,000 | 8,890 | 8,890 | 0.174 |
+| Unique | Parse | 1,000 / 0 / 0 | 8,890 | 1,006 | 1,393,353 | 1,393,353 | 1.260 |
+| Keywords | Lex | 1 / 5,000 / 0 | 21,005 | 5,001 | 21,005 | 21,005 | 0.390 |
+| Keywords | Parse | 1 / 5,000 / 0 | 21,005 | 5,016 | 3,109,404 | 3,109,404 | 2.759 |
+| `how_to` | Lex | 13,278 / 1,909 / 1 | 89,806 | 17,389 | 127,644 | 127,644 | 6.235 |
+| `how_to` | Parse | 13,218 / 1,899 / 1 | 89,480 | 17,517 | 16,189,421 | 16,189,421 | 18.065 |
+
+Reproduce from `modules/Jai_Parser/examples` with `jai atom_baseline_debug.jai -x64` and `jai atom_baseline_time.jai -o -llvm`, then run `./atom_baseline_debug.exe repeated lex` (substitute `unique`, `keywords`, or `how_to`, and `lex` or `parse`) for allocations and retained bytes.  Run each `./atom_baseline_time.exe repeated lex` combination five times in separate processes for a median uninstrumented time.  `-o` selects the same very-optimised build as the deprecated `-release` flag; `-llvm` makes the backend explicit.  The debug build uses Basic's `MEMORY_DEBUGGER`; its time is not a performance baseline.  Sub-millisecond synthetic runs are sensitive to timing noise; compare like-for-like builds and environments.  The reported peak is the maximum live-allocation delta sampled after each file, not a true in-file high-water mark; it equals final retained bytes for these inputs.  Basic does not expose a peak allocator counter through its public leak-report API, and pool-managed allocations are represented by their backing allocations.  The `how_to` lex run emits existing lexer diagnostics for source forms in the corpus; the parse run completes.
+
 - [ ] Define the lifetime and ownership of canonical names across lexer reuse, materialised tokens, AST nodes, `release_parser_tree`, and borrowed source changes.  Keep token text and trivia lossless; do not attach the table to compiler `active_load` or free names while retained tokens or nodes still reference them.
 - [ ] Replace per-occurrence identifier copies with a module-owned atom table and stable name storage only after the lifetime contract is implemented; retain value-based lookup semantics, handle collisions, and keep the existing public token layout and keyword recognition correct.
 - [ ] Add focused tests for repeated and distinct names, hash collisions, backticked identifiers, notes, keywords, lexer reset, separate parse lifetimes, and exact trivia round-trips; run the existing parser, differential, and corpus suites.
