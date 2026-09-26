@@ -340,13 +340,15 @@ Validate and recover at the syntax layer:
 - [x] Synchronise malformed prefixes at the iteration expression or loop body without reinterpreting the body as top-level declarations, and keep partial `Parser_For` nodes stable.  Focused file-level fixtures verify partial loops with malformed selectors, controlled flags, bindings, commas, and duplicate flags; braced and single-statement bodies stay attached while following procedure and file declarations retain their scopes and sources round-trip exactly.
 - [x] Require `how_to/730_for_expansions.jai` to parse as `COMPLETE` with zero diagnostics and round-trip byte-for-byte before marking for-expansion syntax complete.  A dedicated focused fixture reads the real guide and checks all three conditions; expansion semantics remain deferred.
 
-Implement expansion semantics later:
+#### 13.4 Evaluate Identifier Interning Before Name Resolution
 
-- [ ] During name resolution, resolve the default `for_expansion` or selected expansion procedure using the iteration value's pointer form and Jai's auto-dereference rules.
-- [ ] Evaluate controlled pointer/reverse expressions as compile-time booleans, combine them with literal `for_flags`, and provide the resulting `For_Flags` value to the expansion macro.
-- [ ] Expand the loop body as `Code`, remap exported `it` and `it_index` to the source-spelled iterator names, retain additional exported names, and populate `macro_expansion_procedure_call` plus generated declaration fields.
-- [ ] Apply `#insert` break/continue/remove replacements to loop-control nodes in the inserted body, preserving labelled targets such as `break y`; report unsupported controls when the expansion deliberately substitutes a compile-time assertion.
-- [ ] Add semantic fixtures using value and pointer receivers, nested-loop break replacement, extra exported variables, and the real `Unicode.utf8_iter`, `Bit_Array`, `Hash_Table`, and `Bucket_Array` expansions.
+`cached_make_atom` currently copies every identifier spelling; its commented implementation depends on the compiler's `active_load.atom_table`, which this standalone lexer does not have.  A parser-owned table could share repeated spellings and provide canonical keys for later scope lookup, but pointer identity must not substitute for string equality across parses.  Table lookups, retained memory, and pool lifetime may outweigh savings on small or mostly unique inputs.
+
+- [ ] Establish a baseline for identifier allocations, peak retained memory, and lex/parse time on repeated-name, mostly unique-name, and `how_to` inputs; measure keyword-heavy inputs separately before changing storage.
+- [ ] Define the lifetime and ownership of canonical names across lexer reuse, materialised tokens, AST nodes, `release_parser_tree`, and borrowed source changes.  Keep token text and trivia lossless; do not attach the table to compiler `active_load` or free names while retained tokens or nodes still reference them.
+- [ ] Replace per-occurrence identifier copies with a module-owned atom table and stable name storage only after the lifetime contract is implemented; retain value-based lookup semantics, handle collisions, and keep the existing public token layout and keyword recognition correct.
+- [ ] Add focused tests for repeated and distinct names, hash collisions, backticked identifiers, notes, keywords, lexer reset, separate parse lifetimes, and exact trivia round-trips; run the existing parser, differential, and corpus suites.
+- [ ] Compare allocation, peak memory, and elapsed time with the baseline; keep interning only if it provides a measurable benefit without regressions, otherwise document the result and retain the copying path.
 
 ### 14. Add Semantic Analysis
 
@@ -356,6 +358,15 @@ Implement expansion semantics later:
 - [ ] Evaluate constants required by language semantics.
 - [ ] Resolve overloads and polymorphs.
 - [ ] Model desugaring and compiler-generated nodes where observable.
+
+Implement for-expansion semantics after scopes, types, constants, overloads, and generated-node support:
+
+- [ ] During name resolution, resolve the default `for_expansion` or selected expansion procedure using the iteration value's pointer form and Jai's auto-dereference rules.
+- [ ] Evaluate controlled pointer/reverse expressions as compile-time booleans, combine them with literal `for_flags`, and provide the resulting `For_Flags` value to the expansion macro.
+- [ ] Expand the loop body as `Code`, remap exported `it` and `it_index` to the source-spelled iterator names, retain additional exported names, and populate `macro_expansion_procedure_call` plus generated declaration fields.
+- [ ] Apply `#insert` break/continue/remove replacements to loop-control nodes in the inserted body, preserving labelled targets such as `break y`; report unsupported controls when the expansion deliberately substitutes a compile-time assertion.
+- [ ] Add semantic fixtures using value and pointer receivers, nested-loop break replacement, extra exported variables, and the real `Unicode.utf8_iter`, `Bit_Array`, `Hash_Table`, and `Bucket_Array` expansions.
+
 - [ ] Compare semantic output with typechecked compiler workspace messages.
 
 ### 15. Support Incremental and Resumable Parsing
