@@ -9,6 +9,7 @@
 #import "File";
 #import "String";
 #import "Unicode";
+#import "Hash_Table";
 
 USE_SIMD :: false;
 
@@ -328,13 +329,19 @@ Token :: struct {
 	}
 }
 
+Identifier_Storage :: struct {
+	names: Table(string, Table_String);
+	pool: Pool;
+}
+
 Lexer :: struct {
 	current_line_number: s32;
 	current_external_file_error_report_line_number: s32;
 	current_character_index: s32;
 
 	atom_pool:  Pool;
-	//atom_table: Table(string, Table_String);
+	identifier_storage: *Identifier_Storage;
+	identifier_handler: (lexer: *Lexer, name: string, source_name: string) -> Table_String = copy_identifier_name;
 
 	tokens: [MAX_CONCURRENT_TOKENS] Token;
 	token_array_cursor:  s32;
@@ -399,15 +406,57 @@ Hex_Digit_Type :: enum u8 {
 	UNICODE_32	:: 2;
 }
 
-cached_make_atom :: (lexer: *Lexer, name: string, token_to_fill: *Token) {
-	/* @Cleanup
-	table := *lexer.active_load.atom_table;
-	name_atom := nonlocked_make_atom(table, *lexer.atom_pool, name, *token_to_fill.ident_value.hash);
-	token_to_fill.ident_value.name = name_atom;
-	*/
+copy_identifier_name :: (lexer: *Lexer, name: string, source_name: string) -> Table_String {
+	return copy_string(name).(Table_String);
+}
 
+intern_identifier :: (lexer: *Lexer, name: string, source_name: string) -> Table_String {
+	storage := lexer.identifier_storage;
+	found, canonical := table_find(*storage.names, name);
+	if found {
+		return canonical;
+	}
+
+
+	if source_name == name && !lexer.should_free_input {
+		canonical = source_name.(Table_String);
+	} else {
+		push_allocator(pool_allocator_proc, *storage.pool);
+		canonical = copy_string(name).(Table_String);
+	}
+
+	table_add(*storage.names, canonical.(string), canonical);
+	return canonical;
+}
+
+set_identifier_storage :: (lexer: *Lexer, storage: *Identifier_Storage) {
+	if storage {
+		if !storage.names.allocator.proc {
+			storage.names.allocator = Context_Base.default_allocator;
+		}
+		if !storage.pool.block_allocator.proc {
+			set_allocators(*storage.pool, Context_Base.default_allocator);
+		}
+	}
+
+	lexer.identifier_storage = storage;
+	lexer.identifier_handler = ifx storage
+		then intern_identifier
+		else copy_identifier_name;
+}
+
+release_identifier_storage :: (storage: *Identifier_Storage) {
+	deinit(*storage.names);
+	release(*storage.pool);
+}
+
+#scope_file
+
+copy_token_name :: (name: string, token_to_fill: *Token) {
 	token_to_fill.ident_value.name = copy_string(name).(Table_String);
 }
+
+#scope_export
 
 eat_character :: (using lexer: *Lexer) {
 	if input.data[input_cursor] == #char "\n" {
@@ -922,7 +971,7 @@ make_note :: (lexer: *Lexer) -> *Token {
 	// Start and end indices do not include the leading @.
 
 	name := parse_note(lexer);
-	cached_make_atom(lexer, name, note);
+	copy_token_name(name, note);
 	free(name);
 
 	set_end_of_token(lexer, note);
@@ -1021,13 +1070,19 @@ make_ident_or_keyword :: (lexer: *Lexer) -> *Token {
 	result := get_unused_token(lexer);
 	result.type = .IDENT;
 
+	start := lexer.input_cursor;
 	name := parse_ident(lexer, result);
-	cached_make_atom(lexer, name, result);
+	result.ident_value.name = name.(Table_String);
+	keyword_type := check_for_keyword(result);
+	if keyword_type {
+		result.type = keyword_type;
+		copy_token_name(name, result);
+	} else {
+		source_name := slice(lexer.input, start, lexer.input_cursor - start);
+		result.ident_value.name = lexer.identifier_handler(lexer, name, source_name);
+	}
 
 	set_end_of_token(lexer, result);
-
-	keyword_type := check_for_keyword(result);
-	if keyword_type		result.type = keyword_type;
 
 	return result;
 }
@@ -1956,7 +2011,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 					eat_character(lexer);
 					result = make_one_character_token(lexer, .IDENT);
 					result.c0 -= 1;
-					cached_make_atom(lexer, "\\%", result);
+					result.ident_value.name = lexer.identifier_handler(lexer, "\\%", "\\%");
 				} else {
 					result = make_one_character_token(lexer, c.(Token_Type));
 				}
@@ -2100,7 +2155,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 					// This will change later when we do structured notes, probably.
 
 					result.type = .NOTE;
-					cached_make_atom(lexer, result.string_value, result);
+					copy_token_name(result.string_value, result);
 
 					return result;
 				}

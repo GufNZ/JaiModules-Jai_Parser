@@ -14,7 +14,7 @@ Run these from `modules/Jai_Parser/examples` with `jai <file>.jai -x64 && ./<fil
 
 This module starts from `Jai_Lexer` and adds current parser-oriented tokenisation.
 
-The default import retains the original `Token` and `Lexer` memory layouts:
+The default import retains the original `Token` layout:
 
 ```jai
 #import "Jai_Parser";
@@ -35,6 +35,11 @@ In this mode, `Token` additionally contains:
 These strings are zero-copy slices of `Lexer.input`.
 They remain valid only while that input remains installed in the lexer.
 Calling `set_input_from_string` or `set_input_from_file` can invalidate slices from the previous input.
+By default, standalone lexers copy identifier names.
+A caller can optionally provide `Identifier_Storage` with `set_identifier_storage(*lexer, *storage)` to intern names without a shared table or lock.
+The caller must keep the storage and borrowed source buffers supplying its names alive while those names are used.
+Lexer-owned file input is copied into the supplied storage, so resetting that input does not invalidate names; it can still invalidate token trivia.  `release_identifier_storage(*storage)` frees the table and fallback pool after all names are no longer used.
+Restoring a null storage uses the copying path again.
 
 Structured trivia is available through a `for_expansion`:
 
@@ -52,8 +57,12 @@ Trivia kinds are `WHITESPACE`, `LINE_COMMENT`, `BLOCK_COMMENT`, `SHEBANG`, and `
 `materialise_tokens(source)` copies the lexer's ring-buffer tokens into a stable parser-owned array.
 It also recognises `#string` directives, so their bodies are represented by the same string token the parser will consume.
 
-The returned `Parsed_Source` borrows `source`.
+The returned `Parsed_Source` borrows `source` and owns a per-file identifier table and fallback pool.
 Parser callers are expected to keep the source allocation alive and unchanged while using its tokens and syntax tree; the parser does not provide an owned-copy mode.
+Unchanged identifier spellings can refer directly to source bytes, while normalised spellings use the fallback pool.
+`release_parser_tree` does not free name storage because tokens remain available afterward.
+Once the tree has been released and callers are finished with the tokens, `release_parser_names(*parsed)` frees the table and fallback pool; token identifier names are invalid after that call.
+Standalone lexer tokens continue to own copied names unless optional storage was supplied.
 
 With `ENABLE_TRIVIA=false`, `Parser_Token` aliases `Token`.
 With trivia enabled, it extends the lexer token with a stable index and absolute, half-open byte boundaries.
@@ -224,7 +233,7 @@ Each `Parse_Diagnostic` has a primary token span and message.
 Its `related_information` slice can contain zero or more additional span/message pairs, matching the compiler's convention of reporting an `Error:` location followed by related `Info:` locations.
 `render_diagnostic_line` expands tabs to 4-column tab stops and returns the expanded source line plus a caret line covering the diagnostic's exclusive column range.
 
-Recovery loops use `parser_progress_guard` and `parser_ensure_progress` so a failed parse cannot repeatedly inspect the same non-EOF token.
+Recovery loops use `parser_progress_guard` and `parser_ensure_progress`, so a failed parse cannot repeatedly inspect the same non-EOF token.
 `parser_synchronize` defines restart boundaries for expression, statement, declaration, and block contexts.
 Synchronisation stops before the boundary token so its enclosing parser remains responsible for consuming delimiters such as `,`, `;`, `)`, `]`, and `}`.
 Nested parentheses, brackets, and braces are traversed before testing their internal tokens as restart boundaries.

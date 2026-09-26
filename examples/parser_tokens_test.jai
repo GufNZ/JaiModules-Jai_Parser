@@ -41,6 +41,7 @@ main :: () {
 	test_placeholder_and_here_string();
 	test_token_navigation();
 	test_parser_node_pool();
+	test_identifier_storage_lifetime();
 	test_recovery_synchronization();
 	test_complete_file_parsing();
 	test_parenthesized_expression();
@@ -459,6 +460,63 @@ test_parser_node_pool :: () {
 	assert(parsed.root == null);
 	assert(parsed.node_pool.used_memblocks == null);
 	assert(parsed.node_pool.unused_memblocks == null);
+}
+
+test_identifier_storage_lifetime :: () {
+	source := copy_string("alpha alpha some\\  name if @note");
+	parsed := Extended.materialise_tokens(source);
+	assert(parsed.tokens[0].ident_value.name.data == source.data);
+	assert(parsed.tokens[0].ident_value.name.data == parsed.tokens[1].ident_value.name.data);
+	assert(parsed.tokens[2].ident_value.name == "somename");
+	assert(parsed.tokens[2].ident_value.name.data != source.data + 12);
+	assert(parsed.tokens[3].type == .KEYWORD_IF);
+	assert(parsed.tokens[4].type == .NOTE);
+	assert(Extended.reconstruct_source(*parsed) == source);
+
+	other_source := copy_string("alpha");
+	other := Extended.materialise_tokens(other_source);
+	assert(other.tokens[0].ident_value.name == parsed.tokens[0].ident_value.name);
+	assert(other.tokens[0].ident_value.name.data != parsed.tokens[0].ident_value.name.data);
+	Extended.release_parser_tree(*parsed);
+	assert(parsed.tokens[2].ident_value.name == "somename");
+	Extended.release_parser_names(*parsed);
+	Extended.release_parser_names(*other);
+	free(source);
+	free(other_source);
+
+	file := Extended.parse_file("value :: 1;");
+	assert(file.root != null);
+	Extended.release_parser_tree(*file);
+	assert(file.tokens[0].ident_value.name == "value");
+	Extended.release_parser_names(*file);
+
+	standalone_source := copy_string("alpha");
+	lexer: Extended.Lexer;
+	Extended.set_input_from_string(*lexer, standalone_source);
+	standalone_token := Extended.peek_next_token(*lexer).*;
+	assert(standalone_token.ident_value.name.data != standalone_source.data);
+	Extended.set_input_from_string(*lexer, "other");
+	free(standalone_source);
+	assert(standalone_token.ident_value.name == "alpha");
+
+	storage: Extended.Identifier_Storage;
+	first_source := copy_string("shared");
+	second_source := copy_string("shared");
+	Extended.set_identifier_storage(*lexer, *storage);
+	Extended.set_input_from_string(*lexer, first_source);
+	first_token := Extended.peek_next_token(*lexer).*;
+	Extended.set_input_from_string(*lexer, second_source);
+	second_token := Extended.peek_next_token(*lexer).*;
+	assert(first_token.ident_value.name.data == second_token.ident_value.name.data);
+	assert(Extended.set_input_from_file(*lexer, "../../../how_to/001_first.jai"));
+	file_name := Extended.peek_token(*lexer, 1).ident_value.name;
+	assert(file_name == "import");
+	Extended.set_input_from_string(*lexer, "after");
+	assert(file_name == "import");
+	Extended.set_identifier_storage(*lexer, null);
+	Extended.release_identifier_storage(*storage);
+	free(first_source);
+	free(second_source);
 }
 
 test_recovery_synchronization :: () {

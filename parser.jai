@@ -217,7 +217,7 @@ render_diagnostic_line :: (source_line: string, c0: s64, c1: s64, tab_size: s64 
 }
 
 Parsed_Source :: struct {
-	// Source and all token text are borrowed - they must outlive this value.
+	// Source-backed token text is borrowed and must outlive this value.
 	source: string;
 	fully_pathed_filename: string;
 	tokens: [..]Parser_Token;
@@ -226,6 +226,7 @@ Parsed_Source :: struct {
 	status: Parse_Status;
 	root: *Parser_Node;
 	node_pool: Pool;
+	identifier_storage: Identifier_Storage;
 }
 
 
@@ -454,6 +455,11 @@ new_parser_node :: inline (parser: *Parser, $T: Type) -> *T {
 release_parser_tree :: (parsed: *Parsed_Source) {
 	parsed.root = null;
 	release(*parsed.node_pool);
+}
+
+release_parser_names :: (parsed: *Parsed_Source) {
+	assert(parsed.root == null);
+	release_identifier_storage(*parsed.identifier_storage);
 }
 
 make_token_span :: inline (first: s64, one_past_last: s64) -> Token_Span {
@@ -5165,6 +5171,7 @@ materialise_tokens :: (source: string) -> Parsed_Source {
 	result.source = source;
 
 	lexer: Lexer;
+	set_identifier_storage(*lexer, *result.identifier_storage);
 	set_input_from_string(*lexer, source);
 
 	source_cursor: s64;
