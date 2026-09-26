@@ -501,7 +501,9 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 		case .PROCEDURE_HEADER;
 			header := node.(*Parser.Parser_Procedure_Header);
 			add_normalized_field(result, path, "flags", tprint("%", procedure_syntax_flags(header.procedure_flags)));
-			add_normalized_field(result, path, "name", header.name);
+			if layer == .SEMANTIC {
+				add_normalized_field(result, path, "name", header.name);
+			}
 			add_normalized_field(result, path, "foreign_name", header.foreign_function_name);
 			add_normalized_field(result, path, "library", ifx header.library_identifier then header.library_identifier.name else "");
 			add_normalized_field(result, path, "deprecated", header.deprecation_string);
@@ -605,6 +607,8 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 			for_node := node.(*Parser.Parser_For);
 			add_normalized_field(result, path, "flags", tprint("%", for_node.for_flags));
 			normalize_parser_node(for_node.want_replacement_for_expansion, tprint("%.selector", path), layer, result);
+			normalize_parser_node(for_node.want_pointer_expression, tprint("%.pointer_flag", path), layer, result);
+			normalize_parser_node(for_node.want_reverse_expression, tprint("%.reverse_flag", path), layer, result);
 			normalize_parser_node(for_node.ident_it, tprint("%.iterator", path), layer, result);
 			normalize_parser_node(for_node.ident_it_index, tprint("%.index", path), layer, result);
 			normalize_parser_node(for_node.iteration_expression, tprint("%.iteration", path), layer, result);
@@ -881,7 +885,9 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 		case .PROCEDURE_HEADER;
 			header := node.(*Code_Procedure_Header);
 			add_normalized_field(result, path, "flags", tprint("%", procedure_syntax_flags(header.procedure_flags)));
-			add_normalized_field(result, path, "name", header.name);
+			if layer == .SEMANTIC {
+				add_normalized_field(result, path, "name", header.name);
+			}
 			add_normalized_field(result, path, "foreign_name", header.foreign_function_name);
 			add_normalized_field(result, path, "library", ifx header.library_identifier then header.library_identifier.name else "");
 			add_normalized_field(result, path, "deprecated", header.deprecation_string);
@@ -979,6 +985,8 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 			for_node := node.(*Code_For);
 			add_normalized_field(result, path, "flags", tprint("%", for_node.for_flags));
 			normalize_node(for_node.want_replacement_for_expansion, tprint("%.selector", path), layer, result);
+			normalize_node(for_node.want_pointer_expression, tprint("%.pointer_flag", path), layer, result);
+			normalize_node(for_node.want_reverse_expression, tprint("%.reverse_flag", path), layer, result);
 			normalize_node(for_node.ident_it, tprint("%.iterator", path), layer, result);
 			normalize_node(for_node.ident_it_index, tprint("%.index", path), layer, result);
 			normalize_node(for_node.iteration_expression, tprint("%.iteration", path), layer, result);
@@ -1600,6 +1608,8 @@ test_directive_workspace_fixtures :: () {
 	assert_statement_fixture("#insert -> string { return \"generated\"; }");
 	assert_statement_fixture("#insert -> Code { return #code x = x + 1; }");
 	assert_expression_fixture("#insert,scope(caller) (break=break outer, continue=continue outer, remove=remove outer) body");
+	assert_expression_fixture("#insert(break=break y, continue=continue y, remove=#assert(false)) body");
+	assert_statement_fixture("#insert(break=break y) body;");
 	assert_expression_fixture("#location()");
 	assert_expression_fixture("#location(value)");
 	assert_expression_fixture("#caller_location");
@@ -1643,6 +1653,9 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("#ifx ready { prepare(); 1; } else { 2; }");
 	assert_expression_fixture("() { return; }");
 	assert_expression_fixture("(value: $T) -> T #expand #compile_time { return value; }");
+	assert_statement_fixture("for_expansion :: (holder: Holder, body: Code, flags: For_Flags) #expand {}");
+	assert_statement_fixture("for_expansion :: (holder: *Holder, body: Code, flags: For_Flags) #expand {}");
+	assert_statement_fixture("for_expansion :: (holder: Holder, body: Code, flags: For_Flags) #expand { `it := holder; `it_index: s64; `visited_index := 0; }");
 	assert_expression_fixture("(items: ..Any) -> value: s64, found: bool { return 0, false; }");
 	assert_expression_fixture("(value: $T/interface Constraint) -> T");
 	assert_expression_fixture("(using value: *Thing) { return; }");
@@ -1680,6 +1693,27 @@ test_directive_workspace_fixtures :: () {
 	assert_statement_fixture("for < * :utf8_iter value: 1..3 { process(value); }");
 	assert_statement_fixture("for <=reverse :utf8_iter value: first..last { process(value); }");
 
+	// These spellings occur in the for-expansion guide; compare source-owned loop fields before expansion.
+	assert_statement_fixture("for holder { process(it); }");
+	assert_statement_fixture("for v, n: holder { process(v); }");
+	assert_statement_fixture("for :positive_vibes_only v, n: holder { process(v); }");
+	assert_statement_fixture("for :extra_info v, n: holder { process(v); }");
+	assert_statement_fixture("for grid { process(it); }");
+	assert_statement_fixture("for :fixed_break grid { process(it); }");
+	assert_statement_fixture("for dummy {}");
+	assert_statement_fixture("for < dummy {}");
+	assert_statement_fixture("for * dummy {}");
+	assert_statement_fixture("for < * dummy {}");
+	assert_statement_fixture("for :polite dummy {}");
+	assert_statement_fixture("for < :polite dummy {}");
+	assert_statement_fixture("for <=reversed NAMES print(it);");
+	assert_statement_fixture("for *=cast(bool)(flags & .POINTER), <=cast(bool)(flags & .REVERSE) a.data { print(it); }");
+	assert_statement_fixture("for my {}");
+	assert_statement_fixture("for < my {}");
+	assert_statement_fixture("for * my {}");
+	assert_statement_fixture("for <* my {}");
+	assert_statement_fixture("for `it, `it_index: a.data { process(it); }");
+
 	// Compare implicit and renamed bindings under the default and named expansions.
 	assert_statement_fixture("for values process(it);");
 	assert_statement_fixture("for < values process(it);");
@@ -1711,6 +1745,9 @@ test_directive_workspace_fixtures :: () {
 	assert(comparison_flags.want_pointer_expression.kind == .BINARY_OPERATOR);
 	assert(comparison_flags.want_reverse_expression.(*Code_Ident).name == "reverse");
 	assert(comparison_flags.iteration_expression.(*Code_Ident).name == "values");
+	assert(comparison_flags.ident_decl == null);
+	assert(comparison_flags.index_decl == null);
+	assert(comparison_flags.macro_expansion_procedure_call == null);
 
 	assignment_flags := compiler_get_nodes(#code { for <=(flag = enabled) values process(it); }).(*Code_Block).statements[0].(*Code_For);
 	assert(assignment_flags.want_reverse_expression.kind == .BINARY_OPERATOR);
