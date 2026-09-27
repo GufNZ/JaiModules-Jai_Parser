@@ -390,9 +390,28 @@ Canonical-name ownership contract for opt-in identifier interning:
 - [x] Add focused tests for repeated and distinct names, hash collisions, backticked identifiers, notes, keywords, lexer reset, separate parse lifetimes, and exact trivia round-trips; run the existing parser, differential, and corpus suites.  The parser-owned table retains only identifier spellings, distinguishes a real 32-bit hash collision, preserves backticked names and exact source bytes, and keeps an independent parse usable after another parse's tree, names, and source are released.  All three suites pass; the `how_to` corpus is 84/84 complete with zero diagnostics.
 - [x] Compare allocation, peak memory, and elapsed time with the baseline; keep interning only if it provides a measurable benefit without regressions, otherwise document the result and retain the copying path.  Same-revision measurements above show retained-memory regressions for unique names and the guide corpus despite fewer allocations, so copying remains the default and the measured interning variant requires explicit opt-in.
 
-### 14. Add Semantic Analysis
+### 14. Establish Recovery and Restart Contracts
+
+- [ ] Define explicit missing/error nodes or equivalent recovery records.
+- [ ] Record restart points at declarations and blocks.
+- [ ] Keep diagnostics deterministic while source is incomplete.
+
+These syntax contracts should be stable before introducing bindings or reusing parsed regions.
+
+### 15. Build Semantic Foundations
 
 - [ ] Build lexical scopes and bind declarations.
+
+Establish how bindings attach to syntax and become invalid after an edit before reusing tokens or AST nodes.
+
+### 16. Support Incremental and Resumable Parsing
+
+- [ ] Define ownership and invalidation for borrowed source, token spans, pool-allocated nodes, and attached bindings across edits.
+- [ ] Re-lex only the affected source region where possible.
+- [ ] Reuse unchanged token and AST regions after edits.
+
+### 17. Complete Semantic Analysis
+
 - [ ] Resolve identifiers and imports.
 - [ ] Instantiate and infer types.
 - [ ] Evaluate constants required by language semantics.
@@ -409,15 +428,7 @@ Implement for-expansion semantics after scopes, types, constants, overloads, and
 
 - [ ] Compare semantic output with typechecked compiler workspace messages.
 
-### 15. Support Incremental and Resumable Parsing
-
-- [ ] Define explicit missing/error nodes or equivalent recovery records.
-- [ ] Record restart points at declarations and blocks.
-- [ ] Re-lex only the affected source region where possible.
-- [ ] Reuse unchanged token and AST regions after edits.
-- [ ] Keep diagnostics deterministic while source is incomplete.
-
-### 16. Harden and Measure
+### 18. Harden and Measure
 
 - [ ] Parse the `how_to`, `examples`, and `modules` trees.
 - [ ] Round-trip every supported file with trivia enabled.
