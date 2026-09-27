@@ -59,8 +59,8 @@ It also recognises `#string` directives, so their bodies are represented by the 
 
 The returned `Parsed_Source` borrows `source`. By default, its lexer copies identifier names; no per-file identifier table is populated.
 Parser callers are expected to keep the source allocation alive and unchanged while using its tokens and syntax tree; the parser does not provide an owned-copy mode.
-The experimental `#import "Jai_Parser"(ENABLE_TRIVIA=true, INTERN_IDENTIFIERS=true)` instead gives each parsed source an independent identifier table: unchanged spellings can borrow source bytes, while normalised spellings use a fallback pool. Benchmarks favor copying as the default because interning increases retained memory on unique-name and `how_to` inputs.
-`release_parser_tree` does not free token names. With interning enabled, call `release_parser_names(*parsed)` after releasing the tree and finishing with the tokens; it frees the table and fallback pool, invalidating identifier names. In the default copying mode, `release_parser_names` has no names to release; copied names retain the lexer's original allocation behavior.
+The experimental `#import "Jai_Parser"(ENABLE_TRIVIA=true, INTERN_IDENTIFIERS=true)` instead gives each parsed source an independent identifier table: unchanged spellings can borrow source bytes, while normalised spellings use a fallback pool. Benchmarks favour copying as the default because interning increases retained memory on unique-name and `how_to` inputs.
+`release_parser_tree` does not free token names. With interning enabled, call `release_parser_names(*parsed)` after releasing the tree and finishing with the tokens; it frees the table and fallback pool, invalidating identifier names. In the default copying mode, `release_parser_names` has no names to release; copied names retain the lexer's original allocation behaviour.
 Standalone lexer tokens continue to own copied names unless optional storage was supplied.
 
 With `ENABLE_TRIVIA=false`, `Parser_Token` aliases `Token`.
@@ -227,13 +227,26 @@ Focused tests cover parser-owned fields that compiler messages omit, including m
 The source token array is immutable after materialisation.
 When a required token is absent, the parser records a zero-width `Synthetic_Token` at the current token boundary and adds a `Parse_Diagnostic` describing the expected and actual token and the recovery action.
 Synthetic tokens are kept separately from source tokens, so token indices remain stable and `reconstruct_source` always reproduces only the original input.
+`Parsed_Source.recovery_records` is the syntax recovery sidecar; it does not change the compiler-shaped AST.
+`MISSING_TOKEN` points to a synthetic token, `EXPECTED_EXPRESSION` marks a missing or invalid expression, `SKIPPED_TOKENS` covers consumed source, and `ERROR_SPAN` marks erroneous source retained in the tree.
+Each record has a half-open token span and a diagnostic index; `-1` means a synchronisation or progress skip without its own diagnostic.
+The synthetic-token index is `-1` except for `MISSING_TOKEN`.
+Records remain accessible after `release_parser_tree` while the parsed source and borrowed input remain alive.
+Lexer-only errors are separate from these parser-generated records.
+`Parsed_Source.restart_points` retains `DECLARATION` and `BLOCK` anchors as half-open spans of completed syntax nodes, including recovered nodes and the empty file root.
+The first token is the candidate restart position; the end marks the node's parsed extent (a parent may consume its semicolon separately).
+Nested nodes are recorded before their parents, so callers should not assume source order.
+These are token-based anchors that survive `release_parser_tree`, not a promise that a declaration can be reparsed without its enclosing grammar context or that edits can reuse nodes yet.
 
 Each `Parse_Diagnostic` has a primary token span and message.
 Its `related_information` slice can contain zero or more additional span/message pairs, matching the compiler's convention of reporting an `Error:` location followed by related `Info:` locations.
 `render_diagnostic_line` expands tabs to 4-column tab stops and returns the expanded source line plus a caret line covering the diagnostic's exclusive column range.
+Repeated parses of the same immutable incomplete source produce the same ordered structured diagnostics and synthetic-token positions.
+Errors at already present tokens keep their locations as more source is appended; EOF insertion and expected-expression diagnostics may change when the missing input arrives.
+A concrete syntax error takes precedence over EOF incompleteness in `RECOVERED` status.
 
 Recovery loops use `parser_progress_guard` and `parser_ensure_progress`, so a failed parse cannot repeatedly inspect the same non-EOF token.
-`parser_synchronize` defines restart boundaries for expression, statement, declaration, and block contexts.
+`parser_synchronise` defines restart boundaries for expression, statement, declaration, and block contexts.
 Synchronisation stops before the boundary token so its enclosing parser remains responsible for consuming delimiters such as `,`, `;`, `)`, `]`, and `}`.
 Nested parentheses, brackets, and braces are traversed before testing their internal tokens as restart boundaries.
 Completing a recovered braced region returns control to the owning expression, statement, or declaration parser, preventing its contents from being reinterpreted in an enclosing scope.

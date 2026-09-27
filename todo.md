@@ -375,7 +375,7 @@ Comparison (Windows x64, 2026-09-27, same parser revision and input for each pai
 | `how_to` | Lex | 17,472 / 128,473 / 128,473 / 5.723 | Same (standalone lexer) |
 | `how_to` | Parse | 17,601 / 16,255,786 / 16,255,786 / 23.923 | 4,396 / 16,484,466 / 16,484,466 / 22.582 |
 
-Interning saves allocations but increases retained/peak memory by 73,030 bytes on unique names and 228,680 bytes on `how_to`; the keyword workload also gains no speed or allocation benefit.  Small timing differences fluctuate between runs, and the current `how_to` files differ from the historical copying baseline, so the same-revision comparison is the decision gate.  Keep copying as the parser default; retain interning only as an explicit opt-in for workloads that benefit from it.
+Interning saves allocations, but increases retained/peak memory by 73,030 bytes on unique names and 228,680 bytes on `how_to`; the keyword workload also gains no speed or allocation benefit.  Small timing differences fluctuate between runs, and the current `how_to` files differ from the historical copying baseline, so the same-revision comparison is the decision gate.  Keep copying as the parser default; retain interning only as an explicit opt-in for workloads that benefit from it.
 
 - [x] Define the lifetime and ownership of canonical names across lexer reuse, materialised tokens, AST nodes, `release_parser_tree`, and borrowed source changes.  Keep token text and trivia lossless; do not attach the table to compiler `active_load` or free names while retained tokens or nodes still reference them.  Contract below.
 
@@ -392,9 +392,9 @@ Canonical-name ownership contract for opt-in identifier interning:
 
 ### 14. Establish Recovery and Restart Contracts
 
-- [ ] Define explicit missing/error nodes or equivalent recovery records.
-- [ ] Record restart points at declarations and blocks.
-- [ ] Keep diagnostics deterministic while source is incomplete.
+- [x] Define explicit missing/error nodes or equivalent recovery records.  `Parsed_Source.recovery_records` retains half-open spans for missing tokens and expressions, skipped source, and invalid source kept in the AST, with stable indices into diagnostics and synthetic tokens when present.  Focused truncation, skip, duplicate-flag, synchronisation, continuation, and exact round-trip fixtures pass; the differential suite and 84/84 `how_to` corpus remain clean.  Lexer-only errors remain separate.
+- [x] Record restart points at declarations and blocks.  `Parsed_Source.restart_points` stores tree-independent, half-open spans for completed declarations and blocks, including recovered constructs and the empty file root.  Focused clean/recovered/nested/empty/lifetime fixtures pass; the differential suite and 84/84 zero-diagnostic `how_to` corpus remain clean.  Reparse context and reuse across edits remain separate incremental-parsing work.
+- [x] Keep diagnostics deterministic while source is incomplete.  Repeated parses of empty and truncated files preserve ordered diagnostic kinds, half-open spans, expected/actual tokens, recovery actions, messages, related information, and synthetic-token positions; concrete-token errors retain their positions as later input arrives.  EOF diagnostics may change when input is appended, and prior concrete errors take `RECOVERED` precedence over `INCOMPLETE`.  Focused fixtures, the differential suite, and the 84/84 zero-diagnostic `how_to` corpus pass.
 
 These syntax contracts should be stable before introducing bindings or reusing parsed regions.
 

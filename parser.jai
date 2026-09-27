@@ -138,6 +138,28 @@ Synthetic_Token :: struct {
 	insertion_index: Token_Index;
 }
 
+Recovery_Record :: struct {
+	kind: enum u8 {
+		MISSING_TOKEN;
+		EXPECTED_EXPRESSION;
+		SKIPPED_TOKENS;
+		ERROR_SPAN;
+	}
+
+	span: Token_Span;
+	diagnostic_index: s64;
+	synthetic_token_index: s64 = -1;
+}
+
+Restart_Point :: struct {
+	kind: enum u8 {
+		DECLARATION;
+		BLOCK;
+	}
+
+	span: Token_Span;
+}
+
 Parse_Diagnostic_Info :: struct {
 	span: Token_Span;
 	message: string;
@@ -223,6 +245,8 @@ Parsed_Source :: struct {
 	tokens: [..]Parser_Token;
 	synthetic_tokens: [..]Synthetic_Token;
 	diagnostics: [..]Parse_Diagnostic;
+	recovery_records: [..]Recovery_Record;
+	restart_points: [..]Restart_Point;
 	status: Parse_Status;
 	root: *Parser_Node;
 	node_pool: Pool;
@@ -1766,6 +1790,10 @@ set_empty_node_location :: (parser: *Parser, node: *$T/Parser_Node, at: s64) {
 		node.first_token = xx at;
 		node.one_past_last_token = xx at;
 	}
+
+	if node.kind == .BLOCK {
+		array_add(*parser.parsed.restart_points, Restart_Point.{kind = .BLOCK, span = make_token_span(at, at)});
+	}
 }
 
 add_duplicate_for_flag :: (parser: *Parser, first: s64) {
@@ -1776,6 +1804,15 @@ add_duplicate_for_flag :: (parser: *Parser, first: s64) {
 		message = "Duplicate for-loop flag."
 	};
 	array_add(*parser.parsed.diagnostics, diagnostic);
+	array_add(
+		*parser.parsed.recovery_records,
+		Recovery_Record.{
+			kind = .ERROR_SPAN,
+			span = diagnostic.span,
+			diagnostic_index = parser.parsed.diagnostics.count - 1
+		}
+	);
+
 	mark_parse_error(parser, false);
 }
 
@@ -3663,7 +3700,17 @@ parser_ensure_progress :: inline (parser: *Parser, guard: Parser_Progress_Guard)
 	}
 
 
+	first := parser.cursor;
 	parser_eat(parser);
+	array_add(
+		*parser.parsed.recovery_records,
+		Recovery_Record.{
+			kind = .SKIPPED_TOKENS,
+			span = make_token_span(first, parser.cursor),
+			diagnostic_index = -1
+		}
+	);
+
 	return true;
 }
 
@@ -3729,7 +3776,7 @@ is_synchronization_point :: (token_type: Token_Type, synchronization_context: Sy
 	return false;
 }
 
-parser_synchronise :: (parser: *Parser, synchronization_context: Synchronization_Context) -> Token_Span {
+parser_synchronise :: (parser: *Parser, synchronization_context: Synchronization_Context, record_skip := true) -> Token_Span {
 	first := parser.cursor;
 	parenthesis_depth: s64;
 	bracket_depth: s64;
@@ -3770,7 +3817,19 @@ parser_synchronise :: (parser: *Parser, synchronization_context: Synchronization
 		}
 	}
 
-	return make_token_span(first, parser.cursor);
+	span := make_token_span(first, parser.cursor);
+	if record_skip && parser.cursor > first {
+		array_add(
+			*parser.parsed.recovery_records,
+			Recovery_Record.{
+				kind = .SKIPPED_TOKENS,
+				span = span,
+				diagnostic_index = -1
+			}
+		);
+	}
+
+	return span;
 }
 
 parse_binary :: (parser: *Parser, minimum_precedence: s32 = 1) -> *Parser_Node {
@@ -5123,6 +5182,15 @@ add_missing_token :: (parser: *Parser, expectedType: Token_Type) {
 		recovery_action = .INSERT_MISSING_TOKEN
 	};
 	array_add(*parser.parsed.diagnostics, diagnostic);
+	array_add(
+		*parser.parsed.recovery_records,
+		Recovery_Record.{
+			kind = .MISSING_TOKEN,
+			span = diagnostic.span,
+			diagnostic_index = parser.parsed.diagnostics.count - 1,
+			synthetic_token_index = parser.parsed.synthetic_tokens.count - 1
+		}
+	);
 
 	mark_parse_error(parser, actual.type == .END_OF_INPUT);
 }
@@ -5144,6 +5212,14 @@ add_expected_expression_at :: (parser: *Parser, span: Token_Span, message: strin
 		actual_token = actual_token
 	};
 	array_add(*parser.parsed.diagnostics, diagnostic);
+	array_add(
+		*parser.parsed.recovery_records,
+		Recovery_Record.{
+			kind = .EXPECTED_EXPRESSION,
+			span = diagnostic.span,
+			diagnostic_index = parser.parsed.diagnostics.count - 1
+		}
+	);
 
 	mark_parse_error(parser, actual_token == .END_OF_INPUT);
 }
@@ -5153,7 +5229,7 @@ add_unexpected_token :: (parser: *Parser) {
 	first := parser.cursor;
 
 	parser_eat(parser);
-	parser_synchronise(parser, .EXPRESSION);
+	parser_synchronise(parser, .EXPRESSION, false);
 
 	diagnostic := Parse_Diagnostic.{
 		kind = .UNEXPECTED_TOKEN,
@@ -5162,6 +5238,14 @@ add_unexpected_token :: (parser: *Parser) {
 		recovery_action = .SKIP_TOKENS
 	};
 	array_add(*parser.parsed.diagnostics, diagnostic);
+	array_add(
+		*parser.parsed.recovery_records,
+		Recovery_Record.{
+			kind = .SKIPPED_TOKENS,
+			span = diagnostic.span,
+			diagnostic_index = parser.parsed.diagnostics.count - 1
+		}
+	);
 
 	mark_parse_error(parser, false);
 }
@@ -5193,6 +5277,14 @@ finish_node :: (parser: *Parser, node: *$T/Parser_Node, first: s64) -> *T {
 	#if ENABLE_TRIVIA {
 		node.first_token = xx first;
 		node.one_past_last_token = xx parser.cursor;
+	}
+
+	if node.kind == .BLOCK || node.kind == .DECLARATION || node.kind == .COMPOUND_DECLARATION {
+		kind := ifx node.kind == .BLOCK
+			then Restart_Point.kind.BLOCK
+			else .DECLARATION;
+
+		array_add(*parser.parsed.restart_points, Restart_Point.{kind = kind, span = make_token_span(first, parser.cursor)});
 	}
 
 	return node;

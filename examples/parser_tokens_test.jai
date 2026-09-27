@@ -49,6 +49,9 @@ main :: () {
 	test_missing_close_parenthesis();
 	test_null_and_context();
 	test_unexpected_token_diagnostic();
+	test_recovery_records();
+	test_restart_points();
+	test_incomplete_diagnostics();
 	test_diagnostic_tab_rendering();
 	test_prefix_expressions();
 	test_postfix_expressions();
@@ -585,6 +588,11 @@ test_recovery_synchronization :: () {
 	expression_span := Extended.parser_synchronise(*parser, .EXPRESSION);
 	assert(expression_span.first == xx 1);
 	assert(expression_span.one_past_last == xx 3);
+	assert(parsed.recovery_records.count == 1);
+	assert(parsed.recovery_records[0].kind == .SKIPPED_TOKENS);
+	assert(parsed.recovery_records[0].diagnostic_index == -1);
+	assert(parsed.recovery_records[0].span.first == expression_span.first);
+	assert(parsed.recovery_records[0].span.one_past_last == expression_span.one_past_last);
 	assert(Extended.parser_peek(*parser).type == #char ";");
 
 	nested_parsed := Extended.materialise_tokens("bad(inner; still_inner); next");
@@ -596,6 +604,9 @@ test_recovery_synchronization :: () {
 	guard := Extended.parser_progress_guard(*parser);
 	assert(Extended.parser_ensure_progress(*parser, guard));
 	assert(parser.cursor == 4);
+	assert(parsed.recovery_records.count == 2);
+	assert(parsed.recovery_records[1].span.first == xx 3);
+	assert(parsed.recovery_records[1].span.one_past_last == xx 4);
 
 	statement_span := Extended.parser_synchronise(*parser, .STATEMENT);
 	declaration_span := Extended.parser_synchronise(*parser, .DECLARATION);
@@ -605,6 +616,9 @@ test_recovery_synchronization :: () {
 	block_span := Extended.parser_synchronise(*parser, .BLOCK);
 	assert(block_span.first == xx 4);
 	assert(block_span.one_past_last == xx 5);
+	assert(parsed.recovery_records.count == 3);
+	assert(parsed.recovery_records[2].span.first == block_span.first);
+	assert(parsed.recovery_records[2].span.one_past_last == block_span.one_past_last);
 	assert(Extended.parser_peek(*parser).type == #char "}");
 
 	Extended.parser_eat(*parser);
@@ -999,6 +1013,135 @@ test_unexpected_token_diagnostic :: () {
 	assert(multiple.diagnostics.count == 1);
 	assert(multiple.diagnostics[0].span.first == xx 1);
 	assert(multiple.diagnostics[0].span.one_past_last == xx 3);
+}
+
+test_recovery_records :: () {
+	complete := Extended.parse_expression("value");
+	assert(complete.recovery_records.count == 0);
+
+	missing := Extended.parse_expression("(value");
+	assert(missing.recovery_records.count == 1);
+	missing_record := missing.recovery_records[0];
+	assert(missing_record.kind == .MISSING_TOKEN);
+	assert(missing_record.diagnostic_index == 0 && missing_record.synthetic_token_index == 0);
+	assert(missing_record.span.first == xx 2 && missing_record.span.one_past_last == xx 2);
+	assert(missing.synthetic_tokens[missing_record.synthetic_token_index].token.type == #char ")");
+	assert(missing.diagnostics[missing_record.diagnostic_index].recovery_action == .INSERT_MISSING_TOKEN);
+	assert(Extended.reconstruct_source(*missing) == "(value");
+
+	missing_expression := Extended.parse_expression("(");
+	assert(missing_expression.recovery_records.count == 1);
+	assert(missing_expression.recovery_records[0].kind == .EXPECTED_EXPRESSION);
+	assert(missing_expression.recovery_records[0].synthetic_token_index == -1);
+	assert(missing_expression.recovery_records[0].span.first == missing_expression.diagnostics[0].span.first);
+	assert(Extended.reconstruct_source(*missing_expression) == "(");
+
+	skipped := Extended.parse_expression("first second third");
+	assert(skipped.recovery_records.count == 1);
+	skipped_record := skipped.recovery_records[0];
+	assert(skipped_record.kind == .SKIPPED_TOKENS);
+	assert(skipped_record.synthetic_token_index == -1 && skipped_record.diagnostic_index == 0);
+	assert(skipped_record.span.first == xx 1 && skipped_record.span.one_past_last == xx 3);
+	assert(skipped.diagnostics[skipped_record.diagnostic_index].recovery_action == .SKIP_TOKENS);
+	assert(Extended.reconstruct_source(*skipped) == "first second third");
+
+	continued_source :: "{ first := 1 second := 2; }";
+	continued := Extended.parse_block(continued_source);
+	assert(continued.root.(*Extended.Parser_Block).statements.count == 2);
+	assert(continued.recovery_records.count == 1);
+	assert(continued.recovery_records[0].kind == .MISSING_TOKEN);
+	assert(continued.recovery_records[0].span.first == continued.synthetic_tokens[0].insertion_index);
+	assert(Extended.reconstruct_source(*continued) == continued_source);
+}
+
+test_restart_points :: () {
+	empty := Extended.parse_file("");
+	assert(empty.restart_points.count == 1);
+	assert(empty.restart_points[0].kind == .BLOCK);
+	assert(empty.restart_points[0].span.first == xx 0 && empty.restart_points[0].span.one_past_last == xx 0);
+	complete := Extended.parse_file("value :: 1;");
+	assert(complete.status == .COMPLETE && complete.restart_points.count == 2);
+	assert(Extended.parse_expression("value").restart_points.count == 0);
+
+	source :: "main :: () { bad: ; next := 2; }\nafter :: 3;";
+	parsed := Extended.parse_file(source);
+	assert(parsed.status == .RECOVERED);
+	assert(parsed.root.(*Extended.Parser_Block).statements.count == 2);
+	saw_root := false;
+	saw_body := false;
+	saw_main := false;
+	saw_next := false;
+	saw_after := false;
+	for parsed.restart_points {
+		assert(it.span.first <= it.span.one_past_last);
+		assert(it.span.one_past_last < xx parsed.tokens.count);
+		if it.kind == .BLOCK {
+			if it.span.first == xx 0 && it.span.one_past_last == xx (parsed.tokens.count - 1) {
+				saw_root = true;
+			}
+			if Extended.token_at(*parsed, it.span.first).type == #char "{" {
+				saw_body = true;
+			}
+		} else {
+			name := Extended.token_at(*parsed, it.span.first).original_text;
+			if		name == "main"	saw_main = true;
+			else if name == "next"	saw_next = true;
+			else if name == "after"	saw_after = true;
+		}
+	}
+
+	assert(saw_root && saw_body && saw_main && saw_next && saw_after);
+	assert(Extended.reconstruct_source(*parsed) == source);
+	point_count := parsed.restart_points.count;
+	Extended.release_parser_tree(*parsed);
+	assert(parsed.restart_points.count == point_count);
+	assert(Extended.token_at(*parsed, parsed.restart_points[point_count - 1].span.first) != null);
+}
+
+test_incomplete_diagnostics :: () {
+	truncated := Extended.parse_file("broken :: () { next :=");
+	assert(truncated.status == .INCOMPLETE);
+	assert(truncated.diagnostics.count > 0);
+	for source: string.["", "broken :: () {", "broken :: () { next :=", "broken :: () { bad: ; next := "] {
+		parsed := Extended.parse_file(source);
+		again := Extended.parse_file(source);
+		assert(parsed.status == again.status);
+		assert(parsed.diagnostics.count == again.diagnostics.count);
+		assert(parsed.synthetic_tokens.count == again.synthetic_tokens.count);
+		for parsed.diagnostics {
+			other := again.diagnostics[it_index];
+			assert(it.kind == other.kind && it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
+			assert(it.expected_token == other.expected_token && it.actual_token == other.actual_token);
+			assert(it.recovery_action == other.recovery_action && it.message == other.message);
+			assert(it.related_information.count == other.related_information.count);
+			for it.related_information {
+				related := other.related_information[it_index];
+				assert(it.span.first == related.span.first && it.span.one_past_last == related.span.one_past_last);
+				assert(it.message == related.message);
+			}
+		}
+
+		for parsed.synthetic_tokens {
+			other := again.synthetic_tokens[it_index];
+			assert(it.token.type == other.token.type && it.insertion_index == other.insertion_index);
+			assert(it.token.l0 == other.token.l0 && it.token.c0 == other.token.c0);
+		}
+
+		assert(Extended.reconstruct_source(*parsed) == source);
+	}
+
+	source :: "broken :: () { bad: ; next := ";
+	first := Extended.parse_file(source);
+	assert(first.status == .RECOVERED && first.diagnostics.count > 0);
+	assert(Extended.reconstruct_source(*first) == source);
+
+	extended := Extended.parse_file("broken :: () { bad: ; next := 1;");
+	assert(extended.diagnostics.count > 0);
+	assert(first.diagnostics[0].kind == extended.diagnostics[0].kind);
+	assert(first.diagnostics[0].span.first == extended.diagnostics[0].span.first);
+	assert(first.diagnostics[0].span.one_past_last == extended.diagnostics[0].span.one_past_last);
+	assert(first.diagnostics[0].actual_token == extended.diagnostics[0].actual_token);
+	assert(first.diagnostics[0].message == extended.diagnostics[0].message);
 }
 
 test_diagnostic_tab_rendering :: () {
@@ -2458,6 +2601,10 @@ test_duplicate_for_flags :: () {
 	literal_reverse := Extended.parse_block(literal_reverse_source);
 	assert(literal_reverse.status == .RECOVERED);
 	assert(literal_reverse.diagnostics.count == 1);
+	assert(literal_reverse.recovery_records.count == 1);
+	assert(literal_reverse.recovery_records[0].kind == .ERROR_SPAN);
+	assert(literal_reverse.recovery_records[0].diagnostic_index == 0);
+	assert(literal_reverse.recovery_records[0].synthetic_token_index == -1);
 	literal_reverse_loop := literal_reverse.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert((literal_reverse_loop.for_flags & .REVERSE) != 0);
 	assert(literal_reverse_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
