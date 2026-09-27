@@ -1546,6 +1546,18 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("u8.[1, 2, 3]");
 	assert_expression_fixture(".{1, 2, 3}");
 	assert_expression_fixture("Foo.{1, 2, 3}");
+	assert_expression_fixture("foo({1, 2, 3})");
+	assert_expression_fixture("({1, 2, 3})");
+	assert_expression_fixture(".[{3, \"Yes\"}, {2, \"No\"}]");
+	assert_expression_fixture("value == {}");
+	assert_statement_fixture("value := {};");
+	assert_statement_fixture("return {};");
+	assert_statement_fixture("if value == {} { return {}; }");
+	assert_statement_fixture("if values[{1, 2}] { return {}; }");
+	assert_statement_matches_code("if fruit == {\n    // no cases\n}", #code { if fruit == {
+    // no cases
+} });
+	assert_statement_matches_code("if fruit == { /* case other; */ } if fruit == { /* case 1; */ } if fruit == { /* case 2; */ } trailing();", #code { if fruit == { /* case other; */ } if fruit == { /* case 1; */ } if fruit == { /* case 2; */ } trailing(); });
 	assert_expression_fixture(".member");
 	assert_expression_fixture("#string END\nbody\nEND");
 	assert_expression_fixture("#char \"A\"");

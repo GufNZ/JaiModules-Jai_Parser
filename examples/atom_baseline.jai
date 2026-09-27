@@ -2,7 +2,7 @@
 #import "File_Utilities";
 #import "String";
 
-Parser :: #import "Jai_Parser"(ENABLE_TRIVIA=true);
+Parser :: #import "Jai_Parser"(ENABLE_TRIVIA=true, INTERN_IDENTIFIERS=BENCHMARK_INTERN_IDENTIFIERS);
 
 #if MEASURE_MEMORY {
 	Memory_Snapshot :: struct {

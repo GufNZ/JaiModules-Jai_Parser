@@ -439,6 +439,7 @@ Parser :: struct {
 	parsed: *Parsed_Source;
 	cursor: s64;
 	parsing_condition: bool;
+	allow_unprefixed_struct_literal: bool;
 }
 
 parser_node_allocator :: inline (parsed: *Parsed_Source) -> Allocator {
@@ -501,7 +502,7 @@ parseInit :: (source: string, rootParser: (*Parser) -> *Parser_Node, fully_pathe
 #scope_export
 
 parse_expression :: (source: string, fully_pathed_filename: string = "") -> Parsed_Source {
-	result, parser := parseInit(source, p => parse_binary(p), fully_pathed_filename);
+	result, parser := parseInit(source, p => parse_value_expression(p), fully_pathed_filename);
 
 	if !result.root && !result.diagnostics.count {
 		add_expected_expression(*parser);
@@ -751,6 +752,10 @@ statement_requires_semicolon :: (statement: *Parser_Node) -> bool {
 }
 
 parse_statement :: (parser: *Parser, parent: *Parser_Block = null) -> *Parser_Node {
+	previous_allow_unprefixed_struct_literal := parser.allow_unprefixed_struct_literal;
+	parser.allow_unprefixed_struct_literal = false;
+	defer parser.allow_unprefixed_struct_literal = previous_allow_unprefixed_struct_literal;
+
 	token := parser_peek(parser);
 	if parser_peek_if(parser, #char "#", .KEYWORD_IF) {
 		return parse_static_if_statement(parser, parent, .IMPERATIVE);
@@ -1481,7 +1486,7 @@ parse_condition :: (parser: *Parser) -> *Parser_Node {
 	// Parenthesized conditions can otherwise look like procedure headers.
 	was_parsing_condition := parser.parsing_condition;
 	parser.parsing_condition = true;
-	result := parse_binary(parser);
+	result := parse_value_expression(parser);
 	parser.parsing_condition = was_parsing_condition;
 	return result;
 }
@@ -1620,7 +1625,15 @@ has_switch_case_block :: (parser: *Parser) -> bool {
 
 			case .ISEQUAL;
 				if !parenthesis_depth && !bracket_depth {
-					return (parser_peek(parser, lookahead + 1).type == #char "{");
+					opening := parser_peek(parser, lookahead + 1);
+					if opening.type != #char "{"  {
+						return false;
+					}
+
+
+					first_member := parser_peek(parser, lookahead + 2);
+					return first_member.type == .KEYWORD_CASE
+						|| (first_member.type == #char "}" && first_member.l0 > opening.l0);
 				}
 
 			case #char "{";
@@ -2125,7 +2138,7 @@ parse_return_statement :: (parser: *Parser) -> *Parser_Return {
 
 	token := parser_peek(parser);
 	while token.type != #char ";" && token.type != #char "}" && token.type != .END_OF_INPUT {
-		expression := parse_binary(parser);
+		expression := parse_value_expression(parser);
 		if !expression {
 			add_expected_expression(parser);
 			break;
@@ -2504,7 +2517,7 @@ parse_declaration_notes :: (parser: *Parser, declaration: *Parser_Node) {
 
 parse_declaration_expression :: (parser: *Parser, allow_multi_value_expression := true) -> *Parser_Node {
 	first := parser.cursor;
-	first_expression := parse_binary(parser);
+	first_expression := parse_value_expression(parser);
 	if !allow_multi_value_expression || !first_expression || parser_peek(parser).type != #char "," {
 		return first_expression;
 	}
@@ -2515,7 +2528,7 @@ parse_declaration_expression :: (parser: *Parser, allow_multi_value_expression :
 	array_add(*arguments, .{ node = first_expression });
 
 	while parser_eat_if(parser, #char ",") {
-		expression := parse_binary(parser);
+		expression := parse_value_expression(parser);
 		if !expression {
 			add_expected_expression(parser);
 			break;
@@ -3761,6 +3774,13 @@ parser_synchronise :: (parser: *Parser, synchronization_context: Synchronization
 }
 
 parse_binary :: (parser: *Parser, minimum_precedence: s32 = 1) -> *Parser_Node {
+	previous_allow_unprefixed_struct_literal := parser.allow_unprefixed_struct_literal;
+	if parser_peek(parser).type != #char "{" {
+		parser.allow_unprefixed_struct_literal = true;
+	}
+
+	defer parser.allow_unprefixed_struct_literal = previous_allow_unprefixed_struct_literal;
+
 	first := parser.cursor;
 
 	left := parse_prefix(parser);
@@ -3782,7 +3802,7 @@ parse_binary :: (parser: *Parser, minimum_precedence: s32 = 1) -> *Parser_Node {
 		diagnostic_count := parser.parsed.diagnostics.count;
 		next_precedence := precedence + xx !right_associative;
 
-		right := parse_binary(parser, next_precedence);
+		right := parse_value_expression(parser, next_precedence);
 		if !right && parser.parsed.diagnostics.count == diagnostic_count {
 			add_expected_expression_at(
 				parser,
@@ -3806,6 +3826,14 @@ parse_binary :: (parser: *Parser, minimum_precedence: s32 = 1) -> *Parser_Node {
 	}
 
 	return left;
+}
+
+parse_value_expression :: (parser: *Parser, minimum_precedence: s32 = 1) -> *Parser_Node {
+	previous_allow_unprefixed_struct_literal := parser.allow_unprefixed_struct_literal;
+	parser.allow_unprefixed_struct_literal = true;
+	defer parser.allow_unprefixed_struct_literal = previous_allow_unprefixed_struct_literal;
+
+	return parse_binary(parser, minimum_precedence);
 }
 
 /*
@@ -4115,6 +4143,7 @@ parse_postfix_suffixes :: (parser: *Parser, result: *Parser_Node, first: s64) ->
 
 parse_procedure_call :: (parser: *Parser, procedure: *Parser_Node, first: s64) -> *Parser_Node {
 	parser_eat(parser);
+
 	arguments: [..]Parser_Argument;
 	arguments.allocator = parser_node_allocator(parser.parsed);
 	context_modification: *Parser_Context_Modification;
@@ -4133,7 +4162,7 @@ parse_procedure_call :: (parser: *Parser, procedure: *Parser_Node, first: s64) -
 			expressions.allocator = parser_node_allocator(parser.parsed);
 
 			while parser_peek(parser).type != #char ")" && parser_peek(parser).type != .END_OF_INPUT {
-				expression := parse_binary(parser);
+				expression := parse_value_expression(parser);
 				if !expression {
 					add_expected_expression(parser);
 					parser_synchronise(parser, .EXPRESSION);
@@ -4165,7 +4194,7 @@ parse_procedure_call :: (parser: *Parser, procedure: *Parser_Node, first: s64) -
 			finish_node(parser, argument.name, name_first);
 		}
 
-		argument.expression = parse_binary(parser, 2);
+		argument.expression = parse_value_expression(parser, 2);
 		if !argument.expression {
 			add_expected_expression(parser);
 			parser_synchronise(parser, .EXPRESSION);
@@ -4233,7 +4262,7 @@ parse_aggregate_literal :: (
 			break;
 		}
 
-		member := parse_binary(parser);
+		member := parse_value_expression(parser);
 		if !member {
 			add_expected_expression(parser);
 			parser_synchronise(parser, .EXPRESSION);
@@ -4419,8 +4448,11 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 		case .BEGIN_ARRAY_LITERAL;
 			return parse_aggregate_literal(parser, .ARRAY, null, first);
 
-		case .BEGIN_STRUCT_LITERAL;
-			return parse_aggregate_literal(parser, .STRUCT, null, first);
+		case .BEGIN_STRUCT_LITERAL; #through;
+		case #char "{";
+			return ifx token.type == #char "{" && !parser.allow_unprefixed_struct_literal
+				then null
+				else parse_aggregate_literal(parser, .STRUCT, null, first);
 
 		case .TRIPLE_MINUS;
 			parser_eat(parser);
@@ -4438,7 +4470,7 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 
 			parser_eat(parser);
 
-			result := parse_binary(parser);
+			result := parse_value_expression(parser);
 			if !result {
 				add_expected_expression(parser);
 				return null;
@@ -5171,7 +5203,7 @@ materialise_tokens :: (source: string) -> Parsed_Source {
 	result.source = source;
 
 	lexer: Lexer;
-	set_identifier_storage(*lexer, *result.identifier_storage);
+	#if INTERN_IDENTIFIERS set_identifier_storage(*lexer, *result.identifier_storage);
 	set_input_from_string(*lexer, source);
 
 	source_cursor: s64;

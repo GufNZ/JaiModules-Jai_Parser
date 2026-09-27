@@ -3,10 +3,11 @@
 #import "Compiler";
 #import "File";
 #import "File_Utilities";
+#import "Hash";
 #import "String";
 
 Default  :: #import "Jai_Parser";
-Extended :: #import "Jai_Parser"(ENABLE_TRIVIA=true);
+Extended :: #import "Jai_Parser"(ENABLE_TRIVIA=true, INTERN_IDENTIFIERS=true);
 
 COMPILER_PERCENT_HERE_STRING :: #string,\% END
 %\%
@@ -463,6 +464,12 @@ test_parser_node_pool :: () {
 }
 
 test_identifier_storage_lifetime :: () {
+	copying := Default.materialise_tokens("alpha alpha");
+	assert(copying.tokens[0].ident_value.name == copying.tokens[1].ident_value.name);
+	assert(copying.tokens[0].ident_value.name.data != copying.tokens[1].ident_value.name.data);
+	assert(copying.identifier_storage.names.count == 0);
+	Default.release_parser_names(*copying);
+
 	source := copy_string("alpha alpha some\\  name if @note");
 	parsed := Extended.materialise_tokens(source);
 	assert(parsed.tokens[0].ident_value.name.data == source.data);
@@ -471,7 +478,33 @@ test_identifier_storage_lifetime :: () {
 	assert(parsed.tokens[2].ident_value.name.data != source.data + 12);
 	assert(parsed.tokens[3].type == .KEYWORD_IF);
 	assert(parsed.tokens[4].type == .NOTE);
+	assert(parsed.identifier_storage.names.count == 2);
 	assert(Extended.reconstruct_source(*parsed) == source);
+
+	variants_source := copy_string("alpha `alpha beta beta if if @note @note");
+	variants := Extended.materialise_tokens(variants_source);
+	assert(variants.status == .COMPLETE);
+	assert(variants.identifier_storage.names.count == 2);
+	assert(variants.tokens[0].ident_value.name.data == variants.tokens[1].ident_value.name.data);
+	assert(variants.tokens[1].ident_is_backticked);
+	assert(variants.tokens[1].original_text == "`alpha");
+	assert(variants.tokens[2].ident_value.name.data == variants.tokens[3].ident_value.name.data);
+	assert(variants.tokens[0].ident_value.name.data != variants.tokens[2].ident_value.name.data);
+	assert(variants.tokens[4].type == .KEYWORD_IF && variants.tokens[5].type == .KEYWORD_IF);
+	assert(variants.tokens[6].type == .NOTE && variants.tokens[7].type == .NOTE);
+	assert(variants.tokens[4].ident_value.name.data != variants.tokens[5].ident_value.name.data);
+	assert(variants.tokens[6].ident_value.name.data != variants.tokens[7].ident_value.name.data);
+	assert(Extended.reconstruct_source(*variants) == variants_source);
+
+	assert(get_hash("id_vukw35") == get_hash("id_4f72ce"));
+	collisions := Extended.materialise_tokens("id_vukw35 id_4f72ce id_vukw35 id_4f72ce");
+	assert(collisions.identifier_storage.names.count == 2);
+	assert(collisions.tokens[0].ident_value.name == "id_vukw35");
+	assert(collisions.tokens[1].ident_value.name == "id_4f72ce");
+	assert(collisions.tokens[0].ident_value.name.data == collisions.tokens[2].ident_value.name.data);
+	assert(collisions.tokens[1].ident_value.name.data == collisions.tokens[3].ident_value.name.data);
+	assert(collisions.tokens[0].ident_value.name.data != collisions.tokens[1].ident_value.name.data);
+	Extended.release_parser_names(*collisions);
 
 	other_source := copy_string("alpha");
 	other := Extended.materialise_tokens(other_source);
@@ -481,14 +514,34 @@ test_identifier_storage_lifetime :: () {
 	assert(parsed.tokens[2].ident_value.name == "somename");
 	Extended.release_parser_names(*parsed);
 	Extended.release_parser_names(*other);
+	assert(variants.tokens[1].ident_value.name == "alpha");
+	Extended.release_parser_names(*variants);
 	free(source);
 	free(other_source);
+	free(variants_source);
 
 	file := Extended.parse_file("value :: 1;");
 	assert(file.root != null);
 	Extended.release_parser_tree(*file);
 	assert(file.tokens[0].ident_value.name == "value");
 	Extended.release_parser_names(*file);
+
+	first_file_source := copy_string("entry :: entry; // first\n");
+	second_file_source := copy_string("entry :: entry; // second\n");
+	first_file := Extended.parse_file(first_file_source);
+	second_file := Extended.parse_file(second_file_source);
+	assert(first_file.status == .COMPLETE && second_file.status == .COMPLETE);
+	assert(first_file.tokens[0].ident_value.name.data == first_file.tokens[3].ident_value.name.data);
+	assert(first_file.tokens[0].ident_value.name.data != second_file.tokens[0].ident_value.name.data);
+	Extended.release_parser_tree(*first_file);
+	Extended.release_parser_names(*first_file);
+	free(first_file_source);
+	assert(second_file.root != null);
+	assert(second_file.tokens[3].ident_value.name == "entry");
+	assert(Extended.reconstruct_source(*second_file) == second_file_source);
+	Extended.release_parser_tree(*second_file);
+	Extended.release_parser_names(*second_file);
+	free(second_file_source);
 
 	standalone_source := copy_string("alpha");
 	lexer: Extended.Lexer;
@@ -515,6 +568,12 @@ test_identifier_storage_lifetime :: () {
 	assert(file_name == "import");
 	Extended.set_identifier_storage(*lexer, null);
 	Extended.release_identifier_storage(*storage);
+	copy_source := copy_string("shared");
+	Extended.set_input_from_string(*lexer, copy_source);
+	copied_token := Extended.peek_next_token(*lexer).*;
+	assert(copied_token.ident_value.name.data != copy_source.data);
+	free(copy_source);
+	assert(copied_token.ident_value.name == "shared");
 	free(first_source);
 	free(second_source);
 }
@@ -753,6 +812,58 @@ test_aggregate_literals :: () {
 	assert(struct_literal.value_type == .STRUCT);
 	assert(struct_literal.struct_literal_info.type_expression == null);
 	assert(struct_literal.struct_literal_info.arguments.count == 2);
+
+	call_with_struct := Extended.parse_block("{ foo({1, 2, 3}); }");
+	assert(call_with_struct.status == .COMPLETE);
+	assert(call_with_struct.diagnostics.count == 0);
+	call := call_with_struct.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Procedure_Call);
+	assert(call.arguments_unsorted.count == 1);
+	argument := call.arguments_unsorted[0].expression.(*Extended.Parser_Literal);
+	assert(argument.value_type == .STRUCT);
+	assert(argument.struct_literal_info.type_expression == null);
+	assert(argument.struct_literal_info.arguments.count == 3);
+	assert(argument.struct_literal_info.arguments[2].(*Extended.Parser_Literal)._u64 == 3);
+	assert(Extended.reconstruct_source(*call_with_struct) == "{ foo({1, 2, 3}); }");
+
+	bare_struct := Extended.parse_expression("{1, 2, 3}");
+	assert(bare_struct.status == .COMPLETE);
+	assert(bare_struct.root.(*Extended.Parser_Literal).value_type == .STRUCT);
+
+	expression_contexts_source :: "{ value := {}; items := .[{1, 2}, {3, 4}]; if value == {} { return {}; } }";
+	expression_contexts := Extended.parse_block(expression_contexts_source);
+	assert(expression_contexts.status == .COMPLETE);
+	assert(expression_contexts.diagnostics.count == 0);
+	assert(Extended.reconstruct_source(*expression_contexts) == expression_contexts_source);
+
+	nested_condition_source :: "{ if values[{1, 2}] { return {}; } }";
+	nested_condition := Extended.parse_block(nested_condition_source);
+	assert(nested_condition.status == .COMPLETE);
+	assert(nested_condition.diagnostics.count == 0);
+	assert(Extended.reconstruct_source(*nested_condition) == nested_condition_source);
+	empty_switch_source :: "{ if fruit == {\n    // all cases commented out\n} }";
+	empty_switch := Extended.parse_block(empty_switch_source);
+	assert(empty_switch.status == .COMPLETE);
+	empty_switch_if := empty_switch.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
+	assert((empty_switch_if.if_flags & .IS_SWITCH_STATEMENT) != 0);
+	assert(empty_switch_if.then_block.statements.count == 0);
+	assert(Extended.reconstruct_source(*empty_switch) == empty_switch_source);
+
+	inline_literal_source :: "{ if fruit == { /* no cases */ } { return; } }";
+	inline_literal := Extended.parse_block(inline_literal_source);
+	assert(inline_literal.status == .COMPLETE);
+	assert((inline_literal.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).if_flags & .IS_SWITCH_STATEMENT) == 0);
+	assert(Extended.reconstruct_source(*inline_literal) == inline_literal_source);
+
+	leading_literal_condition_source :: "{ if {1} == {1} { return; } }";
+	leading_literal_condition := Extended.parse_block(leading_literal_condition_source);
+	assert(leading_literal_condition.status == .COMPLETE);
+	assert(leading_literal_condition.diagnostics.count == 0);
+	assert(Extended.reconstruct_source(*leading_literal_condition) == leading_literal_condition_source);
+
+	missing_condition_body := Extended.parse_block("{ if value == {} }");
+	assert(missing_condition_body.status == .RECOVERED);
+	assert((missing_condition_body.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).if_flags & .IS_SWITCH_STATEMENT) == 0);
+	assert(Extended.reconstruct_source(*missing_condition_body) == "{ if value == {} }");
 
 	typed_struct := Extended.parse_expression("Thing.{1, 2}");
 	typed_struct_literal := typed_struct.root.(*Extended.Parser_Literal);

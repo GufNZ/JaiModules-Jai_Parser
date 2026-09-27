@@ -57,11 +57,10 @@ Trivia kinds are `WHITESPACE`, `LINE_COMMENT`, `BLOCK_COMMENT`, `SHEBANG`, and `
 `materialise_tokens(source)` copies the lexer's ring-buffer tokens into a stable parser-owned array.
 It also recognises `#string` directives, so their bodies are represented by the same string token the parser will consume.
 
-The returned `Parsed_Source` borrows `source` and owns a per-file identifier table and fallback pool.
+The returned `Parsed_Source` borrows `source`. By default, its lexer copies identifier names; no per-file identifier table is populated.
 Parser callers are expected to keep the source allocation alive and unchanged while using its tokens and syntax tree; the parser does not provide an owned-copy mode.
-Unchanged identifier spellings can refer directly to source bytes, while normalised spellings use the fallback pool.
-`release_parser_tree` does not free name storage because tokens remain available afterward.
-Once the tree has been released and callers are finished with the tokens, `release_parser_names(*parsed)` frees the table and fallback pool; token identifier names are invalid after that call.
+The experimental `#import "Jai_Parser"(ENABLE_TRIVIA=true, INTERN_IDENTIFIERS=true)` instead gives each parsed source an independent identifier table: unchanged spellings can borrow source bytes, while normalised spellings use a fallback pool. Benchmarks favor copying as the default because interning increases retained memory on unique-name and `how_to` inputs.
+`release_parser_tree` does not free token names. With interning enabled, call `release_parser_names(*parsed)` after releasing the tree and finishing with the tokens; it frees the table and fallback pool, invalidating identifier names. In the default copying mode, `release_parser_names` has no names to release; copied names retain the lexer's original allocation behavior.
 Standalone lexer tokens continue to own copied names unless optional storage was supplied.
 
 With `ENABLE_TRIVIA=false`, `Parser_Token` aliases `Token`.
