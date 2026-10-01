@@ -172,7 +172,10 @@ first_diagnostic_for_file :: (parsed: *Parser.Parsed_Source, filename: string) -
 		first := parsed.diagnostics[0];
 		token := Parser.token_at(parsed, first.span.first);
 
-		entry.line = token.l0;
+		entry.line = ifx first.kind == .LEXER_ERROR
+			then first.lexer_line
+			else token.l0;
+
 		lines := split(parsed.source, "\n");
 		if entry.line >= 1 && entry.line <= lines.count {
 			entry.source_line = copy_string(lines[entry.line - 1]);
@@ -190,11 +193,19 @@ first_diagnostic_for_file :: (parsed: *Parser.Parsed_Source, filename: string) -
 }
 
 test_lexer_only_recovery_report :: () {
-	parsed := Parser.Parsed_Source.{status=.RECOVERED};
+	identifier_length :: Parser.MAX_IDENTIFIER_LENGTH + 8;
+	suffix :: " :: 1;";
+	source := alloc_string(identifier_length + suffix.count);
+	defer free(source);
+	for 0..identifier_length-1 source.data[it] = #char "a";
+	memcpy(source.data + identifier_length, suffix.data, suffix.count);
+	parsed := Parser.parse_file(source);
+	defer Parser.release_parser_tree(*parsed);
 	entry := first_diagnostic_for_file(*parsed, "lexer_error.jai");
 	assert(entry.status == .RECOVERED);
-	assert(entry.diagnostic_count == 0);
-	assert(!entry.has_diagnostic);
+	assert(entry.diagnostic_count == 1);
+	assert(entry.has_diagnostic && entry.kind == .LEXER_ERROR);
+	assert(entry.line == 1);
 	assert(entry.filename == "lexer_error.jai");
 }
 
@@ -290,7 +301,7 @@ main :: () {
 	zero_diagnostic_files: s64;
 	zero_diagnostic_recovering_files: s64;
 	total_diagnostics: s64;
-	diagnostic_kind_counts: [3]s64;
+	diagnostic_kind_counts: [5]s64;
 	recovery_action_counts: [3]s64;
 	expected_token_counts: [..]Token_Count;
 	actual_token_counts: [..]Token_Count;
@@ -356,7 +367,7 @@ main :: () {
 	print("First diagnostic per file:\n");
 	for first_diagnostics {
 		if !it.has_diagnostic {
-			print("  %: status=%, diagnostics=0, lexer error without parser diagnostic\n", it.filename, it.status);
+			print("  %: status=%, diagnostics=0\n", it.filename, it.status);
 			continue;
 		}
 

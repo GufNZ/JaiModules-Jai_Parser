@@ -1,4 +1,4 @@
-// Compare default lexer layouts with Jai_Lexer, then assert token and trivia behaviour using focused inputs under default, trivia-enabled, and raw-string imports.
+// Compare default token layout with Jai_Lexer, then assert token and trivia behaviour using focused inputs under default, trivia-enabled, and raw-string imports.
 #import "Basic";
 #import "String";
 
@@ -10,7 +10,6 @@ Raw_Strings	:: #import "Jai_Parser"(ENABLE_TRIVIA=true, EVALUATE_STRING_ESCAPES=
 for_expansion	:: Extended.for_expansion;
 
 #assert(size_of(Default.Token) == size_of(Original.Token));
-#assert(size_of(Default.Lexer) == size_of(Original.Lexer));
 
 main :: () {
 	default_lexer: Default.Lexer;

@@ -102,6 +102,7 @@ capture_compiler_error :: (code: string, log_output := false) -> Compiler_Diagno
 		capture_and_return_output=true,
 		print_captured_output=log_output
 	);
+
 	assert(result.process_result.type == .EXITED, "Compiler diagnostic fixture failed to run.");
 	assert(result.process_result.exit_code != 0, "Compiler accepted invalid fixture:\n%", code);
 
@@ -138,6 +139,7 @@ append_compiler_diagnostics :: (output: string, diagnostics: *[..] Compiler_Diag
 			while caret_start + caret_count < line.count && line[caret_start + caret_count] == #char "^" {
 				caret_count += 1;
 			}
+
 			pending_location.l1 = pending_location.l0;
 			pending_location.c1 = pending_location.c0 + caret_count;
 			pending_location = null;
@@ -147,22 +149,30 @@ append_compiler_diagnostics :: (output: string, diagnostics: *[..] Compiler_Diag
 
 parse_compiler_message_line :: (line: string, marker: string) -> bool, Compiler_Source_Location, string {
 	marker_index := find_index_from_left(line, marker);
-	if marker_index < 0		return false, .{}, "";
+	if marker_index < 0 {
+		return false, .{}, "";
+	}
 
 
 	location_text := slice(line, 0, marker_index);
 	comma_index := find_index_from_right(location_text, #char ",");
-	if comma_index < 0		return false, .{}, "";
+	if comma_index < 0 {
+		return false, .{}, "";
+	}
 
 
 	line_prefix := slice(location_text, 0, comma_index);
 	line_separator := find_index_from_right(line_prefix, #char ":");
-	if line_separator < 0	return false, .{}, "";
+	if line_separator < 0 {
+		return false, .{}, "";
+	}
 
 
 	line_number, valid_line, line_remainder := string_to_int(advance(line_prefix, line_separator + 1), T=s64);
 	column_number, valid_column, column_remainder := string_to_int(advance(location_text, comma_index + 1), T=s64);
-	if !valid_line || line_remainder || !valid_column || column_remainder	return false, .{}, "";
+	if !valid_line || line_remainder || !valid_column || column_remainder {
+		return false, .{}, "";
+	}
 
 
 	location := Compiler_Source_Location.{
@@ -190,6 +200,7 @@ assert_compiler_error_message :: (code: string, expected_message: string) {
 assert_invalid_expression_compiler_message :: (source: string, expected_message: string) {
 	parsed := Parser.parse_expression(source);
 	defer Parser.release_parser_tree(*parsed);
+
 	assert(parsed.status != .COMPLETE, "Parser accepted invalid expression '%'.", source);
 	assert(parsed.diagnostics.count > 0, "Parser rejected '%' without a diagnostic.", source);
 	assert(parsed.diagnostics[0].message == expected_message, "Parser diagnostic differed.\nExpected: %\nActual:   %\n", expected_message, parsed.diagnostics[0].message);
@@ -221,6 +232,7 @@ assert_asm_semantic_error :: (instruction: string, expected_message: string) {
 	source := tprint("main :: () {\n    #asm { % }\n}\n", instruction);
 	parsed := Parser.parse_file(source);
 	defer Parser.release_parser_tree(*parsed);
+
 	assert(parsed.status == .COMPLETE && parsed.diagnostics.count == 0);
 	asm_body := parsed.root.(*Parser.Parser_Block).statements[0].(*Parser.Parser_Declaration).expression.(*Parser.Parser_Procedure_Header).body_or_null.block;
 	assert(asm_body.statements[0].(*Parser.Parser_Asm).statements[0].kind == .INSTRUCTION);
@@ -338,6 +350,7 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 					if info.element_type {
 						normalize_parser_node(info.element_type.type_valued_expression, tprint("%.element_type", path), layer, result);
 					}
+
 					for info.array_members {
 						normalize_parser_node(it, tprint("%.member[%]", path, it_index), layer, result);
 					}
@@ -348,6 +361,7 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 					if info.type_expression {
 						normalize_parser_node(info.type_expression.type_valued_expression, tprint("%.type_expression", path), layer, result);
 					}
+
 					for info.arguments {
 						normalize_parser_node(it, tprint("%.argument[%]", path, it_index), layer, result);
 					}
@@ -390,6 +404,7 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 			if cast_node.target_type {
 				normalize_parser_node(cast_node.target_type.type_valued_expression, tprint("%.target_type", path), layer, result);
 			}
+
 			normalize_parser_node(cast_node.expression, tprint("%.expression", path), layer, result);
 
 		case .EXPRESSION_QUERY;
@@ -504,6 +519,7 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 			if layer == .SEMANTIC {
 				add_normalized_field(result, path, "name", header.name);
 			}
+
 			add_normalized_field(result, path, "foreign_name", header.foreign_function_name);
 			add_normalized_field(result, path, "library", ifx header.library_identifier then header.library_identifier.name else "");
 			add_normalized_field(result, path, "deprecated", header.deprecation_string);
@@ -527,8 +543,14 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 					normalize_parser_node(it, argument_path, layer, result);
 				}
 			}
-			for header.returns 		normalize_parser_node(it, tprint("%.return[%]", path, it_index), layer, result);
-			for header.modify_directives normalize_parser_node(it, tprint("%.modify[%]", path, it_index), layer, result);
+
+			for header.returns {
+				normalize_parser_node(it, tprint("%.return[%]", path, it_index), layer, result);
+			}
+
+			for header.modify_directives {
+				normalize_parser_node(it, tprint("%.modify[%]", path, it_index), layer, result);
+			}
 
 		case .PROCEDURE_BODY;
 			body := node.(*Parser.Parser_Procedure_Body);
@@ -538,9 +560,15 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 			aggregate := node.(*Parser.Parser_Struct);
 			add_normalized_field(result, path, "flags", tprint("%", aggregate.textual_flags));
 			add_normalized_field(result, path, "note_count", tprint("%", aggregate.notes.count));
-			for aggregate.notes add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+			for aggregate.notes {
+				add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+			}
+
 			add_normalized_field(result, path, "modify_count", tprint("%", aggregate.modify_directives.count));
-			for aggregate.modify_directives 	normalize_parser_node(it, tprint("%.modify[%]", path, it_index), layer, result);
+			for aggregate.modify_directives {
+				normalize_parser_node(it, tprint("%.modify[%]", path, it_index), layer, result);
+			}
+
 			normalize_parser_node(aggregate.block, tprint("%.block", path), layer, result);
 
 		case .ENUM;
@@ -549,7 +577,10 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 			add_normalized_field(result, path, "complete", tprint("%", aggregate.marked_as_complete));
 			add_normalized_field(result, path, "specified", tprint("%", aggregate.marked_as_specified));
 			add_normalized_field(result, path, "note_count", tprint("%", aggregate.notes.count));
-			for aggregate.notes add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+			for aggregate.notes {
+				add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+			}
+
 			normalize_parser_node(aggregate.internal_type_inst, tprint("%.internal_type", path), layer, result);
 			normalize_parser_node(aggregate.block, tprint("%.block", path), layer, result);
 
@@ -561,8 +592,10 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 			declaration := node.(*Parser.Parser_Compound_Declaration);
 			add_normalized_field(result, path, "argument_count", tprint("%", declaration.comma_separated_assignment.arguments.count));
 			for declaration.comma_separated_assignment.arguments {
+				add_normalized_field(result, tprint("%.argument[%]", path, it_index), "modifier", tprint("%", it.modifier));
 				normalize_parser_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
 			}
+
 			normalize_parser_declaration(declaration.declaration_properties, tprint("%.properties", path), layer, result);
 			normalize_parser_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
 			add_normalized_field(result, path, "note_count", tprint("%", declaration.notes.count));
@@ -584,14 +617,18 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 			block := node.(*Parser.Parser_Block);
 			add_normalized_field(result, path, "block_type", tprint("%", block.block_type));
 			add_normalized_field(result, path, "statement_count", tprint("%", block.statements.count));
-			for block.statements	normalize_parser_node(it, tprint("%.statement[%]", path, it_index), layer, result);
+			for block.statements {
+				normalize_parser_node(it, tprint("%.statement[%]", path, it_index), layer, result);
+			}
 
 		case .RETURN;
 			return_node := node.(*Parser.Parser_Return);
 			add_normalized_field(result, path, "backticked", tprint("%", (return_node.return_flags & .IS_BACKTICKED) != 0));
 			add_normalized_field(result, path, "quick", tprint("%", (return_node.return_flags & .AUTO_INSERTED_FOR_QUICK_LAMBDA) != 0));
 			add_normalized_field(result, path, "argument_count", tprint("%", return_node.arguments_unsorted.count));
-			for return_node.arguments_unsorted	normalize_parser_node(it.expression, tprint("%.argument[%]", path, it_index), layer, result);
+			for return_node.arguments_unsorted {
+				normalize_parser_node(it.expression, tprint("%.argument[%]", path, it_index), layer, result);
+			}
 
 		case .LOOP_CONTROL;
 			control := node.(*Parser.Parser_Loop_Control);
@@ -766,6 +803,7 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 			if cast_node.target_type {
 				normalize_node(cast_node.target_type.type_valued_expression, tprint("%.target_type", path), layer, result);
 			}
+
 			normalize_node(cast_node.expression, tprint("%.expression", path), layer, result);
 
 		case .EXPRESSION_QUERY;
@@ -796,6 +834,7 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 					expression = body.statements[0];
 				}
 			}
+
 			normalize_node(expression, tprint("%.expression", path), layer, result);
 
 		case .DIRECTIVE_INSERT;
@@ -888,6 +927,7 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 			if layer == .SEMANTIC {
 				add_normalized_field(result, path, "name", header.name);
 			}
+
 			add_normalized_field(result, path, "foreign_name", header.foreign_function_name);
 			add_normalized_field(result, path, "library", ifx header.library_identifier then header.library_identifier.name else "");
 			add_normalized_field(result, path, "deprecated", header.deprecation_string);
@@ -911,8 +951,14 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 					normalize_node(it, argument_path, layer, result);
 				}
 			}
-			for header.returns normalize_node(it, tprint("%.return[%]", path, it_index), layer, result);
-			for header.modify_directives 	normalize_node(it, tprint("%.modify[%]", path, it_index), layer, result);
+
+			for header.returns {
+				normalize_node(it, tprint("%.return[%]", path, it_index), layer, result);
+			}
+
+			for header.modify_directives {
+				normalize_node(it, tprint("%.modify[%]", path, it_index), layer, result);
+			}
 
 		case .PROCEDURE_BODY;
 			body := node.(*Code_Procedure_Body);
@@ -922,9 +968,15 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 			aggregate := node.(*Code_Struct);
 			add_normalized_field(result, path, "flags", tprint("%", aggregate.textual_flags));
 			add_normalized_field(result, path, "note_count", tprint("%", aggregate.notes.count));
-			for aggregate.notes add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+			for aggregate.notes {
+				add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+			}
+
 			add_normalized_field(result, path, "modify_count", tprint("%", aggregate.modify_directives.count));
-			for aggregate.modify_directives 	normalize_node(it, tprint("%.modify[%]", path, it_index), layer, result);
+			for aggregate.modify_directives {
+				normalize_node(it, tprint("%.modify[%]", path, it_index), layer, result);
+			}
+
 			normalize_node(aggregate.block, tprint("%.block", path), layer, result);
 
 		case .ENUM;
@@ -933,7 +985,10 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 			add_normalized_field(result, path, "complete", tprint("%", aggregate.marked_as_complete));
 			add_normalized_field(result, path, "specified", tprint("%", aggregate.marked_as_specified));
 			add_normalized_field(result, path, "note_count", tprint("%", aggregate.notes.count));
-			for aggregate.notes add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+			for aggregate.notes {
+				add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+			}
+
 			normalize_node(aggregate.internal_type_inst, tprint("%.internal_type", path), layer, result);
 			normalize_node(aggregate.block, tprint("%.block", path), layer, result);
 
@@ -944,16 +999,24 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 		case .COMPOUND_DECLARATION;
 			declaration := node.(*Code_Compound_Declaration);
 			add_normalized_field(result, path, "argument_count", tprint("%", declaration.comma_separated_assignment.arguments.count));
-			for declaration.comma_separated_assignment.arguments normalize_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
+			for declaration.comma_separated_assignment.arguments {
+				add_normalized_field(result, tprint("%.argument[%]", path, it_index), "modifier", tprint("%", it.modifier));
+				normalize_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
+			}
+
 			normalize_declaration(declaration.declaration_properties, tprint("%.properties", path), layer, result);
 			normalize_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
 			add_normalized_field(result, path, "note_count", tprint("%", declaration.notes.count));
-			for declaration.notes add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+			for declaration.notes {
+				add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+			}
 
 		case .COMMA_SEPARATED_ARGUMENTS;
 			arguments := node.(*Code_Comma_Separated_Arguments);
 			add_normalized_field(result, path, "argument_count", tprint("%", arguments.arguments.count));
-			for arguments.arguments normalize_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
+			for arguments.arguments {
+				normalize_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
+			}
 
 		case .NOTE;
 			add_normalized_field(result, path, "text", node.(*Code_Note).text);
@@ -962,14 +1025,18 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 			block := node.(*Code_Block);
 			add_normalized_field(result, path, "block_type", tprint("%", block.block_type));
 			add_normalized_field(result, path, "statement_count", tprint("%", block.statements.count));
-			for block.statements	normalize_node(it, tprint("%.statement[%]", path, it_index), layer, result);
+			for block.statements {
+				normalize_node(it, tprint("%.statement[%]", path, it_index), layer, result);
+			}
 
 		case .RETURN;
 			return_node := node.(*Code_Return);
 			add_normalized_field(result, path, "backticked", tprint("%", (return_node.return_flags & .IS_BACKTICKED) != 0));
 			add_normalized_field(result, path, "quick", tprint("%", (return_node.return_flags & .AUTO_INSERTED_FOR_QUICK_LAMBDA) != 0));
 			add_normalized_field(result, path, "argument_count", tprint("%", return_node.arguments_unsorted.count));
-			for return_node.arguments_unsorted	normalize_node(it.expression, tprint("%.argument[%]", path, it_index), layer, result);
+			for return_node.arguments_unsorted {
+				normalize_node(it.expression, tprint("%.argument[%]", path, it_index), layer, result);
+			}
 
 		case .LOOP_CONTROL;
 			control := node.(*Code_Loop_Control);
@@ -1066,7 +1133,9 @@ normalize_declaration :: (declaration: *Code_Declaration, path: string, layer: C
 	normalize_node(declaration.expression, tprint("%.expression", path), layer, result);
 	normalize_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
 	add_normalized_field(result, path, "note_count", tprint("%", declaration.notes.count));
-	for declaration.notes add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+	for declaration.notes {
+		add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+	}
 }
 
 add_normalized_field :: (tree: *Normalized_Tree, path: string, name: string, value: string) {
@@ -1075,7 +1144,9 @@ add_normalized_field :: (tree: *Normalized_Tree, path: string, name: string, val
 
 find_normalized_field :: (fields: [] Normalized_Field, path: string) -> *Normalized_Field {
 	for * fields {
-		if it.path == path return it;
+		if it.path == path {
+			return it;
+		}
 	}
 
 
@@ -1115,6 +1186,7 @@ format_structural_differences :: (result: Differential_Result) -> string {
 assert_expression_matches_code :: (source: string, expected_code: Code, layer := Comparison_Layer.SYNTAX, fully_pathed_filename: string = "") {
 	parsed := Parser.parse_expression(source, fully_pathed_filename);
 	defer Parser.release_parser_tree(*parsed);
+
 	assert(parsed.status == .COMPLETE, "Parser did not complete fixture '%'.", source);
 
 	actual := normalize_parser_tree(parsed.root, layer);
@@ -1258,7 +1330,9 @@ run_typechecked_workspace_fixture :: (source: string, expected_declaration: stri
 
 	while true {
 		message := compiler_wait_for_message();
-		if message.workspace != workspace	continue;
+		if message.workspace != workspace {
+			continue;
+		}
 
 
 		if message.kind == {
@@ -1319,6 +1393,7 @@ test_file_workspace_fixtures :: () {
 assert_declaration_workspace_fixture :: (source: string) {
 	parsed := Parser.parse_declaration(source);
 	defer Parser.release_parser_tree(*parsed);
+
 	assert(parsed.status == .COMPLETE, "Parser did not complete declaration fixture '%'.", source);
 	actual := normalize_parser_tree(parsed.root);
 
@@ -1581,6 +1656,7 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("f(,, allocator = pool_allocator)");
 	assert_expression_fixture("object.method(1)[index].*");
 	assert_expression_fixture("cast(s32) value");
+	assert_expression_fixture("cast,no_check(s32) value");
 	assert_expression_fixture("cast(*u8) value");
 	assert_expression_fixture("cast([3] int) value");
 	assert_expression_fixture("New([3] int)");
@@ -1691,6 +1767,8 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("enum_flags u32 { FAST; SAFE; }");
 	assert_statement_fixture("return 1, 2;");
 	assert_statement_fixture("out1, out2 = hello(1);");
+	assert_statement_fixture("a=, b := proc();");
+	assert_statement_fixture("a:, b = proc();");
 	assert_statement_matches_code("#no_reset fixture_no_reset: s64;", #code { #no_reset fixture_no_reset: s64; }, file_scope=true);
 	assert_statement_fixture("{ value := 1; }");
 	assert_statement_fixture("`return 1;");

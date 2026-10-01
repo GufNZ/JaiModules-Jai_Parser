@@ -2,7 +2,6 @@
 // @Cleanup: We have all these no_checks in here because end-of-input is EOF.  We probably want to be cleaner about that in some way.
 
 //LATER: transcribe the C++ SIMD stuff and turn it on if available.
-//TODO: @Cleanup: Move this function, make it user-overridable.
 
 #import "Basic";
 #import "Pool";
@@ -12,11 +11,26 @@
 #import "Hash_Table";
 
 USE_SIMD :: false;
+LEXER_SIMD_WIDTH :: 16;
 
 EOF :: -1;
 MAX_IDENTIFIER_LENGTH :: 512;
 MAX_CONCURRENT_TOKENS :: 8;		// Ring indices use a bit mask, so the capacity must be a power of two.
-LEXER_SIMD_WIDTH :: 16;
+
+UTF8_E2_LEAD_BYTE					:: 0xE2;
+UTF8_NON_BREAKING_SPACE_LEAD_BYTE	:: 0xC2;
+UTF8_NON_BREAKING_SPACE_TRAIL_BYTE	:: 0xA0;
+
+UNICODE_ZERO_WIDTH_SPACE 			:: 0x200B;
+UNICODE_LEFT_TO_RIGHT_ISOLATE		:: 0x2066;
+UNICODE_RIGHT_TO_LEFT_ISOLATE		:: 0x2067;
+UNICODE_FIRST_STRONG_ISOLATE		:: 0x2068;
+UNICODE_LEFT_TO_RIGHT_EMBEDDING		:: 0x202A;
+UNICODE_RIGHT_TO_LEFT_EMBEDDING		:: 0x202B;
+UNICODE_LEFT_TO_RIGHT_OVERRIDE		:: 0x202D;
+UNICODE_RIGHT_TO_LEFT_OVERRIDE		:: 0x202E;
+UNICODE_POP_DIRECTIONAL_ISOLATE		:: 0x2069;
+UNICODE_POP_DIRECTIONAL_FORMATTING	:: 0x202C;
 
 // @Cleanup: Add zero-termination as an option?
 
@@ -218,6 +232,7 @@ Table_String :: #type,isa string;
 		}
 
 
+		// Handle comments and shebangs.
 		second := iterator.source[iterator.cursor + 1];
 		if first == #char "/" {
 			if second == #char "/" {
@@ -281,7 +296,11 @@ Table_String :: #type,isa string;
 					&& cursor + 1 < iterator.source.count
 					&& iterator.source[cursor + 1] == #char "!"
 				);
-				if is_space(character) || starts_comment || starts_shebang	break;
+				if is_space(character) || starts_comment || starts_shebang {
+					break;
+				}
+
+
 				iterator.cursor += 1;
 			}
 		}
@@ -360,6 +379,8 @@ Lexer :: struct {
 	eof_token.type = .END_OF_INPUT;
 
 	user_data: *void;
+	error_callback: (lexer: *Lexer, message: string, line: s32, column: s32);
+	detail_callback: (lexer: *Lexer, message: string);
 
 	scratch_buffer: [MAX_IDENTIFIER_LENGTH] u8;
 
@@ -394,9 +415,7 @@ get_last_token :: (lexer: *Lexer) -> Token {
 
 
 starts_identifier :: inline (c: u8) -> bool {
-	if is_alpha(c)		return true;
-	if c == #char "_"	return true;
-	return false;
+	return is_alpha(c) || c == #char "_";
 }
 
 
@@ -458,7 +477,7 @@ copy_token_name :: (name: string, token_to_fill: *Token) {
 
 #scope_export
 
-eat_character :: (using lexer: *Lexer) {
+eat_character :: inline (using lexer: *Lexer) {
 	if input.data[input_cursor] == #char "\n" {
 		// :DoThisOnNewline
 		current_line_number += 1;
@@ -483,19 +502,45 @@ peek_next_character :: (lexer: *Lexer) -> s16 {
 
 
 report_parse_error :: (lexer: *Lexer, format: string, arguments: ..Any) {
-	log(format, ..arguments);		//FIXME: @Cleanup: Move this function, make it user-overridable.
-	log("...at line %, character %.\n", lexer.current_line_number, lexer.current_character_index);
+	if lexer.error_callback {
+		message := ifx arguments.count == 0
+			then format
+			else tprint(format, ..arguments);
+
+		lexer.error_callback(lexer, message, lexer.current_line_number, lexer.current_character_index);
+	} else {
+		log(format, ..arguments);
+		log("...at line %, character %.\n", lexer.current_line_number, lexer.current_character_index);
+	}
+
 	lexer.reported_error = true;
 } @PrintLike
 
 report_parse_error :: (lexer: *Lexer, token: *Token, format: string, arguments: ..Any) {
-	log(format, ..arguments);		// @Cleanup: Move this function, make it user-overridable.
-	log("...at line %, character %.\n", token.l0, token.c0);
+	if lexer.error_callback {
+		message := ifx arguments.count == 0
+			then format
+			else tprint(format, ..arguments);
+
+		lexer.error_callback(lexer, message, token.l0, token.c0);
+	} else {
+		log(format, ..arguments);
+		log("...at line %, character %.\n", token.l0, token.c0);
+	}
+
 	lexer.reported_error = true;
 } @PrintLike
 
 report_detail :: (lexer: *Lexer, format: string, arguments: ..Any) {
-	log(format, ..arguments);		// @Cleanup: Move this function, make it user-overridable.
+	if lexer.detail_callback {
+		message := ifx arguments.count == 0
+			then format
+			else tprint(format, ..arguments);
+
+		lexer.detail_callback(lexer, message);
+	} else {
+		log(format, ..arguments);
+	}
 } @PrintLike
 
 get_hex_digit :: (lexer: *Lexer, type: Hex_Digit_Type) -> (value: u8, success: bool) {
@@ -592,36 +637,35 @@ parse_ident :: (lexer: *Lexer, result: *Token) -> string {
 
 	/*
 #if USE_SIMD
-	__m128i zero   = _mm_set1_epi8("0"-1); // Because we don"t have le and ge in SSE2?  We just have lt and gt??
-	__m128i nine   = _mm_set1_epi8("9"+1);
-	__m128i under  = _mm_set1_epi8("_");
-	__m128i a      = _mm_set1_epi8("A"-1);
-	__m128i z      = _mm_set1_epi8("Z"+1); // See above.
-	__m128i not32  = _mm_set1_epi8((char)(255-32));
+	__m128i zero	= _mm_set1_epi8("0"-1);		// Because we don"t have le and ge in SSE2?  We just have lt and gt??
+	__m128i nine	= _mm_set1_epi8("9"+1);
+	__m128i under	= _mm_set1_epi8("_");
+	__m128i a		= _mm_set1_epi8("A"-1);
+	__m128i z		= _mm_set1_epi8("Z"+1); 	// See above.
+	__m128i not32	= _mm_set1_epi8((char)(255-32));
 
 	while (lexer.input.count - lexer.input_cursor >= LEXER_SIMD_WIDTH) {
-		__m128i characters = _mm_loadu_si128  ((__m128i *)(lexer.input.data + lexer.input_cursor));
-		__m128i toupper    = _mm_and_si128    (characters, not32);
+		__m128i characters	= _mm_loadu_si128((__m128i *)(lexer.input.data + lexer.input_cursor));
+		__m128i toupper		= _mm_and_si128(characters, not32);
 
-		// In AVX-512 we can compare into 16-bit masks and do booleans on those,
-		// but, not in SSE.
+		// In AVX-512 we can compare into 16-bit masks and do booleans on those, but, not in SSE.
 
-		__m128i geq_A      = _mm_cmpgt_epi8 (toupper, a);
-		__m128i leq_Z      = _mm_cmplt_epi8 (toupper, z);
-		__m128i _isalpha   = _mm_and_si128  (geq_A, leq_Z);
-		__m128i geq_0      = _mm_cmpgt_epi8 (characters, zero);
-		__m128i leq_9      = _mm_cmplt_epi8 (characters, nine);
-		__m128i _isnum     = _mm_and_si128  (geq_0, leq_9);
-		__m128i _isunder   = _mm_cmpeq_epi8 (characters, under);
+		__m128i geq_A		= _mm_cmpgt_epi8(toupper, a);
+		__m128i leq_Z		= _mm_cmplt_epi8(toupper, z);
+		__m128i _isalpha	= _mm_and_si128(geq_A, leq_Z);
+		__m128i geq_0		= _mm_cmpgt_epi8(characters, zero);
+		__m128i leq_9		= _mm_cmplt_epi8(characters, nine);
+		__m128i _isnum		= _mm_and_si128(geq_0, leq_9);
+		__m128i _isunder	= _mm_cmpeq_epi8(characters, under);
 
-		__m128i _isalnum   = _mm_or_si128   (_isalpha, _isnum);
-		__m128i is_ident   = _mm_or_si128   (_isalnum, _isunder);
+		__m128i _isalnum	= _mm_or_si128(_isalpha, _isnum);
+		__m128i is_ident	= _mm_or_si128(_isalnum, _isunder);
 
-		mask               = _mm_movemask_epi8(is_ident);
+		mask				= _mm_movemask_epi8(is_ident);
 
-		// This mask xor is probably wasteful.  We can DeMorgan all this later, or something.
-		// We"re doing this because we detected what *is* in an identifier, rather than what
-		// is not.
+		// This mask xor is probably wasteful.
+		// We can DeMorgan all this later, or something.
+		// We"re doing this because we detected what *is* in an identifier, rather than what is not.
 		mask ^= 0xffff;
 
 		s64 advance;
@@ -631,24 +675,27 @@ parse_ident :: (lexer: *Lexer, result: *Token) -> string {
 			advance = 16;
 		}
 
-		advance = Min(advance, MAX_TOKEN_LENGTH - (scratch_pos - buffer));  // :IdentTooLong  @Robustness: Report an error here about ident too long.
+		advance = Min(advance, MAX_TOKEN_LENGTH - (scratch_pos - buffer));	// :IdentTooLong  @Robustness: Report an error here about ident too long.
 		assert(advance >= 0);
 
-		// @Speed: Instead of this memcpy, can we just do a move into the
-		// scratch buffer?  (Don"t even need a partial move if we give the scratch buffer LEXER_SIMD_WIDTH extra padding.)
+		// @Speed: Instead of this memcpy, can we just do a move into the scratch buffer?
+		// (Don"t even need a partial move if we give the scratch buffer LEXER_SIMD_WIDTH extra padding.)
 		memcpy(scratch_pos, lexer.input.data + lexer.input_cursor, advance);
 		scratch_pos  += advance;
 		lexer.input_cursor += advance;
 		lexer.current_character_index += temporary_truncate_to_s32(advance);
 
-		if (mask) break;  // If mask != 0, we found a non-identifier character.
+		// If mask != 0, we found a non-identifier character.
+		if (mask) {
+			break;
+		}
 	}
 #endif
 */
 
 	// For now we punt and go into slow mode on a backslash:
-	c := peek_next_character(lexer);
 	reported_identifier_too_long := false;
+	c := peek_next_character(lexer);
 	if !mask || c == #char "\\" {
 		while 1 {
 			c = peek_next_character(lexer);
@@ -829,7 +876,9 @@ parse_here_string_body :: (lexer: *Lexer, terminator: string, want_cr := false, 
 
 			// Don"t break on zero!
 			// There could be a zero in the source file for all you know.
-			//if (c == 0)	break;
+			//if (c == 0) {
+			//	break;
+			//}
 
 			if c == #char "\r" {
 				contains_carriage_return = true;
@@ -971,8 +1020,7 @@ make_note :: (lexer: *Lexer) -> *Token {
 	// Start and end indices do not include the leading @.
 
 	name := parse_note(lexer);
-	copy_token_name(name, note);
-	free(name);
+	note.ident_value.name = lexer.identifier_handler(lexer, name, name);
 
 	set_end_of_token(lexer, note);
 
@@ -984,7 +1032,7 @@ parse_note :: (lexer: *Lexer) -> string {
 
 	while lexer.input_cursor < lexer.input.count {
 		c := lexer.input.data[lexer.input_cursor];
-		if (c == #char " ") || (c == 9) || (c == 10) || (c == 13) || (c == 0) || (c == #char ";") {		// Any whitespace, or semicolon.
+		if c == #char " " || c == 9 || c == 10 || c == 13 || c == 0 || c == #char ";" {		// Any whitespace, null or semicolon.
 			break;
 		}
 
@@ -999,12 +1047,7 @@ parse_note :: (lexer: *Lexer) -> string {
 
 	lexer.current_character_index += len.(s32);
 
-	//FIXME: @Speed: Don't dynamically allocate here.
-	result := alloc_string(len+1);
-	memcpy(result.data, lexer.input.data + input_cursor_orig, len);
-	result[len] = 0;
-
-	return result;
+	return slice(lexer.input, input_cursor_orig, len);
 }
 
 check_for_keyword :: (token: *Token) -> Token_Type {	// Returns Token_Type 0 if it is not a keyword.
@@ -1182,10 +1225,10 @@ make_number :: (lexer: *Lexer) -> *Token {
 	numeric_flags: Value_Flags;
 	digit_accumulator: u64;
 
-	ALL_FS: u64 : 0xffff_ffff_ffff_ffff;
-	ALL_FS_DIV10 :: ALL_FS/10;
-	ALL_FS_DIV16 :: ALL_FS/16;
-	ALL_FS_DIV2  :: ALL_FS/2;
+	ALL_FS: u64 : 0xFFFF_FFFF_FFFF_FFFF;
+	ALL_FS_DIV10 :: ALL_FS / 10;
+	ALL_FS_DIV16 :: ALL_FS / 16;
+	ALL_FS_DIV2  :: ALL_FS / 2;
 
 	overflow_check_lower_bound := ALL_FS_DIV10;		// We start in base 10, but may switch this if we change the base.
 
@@ -1193,22 +1236,28 @@ make_number :: (lexer: *Lexer) -> *Token {
 		c := peek_next_character(lexer);
 
 		if (cursor == buffer + 1) && (buffer.* == #char "0") && !numeric_flags {	// if numeric_flags is nonzero, we already did a prefix!
-			if (c == #char "x") || (c == #char "X") {
-				// Maybe it"s a hex number.
-				numeric_flags |= .HEX;
-				eat_character(lexer);
-				cursor = buffer;	// Take the leading 0 out.
-				continue;
-			} else if (c == #char "b") || (c == #char "B") {
-				// Maybe it"s a binary number.
-				numeric_flags |= .BINARY;
-				eat_character(lexer);
-				cursor = buffer;	// Take the leading 0 out.
-				continue;
-			} else if (c == #char "h") || (c == #char "H") {
-				// Maybe it"s a hexfloat.
-				eat_character(lexer);
-				return make_hexfloat(lexer, result);
+			if c == {
+				case #char "x"; #through;
+				case #char "X";
+					// Maybe it"s a hex number.
+					numeric_flags |= .HEX;
+					eat_character(lexer);
+					cursor = buffer;	// Take the leading 0 out.
+					continue;
+
+				case #char "b"; #through;
+				case #char "B";
+					// Maybe it"s a binary number.
+					numeric_flags |= .BINARY;
+					eat_character(lexer);
+					cursor = buffer;	// Take the leading 0 out.
+					continue;
+
+				case #char "h"; #through;
+				case #char "H";
+					// Maybe it"s a hexfloat.
+					eat_character(lexer);
+					return make_hexfloat(lexer, result);
 			}
 		}
 
@@ -1388,11 +1437,15 @@ make_number :: (lexer: *Lexer) -> *Token {
 		//
 		significant_figures: s32;
 		end := exponent_cursor;
-		if !end		end = cursor;
+		if !end {
+			end = cursor;
+		}
 
 		while end > after_decimal_cursor {
 			p := (end - 1).*;
-			if (p != #char "0") && (p != #char "_")		break;
+			if (p != #char "0") && (p != #char "_") {
+				break;
+			}
 
 
 			end -= 1;
@@ -1401,7 +1454,9 @@ make_number :: (lexer: *Lexer) -> *Token {
 		begin := buffer;
 		while begin < end {
 			b := begin.*;
-			if (b != #char "0") && (b != #char "_") && (b != #char ".")		break;	// We don't worry about +, -, etc.
+			if (b != #char "0") && (b != #char "_") && (b != #char ".") {
+				break;	// We don't worry about +, -, etc.
+			}
 
 
 			begin += 1;
@@ -1410,7 +1465,10 @@ make_number :: (lexer: *Lexer) -> *Token {
 		s := begin;
 		while s < end {
 			c := s.*;
-			if (c >= #char "0") && (c <= #char "9")		significant_figures += 1;
+			if (c >= #char "0") && (c <= #char "9") {
+				significant_figures += 1;
+			}
+
 			s += 1;
 		}
 
@@ -1455,7 +1513,7 @@ make_number :: (lexer: *Lexer) -> *Token {
 
 	set_end_of_token(lexer, result);
 
-	if (numeric_flags & .OVERFLOWED) && !(numeric_flags & .FLOAT) {
+	if numeric_flags & .OVERFLOWED && !(numeric_flags & .FLOAT) {
 		report_parse_error(lexer, result, "Integer literal is too big.  All integer literals must fit into 64 bits.\n");
 	}
 
@@ -1475,121 +1533,103 @@ make_string_constant :: (lexer: *Lexer) -> *Token {
 		c := peek_next_character(lexer);
 		eat_character(lexer);
 
-		if c == #char "\"" {
-			source_end = lexer.input_cursor - 1;
-			break;
-		}
+		if c == {
+			case #char "\"";
+				source_end = lexer.input_cursor - 1;
+				break;
 
+			case EOF;
+				source_end = lexer.input.count;
+				report_parse_error(lexer, "End of file during string constant!\n");
+				break;
 
-		if c == EOF {
-			source_end = lexer.input.count;
-			report_parse_error(lexer, "End of file during string constant!\n");
-			break;
-		}
+			case #char "\n";
+				source_end = lexer.input_cursor - 1;
+				report_parse_error(lexer, "Newline in string constant!\n");
+				break;
 
+			case #char "\\";
+				// @Robustness: add support for more escapes sequences.
 
-		if c == #char "\n" {
-			source_end = lexer.input_cursor - 1;
-			report_parse_error(lexer, "Newline in string constant!\n");
-			break;
-		}
+				next := peek_next_character(lexer);
+				if next == {
+					case #char "n";		c = #char "\n";		eat_character(lexer);
+					case #char "r";		c = #char "\r";		eat_character(lexer);
+					case #char "t";		c = #char "\t";		eat_character(lexer);
+					case #char "0";		c = 0;				eat_character(lexer);
+					case #char "e";		c = 0x1B;/*ESC*/	eat_character(lexer);
 
+					case #char "x";
+						eat_character(lexer);
+						// If get_hex_digit failed, we issued an error, so we don't worry about the value of c in that case.
+						high := get_hex_digit(lexer, .ASCII_8_BIT);
+						low  := get_hex_digit(lexer, .ASCII_8_BIT);
+						c = (high * 16 + low).(s16);
 
-		if c == #char "\\" {
-			// @Robustness: add support for more escapes sequences.
-
-			next := peek_next_character(lexer);
-			if next == {
-				case #char "n";
-					c = #char "\n";
-					eat_character(lexer);
-				case #char "r";
-					c = #char "\r";
-					eat_character(lexer);
-				case #char "t";
-					c = #char "\t";
-					eat_character(lexer);
-				case #char "0";
-					c = 0;
-					eat_character(lexer);
-				case #char "e";
-					c = 0x1B;
-					eat_character(lexer);
-
-				case #char "x";
-					eat_character(lexer);
-					// If get_hex_digit failed, we issued an error, so we don't worry about the value of c in that case.
-					high := get_hex_digit(lexer, .ASCII_8_BIT);
-					low  := get_hex_digit(lexer, .ASCII_8_BIT);
-					c = (high * 16 + low).(s16);
-
-				case #char "d";
-					eat_character(lexer);
-					// get_decimal_digit returns -1 on failure.
-					// If so, we issued an error, so we don't worry about the value of c.
-					high := get_decimal_digit(lexer);
-					if high >= 0 {
-						middle := get_decimal_digit(lexer);
-						if middle >= 0 {
-							low := get_decimal_digit(lexer);
-							if low < 0  low = 0;
-							c = (high * 100 + middle * 10 + low).(s16);
-							if c > 255 {
-								l0 := lexer.current_line_number;
-								l1 := l0;
-								c0 := lexer.current_character_index - 3;
-								c1 := lexer.current_character_index;
-								report_parse_error(lexer, "Decimal value of %d exceeds the limit of 255.\n", c);
+					case #char "d";
+						eat_character(lexer);
+						// get_decimal_digit returns -1 on failure.
+						// If so, we issued an error, so we don't worry about the value of c.
+						high := get_decimal_digit(lexer);
+						if high >= 0 {
+							middle := get_decimal_digit(lexer);
+							if middle >= 0 {
+								low := get_decimal_digit(lexer);
+								if low < 0  low = 0;
+								c = (high * 100 + middle * 10 + low).(s16);
+								if c > 255 {
+									l0 := lexer.current_line_number;
+									l1 := l0;
+									c0 := lexer.current_character_index - 3;
+									c1 := lexer.current_character_index;
+									report_parse_error(lexer, "Decimal value of %d exceeds the limit of 255.\n", c);
+								}
 							}
 						}
-					}
 
-				case #char "u"; #through;
-				case #char "U";
-					eat_character(lexer);
+					case #char "u"; #through;
+					case #char "U";
+						eat_character(lexer);
 
-					num_digits: s32 = 4;
-					type := Hex_Digit_Type.UNICODE_16;
-					if next == #char "U" {
-						num_digits = 8;
-						type = .UNICODE_32;
-					}
+						num_digits: s32 = 4;
+						type := Hex_Digit_Type.UNICODE_16;
+						if next == #char "U" {
+							num_digits = 8;
+							type = .UNICODE_32;
+						}
 
-					value: u32;
-					for i: 0..num_digits-1 {
-						digit, success := get_hex_digit(lexer, type);
-						if !success 	break;
+						value: u32;
+						for i: 0..num_digits-1 {
+							digit, success := get_hex_digit(lexer, type);
+							if !success {
+								break;
+							}
 
-						value <<= 4;
-						value += digit;
-					}
+							value <<= 4;
+							value += digit;
+						}
 
-					LEN_MAX :: 4;
-					buf: [LEN_MAX] u8;
+						LEN_MAX :: 4;
+						buf: [LEN_MAX] u8;
 
-					s: string;
-					s.data = buf.data;
+						s: string;
+						s.data = buf.data;
 
-					character_utf32_to_utf8(value, *s);
-					append(*builder, s);
-					source_end = lexer.input_cursor;
+						character_utf32_to_utf8(value, *s);
+						append(*builder, s);
+						source_end = lexer.input_cursor;
 
-					continue;	// NOTE: Do not fall through to the bottom.
+						continue;	// NOTE: Do not fall through to the bottom.
 
-				case #char "\"";
-					c = #char "\"";
-					eat_character(lexer);
-				case #char "\\";
-					c = #char "\\";
-					eat_character(lexer);
-				case #char "%";
-					c = 31;		//HACK: Using ASCII unit separator as a placeholder for '%'.
-					eat_character(lexer);
-				case;
-					report_parse_error(lexer, "Unknown escape sequence '\\%c' in string constant!", next);
-					c = next;
-					eat_character(lexer);
-			}
+					case #char "\"";		c = #char "\"";		eat_character(lexer);
+					case #char "\\";		c = #char "\\";		eat_character(lexer);
+					case #char "%";			c = 31;				eat_character(lexer);	//HACK: Using ASCII 32 (unit separator) as a placeholder for '%'.
+
+					case;
+						report_parse_error(lexer, "Unknown escape sequence '\\%c' in string constant!", next);
+						c = next;
+						eat_character(lexer);
+				}
 		}
 
 		source_end = lexer.input_cursor;
@@ -1680,7 +1720,9 @@ eat_token :: (lexer: *Lexer) {
 check_for_equals :: (lexer: *Lexer, c: Token_Type, augmented: Token_Type, eat := true, subtractor: s32 = 0) -> *Token {
 	// subtractor is the base token width minus one, for ...reasons...  @Cleanup.
 	result: *Token;
-	if eat	eat_character(lexer);
+	if eat {
+		eat_character(lexer);
+	}
 
 	next := peek_next_character(lexer);
 	if next == #char "=" {
@@ -1703,29 +1745,29 @@ eat_input_due_to_block_comment :: (lexer: *Lexer) {
 
 	while comment_depth {
 		c := peek_next_character(lexer);
+		if c == {
+			case EOF;
+				report_parse_error(lexer, "End of input from within a comment.\n");		// XXX Do a real error message here...
+				return;
 
-		if c == EOF {
-			report_parse_error(lexer, "End of input from within a comment.\n");		// XXX Do a real error message here...
-			return;
-		}
-
-
-		if c == #char "/" {
-			eat_character(lexer);
-			c := peek_next_character(lexer);
-			if c == #char "*" {
+			case #char "/";
 				eat_character(lexer);
-				comment_depth += 1;
-			}
-		} else if c == #char "*" {
-			eat_character(lexer);
-			c := peek_next_character(lexer);
-			if c == #char "/" {
+				c = peek_next_character(lexer);
+				if c == #char "*" {
+					eat_character(lexer);
+					comment_depth += 1;
+				}
+
+			case #char "*";
 				eat_character(lexer);
-				comment_depth -= 1;
-			}
-		} else {
-			eat_character(lexer);
+				c = peek_next_character(lexer);
+				if c == #char "/" {
+					eat_character(lexer);
+					comment_depth -= 1;
+				}
+
+			case;
+				eat_character(lexer);
 		}
 	}
 }
@@ -1736,33 +1778,40 @@ eat_until_newline :: (lexer: *Lexer) {
 #if USE_SIMD
 	__m128i newline = _mm_set1_epi8('\n";
 	while (lexer.input.count - lexer.input_cursor >= LEXER_SIMD_WIDTH) {
-		__m128i characters = _mm_loadu_si128  ((__m128i *)(lexer.input.data + lexer.input_cursor));
-		__m128i test       = _mm_cmpeq_epi8   (characters, newline);
-		int     mask       = _mm_movemask_epi8(test);
+		__m128i	characters	= _mm_loadu_si128((__m128i *)(lexer.input.data + lexer.input_cursor));
+		__m128i	test		= _mm_cmpeq_epi8(characters, newline);
+		int		mask		= _mm_movemask_epi8(test);
 		if (mask) {
 			// We found a newline.
-			auto advance = _tzcnt_u32(mask) + 1;  // +1 for the newline.
+			auto advance = _tzcnt_u32(mask) + 1;	// +1 for the newline.
 			lexer.input_cursor += advance;
 			lexer.current_character_index = 1;
 			lexer.current_line_number += 1;
 			lexer.total_lines_processed += 1;
 			return;
 		} else {
-			lexer.input_cursor            += 16;
-			lexer.current_character_index += 16;
+			lexer.input_cursor				+= 16;
+			lexer.current_character_index	+= 16;
 		}
 	}
 
-	if (lexer.input_cursor == lexer.input.count) return;
+	if (lexer.input_cursor == lexer.input.count) {
+		return;
+	}
 #endif // USE_SIMD
 */
 
 	c: s32;
 	while 1 {
 		c = peek_next_character(lexer);
-		if c == 0			break;
-		if c == #char "\n"	break;
-		if c == EOF			break;
+		if (!c
+			|| c == #char "\n"
+			|| c == EOF
+		) {
+			break;
+		}
+
+
 		eat_character(lexer);
 	}
 }
@@ -1808,6 +1857,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 			return result;
 		}
 
+
 		if c == #char "`" {
 			eat_character(lexer);
 			c = peek_next_character(lexer);
@@ -1833,29 +1883,25 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 			// Check for double-dot...but if it is not specifically double-dot then it might be a single-dot, and it might be a floating-point number...
 
 			eat_character(lexer);
-			c = peek_next_character(lexer);
 			type: Token_Type = 0;
+			c = peek_next_character(lexer);
 			if c == {
-				case #char ".";
-					type = .DOUBLE_DOT;
-				case #char "*";
-					type = .POSTFIX_DEREFERENCE;
-				case #char "[";
-					type = .BEGIN_ARRAY_LITERAL;
-				case #char "{";
-					type = .BEGIN_STRUCT_LITERAL;
+				case #char ".";		type = .DOUBLE_DOT;
+				case #char "*";		type = .POSTFIX_DEREFERENCE;
+				case #char "[";		type = .BEGIN_ARRAY_LITERAL;
+				case #char "{";		type = .BEGIN_STRUCT_LITERAL;
 			}
 
 			if type {
 				eat_character(lexer);
 				result = make_one_character_token(lexer, type);
-				result.c0 -= 1;	// Include the previous dot.
+				result.c0 -= 1;		// Include the previous dot.
 				return result;
 			}
 
 
 			if is_digit(c.(u8)) {
-				unwind_one_character(lexer);  // Get the '.' back.
+				unwind_one_character(lexer);	// Get the '.' back.
 				result = make_number(lexer);
 				return result;
 			}
@@ -1875,6 +1921,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 		if c == {
 			case #char "(";
 				eat_character(lexer);
+				// Check for prefix dereference pattern (.*)
 				remaining := lexer.input.count - lexer.input_cursor;
 				if (remaining >= 3
 					&& lexer.input.data[lexer.input_cursor]		== #char "."
@@ -1890,16 +1937,16 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 					result = make_one_character_token(lexer, c.(Token_Type));
 				}
 
-			case #char ")";  #through;
-			case #char ";";  #through;
-			case #char "[";  #through;
-			case #char "]";  #through;
-			case #char "'"; #through;
+			case #char ")";	#through;
+			case #char ";";	#through;
+			case #char "[";	#through;
+			case #char "]";	#through;
+			case #char "'";	#through;
 			case;
 				eat_character(lexer);
 				result = make_one_character_token(lexer, c.(Token_Type));
 
-			case 0xE2;	//QUESTION: what is this and where does it come from?  UTF-8 or something?
+			case UTF8_E2_LEAD_BYTE;
 				orig_pos := lexer.input.data + lexer.input_cursor;
 
 				u, consumed_length, conv_result := character_utf8_to_utf32(orig_pos, lexer.input.count - lexer.input_cursor);
@@ -1909,20 +1956,22 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 					lexer.current_character_index += consumed_length.(s32);
 
 					if u == {
-						case 0x200B;
+						case UNICODE_ZERO_WIDTH_SPACE;
 							// @Cleanup interp.report(REPORT_WARNING, lexer, null, "Illegal Unicode zero-width space found in the program text.  This could be a problem with pasting the data from another source.\n");
 							continue;
-						case 0x2066; #through;
-						case 0x2067; #through;
-						case 0x2068; #through;
-						case 0x202A; #through;
-						case 0x202B; #through;
-						case 0x202D; #through;
-						case 0x202E; #through;
-						case 0x2069; #through;
-						case 0x202C;
+
+						case UNICODE_LEFT_TO_RIGHT_ISOLATE;		#through;
+						case UNICODE_RIGHT_TO_LEFT_ISOLATE;		#through;
+						case UNICODE_FIRST_STRONG_ISOLATE;		#through;
+						case UNICODE_LEFT_TO_RIGHT_EMBEDDING;	#through;
+						case UNICODE_RIGHT_TO_LEFT_EMBEDDING;	#through;
+						case UNICODE_LEFT_TO_RIGHT_OVERRIDE;	#through;
+						case UNICODE_RIGHT_TO_LEFT_OVERRIDE;	#through;
+						case UNICODE_POP_DIRECTIONAL_ISOLATE;	#through;
+						case UNICODE_POP_DIRECTIONAL_FORMATTING;
 							// @Cleanup interp.report(REPORT_WARNING, lexer, null, "Illegal Unicode directional-formatting character found in the program text.  This could be a problem with pasting the data from another source.\n");
 							continue;
+
 						case;
 							report_parse_error(lexer, "Unicode characters in this range are not supported by the parser at lexer time.  (Offending character code was U+%x.\n", u);
 							continue;
@@ -2006,6 +2055,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 
 			case #char "\\"; {
 				eat_character(lexer);
+
 				next := peek_next_character(lexer);
 				if next == #char "%" {
 					eat_character(lexer);
@@ -2019,6 +2069,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 
 			case #char "/";
 				eat_character(lexer);
+
 				c = peek_next_character(lexer);
 				if c == {
 					case #char "/";
@@ -2045,8 +2096,8 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 
 			case #char ",";
 				eat_character(lexer);
-				next := peek_next_character(lexer);
 
+				next := peek_next_character(lexer);
 				if next == #char "," {
 					eat_character(lexer);
 					result = make_one_character_token(lexer, .DOUBLE_COMMA);
@@ -2057,9 +2108,11 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 
 			case #char "="; {
 				eat_character(lexer);
+
 				next := peek_next_character(lexer);
 				if next == #char "=" {
 					eat_character(lexer);
+
 					next = peek_next_character(lexer);
 					if next == #char "=" {
 						eat_character(lexer);
@@ -2089,9 +2142,11 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 
 			case #char "<"; {
 				eat_character(lexer);
+
 				next := peek_next_character(lexer);
 				if next == #char "<" {
 					eat_character(lexer);
+
 					next := peek_next_character(lexer);
 					if next == #char "<" {
 						eat_character(lexer);
@@ -2108,6 +2163,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 				next := peek_next_character(lexer);
 				if next == #char ">" {
 					eat_character(lexer);
+
 					next := peek_next_character(lexer);
 					if next == #char ">" {
 						eat_character(lexer);
@@ -2119,6 +2175,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 					result = check_for_equals(lexer, c.(Token_Type), .GREATEREQUALS, false);
 				}
 			}
+
 			case #char "?";
 				eat_character(lexer);
 				result = make_one_character_token(lexer, #char "?");
@@ -2130,8 +2187,8 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 			case #char "$";
 				eat_character(lexer);
 
-				other_c := peek_next_character(lexer);
 				doubled := false;
+				other_c := peek_next_character(lexer);
 				if other_c == #char "$" {
 					eat_character(lexer);
 					doubled = true;
@@ -2146,10 +2203,14 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 
 			case #char "@";
 				eat_character(lexer);
+
 				other_c := peek_next_character(lexer);
 				if other_c == #char "\"" {
 					result = make_string_constant(lexer);
-					if !result	break;
+					if !result {
+						break;
+					}
+
 
 					//HACK: Overwrite this to a Note token.
 					// This will change later when we do structured notes, probably.
@@ -2167,10 +2228,11 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 			case #char "\"";
 				result = make_string_constant(lexer);
 
-			case 0xC2;	//QUESTION: what is this?  Unicode or something?
+			case UTF8_NON_BREAKING_SPACE_LEAD_BYTE;
 				eat_character(lexer);
+
 				other_c := peek_next_character(lexer);
-				if other_c == 0xA0 {	// Unicode non-breaking space.
+				if other_c == UTF8_NON_BREAKING_SPACE_TRAIL_BYTE {
 					/*
 					if (!did_nbsp_warning) {	//LATER: decide if we want these errors as an option?
 						// Don't spam!
@@ -2196,7 +2258,10 @@ peek_token :: (lexer: *Lexer, lookahead_index: s32) -> *Token {
 	assert(lookahead_index <  MAX_CONCURRENT_TOKENS);
 	assert(lookahead_index >= 0);
 
-	if lookahead_index == 0		return peek_next_token(lexer);
+	if lookahead_index == 0 {
+		return peek_next_token(lexer);
+	}
+
 
 	while lexer.num_incoming_tokens <= lookahead_index {
 		if lexer.reported_error {
@@ -2219,7 +2284,9 @@ peek_token :: (lexer: *Lexer, lookahead_index: s32) -> *Token {
 #scope_file
 
 initLexer :: (lexer: *Lexer, input: string, should_free_input: bool) {
-	if lexer.should_free_input	free(lexer.input);
+	if lexer.should_free_input {
+		free(lexer.input);
+	}
 
 	lexer.input = input;
 	lexer.input_cursor = 0;
@@ -2251,7 +2318,10 @@ set_input_from_file :: (lexer: *Lexer, file_path: string) -> bool {
 
 
 	value, success := read_entire_file(file_path, true, true);
-	if !success		return false;
+	if !success {
+		return false;
+	}
+
 
 	initLexer(lexer, value, true);
 	return true;
@@ -2268,9 +2338,9 @@ has_a_big_exponent :: inline (value: float64) -> bool {
 
 	exponent := (_s64 >> 52) & 0x7ff;
 
-	if (exponent != 0) && (exponent != 0x7ff) {
+	if exponent != 0 && exponent != 0x7ff {
 		exponent -= 1023;
-		return (exponent > 127) || (exponent < -126);
+		return exponent > 127 || exponent < -126;
 	}
 
 
