@@ -1,4 +1,6 @@
 // Parse focused valid and malformed source snippets under default and trivia-enabled imports; assert token spans, parser-owned AST fields, round trips, and recovery.
+// Some tests copy string-literal sources so they can free an old input while checking that newer parse snapshots remain valid.
+
 #import "Basic";
 #import "Compiler";
 #import "File";
@@ -38,6 +40,7 @@ compiler_node_for_source :: ($source: string) -> *Code_Node #expand {
 }
 
 main :: () {
+	// Lexer contracts and complete tutorial sources.
 	test_default_tokens();
 	test_lexer_only_recovery();
 	test_star_token_contract();
@@ -45,6 +48,8 @@ main :: () {
 	test_asm_tutorial_source();
 	test_for_expansion_tutorial_source();
 	test_asm_tutorial_forms();
+
+	// Tokens, node ownership, and edit snapshot lifetimes.
 	test_trivia_round_trip();
 	test_node_token_spans();
 	test_identifier_expression();
@@ -56,9 +61,15 @@ main :: () {
 	test_parser_node_pool();
 	test_identifier_storage_lifetime();
 	test_edit_snapshot_lifetime();
+	test_reuse_snapshot_lifetime();
 	test_file_edit_api();
+
+	// Declaration reuse and candidate boundaries.
 	test_numeric_ast_reuse();
 	test_recovered_snapshot_ast_reuse_fallback();
+	test_new_recovered_edit_fallback();
+	test_repeated_convergence_edit();
+	test_simple_candidate_syntax_edits();
 	test_semicolon_boundary_ast_reuse();
 	test_typed_declaration_ast_reuse();
 	test_nested_type_instantiation_reuse();
@@ -74,8 +85,11 @@ main :: () {
 	test_four_name_compound_ast_reuse();
 	test_compound_reassignment_ast_reuse();
 	test_compound_candidate_edits();
+
+	// Literal, operator, and query reuse.
 	test_scalar_literal_ast_reuse();
 	test_source_backed_ast_reuse();
+	test_source_position_ast_reuse();
 	test_excluded_literal_ast_reuse_fallback();
 	test_aggregate_payload_edits();
 	test_nested_ast_reuse();
@@ -91,12 +105,22 @@ main :: () {
 	test_expression_query_ast_reuse();
 	test_query_fallback();
 	test_type_query_ast_reuse();
+
+	// Excluded nodes and body fallback boundaries.
 	test_excluded_expression_nodes();
 	test_excluded_file_nodes();
 	test_excluded_statement_nodes();
 	test_imperative_body_fallback();
+	test_aggregate_body_fallback();
+	test_aggregate_parameter_block_fallback();
+	test_single_declaration_branch_fallback();
+	test_synthetic_imperative_block_fallback();
+	test_enum_body_fallback();
+	test_case_arm_fallback();
 	test_lowered_directive_ast_reuse();
 	test_excluded_directive_payload_edit();
+
+	// Unary, cast, call, and aggregate subtree reuse.
 	test_positive_unary_ast_reuse();
 	test_negative_unary_ast_reuse();
 	test_prefix_dereference_ast_reuse();
@@ -113,12 +137,17 @@ main :: () {
 	test_member_ast_reuse();
 	test_subscript_ast_reuse();
 	test_aggregate_ast_reuse();
+
+	// Nested scopes and invalidation after edits.
 	test_nested_block_ast_reuse();
 	test_nested_block_scope_reuse();
 	test_indentation_only_ast_reuse();
 	test_nested_shadowing_ast_reuse();
+	test_dependency_forward_binding_edit();
 	test_moved_closing_brace_ast_reuse();
 	test_default_edit_fallback();
+
+	// Recovery, diagnostics, and complete-file contracts.
 	test_recovery_synchronization();
 	test_complete_file_parsing();
 	test_parenthesized_expression();
@@ -130,6 +159,8 @@ main :: () {
 	test_incomplete_diagnostics();
 	test_lexical_bindings();
 	test_diagnostic_tab_rendering();
+
+	// Expression and declaration grammar.
 	test_prefix_expressions();
 	test_postfix_expressions();
 	test_call_context_modification();
@@ -145,6 +176,8 @@ main :: () {
 	test_procedure_types();
 	test_polymorphic_types();
 	test_declaration_metadata();
+
+	// Statements, control flow, and assembly recovery.
 	test_basic_statements_and_blocks();
 	test_loop_and_scoped_statements();
 	test_for_body_forms();
@@ -748,6 +781,65 @@ test_edit_snapshot_lifetime :: () {
 	free(new_source);
 }
 
+test_reuse_snapshot_lifetime :: () {
+	for release_old_first: bool.[true, false] {
+		old_source := copy_string("target :: 1; left, right :: target; blocked := #run target; #if true { inner := target; }");
+		new_source := copy_string("added :: 0;\ntarget :: 1; left, right :: target; blocked := #run target; #if true { inner := target; }");
+		old := Extended.parse_file(old_source);
+		updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE);
+		old_statements := old.root.(*Extended.Parser_Block).statements;
+		statements := updated.root.(*Extended.Parser_Block).statements;
+		old_compound := old_statements[1].(*Extended.Parser_Compound_Declaration);
+		compound := statements[2].(*Extended.Parser_Compound_Declaration);
+		old_fallback := old_statements[2].(*Extended.Parser_Declaration).expression;
+		fallback := statements[3].(*Extended.Parser_Declaration).expression;
+		old_branch := old_statements[3].(*Extended.Parser_If).then_block;
+		branch := statements[4].(*Extended.Parser_If).then_block;
+		probe_tokens := Extended.materialise_tokens(new_source);
+		probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, cursor=statements[2].first_token.(s64)};
+		set_allocators(*probe_tokens.node_pool, context.default_allocator);
+		probe.current_scope = Extended.push_lexical_scope(*probe);
+		probe_tokens.root = Extended.reuse_simple_declaration(*probe);
+		assert(probe_tokens.root && probe_tokens.root.kind == .COMPOUND_DECLARATION);
+		probe.cursor = statements[3].first_token.(s64);
+		assert(Extended.reuse_simple_declaration(*probe) == null);
+		Extended.release_parser_tree(*probe_tokens);
+		Extended.release_parser_names(*probe_tokens);
+		assert(compound != old_compound && fallback != old_fallback && branch != old_branch);
+		assert(compound.comma_separated_assignment.arguments.count == 2);
+		assert(compound.declaration_properties.expression.(*Extended.Parser_Ident).resolved_declaration == statements[1].(*Extended.Parser_Declaration));
+		assert(branch.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == statements[1].(*Extended.Parser_Declaration));
+		assert(old_branch.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == old_statements[0].(*Extended.Parser_Declaration));
+
+		if release_old_first {
+			Extended.release_parser_tree(*old);
+			Extended.release_parser_names(*old);
+			free(old_source);
+			assert(compound.comma_separated_assignment.arguments[0].node.(*Extended.Parser_Ident).name == "left");
+			assert(fallback.kind == .DIRECTIVE_RUN && branch.owning_statement == statements[4]);
+			assert(branch.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).name == "target");
+			assert(Extended.token_at(*updated, compound.first_token).original_text == "left");
+			assert(Extended.reconstruct_source(*updated) == new_source);
+			Extended.release_parser_tree(*updated);
+			Extended.release_parser_names(*updated);
+			free(new_source);
+		} else {
+			Extended.release_parser_tree(*updated);
+			Extended.release_parser_names(*updated);
+			free(new_source);
+			assert(old_compound.comma_separated_assignment.arguments[0].node.(*Extended.Parser_Ident).name == "left");
+			assert(old_fallback.kind == .DIRECTIVE_RUN && old_branch.owning_statement == old_statements[3]);
+			assert(old_branch.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).name == "target");
+			assert(Extended.token_at(*old, old_compound.first_token).original_text == "left");
+			assert(Extended.reconstruct_source(*old) == old_source);
+			Extended.release_parser_tree(*old);
+			Extended.release_parser_names(*old);
+			free(old_source);
+		}
+	}
+}
+
 test_file_edit_api :: () {
 	old_source := copy_string("value := missing;");
 	old := Extended.parse_file(old_source, "edited.jai");
@@ -800,8 +892,13 @@ test_file_edit_api :: () {
 	check_regional_lex("alpha := 1; beta := 2;", "al := 1; beta := 2;", 2, 5);
 	check_regional_lex("a :: 1; /* comment */\nb := a;", "a :: 1; \nb := a;", 8, 21);
 	check_regional_lex("a :: 1; b := 2;", "a :: 1; /*b := 2;", 8, 8);
+	check_regional_lex("broken: ; stable :: 1;", "broken: s64; stable :: 1;", "broken: ".count, "broken: ".count);
+	check_regional_lex("bad :: 18446744073709551616; stable :: 1;", "bad :: 1; stable :: 1;", "bad :: ".count, "bad :: 18446744073709551616".count);
+	check_regional_lex("bad :: 1; stable :: 1;", "bad :: 18446744073709551616; stable :: 1;", "bad :: ".count, "bad :: 1".count);
 	check_regional_lex("a :: \"x\"; b := 2;", "a :: \"xy\"; b := 2;", 7, 7);
+	check_regional_lex("first :: 1; middle :: 1; last :: 1; use := last;", "first :: 11; middle :: 1; last :: 1; use := last;", "first :: 1".count, "first :: 1".count);
 	check_regional_lex("text :: #string END\nhello\nEND\nnext :: 1;", "text :: #string END\nworld\nEND\nnext :: 1;", "text :: #string END\n".count, "text :: #string END\nhello".count);
+	check_regional_lex("text :: #string END\nhello\nEND\nnext :: 1;", "prefix :: 0;\ntext :: #string END\nhello\nEND\nnext :: 1;", 0, 0);
 	check_regional_lex("a :: 1; // tail", "a :: 1; // tail\n", "a :: 1; // tail".count, "a :: 1; // tail".count);
 }
 
@@ -926,7 +1023,144 @@ check_removed_binding_ast_reuse :: (new_text: string, edit_start: s64, edit_end:
 	free(new_source);
 }
 
+test_repeated_convergence_edit :: () {
+	repeated_old_source := copy_string("first :: 1; middle :: 1; last :: 1; use := last;");
+	repeated_new_source := copy_string("first :: 11; middle :: 1; last :: 1; use := last;");
+	repeated_edit := "first :: 1".count;
+	repeated_old := Extended.parse_file(repeated_old_source);
+	repeated_updated, repeated_ok := Extended.parse_file_edit(*repeated_old, repeated_edit, repeated_edit, repeated_new_source);
+	repeated_fresh := Extended.parse_file(repeated_new_source);
+	assert(repeated_ok && repeated_updated.status == .COMPLETE && repeated_fresh.status == .COMPLETE);
+	repeated_statements := repeated_updated.root.(*Extended.Parser_Block).statements;
+	repeated_fresh_statements := repeated_fresh.root.(*Extended.Parser_Block).statements;
+	repeated_tokens := Extended.materialise_tokens(repeated_new_source);
+	repeated_probe := Extended.Parser.{parsed=*repeated_tokens, edit_source=*repeated_old, edit_start=repeated_edit, edit_end=repeated_edit};
+	set_allocators(*repeated_tokens.node_pool, context.default_allocator);
+	repeated_probe.current_scope = Extended.push_lexical_scope(*repeated_probe);
+	assert(Extended.reuse_simple_declaration(*repeated_probe) == null);
+	repeated_probe.cursor = repeated_statements[1].first_token.(s64);
+	repeated_tokens.root = Extended.reuse_simple_declaration(*repeated_probe);
+	assert(repeated_tokens.root && repeated_tokens.root.(*Extended.Parser_Declaration).name == "middle");
+	Extended.release_parser_tree(*repeated_tokens);
+	Extended.release_parser_names(*repeated_tokens);
+	for repeated_statements {
+		other := repeated_fresh_statements[it_index];
+		assert(it.kind == other.kind && it.first_token == other.first_token && it.one_past_last_token == other.one_past_last_token);
+	}
+
+	assert(repeated_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == repeated_statements[2].(*Extended.Parser_Declaration));
+	assert(repeated_fresh_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == repeated_fresh_statements[2].(*Extended.Parser_Declaration));
+	assert(repeated_updated.diagnostics.count == repeated_fresh.diagnostics.count && repeated_updated.restart_points.count == repeated_fresh.restart_points.count);
+	Extended.release_parser_tree(*repeated_old);
+	Extended.release_parser_names(*repeated_old);
+	free(repeated_old_source);
+	assert(Extended.reconstruct_source(*repeated_updated) == repeated_new_source);
+	Extended.release_parser_tree(*repeated_updated);
+	Extended.release_parser_names(*repeated_updated);
+	Extended.release_parser_tree(*repeated_fresh);
+	Extended.release_parser_names(*repeated_fresh);
+	free(repeated_new_source);
+}
+
+test_new_recovered_edit_fallback :: () {
+	old_source := copy_string("value := 1; keep := value;");
+	new_source := copy_string("value := ; keep := value;");
+	edit_start := "value := ".count;
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_start + 1, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == fresh.status && updated.status != .COMPLETE);
+	probe_tokens := Extended.materialise_tokens(new_source);
+	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=edit_start, edit_end=edit_start + 1};
+	set_allocators(*probe_tokens.node_pool, context.default_allocator);
+	probe.current_scope = Extended.push_lexical_scope(*probe);
+	assert(Extended.reuse_simple_declaration(*probe) == null);
+	Extended.release_parser_tree(*probe_tokens);
+	Extended.release_parser_names(*probe_tokens);
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.diagnostics.count > 0);
+	assert(updated.recovery_records.count == fresh.recovery_records.count && updated.restart_points.count == fresh.restart_points.count);
+	for updated.diagnostics {
+		other := fresh.diagnostics[it_index];
+		assert(it.kind == other.kind && it.message == other.message);
+		assert(it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
+		assert(it.lexer_line == other.lexer_line && it.lexer_column == other.lexer_column);
+	}
+
+	for updated.recovery_records {
+		other := fresh.recovery_records[it_index];
+		assert(it.kind == other.kind && it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
+		assert(it.diagnostic_index == other.diagnostic_index && it.synthetic_token_index == other.synthetic_token_index);
+	}
+
+	assert(updated.tokens.count == fresh.tokens.count);
+	for updated.tokens {
+		other := fresh.tokens[it_index];
+		assert(it.type == other.type && it.byte_start == other.byte_start && it.byte_end == other.byte_end);
+	}
+
+	assert(Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
+
+	lexer_old_source := copy_string("bad :: 1; stable :: 1;");
+	lexer_new_source := copy_string("bad :: 18446744073709551616; stable :: 1;");
+	lexer_start := "bad :: ".count;
+	lexer_old := Extended.parse_file(lexer_old_source);
+	lexer_updated, lexer_ok := Extended.parse_file_edit(*lexer_old, lexer_start, lexer_start + 1, lexer_new_source);
+	lexer_fresh := Extended.parse_file(lexer_new_source);
+	assert(lexer_ok && lexer_old.status == .COMPLETE && lexer_updated.status == .RECOVERED && lexer_fresh.status == .RECOVERED);
+	assert(lexer_updated.diagnostics.count == lexer_fresh.diagnostics.count && lexer_updated.diagnostics[0].kind == .LEXER_ERROR);
+	lexer_tokens := Extended.materialise_tokens(lexer_new_source);
+	lexer_probe := Extended.Parser.{parsed=*lexer_tokens, edit_source=*lexer_old, edit_start=lexer_start, edit_end=lexer_start + 1};
+	set_allocators(*lexer_tokens.node_pool, context.default_allocator);
+	lexer_probe.current_scope = Extended.push_lexical_scope(*lexer_probe);
+	assert(Extended.reuse_simple_declaration(*lexer_probe) == null);
+	Extended.release_parser_tree(*lexer_tokens);
+	Extended.release_parser_names(*lexer_tokens);
+	assert(lexer_updated.recovery_records.count == lexer_fresh.recovery_records.count && lexer_updated.restart_points.count == lexer_fresh.restart_points.count);
+	Extended.release_parser_tree(*lexer_old);
+	Extended.release_parser_names(*lexer_old);
+	free(lexer_old_source);
+	assert(Extended.reconstruct_source(*lexer_updated) == lexer_new_source);
+	Extended.release_parser_tree(*lexer_updated);
+	Extended.release_parser_names(*lexer_updated);
+	Extended.release_parser_tree(*lexer_fresh);
+	Extended.release_parser_names(*lexer_fresh);
+	free(lexer_new_source);
+}
+
 test_recovered_snapshot_ast_reuse_fallback :: () {
+	parser_recovery_source := copy_string("broken: ; stable :: 1;");
+	parser_repaired_source := copy_string("broken: s64; stable :: 1;");
+	parser_recovery := Extended.parse_file(parser_recovery_source);
+	parser_repaired, parser_repaired_ok := Extended.parse_file_edit(*parser_recovery, "broken: ".count, "broken: ".count, parser_repaired_source);
+	parser_fresh := Extended.parse_file(parser_repaired_source);
+	assert(parser_repaired_ok && parser_recovery.status != .COMPLETE && parser_repaired.status == .COMPLETE && parser_fresh.status == .COMPLETE);
+	parser_probe_tokens := Extended.materialise_tokens(parser_repaired_source);
+	parser_probe := Extended.Parser.{parsed=*parser_probe_tokens, edit_source=*parser_recovery, edit_start="broken: ".count, edit_end="broken: ".count, cursor=parser_repaired.root.(*Extended.Parser_Block).statements[1].first_token.(s64)};
+	set_allocators(*parser_probe_tokens.node_pool, context.default_allocator);
+	parser_probe.current_scope = Extended.push_lexical_scope(*parser_probe);
+	assert(Extended.reuse_simple_declaration(*parser_probe) == null);
+	Extended.release_parser_tree(*parser_probe_tokens);
+	Extended.release_parser_names(*parser_probe_tokens);
+	assert(parser_repaired.diagnostics.count == parser_fresh.diagnostics.count && parser_repaired.restart_points.count == parser_fresh.restart_points.count);
+	Extended.release_parser_tree(*parser_recovery);
+	Extended.release_parser_names(*parser_recovery);
+	free(parser_recovery_source);
+	assert(Extended.reconstruct_source(*parser_repaired) == parser_repaired_source);
+	Extended.release_parser_tree(*parser_repaired);
+	Extended.release_parser_names(*parser_repaired);
+	Extended.release_parser_tree(*parser_fresh);
+	Extended.release_parser_names(*parser_fresh);
+	free(parser_repaired_source);
+
 	old_source := copy_string("broken: ; stable :: 1;");
 	new_source := copy_string("broken: ; stable :: 1; later := stable;");
 	old := Extended.parse_file(old_source);
@@ -999,6 +1233,198 @@ test_recovered_snapshot_ast_reuse_fallback :: () {
 	Extended.release_parser_tree(*lexer_fresh);
 	Extended.release_parser_names(*lexer_fresh);
 	free(lexer_new_source);
+}
+
+test_simple_candidate_syntax_edits :: () {
+	check_simple_candidate_edit(
+		"left :: 1; result := left + 2; keep := result;",
+		"left :: 1; result := (left + 2); keep := result;",
+		"left :: 1; result := ".count,
+		"left :: 1; result := left + 2".count
+	);
+	check_simple_candidate_edit(
+		"left :: 1; result := (left + 2); keep := result;",
+		"left :: 1; result := left + 2; keep := result;",
+		"left :: 1; result := ".count,
+		"left :: 1; result := (left + 2)".count
+	);
+	check_simple_candidate_edit(
+		"left :: 1; result := left + 2; keep := result;",
+		"left :: 1; result := left + 3 + 2; keep := result;",
+		"left :: 1; result := left + ".count,
+		"left :: 1; result := left + ".count
+	);
+	check_simple_candidate_edit(
+		"left :: 1; result := left + 2; keep := result;",
+		"left :: 1; result := left - 2; keep := result;",
+		"left :: 1; result := left ".count,
+		"left :: 1; result := left +".count
+	);
+	check_simple_candidate_edit(
+		"left :: 1; result := left + 2; keep := result;",
+		"left :: 1; result := other + 2; keep := result;",
+		"left :: 1; result := ".count,
+		"left :: 1; result := left".count
+	);
+	check_simple_candidate_edit(
+		"left :: 1; result: s64 = left; keep := result;",
+		"left :: 1; result: u64 = left; keep := result;",
+		"left :: 1; result: ".count,
+		"left :: 1; result: s64".count
+	);
+	check_simple_candidate_edit(
+		"left :: 1; result: [2]s64 = left; keep := result;",
+		"left :: 1; result: s64 = left; keep := result;",
+		"left :: 1; result: ".count,
+		"left :: 1; result: [2]s64".count
+	);
+	check_simple_candidate_edit(
+		"left :: 1; result: s64 = left; keep := result;",
+		"left :: 1; result: [2]s64 = left; keep := result;",
+		"left :: 1; result: ".count,
+		"left :: 1; result: s64".count
+	);
+	check_simple_candidate_edit(
+		"left :: 1; result := left + 2; keep := result;",
+		"other :: 1; result := other + 2; keep := result;",
+		0,
+		"left :: 1; result := left + 2".count
+	);
+	check_nested_candidate_syntax_edit();
+	check_semicolon_candidate_edit(
+		"value := 1 + 2; keep := value;",
+		"value := 1; + 2; keep := value;",
+		"value := 1".count,
+		"value := 1".count
+	);
+	check_semicolon_candidate_edit(
+		"value := 1; keep := value;",
+		"value := 1: keep := value;",
+		"value := 1".count,
+		"value := 1;".count
+	);
+}
+
+check_semicolon_candidate_edit :: (before: string, after: string, edit_start: s64, edit_end: s64) {
+	old_source := copy_string(before);
+	new_source := copy_string(after);
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == fresh.status);
+	probe_tokens := Extended.materialise_tokens(new_source);
+	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=edit_start, edit_end=edit_end};
+	set_allocators(*probe_tokens.node_pool, context.default_allocator);
+	probe.current_scope = Extended.push_lexical_scope(*probe);
+	assert(Extended.reuse_simple_declaration(*probe) == null);
+	Extended.release_parser_tree(*probe_tokens);
+	Extended.release_parser_names(*probe_tokens);
+	statements := updated.root.(*Extended.Parser_Block).statements;
+	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
+	assert(statements.count == fresh_statements.count);
+	for statements {
+		other := fresh_statements[it_index];
+		assert(it.kind == other.kind && it.first_token == other.first_token && it.one_past_last_token == other.one_past_last_token);
+	}
+
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.recovery_records.count == fresh.recovery_records.count);
+	assert(updated.restart_points.count == fresh.restart_points.count);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
+}
+
+check_nested_candidate_syntax_edit :: () {
+	old_source := copy_string("#if true { left :: 1; result := left + 2; keep := result; }");
+	new_source := copy_string("#if true { left :: 1; result := (left + 2); keep := result; }");
+	edit_start := "#if true { left :: 1; result := ".count;
+	edit_end := "#if true { left :: 1; result := left + 2".count;
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	old_block := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block;
+	block := updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block;
+	fresh_block := fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block;
+	assert(block != old_block && block.statements.count == 3 && block.statements.count == fresh_block.statements.count);
+	probe_tokens := Extended.materialise_tokens(new_source);
+	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=edit_start, edit_end=edit_end, cursor=block.statements[1].first_token.(s64)};
+	set_allocators(*probe_tokens.node_pool, context.default_allocator);
+	probe.reuse_block = Extended.find_old_declaration_block(*probe, old.root_scope, block.first_token.(s64), .DATA_DECLARATIONS);
+	assert(probe.reuse_block == old_block);
+	probe.current_scope = Extended.push_lexical_scope(*probe);
+	assert(Extended.reuse_simple_declaration(*probe) == null);
+	probe.cursor = block.statements[2].first_token.(s64);
+	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
+	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).name == "keep");
+	Extended.release_parser_tree(*probe_tokens);
+	Extended.release_parser_names(*probe_tokens);
+	for block.statements {
+		other := fresh_block.statements[it_index];
+		assert(it.kind == other.kind && it.first_token == other.first_token && it.one_past_last_token == other.one_past_last_token);
+	}
+
+	use := block.statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	assert(use.resolved_declaration == block.statements[1].(*Extended.Parser_Declaration));
+	assert(fresh_block.statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_block.statements[1].(*Extended.Parser_Declaration));
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(use.name == "result" && Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
+}
+
+check_simple_candidate_edit :: (before: string, after: string, edit_start: s64, edit_end: s64) {
+	old_source := copy_string(before);
+	new_source := copy_string(after);
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	statements := updated.root.(*Extended.Parser_Block).statements;
+	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
+	assert(statements.count == 3 && statements.count == fresh_statements.count);
+	probe_tokens := Extended.materialise_tokens(new_source);
+	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=edit_start, edit_end=edit_end, cursor=statements[1].first_token.(s64)};
+	set_allocators(*probe_tokens.node_pool, context.default_allocator);
+	probe.current_scope = Extended.push_lexical_scope(*probe);
+	assert(Extended.reuse_simple_declaration(*probe) == null);
+	probe.cursor = statements[2].first_token.(s64);
+	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
+	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).name == "keep");
+	Extended.release_parser_tree(*probe_tokens);
+	Extended.release_parser_names(*probe_tokens);
+	for statements {
+		other := fresh_statements[it_index];
+		assert(it.kind == other.kind && it.first_token == other.first_token && it.one_past_last_token == other.one_past_last_token);
+	}
+
+	assert(statements[1].(*Extended.Parser_Declaration).expression.kind == fresh_statements[1].(*Extended.Parser_Declaration).expression.kind);
+	use := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	assert(use.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
+	assert(fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert(updated.recovery_records.count == fresh.recovery_records.count);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(use.name == "result" && Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
 }
 
 test_semicolon_boundary_ast_reuse :: () {
@@ -1092,6 +1518,7 @@ test_typed_declaration_ast_reuse :: () {
 	assert(value_name.resolved_declaration == statements[3].(*Extended.Parser_Declaration));
 	assert(fresh_declaration.expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[3].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -1237,27 +1664,53 @@ test_nested_type_instantiation_reuse :: () {
 	old_type := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).type_inst;
 	type_inst := statements[1].(*Extended.Parser_Declaration).type_inst;
 	fresh_type := fresh_statements[1].(*Extended.Parser_Declaration).type_inst;
+	assert(type_inst.kind == fresh_type.kind && type_inst.node_flags == fresh_type.node_flags && type_inst.inst_flags == fresh_type.inst_flags);
 	assert(type_inst != old_type && type_inst.first_token == fresh_type.first_token && type_inst.one_past_last_token == fresh_type.one_past_last_token);
 	assert(type_inst.l0 == fresh_type.l0 && type_inst.c0 == fresh_type.c0 && type_inst.l1 == fresh_type.l1 && type_inst.c1 == fresh_type.c1);
 	array := type_inst.pointer_to;
 	fresh_array := fresh_type.pointer_to;
+	assert(array.kind == fresh_array.kind && array.node_flags == fresh_array.node_flags);
 	assert(array != old_type.pointer_to && array.first_token == fresh_array.first_token && array.one_past_last_token == fresh_array.one_past_last_token);
 	assert(array.inst_flags == 0 && array.inst_flags == fresh_array.inst_flags);
+	assert(array.l0 == fresh_array.l0 && array.c0 == fresh_array.c0 && array.l1 == fresh_array.l1 && array.c1 == fresh_array.c1);
 	dimension := array.array_dimension.(*Extended.Parser_Binary_Operator);
 	fresh_dimension := fresh_array.array_dimension.(*Extended.Parser_Binary_Operator);
+	assert(dimension.kind == fresh_dimension.kind && dimension.node_flags == fresh_dimension.node_flags && dimension.flags == fresh_dimension.flags);
 	assert(dimension.operator_type == #char "+" && dimension.operator_type == fresh_dimension.operator_type);
 	assert(dimension.first_token == fresh_dimension.first_token && dimension.one_past_last_token == fresh_dimension.one_past_last_token);
+	assert(dimension.l0 == fresh_dimension.l0 && dimension.c0 == fresh_dimension.c0 && dimension.l1 == fresh_dimension.l1 && dimension.c1 == fresh_dimension.c1);
 	assert(dimension.left.(*Extended.Parser_Ident).resolved_declaration == statements[3].(*Extended.Parser_Declaration));
 	assert(fresh_dimension.left.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[3].(*Extended.Parser_Declaration));
 	view := array.array_element_type;
 	fresh_view := fresh_array.array_element_type;
+	assert(view.kind == fresh_view.kind && view.node_flags == fresh_view.node_flags);
 	assert(view != old_type.pointer_to.array_element_type && view.inst_flags == .RESIZABLE && view.inst_flags == fresh_view.inst_flags);
 	assert(view.first_token == fresh_view.first_token && view.one_past_last_token == fresh_view.one_past_last_token);
+	assert(view.l0 == fresh_view.l0 && view.c0 == fresh_view.c0 && view.l1 == fresh_view.l1 && view.c1 == fresh_view.c1);
 	name := view.array_element_type.type_valued_expression.(*Extended.Parser_Ident);
+	fresh_name := fresh_view.array_element_type.type_valued_expression.(*Extended.Parser_Ident);
+	assert(name.kind == fresh_name.kind && name.node_flags == fresh_name.node_flags && name.flags == fresh_name.flags);
+	assert(name.first_token == fresh_name.first_token && name.one_past_last_token == fresh_name.one_past_last_token);
+	assert(name.l0 == fresh_name.l0 && name.c0 == fresh_name.c0 && name.l1 == fresh_name.l1 && name.c1 == fresh_name.c1);
 	assert(name.resolved_declaration == statements[4].(*Extended.Parser_Declaration));
 	assert(fresh_view.array_element_type.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[4].(*Extended.Parser_Declaration));
 	assert(statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == statements[1].(*Extended.Parser_Declaration));
-	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert(updated.tokens.count == fresh.tokens.count);
+	for updated.tokens {
+		other := fresh.tokens[it_index];
+		assert(it.type == other.type && it.value_flags == other.value_flags);
+		assert(it.byte_start == other.byte_start && it.byte_end == other.byte_end && it.preceding_trivia_byte_start == other.preceding_trivia_byte_start);
+		assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+	}
+
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.recovery_records.count == fresh.recovery_records.count);
+	assert(updated.restart_points.count == fresh.restart_points.count);
+	for updated.restart_points {
+		other := fresh.restart_points[it_index];
+		assert(it.kind == other.kind && it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
+	}
+
 	changed_source := copy_string("value: *[size + 2][..]Target; keep := value; size :: 4; Target :: s64;");
 	dimension_start := "value: *[size + ".count;
 	changed, changed_ok := Extended.parse_file_edit(*old, dimension_start, dimension_start + 1, changed_source);
@@ -1293,6 +1746,11 @@ test_nested_type_instantiation_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+	for updated.tokens {
+		other := fresh.tokens[it_index];
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+	}
+
 	assert(name.name == "Target" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -1340,6 +1798,7 @@ check_excluded_type_instantiation :: (type_source: string) {
 	type_inst := statements[3].(*Extended.Parser_Declaration).type_inst;
 	fresh_type := fresh_statements[3].(*Extended.Parser_Declaration).type_inst;
 	assert(type_inst && type_inst.kind == .TYPE_INSTANTIATION && type_inst.inst_flags == fresh_type.inst_flags);
+	assert(type_inst.node_flags == fresh_type.node_flags);
 	assert(type_inst.first_token == fresh_type.first_token && type_inst.one_past_last_token == fresh_type.one_past_last_token);
 	assert(type_inst.l0 == fresh_type.l0 && type_inst.c0 == fresh_type.c0 && type_inst.l1 == fresh_type.l1 && type_inst.c1 == fresh_type.c1);
 	assert((type_inst.pointer_to == null) == (fresh_type.pointer_to == null));
@@ -1394,7 +1853,35 @@ check_excluded_type_instantiation :: (type_source: string) {
 
 	assert(statements[4].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == statements[3].(*Extended.Parser_Declaration));
 	assert(fresh_statements[4].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[3].(*Extended.Parser_Declaration));
-	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert(updated.tokens.count == fresh.tokens.count);
+	for updated.tokens {
+		other := fresh.tokens[it_index];
+		assert(it.type == other.type && it.value_flags == other.value_flags);
+		assert(it.byte_start == other.byte_start && it.byte_end == other.byte_end && it.preceding_trivia_byte_start == other.preceding_trivia_byte_start);
+		assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+	}
+
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.recovery_records.count == fresh.recovery_records.count);
+	assert(updated.restart_points.count == fresh.restart_points.count);
+	for updated.diagnostics {
+		other := fresh.diagnostics[it_index];
+		assert(it.kind == other.kind && it.message == other.message);
+		assert(it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
+		assert(it.lexer_line == other.lexer_line && it.lexer_column == other.lexer_column);
+	}
+
+	for updated.recovery_records {
+		other := fresh.recovery_records[it_index];
+		assert(it.kind == other.kind && it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
+		assert(it.diagnostic_index == other.diagnostic_index && it.synthetic_token_index == other.synthetic_token_index);
+	}
+
+	for updated.restart_points {
+		other := fresh.restart_points[it_index];
+		assert(it.kind == other.kind && it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
+	}
+
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -1428,6 +1915,7 @@ test_array_view_declaration_ast_reuse :: () {
 	assert(declaration.first_token == fresh_declaration.first_token && declaration.one_past_last_token == fresh_declaration.one_past_last_token);
 	view := declaration.type_inst;
 	fresh_view := fresh_declaration.type_inst;
+	assert(view.node_flags == fresh_view.node_flags);
 	assert(view.inst_flags == .ARRAY_VIEW && view.inst_flags == fresh_view.inst_flags && !view.array_dimension);
 	assert(view.first_token == fresh_view.first_token && view.one_past_last_token == fresh_view.one_past_last_token);
 	assert(view.l0 == fresh_view.l0 && view.c0 == fresh_view.c0 && view.l1 == fresh_view.l1 && view.c1 == fresh_view.c1);
@@ -1438,6 +1926,7 @@ test_array_view_declaration_ast_reuse :: () {
 	assert(declaration.expression.(*Extended.Parser_Ident).resolved_declaration == statements[3].(*Extended.Parser_Declaration));
 	assert(fresh_declaration.expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[3].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 
 	changed_source := copy_string("use: [..]Target = value; Target :: 1; value :: 2;");
 	insert_at := "use: [".count;
@@ -1486,6 +1975,7 @@ test_array_view_declaration_ast_reuse :: () {
 	resizable_fresh_declaration := resizable_fresh_statements[1].(*Extended.Parser_Declaration);
 	resizable_type := resizable_declaration.type_inst;
 	resizable_fresh_type := resizable_fresh_declaration.type_inst;
+	assert(resizable_type.node_flags == resizable_fresh_type.node_flags);
 	assert(resizable_type.inst_flags == .RESIZABLE && resizable_type.inst_flags == resizable_fresh_type.inst_flags && !resizable_type.array_dimension);
 	assert(resizable_type.first_token == resizable_fresh_type.first_token && resizable_type.one_past_last_token == resizable_fresh_type.one_past_last_token);
 	assert(resizable_type.l0 == resizable_fresh_type.l0 && resizable_type.c0 == resizable_fresh_type.c0);
@@ -1497,6 +1987,7 @@ test_array_view_declaration_ast_reuse :: () {
 	assert(resizable_declaration.expression.(*Extended.Parser_Ident).resolved_declaration == resizable_statements[3].(*Extended.Parser_Declaration));
 	assert(resizable_fresh_declaration.expression.(*Extended.Parser_Ident).resolved_declaration == resizable_fresh_statements[3].(*Extended.Parser_Declaration));
 	assert(resizable_updated.diagnostics.count == resizable_fresh.diagnostics.count && resizable_updated.restart_points.count == resizable_fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*resizable_updated, *resizable_fresh);
 	Extended.release_parser_tree(*resizable_old);
 	Extended.release_parser_names(*resizable_old);
 	free(resizable_old_source);
@@ -1537,9 +2028,11 @@ test_fixed_array_declaration_ast_reuse :: () {
 	Extended.release_parser_names(*probe_tokens);
 	declaration := statements[1].(*Extended.Parser_Declaration);
 	fresh_declaration := fresh_statements[1].(*Extended.Parser_Declaration);
+	assert(declaration.type_inst.node_flags == fresh_declaration.type_inst.node_flags);
 	assert(declaration.first_token == fresh_declaration.first_token && declaration.one_past_last_token == fresh_declaration.one_past_last_token);
 	array_type := declaration.type_inst;
 	fresh_array_type := fresh_declaration.type_inst;
+	assert(array_type.node_flags == fresh_array_type.node_flags);
 	assert(array_type.inst_flags == 0 && array_type.inst_flags == fresh_array_type.inst_flags);
 	assert(array_type.first_token == fresh_array_type.first_token && array_type.one_past_last_token == fresh_array_type.one_past_last_token);
 	assert(array_type.l0 == fresh_array_type.l0 && array_type.c0 == fresh_array_type.c0 && array_type.l1 == fresh_array_type.l1 && array_type.c1 == fresh_array_type.c1);
@@ -1554,6 +2047,7 @@ test_fixed_array_declaration_ast_reuse :: () {
 	assert(declaration.expression.(*Extended.Parser_Ident).resolved_declaration == statements[4].(*Extended.Parser_Declaration));
 	assert(fresh_declaration.expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[4].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 
 	changed_source := copy_string("use: [4]Target = value; size :: 4; Target :: 1; value :: 2;");
 	dimension_start := "use: [".count;
@@ -1616,6 +2110,7 @@ test_double_pointer_declaration_ast_reuse :: () {
 	assert(declaration.type_inst.l1 == fresh_declaration.type_inst.l1 && declaration.type_inst.c1 == fresh_declaration.type_inst.c1);
 	inner := declaration.type_inst.pointer_to;
 	fresh_inner := fresh_declaration.type_inst.pointer_to;
+	assert(inner.node_flags == fresh_inner.node_flags);
 	assert(inner.first_token == fresh_inner.first_token && inner.one_past_last_token == fresh_inner.one_past_last_token);
 	assert(inner.l0 == fresh_inner.l0 && inner.c0 == fresh_inner.c0 && inner.l1 == fresh_inner.l1 && inner.c1 == fresh_inner.c1);
 	type_name := inner.pointer_to.type_valued_expression.(*Extended.Parser_Ident);
@@ -1624,6 +2119,7 @@ test_double_pointer_declaration_ast_reuse :: () {
 	assert(declaration.expression.(*Extended.Parser_Ident).resolved_declaration == statements[3].(*Extended.Parser_Declaration));
 	assert(fresh_declaration.expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[3].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 
 	changed_source := copy_string("use: *Target = value; Target :: 1; value :: 2;");
 	changed, changed_ok := Extended.parse_file_edit(*old, "use: ".count, "use: *".count, changed_source);
@@ -1868,8 +2364,13 @@ test_typed_compound_ast_reuse :: () {
 	compound := statements[1].(*Extended.Parser_Compound_Declaration);
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	fresh_compound := fresh_statements[1].(*Extended.Parser_Compound_Declaration);
+	assert(compound.kind == fresh_compound.kind && compound.node_flags == fresh_compound.node_flags);
 	assert(compound.first_token == fresh_compound.first_token && compound.one_past_last_token == fresh_compound.one_past_last_token);
+	assert(compound.l0 == fresh_compound.l0 && compound.c0 == fresh_compound.c0 && compound.l1 == fresh_compound.l1 && compound.c1 == fresh_compound.c1);
+	assert(compound.comma_separated_assignment.kind == fresh_compound.comma_separated_assignment.kind && compound.comma_separated_assignment.node_flags == fresh_compound.comma_separated_assignment.node_flags);
+	assert(compound.comma_separated_assignment.first_token == fresh_compound.comma_separated_assignment.first_token);
 	assert(compound.comma_separated_assignment.one_past_last_token == fresh_compound.comma_separated_assignment.one_past_last_token);
+	assert(compound.declaration_properties.node_flags == fresh_compound.declaration_properties.node_flags);
 	assert(compound.declaration_properties.type_inst.first_token == fresh_compound.declaration_properties.type_inst.first_token);
 	assert(compound.declaration_properties.type_inst.one_past_last_token == fresh_compound.declaration_properties.type_inst.one_past_last_token);
 	type_name := compound.declaration_properties.type_inst.type_valued_expression.(*Extended.Parser_Ident);
@@ -2514,6 +3015,7 @@ test_compound_ast_reuse :: () {
 	assert(fresh_sum.left.(*Extended.Parser_Ident).resolved_declaration == fresh_compound.declaration_properties);
 	assert(fresh_sum.right.(*Extended.Parser_Ident).resolved_declaration == fresh_compound.declaration_properties);
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -2912,6 +3414,7 @@ test_three_name_compound_ast_reuse :: () {
 	assert(statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == compound.declaration_properties);
 	assert(fresh_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_compound.declaration_properties);
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -2987,6 +3490,7 @@ check_compound_reuse_fallback :: (source: string, check_procedure_type := false,
 	compound := statements[1].(*Extended.Parser_Compound_Declaration);
 	fresh_compound := fresh_statements[1].(*Extended.Parser_Compound_Declaration);
 	assert(compound.first_token == fresh_compound.first_token && compound.one_past_last_token == fresh_compound.one_past_last_token);
+	assert(compound.node_flags == fresh_compound.node_flags);
 	assert(compound.l0 == fresh_compound.l0 && compound.c0 == fresh_compound.c0);
 	assert(compound.comma_separated_assignment.arguments.count == fresh_compound.comma_separated_assignment.arguments.count);
 	for compound.comma_separated_assignment.arguments {
@@ -3071,6 +3575,7 @@ check_compound_reuse_fallback :: (source: string, check_procedure_type := false,
 	}
 
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -3107,6 +3612,7 @@ test_scalar_literal_ast_reuse :: () {
 		Extended.release_parser_names(*probe_tokens);
 		literal := statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Literal);
 		fresh_literal := fresh_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Literal);
+		assert(literal.node_flags == fresh_literal.node_flags);
 		assert(literal.value_type == fresh_literal.value_type && literal.value_flags == fresh_literal.value_flags);
 		if literal.value_flags & .FLOAT {
 			assert(literal._float64 == fresh_literal._float64);
@@ -3118,10 +3624,30 @@ test_scalar_literal_ast_reuse :: () {
 		assert(literal.l0 == fresh_literal.l0 && literal.c0 == fresh_literal.c0 && literal.l1 == fresh_literal.l1 && literal.c1 == fresh_literal.c1);
 		assert(statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 		assert(fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
-		assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+		assert(updated.tokens.count == fresh.tokens.count);
+		for updated.tokens {
+			other := fresh.tokens[it_index];
+			assert(it.type == other.type && it.value_flags == other.value_flags);
+			assert(it.byte_start == other.byte_start && it.byte_end == other.byte_end && it.preceding_trivia_byte_start == other.preceding_trivia_byte_start);
+			assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
+			assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+		}
+
+		assert(updated.diagnostics.count == fresh.diagnostics.count && updated.recovery_records.count == fresh.recovery_records.count);
+		assert(updated.restart_points.count == fresh.restart_points.count);
+		for updated.restart_points {
+			other := fresh.restart_points[it_index];
+			assert(it.kind == other.kind && it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
+		}
+
 		Extended.release_parser_tree(*old);
 		Extended.release_parser_names(*old);
 		free(old_source);
+		for updated.tokens {
+			other := fresh.tokens[it_index];
+			assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+		}
+
 		assert(Extended.reconstruct_source(*updated) == new_source);
 		Extended.release_parser_tree(*updated);
 		Extended.release_parser_names(*updated);
@@ -3129,6 +3655,79 @@ test_scalar_literal_ast_reuse :: () {
 		Extended.release_parser_names(*fresh);
 		free(new_source);
 	}
+}
+
+test_source_position_ast_reuse :: () {
+	base :: "label :: \"one\\ntwo\"; use := label;";
+	check_source_position_edit(base, "// before\nlabel :: \"one\\ntwo\"; use := label;", 0, 0, true, "one\ntwo");
+	check_source_position_edit(base, " \tlabel :: \"one\\ntwo\"; use := label;", 0, 0, true, "one\ntwo");
+	check_source_position_edit("// before\nlabel :: \"one\\ntwo\"; use := label;", base, 0, "// before\n".count, true, "one\ntwo");
+	check_source_position_edit(base, "label \n :: \"one\\ntwo\"; use := label;", "label ".count, "label ".count, false, "one\ntwo");
+	check_source_position_edit(base, "label :: \"one\\ntwo\" /* note */; use := label;", "label :: \"one\\ntwo\"".count, "label :: \"one\\ntwo\"".count, true, "one\ntwo");
+	check_source_position_edit(base, "label :: \"one\\nthree\"; use := label;", "label :: \"one\\n".count, "label :: \"one\\ntwo".count, false, "one\nthree");
+	check_source_position_edit(base, "label :: \"one\\ntwo\"; // between\nuse := label;", "label :: \"one\\ntwo\"; ".count, "label :: \"one\\ntwo\"; ".count, true, "one\ntwo");
+	check_source_position_edit(base, "label :: \"one\\ntwo\"; use := label; // trailing\n", base.count, base.count, true, "one\ntwo");
+}
+
+check_source_position_edit :: (before: string, after: string, edit_start: s64, edit_end: s64, reuse_first: bool, expected_string: string) {
+	old_source := copy_string(before);
+	new_source := copy_string(after);
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	statements := updated.root.(*Extended.Parser_Block).statements;
+	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
+	probe_tokens := Extended.materialise_tokens(new_source);
+	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=edit_start, edit_end=edit_end, cursor=statements[0].first_token.(s64)};
+	set_allocators(*probe_tokens.node_pool, context.default_allocator);
+	probe.current_scope = Extended.push_lexical_scope(*probe);
+	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
+	assert((probe_tokens.root != null) == reuse_first);
+	probe.cursor = statements[1].first_token.(s64);
+	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
+	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).name == "use");
+	Extended.release_parser_tree(*probe_tokens);
+	Extended.release_parser_names(*probe_tokens);
+	assert(updated.tokens.count == fresh.tokens.count && statements.count == fresh_statements.count);
+	for updated.tokens {
+		other := fresh.tokens[it_index];
+		assert(it.byte_start == other.byte_start && it.byte_end == other.byte_end && it.preceding_trivia_byte_start == other.preceding_trivia_byte_start);
+		assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+	}
+
+	for statements {
+		other := fresh_statements[it_index];
+		assert(it.first_token == other.first_token && it.one_past_last_token == other.one_past_last_token);
+		assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
+	}
+
+	label := statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Literal);
+	assert(label._string == fresh_statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Literal)._string);
+	assert(label._string.data == updated.tokens[label.first_token.(s64)].string_value.data);
+	assert(statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == statements[0].(*Extended.Parser_Declaration));
+	assert(fresh_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[0].(*Extended.Parser_Declaration));
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	for updated.restart_points {
+		other := fresh.restart_points[it_index];
+		assert(it.kind == other.kind && it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
+	}
+
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	for updated.tokens {
+		assert(it.original_text == slice(new_source, it.byte_start, it.original_text.count));
+		assert(it.preceding_trivia == slice(new_source, it.preceding_trivia_byte_start, it.preceding_trivia.count));
+	}
+
+	assert(label._string == expected_string && Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
 }
 
 test_source_backed_ast_reuse :: () {
@@ -3454,6 +4053,7 @@ test_remainder_ast_reuse :: () {
 	assert(fresh_binary.left.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_binary.right.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[2].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -3646,12 +4246,15 @@ check_binary_ast_reuse :: (spelling: string, expected_type: Operator_Type) {
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	binary := statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
 	fresh_binary := fresh_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
+	assert(binary.kind == fresh_binary.kind && binary.node_flags == fresh_binary.node_flags && binary.flags == fresh_binary.flags);
 	assert(binary.operator_type == expected_type && binary.operator_type == fresh_binary.operator_type);
 	assert(binary.first_token == fresh_binary.first_token && binary.one_past_last_token == fresh_binary.one_past_last_token);
 	assert(binary.l0 == fresh_binary.l0 && binary.c0 == fresh_binary.c0 && binary.l1 == fresh_binary.l1 && binary.c1 == fresh_binary.c1);
 	left := binary.left.(*Extended.Parser_Ident);
 	right := binary.right.(*Extended.Parser_Ident);
-	assert(left.first_token == fresh_binary.left.first_token && right.first_token == fresh_binary.right.first_token);
+	assert(left.node_flags == fresh_binary.left.node_flags && right.node_flags == fresh_binary.right.node_flags);
+	assert(left.first_token == fresh_binary.left.first_token && left.one_past_last_token == fresh_binary.left.one_past_last_token);
+	assert(right.first_token == fresh_binary.right.first_token && right.one_past_last_token == fresh_binary.right.one_past_last_token);
 	assert(left.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 	assert(right.resolved_declaration == statements[2].(*Extended.Parser_Declaration));
 	assert(fresh_binary.left.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
@@ -3954,13 +4557,18 @@ test_unary_ast_reuse :: () {
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	updated_unary := updated_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Unary_Operator);
 	fresh_unary := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Unary_Operator);
+	assert(updated_unary.kind == fresh_unary.kind && updated_unary.node_flags == fresh_unary.node_flags);
 	assert(updated_unary.operator_type == fresh_unary.operator_type && updated_unary.operator_type == #char "!");
 	assert(updated_unary.first_token == fresh_unary.first_token && updated_unary.one_past_last_token == fresh_unary.one_past_last_token);
+	assert(updated_unary.l0 == fresh_unary.l0 && updated_unary.c0 == fresh_unary.c0 && updated_unary.l1 == fresh_unary.l1 && updated_unary.c1 == fresh_unary.c1);
 	updated_reference := updated_unary.subexpression.(*Extended.Parser_Ident);
 	fresh_reference := fresh_unary.subexpression.(*Extended.Parser_Ident);
+	assert(updated_reference.node_flags == fresh_reference.node_flags && updated_reference.flags == fresh_reference.flags);
 	assert(updated_reference.first_token == fresh_reference.first_token && updated_reference.one_past_last_token == fresh_reference.one_past_last_token);
+	assert(updated_reference.l0 == fresh_reference.l0 && updated_reference.c0 == fresh_reference.c0 && updated_reference.l1 == fresh_reference.l1 && updated_reference.c1 == fresh_reference.c1);
 	assert(updated_reference.resolved_declaration == updated_statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_reference.resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -3970,6 +4578,39 @@ test_unary_ast_reuse :: () {
 	Extended.release_parser_tree(*fresh);
 	Extended.release_parser_names(*fresh);
 	free(new_source);
+}
+
+assert_eligible_edit_matches_fresh :: (updated: *Extended.Parsed_Source, fresh: *Extended.Parsed_Source) {
+	assert(updated.status == fresh.status && updated.tokens.count == fresh.tokens.count);
+	for updated.tokens {
+		other := fresh.tokens[it_index];
+		assert(it.type == other.type && it.value_flags == other.value_flags);
+		assert(it.byte_start == other.byte_start && it.byte_end == other.byte_end && it.preceding_trivia_byte_start == other.preceding_trivia_byte_start);
+		assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+	}
+
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.recovery_records.count == fresh.recovery_records.count);
+	assert(updated.restart_points.count == fresh.restart_points.count);
+	for updated.diagnostics {
+		other := fresh.diagnostics[it_index];
+		assert(it.kind == other.kind && it.message == other.message);
+		assert(it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
+		assert(it.lexer_line == other.lexer_line && it.lexer_column == other.lexer_column);
+	}
+
+	for updated.recovery_records {
+		other := fresh.recovery_records[it_index];
+		assert(it.kind == other.kind && it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
+		assert(it.diagnostic_index == other.diagnostic_index && it.synthetic_token_index == other.synthetic_token_index);
+	}
+
+	for updated.restart_points {
+		other := fresh.restart_points[it_index];
+		assert(it.kind == other.kind && it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
+	}
+
+	assert(Extended.reconstruct_source(updated) == Extended.reconstruct_source(fresh));
 }
 
 check_excluded_operator_fallback :: (expression: string, expected_operator: Operator_Type, is_unary: bool, unowned_child := false, non_ident_member := false) {
@@ -4059,6 +4700,7 @@ test_query_fallback :: () {
 	Extended.release_parser_names(*probe_tokens);
 	query := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Expression_Query);
 	fresh_query := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Expression_Query);
+	assert(query.node_flags == fresh_query.node_flags);
 	assert(query.query_kind == .TYPE_OF && query.query_kind == fresh_query.query_kind);
 	assert(query.first_token == fresh_query.first_token && query.one_past_last_token == fresh_query.one_past_last_token);
 	assert(query.l0 == fresh_query.l0 && query.c0 == fresh_query.c0 && query.l1 == fresh_query.l1 && query.c1 == fresh_query.c1);
@@ -4170,6 +4812,7 @@ check_excluded_file_node :: (directive: string, expected_kind: type_of(Extended.
 	Extended.release_parser_tree(*probe_tokens);
 	Extended.release_parser_names(*probe_tokens);
 	assert(statements[2] != old_node && statements[2].first_token == fresh_statements[2].first_token);
+	assert(statements[2].node_flags == fresh_statements[2].node_flags);
 	assert(statements[2].one_past_last_token == fresh_statements[2].one_past_last_token);
 	assert(statements[2].l0 == fresh_statements[2].l0 && statements[2].c0 == fresh_statements[2].c0);
 	assert(statements[2].l1 == fresh_statements[2].l1 && statements[2].c1 == fresh_statements[2].c1);
@@ -4189,6 +4832,7 @@ check_excluded_file_node :: (directive: string, expected_kind: type_of(Extended.
 	assert(statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -4275,6 +4919,8 @@ test_imperative_body_fallback :: () {
 	assert(inner_if.then_block.statements[2].(*Extended.Parser_While).condition.(*Extended.Parser_Ident).resolved_declaration == inner_if.then_block.statements[0].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
 	assert(inner_updated.diagnostics.count == inner_fresh.diagnostics.count && inner_updated.restart_points.count == inner_fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
+	assert_eligible_edit_matches_fresh(*inner_updated, *inner_fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -4282,6 +4928,299 @@ test_imperative_body_fallback :: () {
 	assert(inner_if.then_block.statements[2].(*Extended.Parser_While).condition.(*Extended.Parser_Ident).name == "local");
 	assert(Extended.reconstruct_source(*updated) == new_source);
 	assert(Extended.reconstruct_source(*inner_updated) == inner_source);
+	Extended.release_parser_tree(*inner_updated);
+	Extended.release_parser_names(*inner_updated);
+	Extended.release_parser_tree(*inner_fresh);
+	Extended.release_parser_names(*inner_fresh);
+	free(inner_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
+}
+
+test_aggregate_body_fallback :: () {
+	old_source := copy_string("Thing :: struct { field: s64; use := field; field = 1; } tail := 2;");
+	new_source := copy_string("added :: 0;\nThing :: struct { field: s64; use := field; field = 1; } tail := 2;");
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	old_block := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block;
+	block := updated.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block;
+	fresh_block := fresh.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block;
+	assert(block != old_block && block.statements[0] != old_block.statements[0]);
+	assert(block.statements.count == fresh_block.statements.count && block.statements.count == 3);
+	assert(block.first_token == fresh_block.first_token && block.one_past_last_token == fresh_block.one_past_last_token);
+	assert(block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == block.statements[0].(*Extended.Parser_Declaration));
+	assert(fresh_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_block.statements[0].(*Extended.Parser_Declaration));
+	default_assignment := block.statements[2].(*Extended.Parser_Binary_Operator);
+	assert(default_assignment.left.(*Extended.Parser_Ident).resolved_declaration == block.statements[0].(*Extended.Parser_Declaration));
+	assert(fresh_block.statements[2].(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Ident).resolved_declaration == fresh_block.statements[0].(*Extended.Parser_Declaration));
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+
+	inner_source := copy_string("Thing :: struct { field: u64; use := field; field = 1; } tail := 2;");
+	inner_fresh := Extended.parse_file(inner_source);
+	edit_start := "Thing :: struct { field: ".count;
+	inner_updated, inner_ok := Extended.parse_file_edit(*old, edit_start, edit_start + "s64".count, inner_source);
+	assert(inner_ok && inner_updated.status == .COMPLETE && inner_fresh.status == .COMPLETE);
+	inner_block := inner_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block;
+	inner_fresh_block := inner_fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block;
+	assert(inner_block != old_block && inner_block.statements[0] != old_block.statements[0]);
+	assert(inner_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inner_block.statements[0].(*Extended.Parser_Declaration));
+	assert(inner_block.statements[2].(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Ident).resolved_declaration == inner_block.statements[0].(*Extended.Parser_Declaration));
+	assert(inner_fresh_block.statements[2].(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Ident).resolved_declaration == inner_fresh_block.statements[0].(*Extended.Parser_Declaration));
+	assert(inner_block.first_token == inner_fresh_block.first_token && inner_block.one_past_last_token == inner_fresh_block.one_past_last_token);
+	assert(inner_updated.diagnostics.count == inner_fresh.diagnostics.count && inner_updated.restart_points.count == inner_fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
+	assert_eligible_edit_matches_fresh(*inner_updated, *inner_fresh);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(default_assignment.left.(*Extended.Parser_Ident).name == "field");
+	assert(inner_block.statements[2].(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Ident).name == "field");
+	assert(Extended.reconstruct_source(*inner_updated) == inner_source);
+	assert(Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*inner_updated);
+	Extended.release_parser_names(*inner_updated);
+	Extended.release_parser_tree(*inner_fresh);
+	Extended.release_parser_names(*inner_fresh);
+	free(inner_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
+}
+
+test_aggregate_parameter_block_fallback :: () {
+	old_source := copy_string("Thing :: struct (T: Type, N := 2) { value: T; C :: N; } tail := 2;");
+	new_source := copy_string("added :: 0;\nThing :: struct (T: Type, N := 2) { value: T; C :: N; } tail := 2;");
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	old_struct := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct);
+	structure := updated.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct);
+	fresh_struct := fresh.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct);
+	assert(structure.arguments_block != old_struct.arguments_block && structure.arguments_block.block_type == .STRUCT_ARGUMENTS);
+	assert(structure.arguments_block.statements.count == 2 && structure.arguments_block.statements[0] != old_struct.arguments_block.statements[0]);
+	assert(structure.arguments_block.first_token == fresh_struct.arguments_block.first_token && structure.arguments_block.one_past_last_token == fresh_struct.arguments_block.one_past_last_token);
+	assert(structure.block.statements[0].(*Extended.Parser_Declaration).type_inst.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == structure.arguments_block.statements[0].(*Extended.Parser_Declaration));
+	assert(fresh_struct.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_struct.arguments_block.statements[1].(*Extended.Parser_Declaration));
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+
+	inner_source := copy_string("Thing :: struct (T: Type, N := 3) { value: T; C :: N; } tail := 2;");
+	inner_fresh := Extended.parse_file(inner_source);
+	edit_start := "Thing :: struct (T: Type, N := ".count;
+	inner_updated, inner_ok := Extended.parse_file_edit(*old, edit_start, edit_start + 1, inner_source);
+	assert(inner_ok && inner_updated.status == .COMPLETE && inner_fresh.status == .COMPLETE);
+	inner_struct := inner_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct);
+	inner_fresh_struct := inner_fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct);
+	assert(inner_struct.arguments_block != old_struct.arguments_block && inner_struct.arguments_block.statements[0] != old_struct.arguments_block.statements[0]);
+	assert(inner_struct.arguments_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Literal)._u64 == 3);
+	assert(inner_struct.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inner_struct.arguments_block.statements[1].(*Extended.Parser_Declaration));
+	assert(inner_fresh_struct.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inner_fresh_struct.arguments_block.statements[1].(*Extended.Parser_Declaration));
+	assert(inner_updated.diagnostics.count == inner_fresh.diagnostics.count && inner_updated.restart_points.count == inner_fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
+	assert_eligible_edit_matches_fresh(*inner_updated, *inner_fresh);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(structure.arguments_block.statements[1].(*Extended.Parser_Declaration).name == "N");
+	assert(inner_struct.arguments_block.statements[1].(*Extended.Parser_Declaration).name == "N");
+	assert(Extended.reconstruct_source(*updated) == new_source && Extended.reconstruct_source(*inner_updated) == inner_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	Extended.release_parser_tree(*inner_updated);
+	Extended.release_parser_names(*inner_updated);
+	Extended.release_parser_tree(*inner_fresh);
+	Extended.release_parser_names(*inner_fresh);
+	free(new_source);
+	free(inner_source);
+}
+
+test_single_declaration_branch_fallback :: () {
+	old_source := copy_string("#if true target :: 1; use := target;");
+	new_source := copy_string("added :: 0;\n#if true target :: 1; use := target;");
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	old_branch := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block;
+	branch := updated.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_If).then_block;
+	fresh_branch := fresh.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_If).then_block;
+	assert(branch.block_type == .DATA_DECLARATIONS && branch != old_branch && branch.statements[0] != old_branch.statements[0]);
+	assert(branch.parent == fresh_branch.parent && branch.owning_statement == updated.root.(*Extended.Parser_Block).statements[1]);
+	assert(branch.first_token == fresh_branch.first_token && branch.one_past_last_token == fresh_branch.one_past_last_token);
+	assert(updated.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == branch.statements[0].(*Extended.Parser_Declaration));
+	assert(fresh.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_branch.statements[0].(*Extended.Parser_Declaration));
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(branch.statements[0].(*Extended.Parser_Declaration).name == "target");
+	assert(Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
+}
+
+test_synthetic_imperative_block_fallback :: () {
+	old_source := copy_string("lambda := x => x; value := ifx true then 1 else 2;");
+	new_source := copy_string("added :: 0;\nlambda := x => x; value := ifx true then 1 else 2;");
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	old_statements := old.root.(*Extended.Parser_Block).statements;
+	statements := updated.root.(*Extended.Parser_Block).statements;
+	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
+	body := statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null;
+	old_body := old_statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null;
+	fresh_body := fresh_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null;
+	assert(body.block.block_type == .IMPERATIVE && body.block != old_body.block && body.block.statements[0] != old_body.block.statements[0]);
+	assert(body.block.owning_statement == body && body.block.first_token == fresh_body.block.first_token);
+	assert((body.block.statements[0].(*Extended.Parser_Return).return_flags & .AUTO_INSERTED_FOR_QUICK_LAMBDA) != 0);
+	conditional := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_If);
+	old_conditional := old_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_If);
+	fresh_conditional := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_If);
+	assert(conditional.then_block != old_conditional.then_block && conditional.else_block != old_conditional.else_block);
+	assert(conditional.then_block.block_type == .IMPERATIVE && conditional.else_block.block_type == .IMPERATIVE);
+	assert(conditional.then_block.owning_statement == conditional && conditional.else_block.owning_statement == conditional);
+	assert(conditional.then_block.first_token == fresh_conditional.then_block.first_token && conditional.else_block.one_past_last_token == fresh_conditional.else_block.one_past_last_token);
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(body.block.statements[0].(*Extended.Parser_Return).arguments_unsorted[0].expression.(*Extended.Parser_Ident).name == "x");
+	assert(Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
+}
+
+test_enum_body_fallback :: () {
+	old_source := copy_string("Mode :: enum u16 { FIRST; #if true { SECOND; } THIRD; } tail := 2;");
+	new_source := copy_string("added :: 0;\nMode :: enum u16 { FIRST; #if true { SECOND; } THIRD; } tail := 2;");
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	old_enum := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Enum);
+	enumeration := updated.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Enum);
+	fresh_enum := fresh.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Enum);
+	assert(enumeration != old_enum && enumeration.block != old_enum.block);
+	assert(enumeration.block.statements.count == 3 && enumeration.block.statements.count == fresh_enum.block.statements.count);
+	assert(enumeration.block.statements[0] != old_enum.block.statements[0]);
+	assert(enumeration.block.statements[0].(*Extended.Parser_Ident).name == "FIRST");
+	assert(enumeration.block.statements[0].(*Extended.Parser_Ident).resolved_declaration == null);
+	branch := enumeration.block.statements[1].(*Extended.Parser_If).then_block;
+	fresh_branch := fresh_enum.block.statements[1].(*Extended.Parser_If).then_block;
+	assert(branch != old_enum.block.statements[1].(*Extended.Parser_If).then_block);
+	assert(branch.statements.count == 1 && branch.statements[0].(*Extended.Parser_Ident).name == "SECOND");
+	assert(branch.statements[0].first_token == fresh_branch.statements[0].first_token);
+	assert(enumeration.block.statements[2].(*Extended.Parser_Ident).name == "THIRD");
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+
+	inner_source := copy_string("Mode :: enum u16 { FIRST; #if true { FOURTH; } THIRD; } tail := 2;");
+	inner_fresh := Extended.parse_file(inner_source);
+	edit_start := "Mode :: enum u16 { FIRST; #if true { ".count;
+	inner_updated, inner_ok := Extended.parse_file_edit(*old, edit_start, edit_start + "SECOND".count, inner_source);
+	assert(inner_ok && inner_updated.status == .COMPLETE && inner_fresh.status == .COMPLETE);
+	inner_enum := inner_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Enum);
+	inner_fresh_enum := inner_fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Enum);
+	assert(inner_enum.block != old_enum.block && inner_enum.block.statements[0] != old_enum.block.statements[0]);
+	inner_member := inner_enum.block.statements[1].(*Extended.Parser_If).then_block.statements[0].(*Extended.Parser_Ident);
+	inner_fresh_member := inner_fresh_enum.block.statements[1].(*Extended.Parser_If).then_block.statements[0].(*Extended.Parser_Ident);
+	assert(inner_member.name == "FOURTH" && inner_member.first_token == inner_fresh_member.first_token);
+	assert(inner_member.resolved_declaration == null && inner_member != old_enum.block.statements[1].(*Extended.Parser_If).then_block.statements[0].(*Extended.Parser_Ident));
+	assert(inner_updated.diagnostics.count == inner_fresh.diagnostics.count && inner_updated.restart_points.count == inner_fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
+	assert_eligible_edit_matches_fresh(*inner_updated, *inner_fresh);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(branch.statements[0].(*Extended.Parser_Ident).name == "SECOND");
+	assert(inner_member.name == "FOURTH" && Extended.reconstruct_source(*inner_updated) == inner_source);
+	assert(Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*inner_updated);
+	Extended.release_parser_names(*inner_updated);
+	Extended.release_parser_tree(*inner_fresh);
+	Extended.release_parser_names(*inner_fresh);
+	free(inner_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
+}
+
+test_case_arm_fallback :: () {
+	old_source := copy_string("run :: () { outer := 1; if outer == { case 1; local := outer; case 2; local := 2; inner := local; case; return; } } tail := 2;");
+	new_source := copy_string("added :: 0;\nrun :: () { outer := 1; if outer == { case 1; local := outer; case 2; local := 2; inner := local; case; return; } } tail := 2;");
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	old_body := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+	body := updated.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+	fresh_body := fresh.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+	switch_node := body.statements[1].(*Extended.Parser_If);
+	fresh_switch := fresh_body.statements[1].(*Extended.Parser_If);
+	old_switch := old_body.statements[1].(*Extended.Parser_If);
+	assert(switch_node != old_switch && switch_node.then_block != old_switch.then_block);
+	assert(switch_node.then_block.statements.count == 3 && fresh_switch.then_block.statements.count == 3);
+	assert(switch_node.condition.(*Extended.Parser_Ident).resolved_declaration == body.statements[0].(*Extended.Parser_Declaration));
+	for switch_node.then_block.statements {
+		arm := it.(*Extended.Parser_Case);
+		fresh_arm := fresh_switch.then_block.statements[it_index].(*Extended.Parser_Case);
+		assert(arm != old_switch.then_block.statements[it_index].(*Extended.Parser_Case) && arm.then_block != old_switch.then_block.statements[it_index].(*Extended.Parser_Case).then_block);
+		assert(arm.owning_if == switch_node && arm.then_block.parent == switch_node.then_block && arm.then_block.owning_statement == arm);
+		assert(arm.first_token == fresh_arm.first_token && arm.one_past_last_token == fresh_arm.one_past_last_token);
+	}
+
+	first_arm := switch_node.then_block.statements[0].(*Extended.Parser_Case);
+	second_arm := switch_node.then_block.statements[1].(*Extended.Parser_Case);
+	assert(first_arm.then_block.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == body.statements[0].(*Extended.Parser_Declaration));
+	assert(second_arm.then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == second_arm.then_block.statements[0].(*Extended.Parser_Declaration));
+	assert(fresh_switch.then_block.statements[1].(*Extended.Parser_Case).then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_switch.then_block.statements[1].(*Extended.Parser_Case).then_block.statements[0].(*Extended.Parser_Declaration));
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+
+	inner_source := copy_string("run :: () { outer := 1; if outer == { case 1; local := outer; case 2; local := 3; inner := local; case; return; } } tail := 2;");
+	inner_fresh := Extended.parse_file(inner_source);
+	edit_start := "run :: () { outer := 1; if outer == { case 1; local := outer; case 2; local := ".count;
+	inner_updated, inner_ok := Extended.parse_file_edit(*old, edit_start, edit_start + 1, inner_source);
+	assert(inner_ok && inner_updated.status == .COMPLETE && inner_fresh.status == .COMPLETE);
+	inner_body := inner_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+	inner_fresh_body := inner_fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+	inner_switch := inner_body.statements[1].(*Extended.Parser_If);
+	inner_fresh_switch := inner_fresh_body.statements[1].(*Extended.Parser_If);
+	assert(inner_switch.then_block != old_switch.then_block && inner_switch.then_block.statements[0] != old_switch.then_block.statements[0]);
+	inner_arm := inner_switch.then_block.statements[1].(*Extended.Parser_Case);
+	inner_decl := inner_arm.then_block.statements[0].(*Extended.Parser_Declaration);
+	assert(inner_arm != old_switch.then_block.statements[1].(*Extended.Parser_Case) && inner_decl.expression.(*Extended.Parser_Literal)._u64 == 3);
+	assert(inner_arm.then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inner_decl);
+	assert(inner_fresh_switch.then_block.statements[1].(*Extended.Parser_Case).then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inner_fresh_switch.then_block.statements[1].(*Extended.Parser_Case).then_block.statements[0].(*Extended.Parser_Declaration));
+	assert(inner_updated.diagnostics.count == inner_fresh.diagnostics.count && inner_updated.restart_points.count == inner_fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
+	assert_eligible_edit_matches_fresh(*inner_updated, *inner_fresh);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(second_arm.then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).name == "local");
+	assert(inner_arm.then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).name == "local");
+	assert(Extended.reconstruct_source(*inner_updated) == inner_source);
+	assert(Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*inner_updated);
 	Extended.release_parser_names(*inner_updated);
 	Extended.release_parser_tree(*inner_fresh);
@@ -4324,6 +5263,7 @@ check_excluded_statement_node :: (statement: string, expected_kind: type_of(Exte
 	assert(procedure_body != old_procedure_body && procedure_body.first_token == fresh_procedure_body.first_token);
 	assert(procedure_body.one_past_last_token == fresh_procedure_body.one_past_last_token);
 	assert(body != old_body && body.statements[0] != old_body.statements[0]);
+	assert(body.statements[0].node_flags == fresh_body.statements[0].node_flags);
 	assert(body.statements[0].first_token == fresh_body.statements[0].first_token && body.statements[0].one_past_last_token == fresh_body.statements[0].one_past_last_token);
 	assert(body.statements[0].l0 == fresh_body.statements[0].l0 && body.statements[0].c0 == fresh_body.statements[0].c0);
 	assert(body.statements[0].l1 == fresh_body.statements[0].l1 && body.statements[0].c1 == fresh_body.statements[0].c1);
@@ -4355,6 +5295,7 @@ check_excluded_statement_node :: (statement: string, expected_kind: type_of(Exte
 	assert(body.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_body.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -4390,7 +5331,7 @@ check_excluded_expression_node :: (expression: string, expected_kind: type_of(Ex
 	Extended.release_parser_names(*probe_tokens);
 	expression_node := statements[3].(*Extended.Parser_Declaration).expression;
 	fresh_expression := fresh_statements[3].(*Extended.Parser_Declaration).expression;
-	assert(expression_node.kind == expected_kind && expression_node.kind == fresh_expression.kind);
+	assert(expression_node.kind == expected_kind && expression_node.kind == fresh_expression.kind && expression_node.node_flags == fresh_expression.node_flags);
 	assert(expression_node.first_token == fresh_expression.first_token && expression_node.one_past_last_token == fresh_expression.one_past_last_token);
 	assert(expression_node.l0 == fresh_expression.l0 && expression_node.c0 == fresh_expression.c0 && expression_node.l1 == fresh_expression.l1 && expression_node.c1 == fresh_expression.c1);
 	if expression == "value + ---" {
@@ -4496,6 +5437,10 @@ check_excluded_expression_node :: (expression: string, expected_kind: type_of(Ex
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+	for updated.tokens {
+		other := fresh.tokens[it_index];
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+	}
 
 	if expected_kind == {
 		case .DIRECTIVE_IMPORT;
@@ -4650,6 +5595,7 @@ test_expression_query_ast_reuse :: () {
 	assert(name.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_query.expression_to_query.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 
 	other_source := copy_string("value :: 1; result := is_constant(value);");
 	other_old := Extended.parse_file(other_source);
@@ -4681,6 +5627,8 @@ test_expression_query_ast_reuse :: () {
 	assert(other_name.resolved_declaration == other_statements[1].(*Extended.Parser_Declaration));
 	assert(other_fresh_query.expression_to_query.(*Extended.Parser_Ident).resolved_declaration == other_fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(other_updated.diagnostics.count == other_fresh.diagnostics.count && other_updated.restart_points.count == other_fresh.restart_points.count);
+	assert(other_reused_query.node_flags == other_fresh_query.node_flags);
+	assert_eligible_edit_matches_fresh(*other_updated, *other_fresh);
 	Extended.release_parser_tree(*other_old);
 	Extended.release_parser_names(*other_old);
 	free(other_source);
@@ -4718,6 +5666,8 @@ test_expression_query_ast_reuse :: () {
 	assert(code_name.resolved_declaration == code_statements[1].(*Extended.Parser_Declaration));
 	assert(code_fresh_query.expression_to_query.(*Extended.Parser_Ident).resolved_declaration == code_fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(code_updated.diagnostics.count == code_fresh.diagnostics.count && code_updated.restart_points.count == code_fresh.restart_points.count);
+	assert(code_query.node_flags == code_fresh_query.node_flags);
+	assert_eligible_edit_matches_fresh(*code_updated, *code_fresh);
 	Extended.release_parser_tree(*code_old);
 	Extended.release_parser_names(*code_old);
 	free(code_old_source);
@@ -4786,6 +5736,7 @@ test_type_query_ast_reuse :: () {
 	Extended.release_parser_names(*probe_tokens);
 	query := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Type_Query);
 	fresh_query := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Type_Query);
+	assert(query.node_flags == fresh_query.node_flags && query.type_to_query.node_flags == fresh_query.type_to_query.node_flags);
 	assert(query.query_kind == .SIZE_OF && query.query_kind == fresh_query.query_kind);
 	assert(query.first_token == fresh_query.first_token && query.one_past_last_token == fresh_query.one_past_last_token);
 	assert(query.l0 == fresh_query.l0 && query.c0 == fresh_query.c0 && query.l1 == fresh_query.l1 && query.c1 == fresh_query.c1);
@@ -4798,6 +5749,7 @@ test_type_query_ast_reuse :: () {
 	assert(target.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_target.resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -4838,6 +5790,8 @@ test_type_query_ast_reuse :: () {
 	assert(info_target.resolved_declaration == info_statements[1].(*Extended.Parser_Declaration));
 	assert(info_fresh_query.type_to_query.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == info_fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(info_updated.diagnostics.count == info_fresh.diagnostics.count && info_updated.restart_points.count == info_fresh.restart_points.count);
+	assert(info_query.node_flags == info_fresh_query.node_flags && info_query.type_to_query.node_flags == info_fresh_query.type_to_query.node_flags);
+	assert_eligible_edit_matches_fresh(*info_updated, *info_fresh);
 	Extended.release_parser_tree(*info_old);
 	Extended.release_parser_names(*info_old);
 	free(info_old_source);
@@ -4878,6 +5832,8 @@ test_type_query_ast_reuse :: () {
 	assert(initializer_target.resolved_declaration == initializer_statements[1].(*Extended.Parser_Declaration));
 	assert(initializer_fresh_query.type_to_query.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == initializer_fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(initializer_updated.diagnostics.count == initializer_fresh.diagnostics.count && initializer_updated.restart_points.count == initializer_fresh.restart_points.count);
+	assert(initializer_query.node_flags == initializer_fresh_query.node_flags && initializer_query.type_to_query.node_flags == initializer_fresh_query.type_to_query.node_flags);
+	assert_eligible_edit_matches_fresh(*initializer_updated, *initializer_fresh);
 	Extended.release_parser_tree(*initializer_old);
 	Extended.release_parser_names(*initializer_old);
 	free(initializer_old_source);
@@ -4940,6 +5896,7 @@ test_positive_unary_ast_reuse :: () {
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	unary := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Unary_Operator);
 	fresh_unary := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Unary_Operator);
+	assert(unary.node_flags == fresh_unary.node_flags);
 	assert(unary.operator_type == #char "+" && unary.operator_type == fresh_unary.operator_type);
 	assert(unary.first_token == fresh_unary.first_token && unary.one_past_last_token == fresh_unary.one_past_last_token);
 	assert(unary.l0 == fresh_unary.l0 && unary.c0 == fresh_unary.c0 && unary.l1 == fresh_unary.l1 && unary.c1 == fresh_unary.c1);
@@ -4948,6 +5905,7 @@ test_positive_unary_ast_reuse :: () {
 	assert(name.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_unary.subexpression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 
 	changed_source := copy_string("value :: 1; result := -value;");
 	operator_start := "value :: 1; result := ".count;
@@ -5009,6 +5967,7 @@ test_negative_unary_ast_reuse :: () {
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	unary := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Unary_Operator);
 	fresh_unary := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Unary_Operator);
+	assert(unary.node_flags == fresh_unary.node_flags);
 	assert(unary.operator_type == #char "-" && unary.operator_type == fresh_unary.operator_type);
 	assert(unary.first_token == fresh_unary.first_token && unary.one_past_last_token == fresh_unary.one_past_last_token);
 	assert(unary.subexpression.first_token == fresh_unary.subexpression.first_token && unary.subexpression.one_past_last_token == fresh_unary.subexpression.one_past_last_token);
@@ -5016,6 +5975,7 @@ test_negative_unary_ast_reuse :: () {
 	assert(name.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_unary.subexpression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -5049,6 +6009,7 @@ test_prefix_dereference_ast_reuse :: () {
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	unary := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Unary_Operator);
 	fresh_unary := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Unary_Operator);
+	assert(unary.node_flags == fresh_unary.node_flags);
 	assert(unary.operator_type == #char "*" && unary.operator_type == fresh_unary.operator_type);
 	assert(unary.first_token == fresh_unary.first_token && unary.one_past_last_token == fresh_unary.one_past_last_token);
 	assert(unary.l0 == fresh_unary.l0 && unary.c0 == fresh_unary.c0 && unary.l1 == fresh_unary.l1 && unary.c1 == fresh_unary.c1);
@@ -5057,6 +6018,7 @@ test_prefix_dereference_ast_reuse :: () {
 	assert(name.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_unary.subexpression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 
 	changed_source := copy_string("value :: 1; result := +value;");
 	operator_start := "value :: 1; result := ".count;
@@ -5118,6 +6080,7 @@ test_pointer_dereference_ast_reuse :: () {
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	unary := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Unary_Operator);
 	fresh_unary := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Unary_Operator);
+	assert(unary.node_flags == fresh_unary.node_flags);
 	assert(unary.operator_type == .POINTER_DEREFERENCE && unary.operator_type == fresh_unary.operator_type);
 	assert(unary.first_token == fresh_unary.first_token && unary.one_past_last_token == fresh_unary.one_past_last_token);
 	assert(unary.l0 == fresh_unary.l0 && unary.c0 == fresh_unary.c0 && unary.l1 == fresh_unary.l1 && unary.c1 == fresh_unary.c1);
@@ -5126,6 +6089,7 @@ test_pointer_dereference_ast_reuse :: () {
 	assert(name.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_unary.subexpression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 
 	changed_source := copy_string("value :: 1; result := *value;");
 	operator_start := "value :: 1; result := ".count;
@@ -5187,13 +6151,16 @@ test_postfix_dereference_ast_reuse :: () {
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	dereference := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Unary_Operator);
 	fresh_dereference := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Unary_Operator);
+	assert(dereference.node_flags == fresh_dereference.node_flags);
 	assert(dereference.first_token == fresh_dereference.first_token && dereference.one_past_last_token == fresh_dereference.one_past_last_token);
+	assert(dereference.l0 == fresh_dereference.l0 && dereference.c0 == fresh_dereference.c0 && dereference.l1 == fresh_dereference.l1 && dereference.c1 == fresh_dereference.c1);
 	reference := dereference.subexpression.(*Extended.Parser_Ident);
 	fresh_reference := fresh_dereference.subexpression.(*Extended.Parser_Ident);
 	assert(reference.first_token == fresh_reference.first_token && reference.one_past_last_token == fresh_reference.one_past_last_token);
 	assert(reference.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_reference.resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -5227,6 +6194,8 @@ test_cast_ast_reuse :: () {
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	cast_node := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Cast);
 	fresh_cast := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Cast);
+	assert(cast_node.node_flags == fresh_cast.node_flags && cast_node.cast_flags == fresh_cast.cast_flags);
+	assert(cast_node.target_type.node_flags == fresh_cast.target_type.node_flags);
 	assert(cast_node.first_token == fresh_cast.first_token && cast_node.one_past_last_token == fresh_cast.one_past_last_token);
 	assert(cast_node.target_type.first_token == fresh_cast.target_type.first_token && cast_node.target_type.one_past_last_token == fresh_cast.target_type.one_past_last_token);
 	target := cast_node.target_type.type_valued_expression.(*Extended.Parser_Ident);
@@ -5236,6 +6205,7 @@ test_cast_ast_reuse :: () {
 	assert(cast_node.expression.(*Extended.Parser_Ident).resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_cast.expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -5427,7 +6397,7 @@ test_cast_flags_ast_reuse :: () {
 		Extended.release_parser_names(*probe_tokens);
 		cast_node := statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Cast);
 		fresh_cast := fresh_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Cast);
-		assert(cast_node.cast_flags == fresh_cast.cast_flags);
+		assert(cast_node.node_flags == fresh_cast.node_flags && cast_node.cast_flags == fresh_cast.cast_flags);
 		if starts_with(it, "cast") {
 			assert((cast_node.cast_flags & .NO_BOUNDS_CHECK) != 0);
 		} else {
@@ -5443,6 +6413,7 @@ test_cast_flags_ast_reuse :: () {
 		assert(cast_node.expression.(*Extended.Parser_Ident).resolved_declaration == statements[2].(*Extended.Parser_Declaration));
 		assert(fresh_cast.expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[2].(*Extended.Parser_Declaration));
 		assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+		assert_eligible_edit_matches_fresh(*updated, *fresh);
 		Extended.release_parser_tree(*old);
 		Extended.release_parser_names(*old);
 		free(old_source);
@@ -5478,10 +6449,14 @@ test_call_ast_reuse :: () {
 	old_call := old.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Call);
 	updated_call := updated_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Call);
 	fresh_call := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Call);
+	assert(updated_call.kind == fresh_call.kind && updated_call.node_flags == fresh_call.node_flags && updated_call.flags == fresh_call.flags);
 	assert(updated_call.arguments_unsorted.count == fresh_call.arguments_unsorted.count && updated_call.arguments_unsorted.count == 2);
 	assert(updated_call.arguments_unsorted.data != old_call.arguments_unsorted.data);
 	assert(updated_call.first_token == fresh_call.first_token && updated_call.one_past_last_token == fresh_call.one_past_last_token);
+	assert(updated_call.l0 == fresh_call.l0 && updated_call.c0 == fresh_call.c0 && updated_call.l1 == fresh_call.l1 && updated_call.c1 == fresh_call.c1);
 	assert(updated_call.arguments_unsorted[1].expression.first_token == fresh_call.arguments_unsorted[1].expression.first_token);
+	assert(updated_call.arguments_unsorted[1].expression.one_past_last_token == fresh_call.arguments_unsorted[1].expression.one_past_last_token);
+	assert(updated_call.arguments_unsorted[1].expression.node_flags == fresh_call.arguments_unsorted[1].expression.node_flags);
 	assert(updated_call.arguments_unsorted[1].expression.(*Extended.Parser_Binary_Operator).operator_type == #char "+");
 	old_callee := old_call.procedure_expression.(*Extended.Parser_Ident);
 	updated_callee := updated_call.procedure_expression.(*Extended.Parser_Ident);
@@ -5490,6 +6465,7 @@ test_call_ast_reuse :: () {
 	assert(fresh_call.procedure_expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[0].(*Extended.Parser_Declaration));
 	assert(updated_call.arguments_unsorted[0].expression.(*Extended.Parser_Ident).resolved_declaration == updated_statements[1].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -5936,18 +6912,23 @@ test_aggregate_ast_reuse :: () {
 	fresh_array := fresh.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Literal);
 	assert(array_literal.array_literal_info != old_array.array_literal_info);
 	assert(array_literal.array_literal_info.array_members.data != old_array.array_literal_info.array_members.data);
+	assert(array_literal.node_flags == fresh_array.node_flags && array_literal.value_flags == fresh_array.value_flags);
 	assert(array_literal.first_token == fresh_array.first_token && array_literal.one_past_last_token == fresh_array.one_past_last_token);
+	assert(array_literal.l0 == fresh_array.l0 && array_literal.c0 == fresh_array.c0 && array_literal.l1 == fresh_array.l1 && array_literal.c1 == fresh_array.c1);
 	assert(array_literal.array_literal_info.array_members.count == fresh_array.array_literal_info.array_members.count);
 	assert(array_literal.array_literal_info.array_members[0].(*Extended.Parser_Ident).resolved_declaration == statements[1].(*Extended.Parser_Declaration));
+	assert(fresh_array.array_literal_info.array_members[0].(*Extended.Parser_Ident).resolved_declaration == fresh.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration));
 	nested := array_literal.array_literal_info.array_members[1].(*Extended.Parser_Literal);
 	old_nested := old_array.array_literal_info.array_members[1].(*Extended.Parser_Literal);
 	fresh_nested := fresh_array.array_literal_info.array_members[1].(*Extended.Parser_Literal);
 	assert(nested.value_type == .STRUCT && nested.struct_literal_info != old_nested.struct_literal_info);
+	assert(nested.node_flags == fresh_nested.node_flags && nested.value_flags == fresh_nested.value_flags);
 	assert(nested.struct_literal_info.arguments.data != old_nested.struct_literal_info.arguments.data);
 	assert(nested.first_token == fresh_nested.first_token && nested.one_past_last_token == fresh_nested.one_past_last_token);
 	assert(nested.struct_literal_info.arguments.count == 2 && nested.struct_literal_info.arguments[1].(*Extended.Parser_Literal)._string == "blue");
 	assert(nested.struct_literal_info.arguments[1].first_token == fresh_nested.struct_literal_info.arguments[1].first_token);
 	assert(nested.struct_literal_info.arguments[1].(*Extended.Parser_Literal)._string == fresh_nested.struct_literal_info.arguments[1].(*Extended.Parser_Literal)._string);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -5977,6 +6958,8 @@ test_aggregate_ast_reuse :: () {
 	assert(typed_literal.array_literal_info.element_type.type_valued_expression.(*Extended.Parser_Ident).name == "u8");
 	assert(typed_literal.array_literal_info.element_type.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == typed_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration));
 	assert(typed_literal.first_token == typed_fresh.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.first_token);
+	assert(typed_literal.node_flags == typed_fresh.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.node_flags);
+	assert_eligible_edit_matches_fresh(*typed_updated, *typed_fresh);
 	Extended.release_parser_tree(*typed_old);
 	Extended.release_parser_names(*typed_old);
 	Extended.release_parser_tree(*typed_updated);
@@ -5996,6 +6979,8 @@ test_aggregate_ast_reuse :: () {
 	assert(struct_literal.struct_literal_info.type_expression != struct_original.struct_literal_info.type_expression);
 	assert(struct_literal.struct_literal_info.type_expression.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == struct_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration));
 	assert(struct_literal.first_token == struct_fresh.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.first_token);
+	assert(struct_literal.node_flags == struct_fresh.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.node_flags);
+	assert_eligible_edit_matches_fresh(*struct_updated, *struct_fresh);
 	Extended.release_parser_tree(*struct_old);
 	Extended.release_parser_names(*struct_old);
 	Extended.release_parser_tree(*struct_updated);
@@ -6028,19 +7013,34 @@ test_nested_block_ast_reuse :: () {
 
 	updated_block := updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block;
 	fresh_block := fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block;
+	assert(updated_block.kind == fresh_block.kind && updated_block.node_flags == fresh_block.node_flags && updated_block.block_type == fresh_block.block_type);
 	assert(updated_block.statements.count == fresh_block.statements.count && updated_block.statements.count == 3);
 	assert(updated_block.first_token == fresh_block.first_token && updated_block.one_past_last_token == fresh_block.one_past_last_token);
+	assert(updated_block.l0 == fresh_block.l0 && updated_block.c0 == fresh_block.c0 && updated_block.l1 == fresh_block.l1 && updated_block.c1 == fresh_block.c1);
 	for updated_block.statements {
 		other := fresh_block.statements[it_index];
-		assert(it.kind == other.kind && it.first_token == other.first_token && it.one_past_last_token == other.one_past_last_token);
+		assert(it.kind == other.kind && it.node_flags == other.node_flags);
+		assert(it.first_token == other.first_token && it.one_past_last_token == other.one_past_last_token);
 		assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
 	}
 
 	use := updated_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
 	fresh_use := fresh_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	assert(use.node_flags == fresh_use.node_flags && use.flags == fresh_use.flags);
+	assert(use.first_token == fresh_use.first_token && use.one_past_last_token == fresh_use.one_past_last_token);
 	assert(use.resolved_declaration == updated_block.statements[2].(*Extended.Parser_Declaration));
 	assert(fresh_use.resolved_declaration == fresh_block.statements[2].(*Extended.Parser_Declaration));
-	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert(updated.tokens.count == fresh.tokens.count);
+	for updated.tokens {
+		other := fresh.tokens[it_index];
+		assert(it.type == other.type && it.value_flags == other.value_flags);
+		assert(it.byte_start == other.byte_start && it.byte_end == other.byte_end && it.preceding_trivia_byte_start == other.preceding_trivia_byte_start);
+		assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+	}
+
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.recovery_records.count == fresh.recovery_records.count);
+	assert(updated.restart_points.count == fresh.restart_points.count);
 	for updated.restart_points {
 		other := fresh.restart_points[it_index];
 		assert(it.kind == other.kind && it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
@@ -6049,6 +7049,11 @@ test_nested_block_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+	for updated.tokens {
+		other := fresh.tokens[it_index];
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+	}
+
 	assert(use.name == "later" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -6244,6 +7249,215 @@ test_nested_shadowing_ast_reuse :: () {
 	free(new_source);
 }
 
+test_dependency_forward_binding_edit :: () {
+	check_dependency_declaration_edit("target :: 1; use := target;", "other :: 0; target :: 1; use := target;", 0, 0, 1);
+	check_dependency_declaration_edit("target :: 1; use := target;", "use := target;", 0, "target :: 1; ".count, -1);
+	check_dependency_declaration_edit("target :: 1; use := target;", "other :: 1; use := target;", 0, "target".count, -1);
+	check_dependency_declaration_edit("other :: 0; target :: 1; use := target;", "target :: 1; other :: 0; use := target;", 0, "other :: 0; target :: 1; ".count, 0);
+	test_import_dependency_edit();
+	test_using_dependency_edit();
+	test_dependency_scope_move();
+
+	old_source := copy_string("use := target; keep := use;");
+	new_source := copy_string("use := target; target :: 1; keep := use;");
+	edit_start := "use := target; ".count;
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_start, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	old_statements := old.root.(*Extended.Parser_Block).statements;
+	assert(old_statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	statements := updated.root.(*Extended.Parser_Block).statements;
+	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
+	probe_tokens := Extended.materialise_tokens(new_source);
+	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=edit_start, edit_end=edit_start, cursor=statements[0].first_token.(s64)};
+	set_allocators(*probe_tokens.node_pool, context.default_allocator);
+	probe.current_scope = Extended.push_lexical_scope(*probe);
+	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
+	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).name == "use");
+	Extended.release_parser_tree(*probe_tokens);
+	Extended.release_parser_names(*probe_tokens);
+	use := statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	assert(use.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
+	assert(fresh_statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
+	assert(statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == statements[0].(*Extended.Parser_Declaration));
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(use.name == "target" && Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
+}
+
+test_import_dependency_edit :: () {
+	old_source := copy_string("Basic :: #import \"Basic\"; use := Basic;");
+	new_source := copy_string("Basic :: #import \"String\"; use := Basic;");
+	edit_start := "Basic :: #import \"".count;
+	edit_end := "Basic :: #import \"Basic".count;
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	statements := updated.root.(*Extended.Parser_Block).statements;
+	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
+	probe_tokens := Extended.materialise_tokens(new_source);
+	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=edit_start, edit_end=edit_end};
+	set_allocators(*probe_tokens.node_pool, context.default_allocator);
+	probe.current_scope = Extended.push_lexical_scope(*probe);
+	assert(Extended.reuse_simple_declaration(*probe) == null);
+	probe.cursor = statements[1].first_token.(s64);
+	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
+	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).name == "use");
+	Extended.release_parser_tree(*probe_tokens);
+	Extended.release_parser_names(*probe_tokens);
+	import_decl := statements[0].(*Extended.Parser_Declaration);
+	fresh_import := fresh_statements[0].(*Extended.Parser_Declaration);
+	assert(import_decl.expression.(*Extended.Parser_Directive_Import).name == "String");
+	assert(import_decl.expression.(*Extended.Parser_Directive_Import).name == fresh_import.expression.(*Extended.Parser_Directive_Import).name);
+	use := statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	assert(use.resolved_declaration == import_decl && use.resolved_declaration != old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration));
+	assert(fresh_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_import);
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(use.name == "Basic" && Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
+}
+
+test_using_dependency_edit :: () {
+	old_source := copy_string("State :: struct { member: s64; }; using global: State; keep := global;");
+	new_source := copy_string("Other :: struct { member: s64; }; using global: State; keep := global;");
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, 0, "State".count, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	statements := updated.root.(*Extended.Parser_Block).statements;
+	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
+	old_using := old.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Using);
+	assert(old_using.expression.(*Extended.Parser_Declaration).type_inst.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration));
+	probe_tokens := Extended.materialise_tokens(new_source);
+	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=0, edit_end="State".count, cursor=statements[1].first_token.(s64)};
+	set_allocators(*probe_tokens.node_pool, context.default_allocator);
+	probe.current_scope = Extended.push_lexical_scope(*probe);
+	assert(Extended.reuse_simple_declaration(*probe) == null);
+	probe.cursor = statements[2].first_token.(s64);
+	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
+	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).name == "keep");
+	Extended.release_parser_tree(*probe_tokens);
+	Extended.release_parser_names(*probe_tokens);
+	using_node := statements[1].(*Extended.Parser_Using);
+	using_decl := using_node.expression.(*Extended.Parser_Declaration);
+	using_type := using_decl.type_inst.type_valued_expression.(*Extended.Parser_Ident);
+	assert(using_type.resolved_declaration == null);
+	assert(fresh_statements[1].(*Extended.Parser_Using).expression.(*Extended.Parser_Declaration).type_inst.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	assert(using_node != old_using && using_decl != old_using.expression.(*Extended.Parser_Declaration));
+	assert(using_node.first_token == fresh_statements[1].first_token && using_node.one_past_last_token == fresh_statements[1].one_past_last_token);
+	assert(statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == using_decl);
+	assert(fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Using).expression.(*Extended.Parser_Declaration));
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(using_type.name == "State" && Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
+}
+
+test_dependency_scope_move :: () {
+	old_source := copy_string("#if true { target :: 1; } use := target;");
+	new_source := copy_string("target :: 1; #if true { } use := target;");
+	edit_end := "#if true { target :: 1; } ".count;
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, 0, edit_end, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	old_statements := old.root.(*Extended.Parser_Block).statements;
+	assert(old_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	statements := updated.root.(*Extended.Parser_Block).statements;
+	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
+	probe_tokens := Extended.materialise_tokens(new_source);
+	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=0, edit_end=edit_end, cursor=statements[2].first_token.(s64)};
+	set_allocators(*probe_tokens.node_pool, context.default_allocator);
+	probe.current_scope = Extended.push_lexical_scope(*probe);
+	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
+	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).name == "use");
+	Extended.release_parser_tree(*probe_tokens);
+	Extended.release_parser_names(*probe_tokens);
+	use := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	assert(use.resolved_declaration == statements[0].(*Extended.Parser_Declaration));
+	assert(fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[0].(*Extended.Parser_Declaration));
+	assert(statements[1].(*Extended.Parser_If).then_block.statements.count == 0);
+	assert(fresh_statements[1].(*Extended.Parser_If).then_block.statements.count == 0);
+	assert(use.resolved_declaration != old_statements[0].(*Extended.Parser_If).then_block.statements[0].(*Extended.Parser_Declaration));
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(use.name == "target" && Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
+}
+
+check_dependency_declaration_edit :: (before: string, after: string, edit_start: s64, edit_end: s64, target_index: s64) {
+	old_source := copy_string(before);
+	new_source := copy_string(after);
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	statements := updated.root.(*Extended.Parser_Block).statements;
+	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
+	use := statements[statements.count - 1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	fresh_use := fresh_statements[fresh_statements.count - 1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	probe_tokens := Extended.materialise_tokens(new_source);
+	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=edit_start, edit_end=edit_end, cursor=statements[statements.count - 1].first_token.(s64)};
+	set_allocators(*probe_tokens.node_pool, context.default_allocator);
+	probe.current_scope = Extended.push_lexical_scope(*probe);
+	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
+	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).name == "use");
+	Extended.release_parser_tree(*probe_tokens);
+	Extended.release_parser_names(*probe_tokens);
+	if target_index >= 0 {
+		assert(use.resolved_declaration == statements[target_index].(*Extended.Parser_Declaration));
+		assert(fresh_use.resolved_declaration == fresh_statements[target_index].(*Extended.Parser_Declaration));
+	} else {
+		assert(use.resolved_declaration == null && fresh_use.resolved_declaration == null);
+	}
+
+	assert(use.resolved_declaration != old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration));
+	assert(statements.count == fresh_statements.count);
+	for statements {
+		other := fresh_statements[it_index];
+		assert(it.kind == other.kind && it.first_token == other.first_token && it.one_past_last_token == other.one_past_last_token);
+	}
+
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(use.name == "target" && Extended.reconstruct_source(*updated) == new_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
+}
+
 test_moved_closing_brace_ast_reuse :: () {
 	old_source := copy_string("#if true { use := outer; } outer :: 1;");
 	new_source := copy_string("#if true { use := outer; outer :: 1; }");
@@ -6317,6 +7531,39 @@ test_default_edit_fallback :: () {
 	Default.release_parser_tree(*compound_old);
 	Default.release_parser_tree(*compound_updated);
 	Default.release_parser_tree(*compound_fresh);
+
+	import_before := copy_string("Basic :: #import \"Basic\"; use := Basic;");
+	import_after := copy_string("Basic :: #import \"String\"; use := Basic;");
+	import_start := "Basic :: #import \"".count;
+	import_old := Default.parse_file(import_before);
+	import_updated, import_ok := Default.parse_file_edit(*import_old, import_start, import_start + "Basic".count, import_after);
+	import_fresh := Default.parse_file(import_after);
+	assert(import_ok && import_old.status == .COMPLETE && import_updated.status == .COMPLETE && import_fresh.status == .COMPLETE);
+	probe_tokens := Default.materialise_tokens(import_after);
+	probe := Default.Parser.{parsed=*probe_tokens, edit_source=*import_old, edit_start=import_start, edit_end=import_start + "Basic".count};
+	assert(Default.reuse_simple_declaration(*probe) == null);
+	Default.release_parser_tree(*probe_tokens);
+	assert(import_updated.tokens.count == import_fresh.tokens.count);
+	for import_updated.tokens {
+		other := import_fresh.tokens[it_index];
+		assert(it.type == other.type && it.l0 == other.l0 && it.c0 == other.c0);
+	}
+
+	import_statements := import_updated.root.(*Default.Parser_Block).statements;
+	import_fresh_statements := import_fresh.root.(*Default.Parser_Block).statements;
+	import_decl := import_statements[0].(*Default.Parser_Declaration);
+	assert(import_decl.expression.(*Default.Parser_Directive_Import).name == "String");
+	assert(import_decl.expression.(*Default.Parser_Directive_Import).name == import_fresh_statements[0].(*Default.Parser_Declaration).expression.(*Default.Parser_Directive_Import).name);
+	use := import_statements[1].(*Default.Parser_Declaration).expression.(*Default.Parser_Ident);
+	assert(use.resolved_declaration == import_decl && use.resolved_declaration != import_old.root.(*Default.Parser_Block).statements[0].(*Default.Parser_Declaration));
+	assert(import_fresh_statements[1].(*Default.Parser_Declaration).expression.(*Default.Parser_Ident).resolved_declaration == import_fresh_statements[0].(*Default.Parser_Declaration));
+	assert(import_updated.diagnostics.count == import_fresh.diagnostics.count && import_updated.restart_points.count == import_fresh.restart_points.count);
+	Default.release_parser_tree(*import_old);
+	free(import_before);
+	assert(use.name == "Basic");
+	Default.release_parser_tree(*import_updated);
+	Default.release_parser_tree(*import_fresh);
+	free(import_after);
 }
 
 check_regional_lex :: (old_source: string, new_source: string, start: s64, end: s64) {
@@ -7976,6 +9223,7 @@ check_declaration_metadata_edit :: (old_text: string, new_text: string, edit_sta
 	Extended.release_parser_names(*probe_tokens);
 	declaration := statements[0].(*Extended.Parser_Declaration);
 	fresh_declaration := fresh_statements[0].(*Extended.Parser_Declaration);
+	assert(declaration.node_flags == fresh_declaration.node_flags);
 	assert(declaration.flags == fresh_declaration.flags);
 	assert(declaration.program_export_name == expected_export_name && declaration.program_export_name == fresh_declaration.program_export_name);
 	assert(declaration.first_token == fresh_declaration.first_token && declaration.one_past_last_token == fresh_declaration.one_past_last_token);
@@ -7988,6 +9236,7 @@ check_declaration_metadata_edit :: (old_text: string, new_text: string, edit_sta
 	assert(statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == declaration);
 	assert(fresh_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_declaration);
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -8017,6 +9266,7 @@ check_flagged_declaration_fallback :: (source: string, expected_flag: type_of(Co
 	Extended.release_parser_names(*tokens);
 	declaration := statements[1].(*Extended.Parser_Declaration);
 	fresh_declaration := fresh_statements[1].(*Extended.Parser_Declaration);
+	assert(declaration.node_flags == fresh_declaration.node_flags);
 	assert(declaration.flags & expected_flag && declaration.flags == fresh_declaration.flags);
 	assert(declaration.program_export_name == expected_export_name && declaration.program_export_name == fresh_declaration.program_export_name);
 	assert(declaration.first_token == fresh_declaration.first_token && declaration.one_past_last_token == fresh_declaration.one_past_last_token);
@@ -8026,6 +9276,7 @@ check_flagged_declaration_fallback :: (source: string, expected_flag: type_of(Co
 	assert(body.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == declaration);
 	assert(fresh_body.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_declaration);
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -8087,6 +9338,7 @@ test_declaration_metadata :: () {
 	assert(aligned_body.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == aligned_decl);
 	assert(aligned_fresh_body.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == aligned_fresh_decl);
 	assert(aligned_updated.diagnostics.count == aligned_fresh.diagnostics.count && aligned_updated.restart_points.count == aligned_fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*aligned_updated, *aligned_fresh);
 	Extended.release_parser_tree(*aligned_old);
 	Extended.release_parser_names(*aligned_old);
 	free(aligned_old_source);
@@ -8131,6 +9383,7 @@ test_declaration_metadata :: () {
 	assert(noted_body.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == noted_decl);
 	assert(noted_fresh_body.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == noted_fresh_decl);
 	assert(noted_updated.diagnostics.count == noted_fresh.diagnostics.count && noted_updated.restart_points.count == noted_fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*noted_updated, *noted_fresh);
 	Extended.release_parser_tree(*noted_old);
 	Extended.release_parser_names(*noted_old);
 	free(noted_old_source);
