@@ -94,6 +94,7 @@ main :: () {
 	test_excluded_expression_nodes();
 	test_excluded_file_nodes();
 	test_excluded_statement_nodes();
+	test_imperative_body_fallback();
 	test_lowered_directive_ast_reuse();
 	test_excluded_directive_payload_edit();
 	test_positive_unary_ast_reuse();
@@ -4212,13 +4213,85 @@ test_excluded_statement_nodes :: () {
 	check_excluded_statement_node("{ local := value; }", .BLOCK);
 	check_excluded_statement_node("return value;", .RETURN);
 	check_excluded_statement_node("while value { break; }", .WHILE);
+	check_excluded_statement_node("while value break;", .WHILE);
 	check_excluded_statement_node("if value { return value; }", .IF);
+	check_excluded_statement_node("if value return value;", .IF);
 	check_excluded_statement_node("if value == { case 1; return value; case; }", .IF);
 	check_excluded_statement_node("for item: value { continue; }", .FOR);
 	check_excluded_statement_node("defer tick();", .DEFER);
 	check_excluded_statement_node("using state;", .USING);
 	check_excluded_statement_node("push_context new_context { return; }", .PUSH_CONTEXT);
 	check_excluded_statement_node("#asm { mov dst, value; }", .ASM);
+}
+
+test_imperative_body_fallback :: () {
+	old_source := copy_string("outer :: true; run :: () { local := outer; if local { local := false; defer tick(); while local { return; } } } tail := outer;");
+	new_source := copy_string("added :: 0;\nouter :: true; run :: () { local := outer; if local { local := false; defer tick(); while local { return; } } } tail := outer;");
+	old := Extended.parse_file(old_source);
+	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	fresh := Extended.parse_file(new_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
+	old_body := old.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+	statements := updated.root.(*Extended.Parser_Block).statements;
+	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
+	body := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+	fresh_body := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+	assert(body != old_body && body.statements[0] != old_body.statements[0]);
+	assert(body.first_token == fresh_body.first_token && body.one_past_last_token == fresh_body.one_past_last_token);
+	assert(body.statements.count == fresh_body.statements.count && body.statements.count == 2);
+	assert(body.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == statements[1].(*Extended.Parser_Declaration));
+	assert(fresh_body.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
+	probe := Extended.Parser.{parsed=*updated, edit_source=*old, cursor=body.statements[0].first_token.(s64)};
+	assert(Extended.reuse_simple_declaration(*probe) == null);
+	conditional := body.statements[1].(*Extended.Parser_If);
+	inner := conditional.then_block;
+	inner_local := inner.statements[0].(*Extended.Parser_Declaration);
+	loop := inner.statements[2].(*Extended.Parser_While);
+	assert(inner.parent == body && inner.owning_statement == conditional);
+	assert(conditional.condition.(*Extended.Parser_Ident).resolved_declaration == body.statements[0].(*Extended.Parser_Declaration));
+	assert(loop.block.parent == inner && loop.block.owning_statement == loop);
+	assert(loop.condition.(*Extended.Parser_Ident).resolved_declaration == inner_local);
+	assert(inner.statements[1].kind == .DEFER && loop.block.statements[0].kind == .RETURN);
+	assert(loop.condition.first_token == fresh_body.statements[1].(*Extended.Parser_If).then_block.statements[2].(*Extended.Parser_While).condition.first_token);
+	assert(updated.root_scope.children.count == fresh.root_scope.children.count);
+	for updated.restart_points {
+		other := fresh.restart_points[it_index];
+		assert(it.kind == other.kind && it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
+	}
+
+	edit_start := "outer :: true; run :: () { local := outer; if local { local := ".count;
+	inner_source := copy_string("outer :: true; run :: () { local := outer; if local { local := outer; defer tick(); while local { return; } } } tail := outer;");
+	inner_updated, inner_ok := Extended.parse_file_edit(*old, edit_start, edit_start + "false".count, inner_source);
+	inner_fresh := Extended.parse_file(inner_source);
+	assert(inner_ok && inner_updated.status == .COMPLETE && inner_fresh.status == .COMPLETE);
+	inner_body := inner_updated.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+	inner_fresh_body := inner_fresh.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+	assert(inner_body != old_body && inner_body.statements[0] != old_body.statements[0]);
+	assert(inner_body.first_token == inner_fresh_body.first_token && inner_body.one_past_last_token == inner_fresh_body.one_past_last_token);
+	inner_if := inner_body.statements[1].(*Extended.Parser_If);
+	inner_fresh_if := inner_fresh_body.statements[1].(*Extended.Parser_If);
+	assert(inner_if.then_block.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inner_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration));
+	assert(inner_fresh_if.then_block.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inner_fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration));
+	assert(inner_if.then_block.statements[2].(*Extended.Parser_While).condition.(*Extended.Parser_Ident).resolved_declaration == inner_if.then_block.statements[0].(*Extended.Parser_Declaration));
+	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert(inner_updated.diagnostics.count == inner_fresh.diagnostics.count && inner_updated.restart_points.count == inner_fresh.restart_points.count);
+	Extended.release_parser_tree(*old);
+	Extended.release_parser_names(*old);
+	free(old_source);
+	assert(loop.condition.(*Extended.Parser_Ident).resolved_declaration == inner_local);
+	assert(inner_if.then_block.statements[2].(*Extended.Parser_While).condition.(*Extended.Parser_Ident).name == "local");
+	assert(Extended.reconstruct_source(*updated) == new_source);
+	assert(Extended.reconstruct_source(*inner_updated) == inner_source);
+	Extended.release_parser_tree(*inner_updated);
+	Extended.release_parser_names(*inner_updated);
+	Extended.release_parser_tree(*inner_fresh);
+	Extended.release_parser_names(*inner_fresh);
+	free(inner_source);
+	Extended.release_parser_tree(*updated);
+	Extended.release_parser_names(*updated);
+	Extended.release_parser_tree(*fresh);
+	Extended.release_parser_names(*fresh);
+	free(new_source);
 }
 
 check_excluded_statement_node :: (statement: string, expected_kind: type_of(Extended.Parser_Node.kind)) {
