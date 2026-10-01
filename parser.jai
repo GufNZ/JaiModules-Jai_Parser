@@ -289,6 +289,7 @@ Parser_Node :: struct {
 	#as using code_node: Code_Node;
 }
 
+// Concrete compiler node layouts embedded into the code-gened parser-owned counterparts below.
 TYPES :: Type.[
 	Code_Asm,
 	Code_Binary_Operator,
@@ -431,6 +432,7 @@ TYPES :: Type.[
 		if t.name == "Code_Procedure_Call" {
 			print(b, ", context_modification");
 		}
+
 		print_parser_member_exceptions(t, b);
 		print(b, ") _%: %1;\n", t.name);
 
@@ -449,6 +451,7 @@ TYPES :: Type.[
 			case "Code_Placeholder";
 				print(b, "\tname: string;\n");
 		}
+
 		print(b, "}\n\n");
 	}
 
@@ -612,6 +615,7 @@ next_token :: inline (parsed: *Parsed_Source, index: Token_Index) -> *Parser_Tok
 
 #scope_file
 
+// Common setup for parsing functions:
 parseInit :: (
 	source: string,
 	rootParser: (*Parser) -> *Parser_Node,
@@ -641,6 +645,9 @@ parseInit :: (
 
 #scope_export
 
+// Parse one value expression, such as `call(x + 1)`, rather than a statement or file.
+// Empty input and trailing tokens are diagnosed.  The result retains tokens, diagnostics, a root expression, and lexical bindings; source and filename are borrowed until release.
+// Warning mode reports optional semicolons where applicable without changing parse status.
 parse_expression :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false) -> Parsed_Source {
 	result, parser := parseInit(source, p => parse_value_expression(p), fully_pathed_filename, warn_unnecessary_semicolons);
 
@@ -653,6 +660,9 @@ parse_expression :: (source: string, fully_pathed_filename: string = "", warn_un
 	return result;
 }
 
+// Parse a single declaration, such as `answer: s64 = 42;`, including trailing notes.
+// An optional final semicolon is consumed; further input is diagnosed rather than silently becoming another declaration.
+// The returned tree, tokens, and diagnostics follow the same borrowed-source and independent tree/name release rules as parse_file.
 parse_declaration :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false) -> Parsed_Source {
 	result, parser := parseInit(source, p => parse_declaration_node(p), fully_pathed_filename, warn_unnecessary_semicolons);
 
@@ -679,6 +689,8 @@ parse_declaration :: (source: string, fully_pathed_filename: string = "", warn_u
 	return result;
 }
 
+// Parse one braced imperative block, such as `{ value := 1; return value; }`.
+// The root is a Parser_Block; missing braces and unexpected input after the block produce diagnostics while retaining the partial tree for editor use.  Input is borrowed.
 parse_block :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false) -> Parsed_Source {
 	result, parser := parseInit(source, p => parse_block_node(p).(*Parser_Node), fully_pathed_filename, warn_unnecessary_semicolons);
 
@@ -691,6 +703,9 @@ parse_block :: (source: string, fully_pathed_filename: string = "", warn_unneces
 	return result;
 }
 
+// Parse one braced DATA_DECLARATIONS block, such as a struct member body.
+// Unlike parse_block, its contents use declaration grammar.  A missing delimiter or trailing input is diagnosed, and the partial tree remains available for recovery.
+// The returned source and filename are borrowed, as with the other parse entrypoints.
 parse_declaration_block :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false) -> Parsed_Source {
 	result, parser := parseInit(
 		source,
@@ -707,12 +722,20 @@ parse_declaration_block :: (source: string, fully_pathed_filename: string = "", 
 	return result;
 }
 
+// Parse all top-level declarations into an unbraced DATA_DECLARATIONS block.
+// Empty files still have a root; malformed regions retain partial declarations and diagnostics while parsing continues.
+// The returned snapshot borrows source and filename; retain both while inspecting tokens, source spans, or the tree.
+// Release the tree separately from retained tokens and optional interned identifier names.
 parse_file :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false) -> Parsed_Source {
 	result, parser := parseInit(source, parse_file_node, fully_pathed_filename, warn_unnecessary_semicolons);
 	return result;
 }
 
-// Only reuse the old parse when the new source is exactly the advertised single replacement.
+// Parse a complete replacement snapshot after one edit to old.source's byte range [start, end).
+// The unchanged prefix and suffix must match exactly; otherwise return an empty result and false without parsing.
+// On success, retain the old filename and return a new, independently owned tree and token snapshot.
+// Unchanged syntax may be copied only when eligible; other regions are reparsed.
+// Keep both source buffers alive while their snapshots are in use, and pass warning mode again if it was enabled.
 parse_file_edit :: (old: *Parsed_Source, start: s64, end: s64, new_source: string, warn_unnecessary_semicolons: bool = false) -> Parsed_Source, bool {
 	old_source := old.source;
 	if start >= 0 && end >= start && end <= old_source.count {
@@ -781,6 +804,7 @@ parse_file_node :: (parser: *Parser) -> *Parser_Node {
 }
 
 // Reuse only declarations whose token boundaries and dependencies can be mapped unambiguously across the edit.
+// The old tree is a template, never shared: reject metadata and expression shapes that cannot be cloned into the new pool with new-source names, spans, and lexical links.
 reuse_simple_declaration :: (parser: *Parser) -> *Parser_Node {
 	#if ENABLE_TRIVIA {
 		old := parser.edit_source;
@@ -805,6 +829,7 @@ reuse_simple_declaration :: (parser: *Parser) -> *Parser_Node {
 			then new_byte
 			else new_byte - byte_delta;
 
+		// Advance past old declarations before this byte position; never pair by array index alone.
 		while parser.reuse_statement_index < old_statements.count {
 			it := old_statements[parser.reuse_statement_index];
 			candidate_byte := old.tokens[it.first_token.(s64)].byte_start;
@@ -838,6 +863,7 @@ reuse_simple_declaration :: (parser: *Parser) -> *Parser_Node {
 				expression_first := ifx typed
 					then previous.type_inst.one_past_last_token.(s64) + 1
 					else first + 3;
+				// Require a whole, simple declaration; partial token matches could reuse stale children.
 				if (
 					!without_initializer && (
 						!reusable_expression(previous.expression)
@@ -881,6 +907,7 @@ reuse_simple_declaration :: (parser: *Parser) -> *Parser_Node {
 						then separator_at + 1
 						else separator_at + 2;
 
+				// Compound names must occupy the expected comma-separated slots, with no hidden metadata.
 				if (last - first < (ifx without_initializer || reassignment_compound then 2 * argument_count + 1 else 2 * argument_count + 2)
 					|| compound.notes.count
 					|| compound.alignment_expression
@@ -911,6 +938,7 @@ reuse_simple_declaration :: (parser: *Parser) -> *Parser_Node {
 				}
 
 
+				// Each target must be one identifier, not a member, index, or mixed assignment.
 				for arguments.arguments {
 					argument_first := first + 2 * it_index;
 					if (it.modifier != .NONE
@@ -966,6 +994,7 @@ reuse_simple_declaration :: (parser: *Parser) -> *Parser_Node {
 
 			start := parser.cursor;
 			parser.cursor += count;
+			// Rebuild the argument list and declaration properties so no old-pool pointers escape.
 			if compound {
 				old_arguments := compound.comma_separated_assignment;
 				arguments := new_parser_node(parser, Parser_Comma_Separated_Arguments);
@@ -1050,16 +1079,42 @@ find_old_declaration_block :: (parser: *Parser, scope: *Parser_Lexical_Scope, fi
 			then new_token.byte_start
 			else new_token.byte_start - byte_delta;
 
+		// Nested candidates belong to the same braced block, even if another block has the same start offset.
 		for scope.children {
 			if it.owner && it.owner.kind == .BLOCK {
 				block := it.owner.(*Parser_Block);
 				old_token := old.tokens[block.first_token.(s64)];
-				if (block.block_type == block_type
+				if ((!parser.current_scope || (ifx parser.reuse_block then scope.owner == parser.reuse_block else scope == old.root_scope))
+					&& block.block_type == block_type
 					&& old_token.type == #char "{"
 					&& old_token.byte_start == old_byte
 					&& (old_token.byte_end <= parser.edit_start || old_token.byte_start >= parser.edit_end)
 				) {
-					return block;
+					close_index := block.one_past_last_token.(s64) - 1;
+					if close_index >= 0 && close_index < old.tokens.count {
+						old_close := old.tokens[close_index];
+						if (old_close.type == #char "}"
+							&& (old_close.byte_end <= parser.edit_start || old_close.byte_start >= parser.edit_end)
+						) {
+							depth := 0;
+							for index: first..parser.parsed.tokens.count-1 {
+								token := parser.parsed.tokens[index];
+								if token.type == #char "{" {
+									depth += 1;
+								} else if token.type == #char "}" {
+									depth -= 1;
+									if depth == 0 {
+										if token.byte_start == old_close.byte_start + (ifx old_close.byte_start >= parser.edit_end then byte_delta else 0) {
+											return block;
+										}
+
+
+										break;
+									}
+								}
+							}
+						}
+					}
 				}
 			}
 
@@ -1089,6 +1144,7 @@ reusable_type_instantiation :: (original: *Parser_Type_Instantiation) -> bool {
 		}
 
 
+		// A wrapper is reusable only when its element and dimension consume the exact source shape.
 		if original.array_element_type {
 			return (
 				original.array_dimension
@@ -1162,6 +1218,7 @@ reusable_expression :: (node: *Parser_Node) -> bool {
 		}
 
 
+		// Literal values with self-contained members, such as `[1, 2]` or `.{x = 1}`, can be rebuilt; contextual here strings and unsupported payloads cannot.
 		if node.kind == .LITERAL {
 			literal := node.(*Parser_Literal);
 			if literal.value_type == .ARRAY {
@@ -1339,7 +1396,9 @@ copy_reusable_expression :: (parser: *Parser, original: *Parser_Node, token_delt
 		last := original.one_past_last_token.(s64) + token_delta;
 		result: *Parser_Node;
 
+		// Clone only the shapes approved by reusable_expression; each case below reconstructs children or source-backed names instead of keeping old pointers.
 		if original.kind == {
+			// Literal payloads, e.g. `"hi"` or `[1, 2]`, need new token text or member storage.
 			case .LITERAL;
 				literal := new_parser_node(parser, Parser_Literal);
 				literal.* = original.(*Parser_Literal).*;
@@ -1391,6 +1450,7 @@ copy_reusable_expression :: (parser: *Parser, original: *Parser_Node, token_delt
 
 				result = literal;
 
+			// Identifier `value` gets its new token spelling and a fresh scope reference.
 			case .IDENT;
 				ident := new_parser_node(parser, Parser_Ident);
 				ident.* = original.(*Parser_Ident).*;
@@ -1408,24 +1468,28 @@ copy_reusable_expression :: (parser: *Parser, original: *Parser_Node, token_delt
 
 				result = ident;
 
+			// Prefix or postfix unary `-value` / `value.*` clones its operand.
 			case .UNARY_OPERATOR;
 				unary := new_parser_node(parser, Parser_Unary_Operator);
 				unary.* = original.(*Parser_Unary_Operator).*;
 				unary.subexpression = copy_reusable_expression(parser, unary.subexpression, token_delta);
 				result = unary;
 
+			// Expression query `type_of(value)` clones the queried expression.
 			case .EXPRESSION_QUERY;
 				query := new_parser_node(parser, Parser_Expression_Query);
 				query.* = original.(*Parser_Expression_Query).*;
 				query.expression_to_query = copy_reusable_expression(parser, query.expression_to_query, token_delta);
 				result = query;
 
+			// Type query `size_of(T)` clones the type wrapper and its dependencies.
 			case .TYPE_QUERY;
 				query := new_parser_node(parser, Parser_Type_Query);
 				query.* = original.(*Parser_Type_Query).*;
 				query.type_to_query = copy_reusable_type_instantiation(parser, query.type_to_query, token_delta);
 				result = query;
 
+			// Call `f(x, name=y)` rebuilds argument labels, values, and context replacements.
 			case .PROCEDURE_CALL;
 				old_call := original.(*Parser_Procedure_Call);
 				call := new_parser_node(parser, Parser_Procedure_Call);
@@ -1458,6 +1522,7 @@ copy_reusable_expression :: (parser: *Parser, original: *Parser_Node, token_delt
 
 				result = call;
 
+			// Cast `cast(T) value` rebuilds the type and value separately.
 			case .CAST;
 				old_cast := original.(*Parser_Cast);
 				cast_node := new_parser_node(parser, Parser_Cast);
@@ -1466,6 +1531,7 @@ copy_reusable_expression :: (parser: *Parser, original: *Parser_Node, token_delt
 				cast_node.expression = copy_reusable_expression(parser, old_cast.expression, token_delta);
 				result = cast_node;
 
+			// Binary `left + right` rebuilds both operands before remapping the span.
 			case .BINARY_OPERATOR;
 				binary := new_parser_node(parser, Parser_Binary_Operator);
 				binary.* = original.(*Parser_Binary_Operator).*;
@@ -1474,6 +1540,7 @@ copy_reusable_expression :: (parser: *Parser, original: *Parser_Node, token_delt
 				binary.right = copy_reusable_expression(parser, old_binary.right, token_delta);
 				result = binary;
 
+			// Any newly approved expression kind needs an explicit copy rule first.
 			case;
 				assert(false, "Unexpected reusable node kind: %", original.kind);
 				return null;
@@ -1529,6 +1596,7 @@ parse_block_node :: (parser: *Parser, parent: *Parser_Block = null, block_type :
 	statements.allocator = parser_node_allocator(parser.parsed);
 
 	token := parser_peek(parser);
+	// Keep declaration, enum, and imperative grammars in the same scoped recovery loop.
 	while token.type != #char "}" && token.type != .END_OF_INPUT {
 		guard := parser_progress_guard(parser);
 		statement: *Parser_Node;
@@ -1626,6 +1694,7 @@ statement_requires_semicolon :: (statement: *Parser_Node) -> bool {
 				return false;
 			}
 
+		// A braced value `ifx` ends a declaration at `}`, like `x := ifx ok { 1 } else { 2 }`.
 		case .DECLARATION;
 			expression := statement.(*Parser_Declaration).expression;
 			if expression {
@@ -2050,6 +2119,7 @@ add_asm_operand :: (parser: *Parser, operands: *[..]*Parser_Asm_Operand, first: 
 		modifiers.allocator = parser_node_allocator(parser.parsed);
 		position := base_end;
 
+		// Suffixes may stack, e.g. `[base]! &* mask`; retain their source order.
 		while position < one_past_last {
 			modifier_first := position;
 			modifier := New(Parser_Asm_Operand_Modifier,, parser_node_allocator(parser.parsed));
@@ -2135,6 +2205,7 @@ add_asm_operand :: (parser: *Parser, operands: *[..]*Parser_Asm_Operand, first: 
 		}
 	}
 
+	// Only self-contained values become expression nodes; unknown forms keep their raw span.
 	if operand.kind == .UNPARSED {
 		is_number := (base_end == first + 1 && parser.parsed.tokens[first].type == .NUMBER);
 		is_ident := (base_end == first + 1 && parser.parsed.tokens[first].type == .IDENT);
@@ -2197,6 +2268,7 @@ parse_asm_instruction_span :: (parser: *Parser, statement: *Parser_Asm_Statement
 	instruction.span = statement.span;
 	instruction.mnemonic = new_asm_ident(parser, content_first);
 
+	// Adjacent `.8` or `?BITS` belongs to the mnemonic, not its first operand.
 	operand_first := after_mnemonic;
 	if (operand_first < content_one_past_last
 		&& parser.parsed.tokens[operand_first].type == .NUMBER
@@ -2228,6 +2300,7 @@ parse_asm_instruction_span :: (parser: *Parser, statement: *Parser_Asm_Statement
 	bracket_depth: s64;
 	brace_depth: s64;
 	index := operand_first;
+	// Commas inside memory or parenthesized values do not separate instruction operands.
 	while index < content_one_past_last {
 		token_type := parser.parsed.tokens[index].type;
 		at_top_level := (!parenthesis_depth && !bracket_depth && !brace_depth);
@@ -2314,6 +2387,7 @@ parse_asm_statement :: (parser: *Parser, enclosing_scope: *Parser_Block) -> *Par
 	body_first := parser.cursor;
 	statement_first := parser.cursor;
 	brace_depth: s64 = 1;
+	// Nested braces belong to assembly statements; only the outer brace ends the block.
 	while brace_depth && parser_peek(parser).type != .END_OF_INPUT {
 		token := parser_peek(parser);
 		if token.type == #char "{" {
@@ -2616,6 +2690,7 @@ parse_case_block :: (parser: *Parser, parent: *Parser_Block, owning_if: *Parser_
 	cases.allocator = parser_node_allocator(parser.parsed);
 
 	token := parser_peek(parser);
+	// A malformed arm must recover before the next `case`, leaving the switch intact.
 	while token.type != #char "}" && token.type != .END_OF_INPUT {
 		case_first := parser.cursor;
 		if !parser_expect(parser, .KEYWORD_CASE) {
@@ -3053,6 +3128,7 @@ parse_push_context_statement :: (parser: *Parser, parent: *Parser_Block) -> *Par
 	return result;
 }
 
+// Distinguish `name: Type` and `a, b := value` from identifier-led statements without consuming input; the real declaration parser owns error reporting.
 looks_like_declaration :: (parser: *Parser) -> bool {
 	lookahead: s64;
 	token := parser_peek(parser, lookahead);
@@ -3086,6 +3162,7 @@ looks_like_declaration :: (parser: *Parser) -> bool {
 	return parser_peek(parser, lookahead).type == #char ":";
 }
 
+// Spot mixed-target forms such as `a=, b := call()` before parsing an ordinary expression statement.  A single assignment is not a compound reassignment.
 looks_like_compound_reassignment :: (parser: *Parser) -> bool {
 	if parser_peek(parser).type != .IDENT {
 		return false;
@@ -3178,6 +3255,7 @@ parse_loop_control_statement :: (parser: *Parser) -> *Parser_Loop_Control {
 	return result;
 }
 
+// Declaration position admits static branches, using, placeholders, directives, and ordinary names; parameter lists disable multi-value initializers at commas.
 parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true) -> *Parser_Node {
 	first := parser.cursor;
 	if parser_peek_if(parser, #char "#", .KEYWORD_IF) {
@@ -3246,13 +3324,11 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 	}
 
 
-	// Modifiers before a comma belong to individual names, not to the whole declaration.
-	if (parser_peek(parser).type == #char ","
-		|| parser_peek(parser, 1).type == #char "," && (
-			parser_peek(parser).type == #char ":"
-			|| parser_peek(parser).type == #char "="
-		)
+	// A comma makes `a=, b := call()` one compound node with per-name modifiers.
+	if (parser_peek(parser).type == #char "," || parser_peek(parser, 1).type == #char ","
+		&& (parser_peek(parser).type == #char ":" || parser_peek(parser).type == #char "=")
 	) {
+		// 1. Capture names and their individual declare/assign intent before the shared separator.
 		arguments: [..]Parser_Comma_Separated_Argument;
 		arguments.allocator = parser_node_allocator(parser.parsed);
 
@@ -3307,13 +3383,16 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 			array_add(*arguments, .{node=ident, modifier=modifier});
 		}
 
+		// 2. A shared `=` reassigns existing targets; `:` introduces declaration properties.
 		reassignment := parser_eat_if(parser, #char "=");
 		if !reassignment {
 			parser_expect(parser, #char ":");
 		}
 
+		// 3. Preserve the compiler's compound shape even for multi-target reassignment.
 		result := new_parser_node(parser, Parser_Compound_Declaration);
 		result.kind = .COMPOUND_DECLARATION;
+
 		if reassignment {
 			result.operator_type = #char "=";
 		}
@@ -3329,6 +3408,7 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 		result.declaration_properties.kind = .DECLARATION;
 		result.declaration_properties.flags = declaration_flags;
 
+		// 4. Reassignments take RHS values; declarations may also have types and metadata.
 		if reassignment {
 			result.declaration_properties.expression = parse_declaration_expression(parser);
 			if !result.declaration_properties.expression {
@@ -3342,6 +3422,7 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 
 		finish_node(parser, result, first);
 
+		// 5. Only newly declared names enter this scope; assigned targets remain uses.
 		for arguments {
 			if (!reassignment && it.modifier != .ASSIGN) || it.modifier == .DECLARE {
 				name := it.node.(*Parser_Ident).name;
@@ -3597,6 +3678,7 @@ parse_declaration_expression :: (parser: *Parser, allow_multi_value_expression :
 }
 
 // Parse type-only prefixes before general expressions so polymorphic bindings and pointer/view types keep their structure.
+// For example, `*T`, `[] T`, and `#type distinct T` describe types here, while `*value` in an ordinary expression can instead mean address-of.
 parse_type_instantiation :: (parser: *Parser) -> *Parser_Type_Instantiation {
 	first := parser.cursor;
 
@@ -3756,6 +3838,7 @@ parse_type_instantiation :: (parser: *Parser) -> *Parser_Type_Instantiation {
 }
 
 // Give parameters their own scope so defaults and the eventual body resolve against the header's bindings.
+// This also prevents a parameter named `value` from binding a same-named use in the enclosing file; unnamed type-only arguments have no declaration to bind.
 parse_procedure_type_header :: (parser: *Parser, parse_body := false) -> *Parser_Procedure_Header {
 	first := parser.cursor;
 
@@ -4040,6 +4123,8 @@ procedure_header_terminator :: (parser: *Parser) -> Token_Type {
 	return .END_OF_INPUT;
 }
 
+// A leading `(...)` can be a procedure header or a grouped condition.
+// Peek past balanced parameters before deciding whether `{` begins a body or an `if` block.
 looks_like_procedure_header :: (parser: *Parser) -> bool {
 	terminator := procedure_header_terminator(parser);
 	if terminator == #char "{" {
@@ -4089,6 +4174,7 @@ looks_like_procedure_header :: (parser: *Parser) -> bool {
 }
 
 // Stop at an unknown directive so the enclosing grammar can interpret it instead of consuming it as a procedure flag.
+// Header flags like `#expand` belong to `(x: T) #expand { ... }`, but a later `#run` or `#insert` must remain available to its own expression parser.
 parse_procedure_flags :: (parser: *Parser, result: *Parser_Procedure_Header) {
 	while true {
 		if parser_eat_if(parser, .KEYWORD_INLINE) {
@@ -4265,6 +4351,7 @@ type_instantiation_is_polymorphic :: (type_inst: *Parser_Type_Instantiation) -> 
 }
 
 // Keep aggregate members in a child scope, while allowing struct modifiers in each position accepted by the grammar.
+// Enum bodies hold member names, while struct and union bodies hold declarations and defaults; parameters such as `struct (T: Type) { value: T; }` precede that body.
 parse_aggregate_definition :: (parser: *Parser) -> *Parser_Node {
 	first := parser.cursor;
 	keyword := parser_eat(parser);
@@ -4414,6 +4501,7 @@ parse_enum_member :: (parser: *Parser) -> *Parser_Ident {
 	return result;
 }
 
+// An aggregate body uses declaration grammar, except bare enum members and field-default assignments such as `field = 1` or `info.flavor = "sweet"`.
 parse_aggregate_block :: (parser: *Parser, enum_members: bool) -> *Parser_Block {
 	first := parser.cursor;
 	if !parser_eat_if(parser, #char "{") {
@@ -4540,6 +4628,7 @@ parse_struct_modifiers :: (parser: *Parser, result: *Parser_Struct) {
 }
 
 // Consume only directives valid in declaration position; unknown names remain for the caller's recovery path.
+// `#placeholder Name` and `#as using field: T` introduce declaration-shaped nodes, whereas expression-only directives must not consume the next declaration.
 parse_declaration_directive :: (parser: *Parser) -> *Parser_Node {
 	if !parser_peek_if(parser, #char "#", .IDENT) {
 		return null;
@@ -5019,6 +5108,7 @@ binary_operator_info :: (token_type: Token_Type) -> (bool, Operator_Type, s32, b
 }
 
 // Recognize explicit type prefixes before unary operators, since the same punctuation can begin either form.
+// `[3] T` and `*[] T` are type-valued expressions; `-3` stays a signed literal, and a leading `.` binds to its immediate primary before later postfix access.
 parse_prefix :: (parser: *Parser) -> *Parser_Node {
 	first := parser.cursor;
 	token := parser_peek(parser);
@@ -5129,6 +5219,7 @@ parse_prefix :: (parser: *Parser) -> *Parser_Node {
 		case #char "~";
 			operator_type = token.type.(Operator_Type);
 
+		// Prefix dereference `(.*)`, e.g. `(.*)value`, applies before postfix access.
 		case .PREFIX_DEREFERENCE;
 			operator_type = .POINTER_DEREFERENCE;
 
@@ -5178,9 +5269,11 @@ parse_postfix :: (parser: *Parser) -> *Parser_Node {
 parse_postfix_suffixes :: (parser: *Parser, result: *Parser_Node, first: s64) -> *Parser_Node {
 	while true {
 		if parser_peek(parser).type == {
+			// Call suffix `(x)`, e.g. `make(1)` or `factory()(2)`.
 			case #char "(";
 				result = parse_procedure_call(parser, result, first);
 
+			// Index suffix `[i]`, e.g. `items[0]`.
 			case #char "[";
 				parser_eat(parser);
 
@@ -5198,6 +5291,7 @@ parse_postfix_suffixes :: (parser: *Parser, result: *Parser_Node, first: s64) ->
 				subscript.right = index;
 				result = finish_node(parser, subscript, first);
 
+			// Postfix dereference `.*`, e.g. `pointer.*`.
 			case .POSTFIX_DEREFERENCE;
 				parser_eat(parser);
 
@@ -5207,6 +5301,7 @@ parse_postfix_suffixes :: (parser: *Parser, result: *Parser_Node, first: s64) ->
 				dereference.subexpression = result;
 				result = finish_node(parser, dereference, first);
 
+			// Member `.name` or postfix cast `.(T)`, e.g. `item.field` / `value.(s64)`.
 			case #char ".";
 				parser_eat(parser);
 				if parser_eat_if(parser, #char "(") {
@@ -5247,11 +5342,15 @@ parse_postfix_suffixes :: (parser: *Parser, result: *Parser_Node, first: s64) ->
 				access.right = member;
 				result = finish_node(parser, access, first);
 
+			// Typed array literal prefix, e.g. `T.[1, 2]`.
 			case .BEGIN_ARRAY_LITERAL;
 				result = parse_aggregate_literal(parser, .ARRAY, result, first);
+
+			// Typed struct literal prefix, e.g. `T.{field = 1}`.
 			case .BEGIN_STRUCT_LITERAL;
 				result = parse_aggregate_literal(parser, .STRUCT, result, first);
 
+			// No more postfix syntax: leave the next token to the enclosing expression.
 			case;
 				break;
 		}
@@ -5260,7 +5359,8 @@ parse_postfix_suffixes :: (parser: *Parser, result: *Parser_Node, first: s64) ->
 	return result;
 }
 
-// Treat ,, as the boundary between ordinary arguments and call-local context modifications.
+// Treat `,,` as the boundary between ordinary arguments and call-local context modifications.
+// In `f(x, name=y,, allocator=arena)`, the first two are call arguments; `allocator=arena` is retained separately as source-spelled context replacement.
 parse_procedure_call :: (parser: *Parser, procedure: *Parser_Node, first: s64) -> *Parser_Node {
 	parser_eat(parser);
 
@@ -5359,6 +5459,7 @@ make_type_instantiation :: (parser: *Parser, expression: *Parser_Node) -> *Parse
 	return result;
 }
 
+// Build array or struct literals in either typed postfix form (`T.[1]`, `T.{x=1}`) or untyped primary form (`.[1]`, `.{x=1}`), retaining the contextual type separately.
 parse_aggregate_literal :: (
 	parser: *Parser,
 	value_type: type_of(Code_Literal.value_type),
@@ -5434,9 +5535,11 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 	token := parser_peek(parser);
 
 	if token.type == {
+		// Value conditional `ifx condition then a else b` (not a statement `if`).
 		case .KEYWORD_IFX;
 			return parse_if_statement(parser, null, true);
 
+		// Inline hint before a call or header, e.g. `inline f()` / `inline (x: T) { ... }`.
 		case .KEYWORD_INLINE; #through;
 		case .KEYWORD_NO_INLINE;
 			parser_eat(parser);
@@ -5465,12 +5568,14 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			finish_node(parser, header, first);
 			return header;
 
+		// Aggregate type value, e.g. `struct { x: s64; }` or `enum u8 { A; }`.
 		case .KEYWORD_STRUCT; #through;
 		case .KEYWORD_UNION; #through;
 		case .KEYWORD_ENUM; #through;
 		case .KEYWORD_ENUM_FLAGS;
 			return parse_aggregate_definition(parser);
 
+		// Query an expression, e.g. `type_of(value)` or `is_constant(value)`.
 		case .KEYWORD_TYPE_OF; #through;
 		case .KEYWORD_IS_CONSTANT; #through;
 		case .KEYWORD_CODE_OF;
@@ -5498,6 +5603,7 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			finish_node(parser, result, first);
 			return result;
 
+		// Query a type, e.g. `size_of(T)` or `type_info(T)`.
 		case .KEYWORD_SIZE_OF; #through;
 		case .KEYWORD_TYPE_INFO; #through;
 		case .KEYWORD_INITIALIZER_OF;
@@ -5525,6 +5631,7 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			finish_node(parser, result, first);
 			return result;
 
+		// Expression directive `#run x`, `#ifx ...`, or `#string` here-string.
 		case #char "#";
 			directive_name := parser_peek(parser, 1);
 			if directive_name.type == .KEYWORD_IFX {
@@ -5566,15 +5673,18 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			finish_node(parser, result, first);
 			return result;
 
+		// Untyped array literal `.[1, 2]`.
 		case .BEGIN_ARRAY_LITERAL;
 			return parse_aggregate_literal(parser, .ARRAY, null, first);
 
+		// Struct literal `.{x=1}`; bare `{x=1}` only where a value is expected.
 		case .BEGIN_STRUCT_LITERAL; #through;
 		case #char "{";
 			return ifx token.type == #char "{" && !parser.allow_unprefixed_struct_literal
 				then null
 				else parse_aggregate_literal(parser, .STRUCT, null, first);
 
+		// Uninitialised marker `---`, retained as a literal for standalone parsing.
 		case .TRIPLE_MINUS;
 			parser_eat(parser);
 
@@ -5584,6 +5694,7 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			finish_node(parser, result, first);
 			return result;
 
+		// Group `(a + b)` or procedure header `(x: T) -> T { ... }`.
 		case #char "(";
 			if looks_like_procedure_header(parser) {
 				return parse_procedure_type_header(parser, true);
@@ -5605,6 +5716,7 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			finish_node(parser, result, first);
 			return result;
 
+		// Identifier `value` or single-argument quick lambda `x => x + 1`.
 		case .IDENT;
 			if parser_peek(parser, 1).type == .QUICK_LAMBDA {
 				parser_eat(parser);
@@ -5645,6 +5757,7 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			array_add(*parser.current_scope.references, result);
 			return result;
 
+		// Numeric literal `42`, `0xFF`, or `1.5`, preserving spelling-dependent flags.
 		case .NUMBER;
 			parser_eat(parser);
 
@@ -5671,6 +5784,7 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			finish_node(parser, result, first);
 			return result;
 
+		// Quoted or materialised here-string body, e.g. `"text"`.
 		case .STRING;
 			parser_eat(parser);
 
@@ -5685,6 +5799,7 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			finish_node(parser, result, first);
 			return result;
 
+		// Boolean literals `true` and `false`.
 		case .KEYWORD_TRUE; #through;
 		case .KEYWORD_FALSE;
 			parser_eat(parser);
@@ -5696,6 +5811,7 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			finish_node(parser, result, first);
 			return result;
 
+		// Null pointer literal `null`.
 		case .KEYWORD_NULL;
 			parser_eat(parser);
 
@@ -5709,6 +5825,7 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			finish_node(parser, result, first);
 			return result;
 
+		// Current context value `context`.
 		case .KEYWORD_CONTEXT;
 			parser_eat(parser);
 
@@ -5717,6 +5834,7 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			finish_node(parser, result, first);
 			return result;
 
+		// Not a primary; let the caller diagnose or recover at this token.
 		case;
 			return null;
 	}
@@ -6367,6 +6485,10 @@ finish_node :: (parser: *Parser, node: *$T/Parser_Node, first: s64) -> *T {
 }
 
 // Relex around an edit until a stable token boundary is found, then reuse the unchanged suffix with adjusted positions.
+// A clean, trivia-enabled old snapshot permits copying prefix tokens before the edited region; lex from one token earlier to account for token/trivia merging.
+// Only an identical token and trivia boundary after the edit permits suffix reuse.
+// Here strings and lexer errors force full lexing because their tokenisation depends on wider context.
+// Every copied token gets new-source views and adjusted locations.
 materialise_tokens :: (source: string, old: *Parsed_Source = null, edit_start: s64 = 0, edit_end: s64 = 0) -> Parsed_Source {
 	result: Parsed_Source;
 	result.source = source;

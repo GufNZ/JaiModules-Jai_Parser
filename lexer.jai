@@ -666,7 +666,7 @@ parse_ident :: (lexer: *Lexer, result: *Token) -> string {
 		// This mask xor is probably wasteful.
 		// We can DeMorgan all this later, or something.
 		// We"re doing this because we detected what *is* in an identifier, rather than what is not.
-		mask ^= 0xffff;
+		mask ^= 0xFFFF;
 
 		s64 advance;
 		if (mask) {
@@ -1398,7 +1398,7 @@ make_number :: (lexer: *Lexer) -> *Token {
 
 					pre_add := digit_accumulator;
 
-					if (digit_accumulator > 0x7fff_ffff_ffff_ffff) && (base == 10) {	//QUESTION: @Speed: Reverse these ifs, because this is less than all our overflow_check_lower_bound values, so we can get away with 1 if statement for almost all numbers.
+					if (digit_accumulator > 0x7FFF_FFFF_FFFF_FFFF) && (base == 10) {	//QUESTION: @Speed: Reverse these ifs, because this is less than all our overflow_check_lower_bound values, so we can get away with 1 if statement for almost all numbers.
 						result_can_only_be_u64_if_it_is_an_integer_at_the_end = true;
 					}
 
@@ -1431,10 +1431,8 @@ make_number :: (lexer: *Lexer) -> *Token {
 		t.count = cursor - buffer;
 		f64_value := string_to_float64(t);
 
-		//
-		// We want to find the number of significant digits, so we can decide the default size of the number.
-		// This is probably too complex to be the right thing to do.
-		//
+		// Decimal precision affects whether an unsuffixed literal defaults to float32 or needs float64.
+		// Ignore trailing zeros and separators before counting significant digits; this approximation may still be more elaborate than necessary.
 		significant_figures: s32;
 		end := exponent_cursor;
 		if !end {
@@ -1737,9 +1735,8 @@ check_for_equals :: (lexer: *Lexer, c: Token_Type, augmented: Token_Type, eat :=
 	return result;
 }
 
-//
-// @Robustness: We might want to modify eat_input_due_to_block_comment so that characters in front of comment items need to be clear...e.g. right now it considers the string "/////*" to be a nested open-comment...not sure if we want that.
-//
+// Nested block comments treat an adjacent `/*` as another opener, even inside runs of slashes like `/////*`.
+//LATER: If that spelling should instead be plain comment text, the opener test here needs a stricter boundary rule.
 eat_input_due_to_block_comment :: (lexer: *Lexer) {
 	comment_depth: s32 = 1;
 
@@ -2308,11 +2305,8 @@ set_input_from_string :: (lexer: *Lexer, input: string) {
 }
 
 set_input_from_file :: (lexer: *Lexer, file_path: string) -> bool {
-	//
-	// :AtomTableInit
-	//
-	// @Speed: Use some heuristic to size the atom table so we don't pay for expansions?
-	//
+	// File input is lexer-owned and released on reset; optional identifier storage must copy names out of that buffer so retained names survive the reset.
+	//LATER: @Speed: Use some heuristic to size the storage so we don't pay for expansions?
 
 	assert(file_path != "");
 
@@ -2336,9 +2330,9 @@ has_a_big_exponent :: inline (value: float64) -> bool {
 
 	_f64 = value;
 
-	exponent := (_s64 >> 52) & 0x7ff;
+	exponent := (_s64 >> 52) & 0x7FF;
 
-	if exponent != 0 && exponent != 0x7ff {
+	if exponent != 0 && exponent != 0x7FF {
 		exponent -= 1023;
 		return exponent > 127 || exponent < -126;
 	}

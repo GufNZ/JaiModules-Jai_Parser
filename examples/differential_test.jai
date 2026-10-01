@@ -1609,8 +1609,10 @@ test_directive_workspace_fixtures :: () {
 	assert_all_precedence_pairs();
 	assert_expression_fixture("identifier");
 	assert_expression_fixture("42");
-	assert_expression_fixture("0xff");
+	assert_expression_fixture("0xFF");
+	assert_expression_fixture("0Xff");
 	assert_expression_fixture("0b101");
+	assert_expression_fixture("0B101");
 	assert_expression_fixture("1.25");
 	assert_expression_fixture("\"hello\\n\"");
 	assert_expression_fixture("true");

@@ -3087,7 +3087,7 @@ check_compound_reuse_fallback :: (source: string, check_procedure_type := false,
 }
 
 test_scalar_literal_ast_reuse :: () {
-	for expression: string.["42", "0xff", "0b101", "3.5", "true", "false", "#char \"A\""] {
+	for expression: string.["42", "0xFF", "0b101", "3.5", "true", "false", "#char \"A\""] {
 		old_source := copy_string(tprint("value := %; use := value;", expression));
 		new_source := copy_string(tprint("prefix :: 0;\nvalue := %; use := value;", expression));
 		old := Extended.parse_file(old_source);
@@ -5945,6 +5945,7 @@ test_nested_block_ast_reuse :: () {
 	set_allocators(*probe_tokens.node_pool, context.default_allocator);
 	probe.reuse_block = Extended.find_old_declaration_block(*probe, old.root_scope, 3, .DATA_DECLARATIONS);
 	assert(probe.reuse_block != null);
+	assert(Extended.find_old_declaration_block(*probe, old.root_scope, 3, .IMPERATIVE) == null);
 	probe.current_scope = Extended.push_lexical_scope(*probe);
 	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
 	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).name == "use");
@@ -6035,6 +6036,35 @@ test_nested_block_scope_reuse :: () {
 	Extended.release_parser_tree(*fresh);
 	Extended.release_parser_names(*fresh);
 	free(new_source);
+
+	boundary_source := copy_string("#if true { #if true { use := target; } target :: 1; }");
+	boundary_old := Extended.parse_file(boundary_source);
+	outer_at := "#if true ".count;
+	boundary_updated, boundary_ok := Extended.parse_file_edit(*boundary_old, outer_at, outer_at + 1, boundary_source);
+	boundary_fresh := Extended.parse_file(boundary_source);
+	assert(boundary_ok && boundary_updated.status == .COMPLETE && boundary_fresh.status == .COMPLETE);
+	boundary_tokens := Extended.materialise_tokens(boundary_source);
+	boundary_probe := Extended.Parser.{parsed=*boundary_tokens, edit_source=*boundary_old, edit_start=outer_at, edit_end=outer_at + 1};
+	set_allocators(*boundary_tokens.node_pool, context.default_allocator);
+	boundary_probe.current_scope = Extended.push_lexical_scope(*boundary_probe);
+	old_outer := boundary_old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block;
+	old_inner := old_outer.statements[0].(*Extended.Parser_If).then_block;
+	assert(Extended.find_old_declaration_block(*boundary_probe, boundary_old.root_scope, old_outer.first_token.(s64), .DATA_DECLARATIONS) == null);
+	assert(Extended.find_old_declaration_block(*boundary_probe, boundary_old.root_scope, old_inner.first_token.(s64), .DATA_DECLARATIONS) == null);
+	boundary_block := boundary_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block;
+	boundary_fresh_block := boundary_fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block;
+	assert(boundary_block.statements[0].(*Extended.Parser_If).then_block.statements[0].first_token == boundary_fresh_block.statements[0].(*Extended.Parser_If).then_block.statements[0].first_token);
+	assert(boundary_updated.diagnostics.count == boundary_fresh.diagnostics.count && boundary_updated.restart_points.count == boundary_fresh.restart_points.count);
+	Extended.release_parser_tree(*boundary_tokens);
+	Extended.release_parser_names(*boundary_tokens);
+	Extended.release_parser_tree(*boundary_old);
+	Extended.release_parser_names(*boundary_old);
+	assert(Extended.reconstruct_source(*boundary_updated) == boundary_source);
+	Extended.release_parser_tree(*boundary_updated);
+	Extended.release_parser_names(*boundary_updated);
+	Extended.release_parser_tree(*boundary_fresh);
+	Extended.release_parser_names(*boundary_fresh);
+	free(boundary_source);
 }
 
 test_indentation_only_ast_reuse :: () {
@@ -6160,11 +6190,9 @@ test_moved_closing_brace_ast_reuse :: () {
 	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=edit_start, edit_end=old_source.count, cursor=block.statements[0].first_token.(s64)};
 	set_allocators(*probe_tokens.node_pool, context.default_allocator);
 	probe.reuse_block = Extended.find_old_declaration_block(*probe, old.root_scope, block.first_token.(s64), .DATA_DECLARATIONS);
-	assert(probe.reuse_block == old_block);
+	assert(probe.reuse_block == null);
 	probe.current_scope = Extended.push_lexical_scope(*probe);
-	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
-	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).name == "use");
-	assert(probe.current_scope.references.count == 1);
+	assert(Extended.reuse_simple_declaration(*probe) == null);
 	Extended.release_parser_tree(*probe_tokens);
 	Extended.release_parser_names(*probe_tokens);
 
@@ -7515,12 +7543,12 @@ test_compound_declarations :: () {
 	assert(values.arguments[0].node.(*Extended.Parser_Literal)._u64 == 1);
 	assert(values.arguments[1].node.(*Extended.Parser_Literal)._u64 == 2);
 
-	shared := Extended.parse_declaration("mask, lower, upper: u32 = 0xffffffff;");
+	shared := Extended.parse_declaration("mask, lower, upper: u32 = 0xFFFFFFFF;");
 	assert(shared.status == .COMPLETE);
 	shared_node := shared.root.(*Extended.Parser_Compound_Declaration);
 	assert(shared_node.comma_separated_assignment.arguments.count == 3);
 	assert(shared_node.declaration_properties.expression.kind == .LITERAL);
-	assert(shared_node.declaration_properties.expression.(*Extended.Parser_Literal)._u64 == 0xffffffff);
+	assert(shared_node.declaration_properties.expression.(*Extended.Parser_Literal)._u64 == 0xFFFFFFFF);
 
 	partial_reassignment_source :: "{ a: int; a=, b := proc(); after(); }";
 	partial_reassignment := Extended.parse_block(partial_reassignment_source);
@@ -9023,7 +9051,7 @@ test_preserved_directive_forms :: () {
 	assert(Extended.token_at(*registers, register_statements[7].instruction.operands[1].register_declaration.pinning.target.span.first).original_text == "9");
 	assert(Extended.reconstruct_source(*registers) == register_source);
 
-	asm_numeric_source :: "{ #asm { mov dst, -10; mov dst, +0x2a; mov dst, -10.5; mov dst, +1.25; mov dst, 4294967296; mov dst, [base - 10]; } }";
+	asm_numeric_source :: "{ #asm { mov dst, -10; mov dst, +0x2A; mov dst, -10.5; mov dst, +1.25; mov dst, 4294967296; mov dst, [base - 10]; } }";
 	asm_numeric := Extended.parse_block(asm_numeric_source);
 	assert(asm_numeric.status == .COMPLETE);
 	asm_numeric_statements := asm_numeric.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements;
@@ -9562,10 +9590,10 @@ test_compiler_literal_shapes :: () {
 	assert_literal_fixture("-42");
 	assert_literal_fixture("0xff");
 	assert_literal_fixture("0XFF");
-	assert_literal_fixture("-0xff");
+	assert_literal_fixture("-0xFF");
 	assert_literal_fixture("0b101");
 	assert_literal_fixture("0B101");
-	assert_literal_fixture("0h3f800000");
+	assert_literal_fixture("0h3F800000");
 	assert_literal_fixture("0H3F800000");
 	assert_literal_fixture("1.25");
 	assert_literal_fixture("-1.25");
