@@ -23,6 +23,10 @@ main :: () {
 	Default.set_input_from_string(*default_lexer, "( .*)");
 	assert(Default.peek_next_token(*default_lexer).type == #char "(");
 
+	Default.set_input_from_string(*default_lexer, "\xEF\xBB\xBFvalue");
+	assert(Default.peek_next_token(*default_lexer).ident_value.name == "value");
+	assert(Default.peek_next_token(*default_lexer).c0 == 1);
+
 	input :: " \tfoo\\  bar /* outer /* inner */ end */ 1_000 (.*) ptr // tail";
 	Extended.set_input_from_string(*extended_lexer, input);
 

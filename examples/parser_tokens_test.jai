@@ -50,6 +50,7 @@ main :: () {
 	test_asm_tutorial_forms();
 
 	// Tokens, node ownership, and edit snapshot lifetimes.
+	test_utf8_bom();
 	test_trivia_round_trip();
 	test_node_token_spans();
 	test_identifier_expression();
@@ -217,7 +218,19 @@ test_for_expansion_tutorial_source :: () {
 }
 
 test_asm_tutorial_forms :: () {
-	BASICS_SOURCE :: "{ #asm { mov apple:, 10; banana: gpr; mov.64 banana, 17; } #asm { sub banana, apple; add count, banana; } }";//
+	BASICS_SOURCE :: #string JAI
+{
+	#asm {
+		mov apple:, 10;
+		banana: gpr;
+		mov.64 banana, 17;
+	}
+	#asm {
+		sub banana, apple;
+		add count, banana;
+	}
+}
+JAI;
 	basics := Extended.parse_block(BASICS_SOURCE);
 	assert(basics.status == .COMPLETE);
 	basics_statements := basics.root.(*Extended.Parser_Block).statements;
@@ -229,7 +242,20 @@ test_asm_tutorial_forms :: () {
 	assert(basics_statements[0].(*Extended.Parser_Asm).enclosing_scope == basics_statements[1].(*Extended.Parser_Asm).enclosing_scope);
 	assert(Extended.reconstruct_source(*basics) == BASICS_SOURCE);
 
-	IMMEDIATE_SOURCE :: "{ #asm { mov.8 b1:, 255; mov.8 b2:, -127; mov.16 w1:, 65535; mov.32 d1:, 4294967295; mov.64 q3:, 18446744073709551615; mov.64 q4:, -9223372036854775808; mov.32 f1:, 133.247; mov.64 f2:, 133.247; } }";//
+	IMMEDIATE_SOURCE :: #string JAI
+{
+	#asm {
+		mov.8 b1:, 255;
+		mov.8 b2:, -127;
+		mov.16 w1:, 65535;
+		mov.32 d1:, 4294967295;
+		mov.64 q3:, 18446744073709551615;
+		mov.64 q4:, -9223372036854775808;
+		mov.32 f1:, 133.247;
+		mov.64 f2:, 133.247;
+	}
+}
+JAI;
 	immediates := Extended.parse_block(IMMEDIATE_SOURCE);
 	assert(immediates.status == .COMPLETE);
 	immediate_statements := immediates.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements;
@@ -241,7 +267,14 @@ test_asm_tutorial_forms :: () {
 	assert(immediate_statements[7].instruction.operands[1].value.expression.kind == .LITERAL);
 	assert(Extended.reconstruct_source(*immediates) == IMMEDIATE_SOURCE);
 
-	FEATURE_SOURCE :: "{ #asm AVX, AVX2 {} #asm AVX2 { pxor v1:, v1, v1; } }";//
+	FEATURE_SOURCE :: #string JAI
+{
+	#asm AVX, AVX2 {}
+	#asm AVX2 {
+		pxor v1:, v1, v1;
+	}
+}
+JAI;
 	features := Extended.parse_block(FEATURE_SOURCE);
 	assert(features.status == .COMPLETE);
 	feature_blocks := features.root.(*Extended.Parser_Block).statements;
@@ -252,7 +285,21 @@ test_asm_tutorial_forms :: () {
 	assert(feature_blocks[1].(*Extended.Parser_Asm).statements[0].instruction.mnemonic.name == "pxor");
 	assert(Extended.reconstruct_source(*features) == FEATURE_SOURCE);
 
-	MACRO_SOURCE :: "{ reg :: __reg; add_the_two_regs :: (left: reg, right: reg) #expand { #asm { add left, right; } } #asm { mov a:, 12; mov b:, 18; } add_the_two_regs(b, a); }";//
+	MACRO_SOURCE :: #string JAI
+{
+	reg :: __reg;
+	add_the_two_regs :: (left: reg, right: reg) #expand {
+		#asm {
+			add left, right;
+		}
+	}
+	#asm {
+		mov a:, 12;
+		mov b:, 18;
+	}
+	add_the_two_regs(b, a);
+}
+JAI;
 	macro := Extended.parse_block(MACRO_SOURCE);
 	assert(macro.status == .COMPLETE);
 	macro_statements := macro.root.(*Extended.Parser_Block).statements;
@@ -266,7 +313,17 @@ test_asm_tutorial_forms :: () {
 	assert(macro_statements[3].kind == .PROCEDURE_CALL);
 	assert(Extended.reconstruct_source(*macro) == MACRO_SOURCE);
 
-	RUN_SOURCE :: "{ do_some_work :: (a: int, b: int) -> int { #asm { add a, b; } return a; } A :: #run do_some_work(10, 13); }";//
+	RUN_SOURCE :: #string JAI
+{
+	do_some_work :: (a: int, b: int) -> int {
+		#asm {
+			add a, b;
+		}
+		return a;
+	}
+	A :: #run do_some_work(10, 13);
+}
+JAI;
 	run_file := Extended.parse_block(RUN_SOURCE);
 	assert(run_file.status == .COMPLETE);
 	run_statements := run_file.root.(*Extended.Parser_Block).statements;
@@ -275,7 +332,13 @@ test_asm_tutorial_forms :: () {
 	assert(run_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Directive_Run).expression.kind == .PROCEDURE_CALL);
 	assert(Extended.reconstruct_source(*run_file) == RUN_SOURCE);
 
-	VSIB_SOURCE :: "{ #asm AVX, AVX2 { gatherdps gather_dest:, [original_float_array_pointer + vindex*4], gather_mask; } }";//
+	VSIB_SOURCE :: #string JAI
+{
+	#asm AVX, AVX2 {
+		gatherdps gather_dest:, [original_float_array_pointer + vindex*4], gather_mask;
+	}
+}
+JAI;
 	vsib := Extended.parse_block(VSIB_SOURCE);
 	assert(vsib.status == .COMPLETE);
 	vsib_asm := vsib.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm);
@@ -290,7 +353,15 @@ test_asm_tutorial_forms :: () {
 	assert(gather.operands[2].value.expression.(*Extended.Parser_Ident).name == "gather_mask");
 	assert(Extended.reconstruct_source(*vsib) == VSIB_SOURCE);
 
-	EVEX_SOURCE :: "{ #asm AVX512F { cvtps2dq v1:, [value_pointer]!; cvtps2dq v3:, v2 !z; cvtps2dq v5: &* mask, v4 !z; } }";//
+	EVEX_SOURCE :: #string JAI
+{
+	#asm AVX512F {
+		cvtps2dq v1:, [value_pointer]!;
+		cvtps2dq v3:, v2 !z;
+		cvtps2dq v5: &* mask, v4 !z;
+	}
+}
+JAI;
 	evex := Extended.parse_block(EVEX_SOURCE);
 	assert(evex.status == .COMPLETE);
 	evex_asm := evex.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm);
@@ -307,7 +378,16 @@ test_asm_tutorial_forms :: () {
 	assert(evex_asm.statements[2].instruction.operands[1].modifiers[0].kind == .BANG_Z);
 	assert(Extended.reconstruct_source(*evex) == EVEX_SOURCE);
 
-	SIZE_SOURCE :: "{ #if BITS == 8 #asm { popcnt.16 result, two_bytes; } else #asm { popcnt?BITS result, value; popcnt?T result, value; } }";//
+	SIZE_SOURCE :: #string JAI
+{
+	#if BITS == 8 #asm {
+		popcnt.16 result, two_bytes;
+	} else #asm {
+		popcnt?BITS result, value;
+		popcnt?T result, value;
+	}
+}
+JAI;
 	sizes := Extended.parse_block(SIZE_SOURCE);
 	assert(sizes.status == .COMPLETE);
 	size_branch := sizes.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
@@ -437,7 +517,15 @@ test_star_token_contract :: () {
 }
 
 test_asm_token_contract :: () {
-	SOURCE :: "#asm AVX, AVX2 {\n\t// declaration and pinning\n\tmov.8 apple:, -10;\n\tt: future_class === source;\n\tpopcnt?BITS result, value;\n\tcvtps2dq destination:, [base + index*8 - (-10.5)]!z &* mask; /* tail */\n}";//
+	SOURCE :: #string JAI
+#asm AVX, AVX2 {
+	// declaration and pinning
+	mov.8 apple:, -10;
+	t: future_class === source;
+	popcnt?BITS result, value;
+	cvtps2dq destination:, [base + index*8 - (-10.5)]!z &* mask; /* tail */
+}
+JAI;
 	parsed := Extended.materialise_tokens(SOURCE);
 	assert(parsed.status == .COMPLETE);
 	assert(Extended.reconstruct_source(*parsed) == SOURCE);
@@ -539,8 +627,38 @@ test_asm_token_contract :: () {
 	assert(Extended.reconstruct_source(*ordinary) == ORDINARY_SOURCE);
 }
 
+test_utf8_bom :: () {
+	SOURCE :: "\xEF\xBB\xBFvalue :: 1;";
+	parsed := Extended.parse_file(SOURCE);
+	assert(parsed.status == .COMPLETE);
+	assert(parsed.tokens[0].type == .IDENT);
+	assert(parsed.tokens[0].byte_start == 3 && parsed.tokens[0].c0 == 1);
+	assert(parsed.tokens[0].preceding_trivia == slice(SOURCE, 0, 3));
+	assert(Extended.reconstruct_source(*parsed) == SOURCE);
+
+	EDITED_SOURCE :: "\xEF\xBB\xBFvalue :: 2;";
+	edited, ok := Extended.parse_file_edit(*parsed, SOURCE.count - 2, SOURCE.count - 1, EDITED_SOURCE);
+	assert(ok && edited.status == .COMPLETE);
+	assert(edited.tokens[0].byte_start == 3 && edited.tokens[0].preceding_trivia == slice(EDITED_SOURCE, 0, 3));
+	assert(Extended.reconstruct_source(*edited) == EDITED_SOURCE);
+	Extended.release_parser_tree(*edited);
+	Extended.release_parser_names(*edited);
+	Extended.release_parser_tree(*parsed);
+	Extended.release_parser_names(*parsed);
+
+	empty := Extended.parse_file("\xEF\xBB\xBF");
+	assert(empty.status == .COMPLETE && empty.root.(*Extended.Parser_Block).statements.count == 0);
+	assert(Extended.reconstruct_source(*empty) == empty.source);
+	Extended.release_parser_tree(*empty);
+	Extended.release_parser_names(*empty);
+}
+
 test_trivia_round_trip :: () {
-	SOURCE :: "\xC2\xA0str :: #string /**/ , /**/ cr END\n123\nEND; // tail";//
+	SOURCE :: #string JAI
+str :: #string /**/ , /**/ cr END
+123
+END; // tail
+JAI;
 	parsed := Extended.materialise_tokens(SOURCE);
 	assert(parsed.status == .COMPLETE);
 
@@ -1101,7 +1219,7 @@ check_removed_binding_ast_reuse :: (new_text: string, edit_start: s64, edit_end:
 }
 
 test_repeated_convergence_edit :: () {
-	repeated_old_source := copy_string("first :: 1; middle :: 1; last :: 1; use := last;");
+	repeated_old_source := copy_string( "first :: 1; middle :: 1; last :: 1; use := last;");
 	repeated_new_source := copy_string("first :: 11; middle :: 1; last :: 1; use := last;");
 	repeated_edit := "first :: 1".count;
 	repeated_old := Extended.parse_file(repeated_old_source);
@@ -4938,7 +5056,7 @@ test_excluded_file_nodes :: () {
 }
 
 check_excluded_file_node :: (directive: string, expected_kind: type_of(Extended.Parser_Node.kind)) {
-	old_source := copy_string(tprint("value :: 1; % keep := value;", directive));
+	old_source := copy_string(tprint(			  "value :: 1; % keep := value;", directive));
 	new_source := copy_string(tprint("added :: 0;\nvalue :: 1; % keep := value;", directive));
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -7322,10 +7440,14 @@ test_nested_block_scope_reuse :: () {
 test_indentation_only_ast_reuse :: () {
 	check_indentation_only_ast_reuse(
 		"#if true {\n    use := target;\n    target :: 1;\n}",
-		"#if true {\n        use := target;\n    target :: 1;\n}", 4);
+		"#if true {\n        use := target;\n    target :: 1;\n}",
+		4
+	);
 	check_indentation_only_ast_reuse(
 		"#if true {\n        use := target;\n    target :: 1;\n}",
-		"#if true {\n    use := target;\n    target :: 1;\n}", 8);
+		"#if true {\n    use := target;\n    target :: 1;\n}",
+		8
+	);
 }
 
 check_indentation_only_ast_reuse :: (before: string, after: string, old_indent_length: s64) {
@@ -7854,8 +7976,17 @@ test_recovery_synchronization :: () {
 	assert(!Extended.parser_ensure_progress(*parser, guard));
 }
 
-test_complete_file_parsing :: () {//
-	SOURCE :: "first :: 1;\nsecond: s64 = 2;\ntyped_constant: s64 : 3;\n#scope_file\nmain :: () { value := cast,no_check(s32) 1; }\nthird := 3;";//
+test_complete_file_parsing :: () {
+	SOURCE :: #string JAI
+first :: 1;
+second: s64 = 2;
+typed_constant: s64 : 3;
+#scope_file
+main :: () {
+	value := cast,no_check(s32) 1;
+}
+third := 3;
+JAI;
 	parsed := Extended.parse_file(SOURCE, "fixture.jai");
 	root := parsed.root.(*Extended.Parser_Block);
 	if parsed.status != .COMPLETE {
@@ -7880,7 +8011,11 @@ test_complete_file_parsing :: () {//
 	assert((root.statements[2].(*Extended.Parser_Declaration).flags & .IS_CONSTANT) != 0);
 	assert(Extended.reconstruct_source(*parsed) == SOURCE);
 
-	NO_RESET_SOURCE :: "#no_reset x1: int;\n#no_reset x2: int;\nafter :: 1;";//
+	NO_RESET_SOURCE :: #string JAI
+#no_reset x1: int;
+#no_reset x2: int;
+after :: 1;
+JAI;
 	no_reset := Extended.parse_file(NO_RESET_SOURCE);
 	assert(no_reset.status == .COMPLETE);
 	no_reset_statements := no_reset.root.(*Extended.Parser_Block).statements;
@@ -7913,7 +8048,27 @@ test_complete_file_parsing :: () {//
 	assert(empty_root.statements.count == 0);
 	assert(empty_root.first_token == empty_root.one_past_last_token);
 
-	TERMINATORS_SOURCE :: "normal :: () {}\nafter_normal :: 1;\nquick_block :: () => {}\n#scope_file\nquick_expression :: value => value + 1;\nRecord :: struct {}\nafter_struct :: 2;\nChoice :: enum { ONLY; }\nouter :: () { nested :: () {}\nnext := 3;\nNested_Record :: struct {}\nNested_Choice :: enum { ONLY; } }\nfinal :: () {}";//
+	TERMINATORS_SOURCE :: #string JAI
+normal :: () { }
+after_normal :: 1;
+quick_block :: () => { }
+#scope_file
+quick_expression :: value => value + 1;
+Record :: struct { }
+after_struct :: 2;
+Choice :: enum {
+	ONLY;
+}
+outer :: () {
+	nested :: () { }
+	next := 3;
+	Nested_Record :: struct { }
+	Nested_Choice :: enum {
+		ONLY;
+	}
+}
+final :: () { }
+JAI;
 	terminators := Extended.parse_file(TERMINATORS_SOURCE);
 	terminators_root := terminators.root.(*Extended.Parser_Block);
 	assert(terminators.status == .COMPLETE);
@@ -8386,7 +8541,19 @@ test_incomplete_diagnostics :: () {
 }
 
 test_lexical_bindings :: () {
-	SOURCE :: "global :: 1; main :: (arg: s64) { local := arg; { local := 2; inner := local + global; } after := local; } forward := later; later :: 3;";//
+	SOURCE :: #string JAI
+global :: 1;
+main :: (arg: s64) {
+	local := arg;
+	{
+		local := 2;
+		inner := local + global;
+	}
+	after := local;
+}
+forward := later;
+later :: 3;
+JAI;
 	parsed := Extended.parse_file(SOURCE);
 	assert(parsed.status == .COMPLETE);
 	root := parsed.root.(*Extended.Parser_Block);
@@ -8537,7 +8704,11 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*load_parsed);
 	Extended.release_parser_names(*load_parsed);
 
-	SOURCE :: "Specific :: #import,file \"files/specific.jai\"; value := Specific.mess_up_this_string; nested := Specific.mess_up_this_string(\"text\");";//
+	SOURCE :: #string JAI
+Specific :: #import,file "files/specific.jai";
+value := Specific.mess_up_this_string;
+nested := Specific.mess_up_this_string("text");
+JAI;
 	parsed := Extended.parse_file(SOURCE, filename);
 	assert(parsed.status == .COMPLETE);
 	root := parsed.root.(*Extended.Parser_Block);
@@ -8564,7 +8735,11 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*parsed);
 	Extended.release_parser_names(*parsed);
 
-	DIRECTORY_SOURCE :: "Subdir :: #import,dir \"files/From_Subdirectory\"; call := Subdir.repeat; other := Subdir.pete;";//
+	DIRECTORY_SOURCE :: #string JAI
+Subdir :: #import,dir "files/From_Subdirectory";
+call := Subdir.repeat;
+other := Subdir.pete;
+JAI;
 	directory := Extended.parse_file(DIRECTORY_SOURCE, filename);
 	directory_only := Extended.resolve_file_imports(*directory, follow=.IMPORT_DIR);
 	assert(directory_only.modules.count == 1 && directory_only.modules[0].loaded_files.count == 0);
@@ -8583,7 +8758,12 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*directory);
 	Extended.release_parser_names(*directory);
 
-	EXCEPT_SOURCE :: "Subdir :: #import,dir \"files/From_Subdirectory\"; using,except(repeat) Subdir; yes := pete; no := repeat;";//
+	EXCEPT_SOURCE :: #string JAI
+Subdir :: #import,dir "files/From_Subdirectory";
+using,except(repeat) Subdir;
+yes := pete;
+no := repeat;
+JAI;
 	except_parsed := Extended.parse_file(EXCEPT_SOURCE, filename);
 	except_imports := Extended.resolve_file_imports(*except_parsed);
 	except_statements := except_parsed.root.(*Extended.Parser_Block).statements;
@@ -8593,7 +8773,9 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*except_parsed);
 	Extended.release_parser_names(*except_parsed);
 
-	MISSING_SOURCE :: "Missing :: #import,file \"files/does_not_exist.jai\";";//
+	MISSING_SOURCE :: #string JAI
+Missing :: #import,file "files/does_not_exist.jai";
+JAI;
 	missing := Extended.parse_file(MISSING_SOURCE, filename);
 	missing_imports := Extended.resolve_file_imports(*missing);
 	assert(missing_imports.modules.count == 0);
@@ -8603,7 +8785,10 @@ test_file_import_resolution :: () {
 	Extended.release_parser_names(*missing);
 
 	search_path := join(#filepath, "../../../how_to/040_import_and_load/files");
-	BARE_SOURCE :: "#import \"specific\"; call := mess_up_this_string;";//
+	BARE_SOURCE :: #string JAI
+#import "specific";
+call := mess_up_this_string;
+JAI;
 	bare := Extended.parse_file(BARE_SOURCE, filename);
 	bare_skipped := Extended.resolve_file_imports(*bare, .[search_path], follow=.IMPORT_FILE | .IMPORT_DIR);
 	assert(bare_skipped.modules.count == 0 && bare_skipped.unresolved_imports.count == 0);
@@ -8620,7 +8805,10 @@ test_file_import_resolution :: () {
 	Extended.release_parser_names(*bare);
 	free(search_path);
 
-	USING_SOURCE :: "using Specific :: #import,file \"files/specific.jai\"; call := mess_up_this_string;";//
+	USING_SOURCE :: #string JAI
+using Specific :: #import,file "files/specific.jai";
+call := mess_up_this_string;
+JAI;
 	using_parsed := Extended.parse_file(USING_SOURCE, filename);
 	using_imports := Extended.resolve_file_imports(*using_parsed);
 	assert(using_imports.modules.count == 1);
@@ -8630,7 +8818,12 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*using_parsed);
 	Extended.release_parser_names(*using_parsed);
 
-	FILTERED_SOURCE :: "Subdir :: #import,dir \"files/From_Subdirectory\"; using,only(repeat) Subdir; call := repeat; hidden := pete;";//
+	FILTERED_SOURCE :: #string JAI
+Subdir :: #import,dir "files/From_Subdirectory";
+using,only(repeat) Subdir;
+call := repeat;
+hidden := pete;
+JAI;
 	filtered := Extended.parse_file(FILTERED_SOURCE, filename);
 	filtered_imports := Extended.resolve_file_imports(*filtered);
 	filtered_use := filtered.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
@@ -8641,7 +8834,13 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*filtered);
 	Extended.release_parser_names(*filtered);
 
-	MULTIPLE_SOURCE :: "Subdir :: #import,dir \"files/From_Subdirectory\"; using,only(repeat) Subdir; using,only(pete) Subdir; first := repeat; second := pete;";//
+	MULTIPLE_SOURCE :: #string JAI
+Subdir :: #import,dir "files/From_Subdirectory";
+using,only(repeat) Subdir;
+using,only(pete) Subdir;
+first := repeat;
+second := pete;
+JAI;
 	multiple := Extended.parse_file(MULTIPLE_SOURCE, filename);
 	multiple_imports := Extended.resolve_file_imports(*multiple);
 	multiple_statements := multiple.root.(*Extended.Parser_Block).statements;
@@ -8653,7 +8852,11 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*multiple);
 	Extended.release_parser_names(*multiple);
 
-	PLAIN_USING_SOURCE :: "Specific :: #import,file \"files/specific.jai\"; using Specific; call := mess_up_this_string;";//
+	PLAIN_USING_SOURCE :: #string JAI
+Specific :: #import,file "files/specific.jai";
+using Specific;
+call := mess_up_this_string;
+JAI;
 	plain_using := Extended.parse_file(PLAIN_USING_SOURCE, filename, resolve_identifiers=false);
 	assert(plain_using.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
 	plain_imports := Extended.resolve_file_imports(*plain_using);
@@ -8663,7 +8866,16 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*plain_using);
 	Extended.release_parser_names(*plain_using);
 
-	NESTED_USING_SOURCE :: "Specific :: #import,file \"files/specific.jai\"; first :: () { using Specific; call := mess_up_this_string; } second :: () { call := mess_up_this_string; }";//
+	NESTED_USING_SOURCE :: #string JAI
+Specific :: #import,file "files/specific.jai";
+first :: () {
+	using Specific;
+	call := mess_up_this_string;
+}
+second :: () {
+	call := mess_up_this_string;
+}
+JAI;
 	nested_using := Extended.parse_file(NESTED_USING_SOURCE, filename);
 	nested_imports := Extended.resolve_file_imports(*nested_using);
 	nested_uses: [..]*Extended.Parser_Ident;
@@ -8685,7 +8897,11 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*nested_using);
 	Extended.release_parser_names(*nested_using);
 
-	MAP_SOURCE :: "Specific :: #import,file \"files/specific.jai\"; using,map(rename) Specific; call := mess_up_this_string;";//
+	MAP_SOURCE :: #string JAI
+Specific :: #import,file "files/specific.jai";
+using,map(rename) Specific;
+call := mess_up_this_string;
+JAI;
 	map_parsed := Extended.parse_file(MAP_SOURCE, filename);
 	map_imports := Extended.resolve_file_imports(*map_parsed);
 	assert(map_imports.unsupported_using_filters.count == 1);
@@ -8694,7 +8910,13 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*map_parsed);
 	Extended.release_parser_names(*map_parsed);
 
-	MAPPED_SOURCE :: "Subdir :: #import,dir \"files/From_Subdirectory\"; using,map(rename) Subdir; call := renamed_pete; hidden := pete; skipped := repeat;";//
+	MAPPED_SOURCE :: #string JAI
+Subdir :: #import,dir "files/From_Subdirectory";
+using,map(rename) Subdir;
+call := renamed_pete;
+hidden := pete;
+skipped := repeat;
+JAI;
 	mapped := Extended.parse_file(MAPPED_SOURCE, filename);
 	mapped_imports := Extended.resolve_file_imports(*mapped, map_names=test_using_map_names);
 	mapped_statements := mapped.root.(*Extended.Parser_Block).statements;
@@ -8717,7 +8939,11 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*mapped);
 	Extended.release_parser_names(*mapped);
 
-	COLLISION_SOURCE :: "Subdir :: #import,dir \"files/From_Subdirectory\"; using,map(rename) Subdir; call := same_name;";//
+	COLLISION_SOURCE :: #string JAI
+Subdir :: #import,dir "files/From_Subdirectory";
+using,map(rename) Subdir;
+call := same_name;
+JAI;
 	collision := Extended.parse_file(COLLISION_SOURCE, filename);
 	collision_imports := Extended.resolve_file_imports(*collision, map_names=test_using_map_collision);
 	assert(collision_imports.map_collisions.count == 1);
@@ -8728,7 +8954,17 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*collision);
 	Extended.release_parser_names(*collision);
 
-	AGGREGATE_SOURCE :: "Procs :: struct { Clear: int; PushMatrix: int; } main :: () { using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	AGGREGATE_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+	PushMatrix: int;
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := glClear;
+	hidden := PushMatrix;
+}
+JAI;
 	aggregate := Extended.parse_file(AGGREGATE_SOURCE, filename);
 	aggregate_imports := Extended.resolve_file_imports(*aggregate, map_names=test_using_map_fields);
 	assert(aggregate_imports.mapped_names.count == 2);
@@ -8753,7 +8989,20 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*aggregate);
 	Extended.release_parser_names(*aggregate);
 
-	STATIC_SOURCE :: "Procs :: struct { #if true { Clear: int; } else { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	STATIC_SOURCE :: #string JAI
+Procs :: struct {
+	#if true {
+		Clear: int;
+	} else {
+		PushMatrix: int;
+	}
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := glClear;
+	hidden := PushMatrix;
+}
+JAI;
 	static_value := Extended.parse_file(STATIC_SOURCE, filename);
 	static_imports := Extended.resolve_file_imports(*static_value, map_names=test_using_map_fields);
 	assert(static_value.status == .COMPLETE && static_imports.mapped_names.count == 1);
@@ -8764,7 +9013,22 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*static_value);
 	Extended.release_parser_names(*static_value);
 
-	FALSE_SOURCE :: "Procs :: struct { #if false { PushMatrix: int; } else { #if true { Clear: int; } } } main :: () { using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	FALSE_SOURCE :: #string JAI
+Procs :: struct {
+	#if false {
+		PushMatrix: int;
+	} else {
+		#if true {
+			Clear: int;
+		}
+	}
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := glClear;
+	hidden := PushMatrix;
+}
+JAI;
 	false_value := Extended.parse_file(FALSE_SOURCE, filename);
 	false_imports := Extended.resolve_file_imports(*false_value, map_names=test_using_map_fields);
 	assert(false_value.status == .COMPLETE && false_imports.mapped_names.count == 1);
@@ -8776,7 +9040,20 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*false_value);
 	Extended.release_parser_names(*false_value);
 
-	NEGATED_SOURCE :: "Procs :: struct { #if !false { Clear: int; } else { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	NEGATED_SOURCE :: #string JAI
+Procs :: struct {
+	#if !false {
+		Clear: int;
+	} else {
+		PushMatrix: int;
+	}
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := glClear;
+	hidden := PushMatrix;
+}
+JAI;
 	negated_value := Extended.parse_file(NEGATED_SOURCE, filename);
 	negated_imports := Extended.resolve_file_imports(*negated_value, map_names=test_using_map_fields);
 	assert(negated_value.status == .COMPLETE && negated_imports.mapped_names.count == 1);
@@ -8787,7 +9064,20 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*negated_value);
 	Extended.release_parser_names(*negated_value);
 
-	NEGATED_FALSE_SOURCE :: "Procs :: struct { #if !true { PushMatrix: int; } else { Clear: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	NEGATED_FALSE_SOURCE :: #string JAI
+Procs :: struct {
+	#if !true {
+		PushMatrix: int;
+	} else {
+		Clear: int;
+	}
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := glClear;
+	hidden := PushMatrix;
+}
+JAI;
 	negated_false := Extended.parse_file(NEGATED_FALSE_SOURCE, filename);
 	negated_false_imports := Extended.resolve_file_imports(*negated_false, map_names=test_using_map_fields);
 	assert(negated_false.status == .COMPLETE && negated_false_imports.mapped_names.count == 1);
@@ -8799,7 +9089,21 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*negated_false);
 	Extended.release_parser_names(*negated_false);
 
-	CONSTANT_SOURCE :: "Enabled :: true; Procs :: struct { #if Enabled { Clear: int; } else { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	CONSTANT_SOURCE :: #string JAI
+Enabled :: true;
+Procs :: struct {
+	#if Enabled {
+		Clear: int;
+	} else {
+		PushMatrix: int;
+	}
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := glClear;
+	hidden := PushMatrix;
+}
+JAI;
 	constant_value := Extended.parse_file(CONSTANT_SOURCE, filename);
 	constant_imports := Extended.resolve_file_imports(*constant_value, map_names=test_using_map_fields);
 	assert(constant_value.status == .COMPLETE && constant_imports.mapped_names.count == 1);
@@ -8810,7 +9114,21 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*constant_value);
 	Extended.release_parser_names(*constant_value);
 
-	AMBIGUOUS_CONSTANT_SOURCE :: "Enabled :: true; Enabled :: false; Procs :: struct { #if Enabled { Clear: int; } else { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	AMBIGUOUS_CONSTANT_SOURCE :: #string JAI
+Enabled :: true;
+Enabled :: false;
+Procs :: struct {
+	#if Enabled {
+		Clear: int;
+	} else {
+		PushMatrix: int;
+	}
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := glClear;
+}
+JAI;
 	ambiguous_constant := Extended.parse_file(AMBIGUOUS_CONSTANT_SOURCE, filename);
 	ambiguous_constant_imports := Extended.resolve_file_imports(*ambiguous_constant, map_names=test_using_map_fields);
 	assert(ambiguous_constant.status == .COMPLETE && ambiguous_constant_imports.mapped_names.count == 0 && ambiguous_constant_imports.unsupported_using_filters.count == 1);
@@ -8823,7 +9141,22 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*ambiguous_constant);
 	Extended.release_parser_names(*ambiguous_constant);
 
-	AMBIGUOUS_CONDITION_ALIAS_SOURCE :: "Enabled :: true; Enabled :: false; Selected :: Enabled; Procs :: struct { #if Selected { Clear: int; } else { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	AMBIGUOUS_CONDITION_ALIAS_SOURCE :: #string JAI
+Enabled :: true;
+Enabled :: false;
+Selected :: Enabled;
+Procs :: struct {
+	#if Selected {
+		Clear: int;
+	} else {
+		PushMatrix: int;
+	}
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := glClear;
+}
+JAI;
 	ambiguous_condition_alias := Extended.parse_file(AMBIGUOUS_CONDITION_ALIAS_SOURCE, filename);
 	ambiguous_condition_alias_imports := Extended.resolve_file_imports(*ambiguous_condition_alias, map_names=test_using_map_fields);
 	assert(ambiguous_condition_alias.status == .COMPLETE && ambiguous_condition_alias_imports.mapped_names.count == 0 && ambiguous_condition_alias_imports.unsupported_using_filters.count == 1);
@@ -8831,7 +9164,22 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*ambiguous_condition_alias);
 	Extended.release_parser_names(*ambiguous_condition_alias);
 
-	COMBINED_SOURCE :: "Left :: false; Right :: true; Enabled :: Left || Right && !false; Procs :: struct { #if Enabled { Clear: int; } else { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	COMBINED_SOURCE :: #string JAI
+Left :: false;
+Right :: true;
+Enabled :: Left || Right && !false;
+Procs :: struct {
+	#if Enabled {
+		Clear: int;
+	} else {
+		PushMatrix: int;
+	}
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := glClear;
+}
+JAI;
 	combined := Extended.parse_file(COMBINED_SOURCE, filename);
 	combined_imports := Extended.resolve_file_imports(*combined, map_names=test_using_map_fields);
 	assert(combined.status == .COMPLETE && combined_imports.mapped_names.count == 1);
@@ -8840,7 +9188,19 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*combined);
 	Extended.release_parser_names(*combined);
 
-	MUTABLE_SOURCE :: "Enabled := true; Procs :: struct { Clear: int; #if Enabled { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	MUTABLE_SOURCE :: #string JAI
+Enabled := true;
+Procs :: struct {
+	Clear: int;
+	#if Enabled {
+		PushMatrix: int;
+	}
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := glClear;
+}
+JAI;
 	mutable_value := Extended.parse_file(MUTABLE_SOURCE, filename);
 	mutable_imports := Extended.resolve_file_imports(*mutable_value, map_names=test_using_map_fields);
 	assert(mutable_value.status == .COMPLETE && mutable_imports.mapped_names.count == 0 && mutable_imports.unsupported_using_filters.count == 1);
@@ -8848,7 +9208,20 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*mutable_value);
 	Extended.release_parser_names(*mutable_value);
 
-	CONSTANT_CYCLE_SOURCE :: "First :: Second; Second :: First; Procs :: struct { Clear: int; #if First { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	CONSTANT_CYCLE_SOURCE :: #string JAI
+First :: Second;
+Second :: First;
+Procs :: struct {
+	Clear: int;
+	#if First {
+		PushMatrix: int;
+	}
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := glClear;
+}
+JAI;
 	constant_cycle := Extended.parse_file(CONSTANT_CYCLE_SOURCE, filename);
 	constant_cycle_imports := Extended.resolve_file_imports(*constant_cycle, map_names=test_using_map_fields);
 	assert(constant_cycle.status == .COMPLETE && constant_cycle_imports.mapped_names.count == 0 && constant_cycle_imports.unsupported_using_filters.count == 1);
@@ -8856,7 +9229,18 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*constant_cycle);
 	Extended.release_parser_names(*constant_cycle);
 
-	UNKNOWN_SOURCE :: "Procs :: struct { Clear: int; #if Unknown { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	UNKNOWN_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+	#if Unknown {
+		PushMatrix: int;
+	}
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := glClear;
+}
+JAI;
 	unknown_value := Extended.parse_file(UNKNOWN_SOURCE, filename);
 	unknown_imports := Extended.resolve_file_imports(*unknown_value, map_names=test_using_map_fields);
 	assert(unknown_value.status == .COMPLETE && unknown_imports.mapped_names.count == 0 && unknown_imports.unsupported_using_filters.count == 1);
@@ -8869,7 +9253,18 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*unknown_value);
 	Extended.release_parser_names(*unknown_value);
 
-	NEGATED_UNKNOWN_SOURCE :: "Procs :: struct { Clear: int; #if !Unknown { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	NEGATED_UNKNOWN_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+	#if !Unknown {
+		PushMatrix: int;
+	}
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := glClear;
+}
+JAI;
 	negated_unknown := Extended.parse_file(NEGATED_UNKNOWN_SOURCE, filename);
 	negated_unknown_imports := Extended.resolve_file_imports(*negated_unknown, map_names=test_using_map_fields);
 	assert(negated_unknown.status == .COMPLETE && negated_unknown_imports.mapped_names.count == 0 && negated_unknown_imports.unsupported_using_filters.count == 1);
@@ -8877,7 +9272,16 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*negated_unknown);
 	Extended.release_parser_names(*negated_unknown);
 
-	ALIAS_SOURCE :: "Procs :: struct { Clear: int; } Alias :: Procs; main :: () { using,map(rename) procs: Alias; call := glClear; }";//
+	ALIAS_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Alias :: Procs;
+main :: () {
+	using,map(rename) procs: Alias;
+	call := glClear;
+}
+JAI;
 	alias := Extended.parse_file(ALIAS_SOURCE, filename);
 	alias_imports := Extended.resolve_file_imports(*alias, map_names=test_using_map_fields);
 	assert(alias_imports.mapped_names.count == 1);
@@ -8890,7 +9294,18 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*alias);
 	Extended.release_parser_names(*alias);
 
-	QUERY_TYPE_SOURCE :: "Procs :: struct { Clear: int; } main :: () { original := Procs.{Clear=1}; using,map(rename) procs: type_of(original); call := glClear; }";//
+	QUERY_TYPE_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+main :: () {
+	original := Procs.{
+		Clear=1
+	};
+	using,map(rename) procs: type_of(original);
+	call := glClear;
+}
+JAI;
 	query_type := Extended.parse_file(QUERY_TYPE_SOURCE, filename);
 	query_type_imports := Extended.resolve_file_imports(*query_type, map_names=test_using_map_fields);
 	assert(query_type.status == .COMPLETE && query_type_imports.mapped_names.count == 1 && query_type_imports.unsupported_using_filters.count == 0);
@@ -8900,7 +9315,22 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*query_type);
 	Extended.release_parser_names(*query_type);
 
-	MEMBER_TYPE_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { using,map(rename) procs := Container.{Nested=Child.{Clear=1}}.Nested; call := glClear; }";//
+	MEMBER_TYPE_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+main :: () {
+	using,map(rename) procs := Container.{
+		Nested=Child.{
+			Clear=1
+		}
+	}.Nested;
+	call := glClear;
+}
+JAI;
 	member_type := Extended.parse_file(MEMBER_TYPE_SOURCE, filename);
 	member_type_imports := Extended.resolve_file_imports(*member_type, map_names=test_using_map_fields);
 	assert(member_type.status == .COMPLETE && member_type_imports.mapped_names.count == 1 && member_type_imports.unsupported_using_filters.count == 0);
@@ -8910,7 +9340,23 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*member_type);
 	Extended.release_parser_names(*member_type);
 
-	TYPED_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { container: Container = .{Nested=Child.{Clear=1}}; using,map(rename) procs := container.Nested; call := glClear; }";//
+	TYPED_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+main :: () {
+	container: Container = .{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+	using,map(rename) procs := container.Nested;
+	call := glClear;
+}
+JAI;
 	typed_member := Extended.parse_file(TYPED_MEMBER_SOURCE, filename);
 	typed_member_imports := Extended.resolve_file_imports(*typed_member, map_names=test_using_map_fields);
 	assert(typed_member.status == .COMPLETE && typed_member_imports.mapped_names.count == 1 && typed_member_imports.unsupported_using_filters.count == 0);
@@ -8920,7 +9366,23 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*typed_member);
 	Extended.release_parser_names(*typed_member);
 
-	INFERRED_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { container := Container.{Nested=Child.{Clear=1}}; using,map(rename) procs := container.Nested; call := glClear; }";//
+	INFERRED_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+main :: () {
+	container := Container.{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+	using,map(rename) procs := container.Nested;
+	call := glClear;
+}
+JAI;
 	inferred_member := Extended.parse_file(INFERRED_MEMBER_SOURCE, filename);
 	inferred_member_imports := Extended.resolve_file_imports(*inferred_member, map_names=test_using_map_fields);
 	assert(inferred_member.status == .COMPLETE && inferred_member_imports.mapped_names.count == 1 && inferred_member_imports.unsupported_using_filters.count == 0);
@@ -8930,7 +9392,25 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*inferred_member);
 	Extended.release_parser_names(*inferred_member);
 
-	CALLED_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } make :: () -> Container { return .{Nested=Child.{Clear=1}}; } main :: () { using,map(rename) procs := make().Nested; call := glClear; }";//
+	CALLED_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+make :: () -> Container {
+	return .{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+}
+main :: () {
+	using,map(rename) procs := make().Nested;
+	call := glClear;
+}
+JAI;
 	called_member := Extended.parse_file(CALLED_MEMBER_SOURCE, filename);
 	called_member_imports := Extended.resolve_file_imports(*called_member, map_names=test_using_map_fields);
 	assert(called_member.status == .COMPLETE && called_member_imports.mapped_names.count == 1 && called_member_imports.unsupported_using_filters.count == 0);
@@ -8940,7 +9420,23 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*called_member);
 	Extended.release_parser_names(*called_member);
 
-	CAST_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { original := Container.{Nested=Child.{Clear=1}}; using,map(rename) procs := (cast(Container) original).Nested; call := glClear; }";//
+	CAST_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+main :: () {
+	original := Container.{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+	using,map(rename) procs := (cast(Container) original).Nested;
+	call := glClear;
+}
+JAI;
 	cast_member := Extended.parse_file(CAST_MEMBER_SOURCE, filename);
 	cast_member_imports := Extended.resolve_file_imports(*cast_member, map_names=test_using_map_fields);
 	assert(cast_member.status == .COMPLETE && cast_member_imports.mapped_names.count == 1 && cast_member_imports.unsupported_using_filters.count == 0);
@@ -8950,7 +9446,22 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*cast_member);
 	Extended.release_parser_names(*cast_member);
 
-	RUN_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { using,map(rename) procs := (#run Container.{Nested=Child.{Clear=1}}).Nested; call := glClear; }";//
+	RUN_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+main :: () {
+	using,map(rename) procs := (#run Container.{
+		Nested=Child.{
+			Clear=1
+		}
+	}).Nested;
+	call := glClear;
+}
+JAI;
 	run_member := Extended.parse_file(RUN_MEMBER_SOURCE, filename);
 	run_member_imports := Extended.resolve_file_imports(*run_member, map_names=test_using_map_fields);
 	assert(run_member.status == .COMPLETE && run_member_imports.mapped_names.count == 1 && run_member_imports.unsupported_using_filters.count == 0);
@@ -8960,7 +9471,29 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*run_member);
 	Extended.release_parser_names(*run_member);
 
-	CONDITIONAL_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: (ready: bool) { using,map(rename) procs := (ifx ready then Container.{Nested=Child.{Clear=1}} else Container.{Nested=Child.{Clear=2}}).Nested; call := glClear; }";//
+	CONDITIONAL_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+main :: (ready: bool) {
+	using,map(rename) procs := (
+		ifx ready
+			then Container.{
+				Nested=Child.{
+					Clear=1
+				}
+			} else Container.{
+				Nested=Child.{
+					Clear=2
+				}
+			}
+	).Nested;
+	call := glClear;
+}
+JAI;
 	conditional_member := Extended.parse_file(CONDITIONAL_MEMBER_SOURCE, filename);
 	conditional_member_imports := Extended.resolve_file_imports(*conditional_member, map_names=test_using_map_fields);
 	assert(conditional_member.status == .COMPLETE && conditional_member_imports.mapped_names.count == 1 && conditional_member_imports.unsupported_using_filters.count == 0);
@@ -8970,7 +9503,32 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*conditional_member);
 	Extended.release_parser_names(*conditional_member);
 
-	MISMATCHED_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Other :: struct { Nested: Child; } main :: (ready: bool) { using,map(rename) procs := (ifx ready then Container.{Nested=Child.{Clear=1}} else Other.{Nested=Child.{Clear=2}}).Nested; call := glClear; }";//
+	MISMATCHED_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+Other :: struct {
+	Nested: Child;
+}
+main :: (ready: bool) {
+	using,map(rename) procs := (
+		ifx ready
+			then Container.{
+				Nested=Child.{
+					Clear=1
+				}
+			} else Other.{
+				Nested=Child.{
+					Clear=2
+				}
+			}
+	).Nested;
+	call := glClear;
+}
+JAI;
 	mismatched_member := Extended.parse_file(MISMATCHED_MEMBER_SOURCE, filename);
 	mismatched_member_imports := Extended.resolve_file_imports(*mismatched_member, map_names=test_using_map_fields);
 	assert(mismatched_member.status == .COMPLETE && mismatched_member_imports.mapped_names.count == 0 && mismatched_member_imports.unsupported_using_filters.count == 1);
@@ -8978,7 +9536,30 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*mismatched_member);
 	Extended.release_parser_names(*mismatched_member);
 
-	STATIC_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Other :: struct { PushMatrix: int; } main :: () { using,map(rename) procs := (#ifx true then Container.{Nested=Child.{Clear=1}} else Other.{PushMatrix=2}).Nested; call := glClear; }";//
+	STATIC_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+main :: () {
+	using,map(rename) procs := (
+		#ifx true
+			then Container.{
+				Nested=Child.{
+					Clear=1
+				}
+			} else Other.{
+				PushMatrix=2
+			}
+	).Nested;
+	call := glClear;
+}
+JAI;
 	static_member := Extended.parse_file(STATIC_MEMBER_SOURCE, filename);
 	static_member_imports := Extended.resolve_file_imports(*static_member, map_names=test_using_map_fields);
 	assert(static_member.status == .COMPLETE && static_member_imports.mapped_names.count == 1 && static_member_imports.unsupported_using_filters.count == 0);
@@ -8988,7 +9569,33 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*static_member);
 	Extended.release_parser_names(*static_member);
 
-	OVERLOADED_RUN_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Container { return .{Nested=Child.{Clear=1}}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := (#run make(1)).Nested; call := glClear; }";//
+	OVERLOADED_RUN_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: int) -> Container {
+	return .{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+}
+make :: (text: string) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	using,map(rename) procs := (#run make(1)).Nested;
+	call := glClear;
+}
+JAI;
 	overloaded_run_member := Extended.parse_file(OVERLOADED_RUN_MEMBER_SOURCE, filename);
 	overloaded_run_member_imports := Extended.resolve_file_imports(*overloaded_run_member, map_names=test_using_map_fields);
 	assert(overloaded_run_member.status == .COMPLETE && overloaded_run_member_imports.mapped_names.count == 0 && overloaded_run_member_imports.unsupported_using_filters.count == 1);
@@ -8996,7 +9603,24 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*overloaded_run_member);
 	Extended.release_parser_names(*overloaded_run_member);
 
-	AMBIGUOUS_CAST_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Container :: struct { PushMatrix: int; } main :: () { original := Child.{Clear=1}; using,map(rename) procs := (cast(Container) original).Nested; call := glClear; }";//
+	AMBIGUOUS_CAST_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+Container :: struct {
+	PushMatrix: int;
+}
+main :: () {
+	original := Child.{
+		Clear=1
+	};
+	using,map(rename) procs := (cast(Container) original).Nested;
+	call := glClear;
+}
+JAI;
 	ambiguous_cast_member := Extended.parse_file(AMBIGUOUS_CAST_MEMBER_SOURCE, filename);
 	ambiguous_cast_member_imports := Extended.resolve_file_imports(*ambiguous_cast_member, map_names=test_using_map_fields);
 	assert(ambiguous_cast_member.status == .COMPLETE && ambiguous_cast_member_imports.mapped_names.count == 0 && ambiguous_cast_member_imports.unsupported_using_filters.count == 1);
@@ -9004,7 +9628,33 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*ambiguous_cast_member);
 	Extended.release_parser_names(*ambiguous_cast_member);
 
-	CALLED_OVERLOAD_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Container { return .{Nested=Child.{Clear=1}}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(1).Nested; call := glClear; }";//
+	CALLED_OVERLOAD_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: int) -> Container {
+	return .{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+}
+make :: (text: string) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make(1).Nested;
+	call := glClear;
+}
+JAI;
 	called_overload_member := Extended.parse_file(CALLED_OVERLOAD_MEMBER_SOURCE, filename);
 	called_overload_member_imports := Extended.resolve_file_imports(*called_overload_member, map_names=test_using_map_fields);
 	assert(called_overload_member.status == .COMPLETE && called_overload_member_imports.mapped_names.count == 0 && called_overload_member_imports.unsupported_using_filters.count == 1);
@@ -9012,7 +9662,25 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*called_overload_member);
 	Extended.release_parser_names(*called_overload_member);
 
-	CALLED_POLYMORPHIC_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } make :: (value: $T) -> Container { return .{Nested=Child.{Clear=1}}; } main :: () { using,map(rename) procs := make(1).Nested; call := glClear; }";//
+	CALLED_POLYMORPHIC_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+make :: (value: $T) -> Container {
+	return .{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+}
+main :: () {
+	using,map(rename) procs := make(1).Nested;
+	call := glClear;
+}
+JAI;
 	called_polymorphic_member := Extended.parse_file(CALLED_POLYMORPHIC_MEMBER_SOURCE, filename);
 	called_polymorphic_member_imports := Extended.resolve_file_imports(*called_polymorphic_member, map_names=test_using_map_fields);
 	assert(called_polymorphic_member.status == .COMPLETE && called_polymorphic_member_imports.mapped_names.count == 1 && called_polymorphic_member_imports.unsupported_using_filters.count == 0);
@@ -9020,7 +9688,24 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*called_polymorphic_member);
 	Extended.release_parser_names(*called_polymorphic_member);
 
-	ALIASED_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { original := Container.{Nested=Child.{Clear=1}}; container := original; using,map(rename) procs := container.Nested; call := glClear; }";//
+	ALIASED_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+main :: () {
+	original := Container.{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+	container := original;
+	using,map(rename) procs := container.Nested;
+	call := glClear;
+}
+JAI;
 	aliased_member := Extended.parse_file(ALIASED_MEMBER_SOURCE, filename);
 	aliased_member_imports := Extended.resolve_file_imports(*aliased_member, map_names=test_using_map_fields);
 	assert(aliased_member.status == .COMPLETE && aliased_member_imports.mapped_names.count == 1 && aliased_member_imports.unsupported_using_filters.count == 0);
@@ -9030,7 +9715,20 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*aliased_member);
 	Extended.release_parser_names(*aliased_member);
 
-	CYCLIC_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { first := second; second := first; using,map(rename) procs := first.Nested; call := glClear; }";//
+	CYCLIC_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+main :: () {
+	first := second;
+	second := first;
+	using,map(rename) procs := first.Nested;
+	call := glClear;
+}
+JAI;
 	cyclic_member := Extended.parse_file(CYCLIC_MEMBER_SOURCE, filename);
 	cyclic_member_imports := Extended.resolve_file_imports(*cyclic_member, map_names=test_using_map_fields);
 	assert(cyclic_member.status == .COMPLETE && cyclic_member_imports.mapped_names.count == 0 && cyclic_member_imports.unsupported_using_filters.count == 1);
@@ -9038,7 +9736,35 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*cyclic_member);
 	Extended.release_parser_names(*cyclic_member);
 
-	OVERLOADED_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Container { return .{Nested=Child.{Clear=1}}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { original := make(1); container := original; using,map(rename) procs := container.Nested; call := glClear; }";//
+	OVERLOADED_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: int) -> Container {
+	return .{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+}
+make :: (text: string) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	original := make(1);
+	container := original;
+	using,map(rename) procs := container.Nested;
+	call := glClear;
+}
+JAI;
 	overloaded_member := Extended.parse_file(OVERLOADED_MEMBER_SOURCE, filename);
 	overloaded_member_imports := Extended.resolve_file_imports(*overloaded_member, map_names=test_using_map_fields);
 	assert(overloaded_member.status == .COMPLETE && overloaded_member_imports.mapped_names.count == 0 && overloaded_member_imports.unsupported_using_filters.count == 1);
@@ -9046,7 +9772,29 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*overloaded_member);
 	Extended.release_parser_names(*overloaded_member);
 
-	AMBIGUOUS_ALIAS_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { original := Container.{Nested=Child.{Clear=1}}; original := Container.{Nested=Child.{Clear=2}}; container := original; using,map(rename) procs := container.Nested; call := glClear; }";//
+	AMBIGUOUS_ALIAS_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+main :: () {
+	original := Container.{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+	original := Container.{
+		Nested=Child.{
+			Clear=2
+		}
+	};
+	container := original;
+	using,map(rename) procs := container.Nested;
+	call := glClear;
+}
+JAI;
 	ambiguous_alias_member := Extended.parse_file(AMBIGUOUS_ALIAS_MEMBER_SOURCE, filename);
 	ambiguous_alias_member_imports := Extended.resolve_file_imports(*ambiguous_alias_member, map_names=test_using_map_fields);
 	assert(ambiguous_alias_member.status == .COMPLETE && ambiguous_alias_member_imports.mapped_names.count == 0 && ambiguous_alias_member_imports.unsupported_using_filters.count == 1);
@@ -9054,7 +9802,20 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*ambiguous_alias_member);
 	Extended.release_parser_names(*ambiguous_alias_member);
 
-	AMBIGUOUS_VALUE_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { container: Container; container: Container; using,map(rename) procs := container.Nested; call := glClear; }";//
+	AMBIGUOUS_VALUE_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+main :: () {
+	container: Container;
+	container: Container;
+	using,map(rename) procs := container.Nested;
+	call := glClear;
+}
+JAI;
 	ambiguous_value_member := Extended.parse_file(AMBIGUOUS_VALUE_MEMBER_SOURCE, filename);
 	ambiguous_value_member_imports := Extended.resolve_file_imports(*ambiguous_value_member, map_names=test_using_map_fields);
 	assert(ambiguous_value_member.status == .COMPLETE && ambiguous_value_member_imports.mapped_names.count == 0 && ambiguous_value_member_imports.unsupported_using_filters.count == 1);
@@ -9062,7 +9823,22 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*ambiguous_value_member);
 	Extended.release_parser_names(*ambiguous_value_member);
 
-	MISSING_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { using,map(rename) procs := Container.{Nested=Child.{Clear=1}}.Missing; call := glClear; }";//
+	MISSING_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+main :: () {
+	using,map(rename) procs := Container.{
+		Nested=Child.{
+			Clear=1
+		}
+	}.Missing;
+	call := glClear;
+}
+JAI;
 	missing_member := Extended.parse_file(MISSING_MEMBER_SOURCE, filename);
 	missing_member_imports := Extended.resolve_file_imports(*missing_member, map_names=test_using_map_fields);
 	assert(missing_member.status == .COMPLETE && missing_member_imports.mapped_names.count == 0 && missing_member_imports.unsupported_using_filters.count == 1);
@@ -9070,7 +9846,25 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*missing_member);
 	Extended.release_parser_names(*missing_member);
 
-	AMBIGUOUS_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Child :: struct { PushMatrix: int; } Container :: struct { Nested: Child; } main :: () { using,map(rename) procs := Container.{Nested=Child.{Clear=1}}.Nested; call := glClear; }";//
+	AMBIGUOUS_MEMBER_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Child :: struct {
+	PushMatrix: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+main :: () {
+	using,map(rename) procs := Container.{
+		Nested=Child.{
+			Clear=1
+		}
+	}.Nested;
+	call := glClear;
+}
+JAI;
 	ambiguous_member := Extended.parse_file(AMBIGUOUS_MEMBER_SOURCE, filename);
 	ambiguous_member_imports := Extended.resolve_file_imports(*ambiguous_member, map_names=test_using_map_fields);
 	assert(ambiguous_member.status == .COMPLETE && ambiguous_member_imports.mapped_names.count == 0 && ambiguous_member_imports.unsupported_using_filters.count == 1);
@@ -9078,7 +9872,15 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*ambiguous_member);
 	Extended.release_parser_names(*ambiguous_member);
 
-	UNKNOWN_QUERY_SOURCE :: "Procs :: struct { Clear: int; } main :: () { using,map(rename) procs: type_of(missing); call := glClear; }";//
+	UNKNOWN_QUERY_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+main :: () {
+	using,map(rename) procs: type_of(missing);
+	call := glClear;
+}
+JAI;
 	unknown_query := Extended.parse_file(UNKNOWN_QUERY_SOURCE, filename);
 	unknown_query_imports := Extended.resolve_file_imports(*unknown_query, map_names=test_using_map_fields);
 	assert(unknown_query.status == .COMPLETE && unknown_query_imports.mapped_names.count == 0 && unknown_query_imports.unsupported_using_filters.count == 1);
@@ -9086,7 +9888,13 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*unknown_query);
 	Extended.release_parser_names(*unknown_query);
 
-	CYCLIC_QUERY_SOURCE :: "main :: () { value: type_of(value); using,map(rename) procs: type_of(value); call := glClear; }";//
+	CYCLIC_QUERY_SOURCE :: #string JAI
+main :: () {
+	value: type_of(value);
+	using,map(rename) procs: type_of(value);
+	call := glClear;
+}
+JAI;
 	cyclic_query := Extended.parse_file(CYCLIC_QUERY_SOURCE, filename);
 	cyclic_query_imports := Extended.resolve_file_imports(*cyclic_query, map_names=test_using_map_fields);
 	assert(cyclic_query.status == .COMPLETE && cyclic_query_imports.mapped_names.count == 0 && cyclic_query_imports.unsupported_using_filters.count == 1);
@@ -9094,7 +9902,28 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*cyclic_query);
 	Extended.release_parser_names(*cyclic_query);
 
-	OVERLOADED_QUERY_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Procs { return .{Clear=1}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs: type_of(make(1)); call := glClear; }";//
+	OVERLOADED_QUERY_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: int) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+make :: (text: string) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	using,map(rename) procs: type_of(make(1));
+	call := glClear;
+}
+JAI;
 	overloaded_query := Extended.parse_file(OVERLOADED_QUERY_SOURCE, filename);
 	overloaded_query_imports := Extended.resolve_file_imports(*overloaded_query, map_names=test_using_map_fields);
 	assert(overloaded_query.status == .COMPLETE && overloaded_query_imports.mapped_names.count == 0 && overloaded_query_imports.unsupported_using_filters.count == 1);
@@ -9102,7 +9931,19 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*overloaded_query);
 	Extended.release_parser_names(*overloaded_query);
 
-	AMBIGUOUS_TYPE_SOURCE :: "Procs :: struct { Clear: int; } Procs :: struct { PushMatrix: int; } Alias :: Procs; main :: () { using,map(rename) procs: Alias; call := glClear; }";//
+	AMBIGUOUS_TYPE_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Procs :: struct {
+	PushMatrix: int;
+}
+Alias :: Procs;
+main :: () {
+	using,map(rename) procs: Alias;
+	call := glClear;
+}
+JAI;
 	ambiguous_type := Extended.parse_file(AMBIGUOUS_TYPE_SOURCE, filename);
 	ambiguous_type_imports := Extended.resolve_file_imports(*ambiguous_type, map_names=test_using_map_fields);
 	assert(ambiguous_type.status == .COMPLETE && ambiguous_type_imports.mapped_names.count == 0 && ambiguous_type_imports.unsupported_using_filters.count == 1);
@@ -9112,7 +9953,19 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*ambiguous_type);
 	Extended.release_parser_names(*ambiguous_type);
 
-	SHADOWED_TYPE_SOURCE :: "Procs :: struct { PushMatrix: int; } main :: () { Procs :: struct { Clear: int; } using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	SHADOWED_TYPE_SOURCE :: #string JAI
+Procs :: struct {
+	PushMatrix: int;
+}
+main :: () {
+	Procs :: struct {
+		Clear: int;
+	}
+	using,map(rename) procs: Procs;
+	call := glClear;
+	hidden := PushMatrix;
+}
+JAI;
 	shadowed_type := Extended.parse_file(SHADOWED_TYPE_SOURCE, filename);
 	shadowed_type_imports := Extended.resolve_file_imports(*shadowed_type, map_names=test_using_map_fields);
 	assert(shadowed_type.status == .COMPLETE && shadowed_type_imports.mapped_names.count == 1 && shadowed_type_imports.mapped_names[0].declaration.name == "Clear");
@@ -9123,7 +9976,17 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*shadowed_type);
 	Extended.release_parser_names(*shadowed_type);
 
-	LITERAL_SOURCE :: "Procs :: struct { Clear: int; } main :: () { using,map(rename) procs := Procs.{Clear=1}; call := glClear; }";//
+	LITERAL_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+main :: () {
+	using,map(rename) procs := Procs.{
+		Clear=1
+	};
+	call := glClear;
+}
+JAI;
 	literal := Extended.parse_file(LITERAL_SOURCE, filename);
 	literal_imports := Extended.resolve_file_imports(*literal, map_names=test_using_map_fields, aggregate_fields=test_using_map_decline_fields);
 	assert(literal_imports.mapped_names.count == 1);
@@ -9136,7 +9999,18 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*literal);
 	Extended.release_parser_names(*literal);
 
-	INFERRED_SOURCE :: "Procs :: struct { Clear: int; } main :: () { original := Procs.{Clear=1}; using,map(rename) procs := original; call := glClear; }";//
+	INFERRED_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+main :: () {
+	original := Procs.{
+		Clear=1
+	};
+	using,map(rename) procs := original;
+	call := glClear;
+}
+JAI;
 	inferred := Extended.parse_file(INFERRED_SOURCE, filename);
 	inferred_imports := Extended.resolve_file_imports(*inferred, map_names=test_using_map_fields);
 	assert(inferred_imports.mapped_names.count == 1 && inferred_imports.unsupported_using_filters.count == 0);
@@ -9146,7 +10020,20 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*inferred);
 	Extended.release_parser_names(*inferred);
 
-	CONDITIONAL_SOURCE :: "Procs :: struct { Clear: int; } main :: (ready: bool) { using,map(rename) procs := ifx ready then Procs.{Clear=1} else Procs.{Clear=2}; call := glClear; }";//
+	CONDITIONAL_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+main :: (ready: bool) {
+	using,map(rename) procs := ifx ready
+		then Procs.{
+			Clear=1
+		} else Procs.{
+			Clear=2
+		};
+	call := glClear;
+}
+JAI;
 	conditional := Extended.parse_file(CONDITIONAL_SOURCE, filename);
 	conditional_imports := Extended.resolve_file_imports(*conditional, map_names=test_using_map_fields);
 	assert(conditional.status == .COMPLETE && conditional_imports.mapped_names.count == 1 && conditional_imports.unsupported_using_filters.count == 0);
@@ -9156,7 +10043,22 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*conditional);
 	Extended.release_parser_names(*conditional);
 
-	CONDITIONAL_ALIAS_SOURCE :: "Procs :: struct { Clear: int; } Alias :: Procs; main :: (ready: bool) { first := Procs.{Clear=1}; second := Alias.{Clear=2}; using,map(rename) procs := ifx ready then first else second; call := glClear; }";//
+	CONDITIONAL_ALIAS_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Alias :: Procs;
+main :: (ready: bool) {
+	first := Procs.{
+		Clear=1
+	};
+	second := Alias.{
+		Clear=2
+	};
+	using,map(rename) procs := ifx ready then first else second;
+	call := glClear;
+}
+JAI;
 	conditional_alias := Extended.parse_file(CONDITIONAL_ALIAS_SOURCE, filename);
 	conditional_alias_imports := Extended.resolve_file_imports(*conditional_alias, map_names=test_using_map_fields);
 	assert(conditional_alias.status == .COMPLETE && conditional_alias_imports.mapped_names.count == 1 && conditional_alias_imports.unsupported_using_filters.count == 0);
@@ -9166,7 +10068,23 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*conditional_alias);
 	Extended.release_parser_names(*conditional_alias);
 
-	MISMATCHED_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { Clear: int; } main :: (ready: bool) { using,map(rename) procs := ifx ready then Procs.{Clear=1} else Other.{Clear=2}; call := glClear; }";//
+	MISMATCHED_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	Clear: int;
+}
+main :: (ready: bool) {
+	using,map(rename) procs := ifx ready
+		then Procs.{
+			Clear=1
+		} else Other.{
+			Clear=2
+		};
+	call := glClear;
+}
+JAI;
 	mismatched := Extended.parse_file(MISMATCHED_SOURCE, filename);
 	mismatched_imports := Extended.resolve_file_imports(*mismatched, map_names=test_using_map_fields);
 	assert(mismatched.status == .COMPLETE && mismatched_imports.mapped_names.count == 0 && mismatched_imports.unsupported_using_filters.count == 1);
@@ -9174,7 +10092,25 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*mismatched);
 	Extended.release_parser_names(*mismatched);
 
-	STATIC_VALUE_SOURCE :: "Enabled :: false; Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } main :: () { using,map(rename) procs := #ifx Enabled then Other.{PushMatrix=1} else Procs.{Clear=2}; call := glClear; hidden := PushMatrix; }";//
+	STATIC_VALUE_SOURCE :: #string JAI
+Enabled :: false;
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+main :: () {
+	using,map(rename) procs := #ifx Enabled
+		then Other.{
+			PushMatrix=1
+		} else Procs.{
+			Clear=2
+		};
+	call := glClear;
+	hidden := PushMatrix;
+}
+JAI;
 	static_ifx_value := Extended.parse_file(STATIC_VALUE_SOURCE, filename);
 	static_value_imports := Extended.resolve_file_imports(*static_ifx_value, map_names=test_using_map_fields);
 	assert(static_ifx_value.status == .COMPLETE && static_value_imports.mapped_names.count == 1);
@@ -9185,7 +10121,26 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*static_ifx_value);
 	Extended.release_parser_names(*static_ifx_value);
 
-	AMBIGUOUS_STATIC_IFX_SOURCE :: "Enabled :: true; Enabled :: false; Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } main :: () { using,map(rename) procs := #ifx Enabled then Procs.{Clear=1} else Other.{PushMatrix=2}; call := glClear; }";//
+	AMBIGUOUS_STATIC_IFX_SOURCE :: #string JAI
+Enabled :: true;
+Enabled :: false;
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+main :: () {
+	using,map(rename) procs := #ifx
+	Enabled
+		then Procs.{
+			Clear=1
+		} else Other.{
+			PushMatrix=2
+		};
+	call := glClear;
+}
+JAI;
 	ambiguous_static_ifx := Extended.parse_file(AMBIGUOUS_STATIC_IFX_SOURCE, filename);
 	ambiguous_static_ifx_imports := Extended.resolve_file_imports(*ambiguous_static_ifx, map_names=test_using_map_fields);
 	assert(ambiguous_static_ifx.status == .COMPLETE && ambiguous_static_ifx_imports.mapped_names.count == 0 && ambiguous_static_ifx_imports.unsupported_using_filters.count == 1);
@@ -9193,7 +10148,24 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*ambiguous_static_ifx);
 	Extended.release_parser_names(*ambiguous_static_ifx);
 
-	STATIC_THEN_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } main :: () { using,map(rename) procs := #ifx true then Procs.{Clear=1} else Other.{PushMatrix=2}; call := glClear; hidden := PushMatrix; }";//
+	STATIC_THEN_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+main :: () {
+	using,map(rename) procs := #ifx true
+		then Procs.{
+			Clear=1
+		} else Other.{
+			PushMatrix=2
+		};
+	call := glClear;
+	hidden := PushMatrix;
+}
+JAI;
 	static_then := Extended.parse_file(STATIC_THEN_SOURCE, filename);
 	static_then_imports := Extended.resolve_file_imports(*static_then, map_names=test_using_map_fields);
 	assert(static_then.status == .COMPLETE && static_then_imports.mapped_names.count == 1 && static_then_imports.mapped_names[0].declaration.name == "Clear");
@@ -9204,7 +10176,20 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*static_then);
 	Extended.release_parser_names(*static_then);
 
-	STATIC_UNKNOWN_SOURCE :: "Procs :: struct { Clear: int; } main :: () { using,map(rename) procs := #ifx Unknown then Procs.{Clear=1} else Procs.{Clear=2}; call := glClear; }";//
+	STATIC_UNKNOWN_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+main :: () {
+	using,map(rename) procs := #ifx Unknown
+		then Procs.{
+			Clear=1
+		} else Procs.{
+			Clear=2
+		};
+	call := glClear;
+}
+JAI;
 	static_unknown := Extended.parse_file(STATIC_UNKNOWN_SOURCE, filename);
 	static_unknown_imports := Extended.resolve_file_imports(*static_unknown, map_names=test_using_map_fields);
 	assert(static_unknown.status == .COMPLETE && static_unknown_imports.mapped_names.count == 0 && static_unknown_imports.unsupported_using_filters.count == 1);
@@ -9212,7 +10197,14 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*static_unknown);
 	Extended.release_parser_names(*static_unknown);
 
-	CYCLE_SOURCE :: "main :: () { first := second; second := first; using,map(rename) procs := first; call := glClear; }";//
+	CYCLE_SOURCE :: #string JAI
+main :: () {
+	first := second;
+	second := first;
+	using,map(rename) procs := first;
+	call := glClear;
+}
+JAI;
 	cycle := Extended.parse_file(CYCLE_SOURCE, filename);
 	cycle_imports := Extended.resolve_file_imports(*cycle, map_names=test_using_map_fields);
 	assert(cycle_imports.mapped_names.count == 0 && cycle_imports.unsupported_using_filters.count == 1);
@@ -9225,7 +10217,24 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*cycle);
 	Extended.release_parser_names(*cycle);
 
-	AMBIGUOUS_VALUE_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } main :: () { original := Procs.{Clear=1}; original := Other.{PushMatrix=2}; using,map(rename) procs := original; call := glClear; }";//
+	AMBIGUOUS_VALUE_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+main :: () {
+	original := Procs.{
+		Clear=1
+	};
+	original := Other.{
+		PushMatrix=2
+	};
+	using,map(rename) procs := original;
+	call := glClear;
+}
+JAI;
 	ambiguous_value := Extended.parse_file(AMBIGUOUS_VALUE_SOURCE, filename);
 	ambiguous_value_imports := Extended.resolve_file_imports(*ambiguous_value, map_names=test_using_map_fields);
 	assert(ambiguous_value.status == .COMPLETE && ambiguous_value_imports.mapped_names.count == 0 && ambiguous_value_imports.unsupported_using_filters.count == 1);
@@ -9238,7 +10247,24 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*ambiguous_value);
 	Extended.release_parser_names(*ambiguous_value);
 
-	SHADOWED_VALUE_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } original := Other.{PushMatrix=1}; main :: () { original := Procs.{Clear=2}; using,map(rename) procs := original; call := glClear; }";//
+	SHADOWED_VALUE_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+original := Other.{
+	PushMatrix=1
+};
+main :: () {
+	original := Procs.{
+		Clear=2
+	};
+	using,map(rename) procs := original;
+	call := glClear;
+}
+JAI;
 	shadowed_value := Extended.parse_file(SHADOWED_VALUE_SOURCE, filename);
 	shadowed_value_imports := Extended.resolve_file_imports(*shadowed_value, map_names=test_using_map_fields);
 	assert(shadowed_value.status == .COMPLETE && shadowed_value_imports.mapped_names.count == 1 && shadowed_value_imports.unsupported_using_filters.count == 0);
@@ -9251,7 +10277,16 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*shadowed_value);
 	Extended.release_parser_names(*shadowed_value);
 
-	CAST_SOURCE :: "Procs :: struct { Clear: int; } main :: () { original: Procs; using,map(rename) procs := cast(Procs) original; call := glClear; }";//
+	CAST_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+main :: () {
+	original: Procs;
+	using,map(rename) procs := cast(Procs) original;
+	call := glClear;
+}
+JAI;
 	cast_value := Extended.parse_file(CAST_SOURCE, filename);
 	cast_imports := Extended.resolve_file_imports(*cast_value, map_names=test_using_map_fields);
 	assert(cast_value.status == .COMPLETE && cast_imports.mapped_names.count == 1);
@@ -9261,7 +10296,20 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*cast_value);
 	Extended.release_parser_names(*cast_value);
 
-	CALL_SOURCE :: "Procs :: struct { Clear: int; } make :: () -> Procs { return .{Clear=1}; } main :: () { using,map(rename) procs := make(); call := glClear; }";//
+	CALL_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+make :: () -> Procs {
+	return .{
+		Clear=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make();
+	call := glClear;
+}
+JAI;
 	call := Extended.parse_file(CALL_SOURCE, filename);
 	call_imports := Extended.resolve_file_imports(*call, map_names=test_using_map_fields);
 	assert(call.status == .COMPLETE && call_imports.mapped_names.count == 1);
@@ -9274,7 +10322,21 @@ test_file_import_resolution :: () {
 	Extended.release_parser_tree(*call);
 	Extended.release_parser_names(*call);
 
-	ALIASED_CALL_SOURCE :: "Procs :: struct { Clear: int; } make :: () -> Procs { return .{Clear=1}; } main :: () { make_alias :: make; using,map(rename) procs := make_alias(); call := glClear; }";//
+	ALIASED_CALL_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+make :: () -> Procs {
+	return .{
+		Clear=1
+	};
+}
+main :: () {
+	make_alias :: make;
+	using,map(rename) procs := make_alias();
+	call := glClear;
+}
+JAI;
 	aliased_call := Extended.parse_file(ALIASED_CALL_SOURCE, filename);
 	aliased_call_imports := Extended.resolve_file_imports(*aliased_call, map_names=test_using_map_fields);
 	assert(aliased_call.status == .COMPLETE && aliased_call_imports.mapped_names.count == 1 && aliased_call_imports.unsupported_using_filters.count == 0);
@@ -9286,32 +10348,85 @@ test_file_import_resolution :: () {
 
 	complete_call_receiver_sources: []string = .[
 		#string JAI
-Child :: struct { Clear: int; }
-Box :: struct (T: Type) { Nested: T; }
-make :: (value: Child) -> Box(Child) { return .{Nested=value}; }
-main :: () { alias :: make; using,map(rename) procs := alias(Child.{Clear=1}).Nested; call := glClear; }
-JAI
-		,
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+make :: (value: Child) -> Box(Child) {
+	return .{Nested=value};
+}
+main :: () {
+	alias :: make;
+	using,map(rename) procs := alias(Child.{Clear=1}).Nested;
+	call := glClear;
+}
+JAI,
+
 		#string JAI
-Child :: struct { Clear: int; }
-Other :: struct { PushMatrix: int; }
-Box :: struct (T: Type) { Nested: T; }
-make :: (value: string) -> Box(Child) { return .{Nested=.{Clear=1}}; }
-make :: (value: bool) -> Box(Other) { return .{Nested=.{PushMatrix=1}}; }
-main :: () { using,map(rename) procs := make("a").Nested; call := glClear; }
-JAI
-		,
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+make :: (value: string) -> Box(Child) {
+	return .{
+		Nested=.{
+			Clear=1
+		}
+	};
+}
+make :: (value: bool) -> Box(Other) {
+	return .{
+		Nested=.{
+			PushMatrix=1
+		}
+	};
+}
+main :: () {
+	using,map(rename) procs := make("a").Nested;
+	call := glClear;
+}
+JAI,
+
 		#string JAI
-Child :: struct { Clear: int; }
-Box :: struct (T: Type) { Nested: T; }
-main :: () { original := Box(Child).{Nested=Child.{Clear=1}}; using,map(rename) procs := (cast(Box(Child)) original).Nested; call := glClear; }
-JAI
-		,
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: () {
+	original := Box(Child).{Nested=Child.{Clear=1}};
+	using,map(rename) procs := (cast(Box(Child)) original).Nested;
+	call := glClear;
+}
+JAI,
+
 		#string JAI
-Child :: struct { Clear: int; }
-Box :: struct (T: Type) { Nested: T; }
-make :: () -> Box(Child) { return .{Nested=Child.{Clear=1}}; }
-main :: () { value: type_of(make()); using,map(rename) procs := value.Nested; call := glClear; }
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+make :: () -> Box(Child) {
+	return .{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+}
+main :: () {
+	value: type_of(make());
+	using,map(rename) procs := value.Nested;
+	call := glClear;
+}
 JAI
 	];
 	for complete_call_receiver_sources {
@@ -9325,34 +10440,99 @@ JAI
 
 	unsupported_call_receiver_sources: []string = .[
 		#string JAI
-Child :: struct { Clear: int; }
-Other :: struct { PushMatrix: int; }
-Box :: struct (T: Type) { Nested: T; }
-make :: (value: string) -> Box(Child) { return .{Nested=.{Clear=1}}; }
-make :: (value: bool) -> Box(Other) { return .{Nested=.{PushMatrix=1}}; }
-main :: () { alias :: make; using,map(rename) procs := alias("a").Nested; call := glClear; }
-JAI
-		,
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+make :: (value: string) -> Box(Child) {
+	return .{
+		Nested=.{
+			Clear=1
+		}
+	};
+}
+make :: (value: bool) -> Box(Other) {
+	return .{
+		Nested=.{
+			PushMatrix=1
+		}
+	};
+}
+main :: () {
+	alias :: make;
+	using,map(rename) procs := alias("a").Nested;
+	call := glClear;
+}
+JAI,
+
 		#string JAI
-Child :: struct { Clear: int; }
-Other :: struct { PushMatrix: int; }
-Box :: struct (T: Type) { Nested: T; }
-make :: (value: string) -> Box(Child) { return .{Nested=.{Clear=1}}; }
-make :: (value: bool) -> Box(Other) { return .{Nested=.{PushMatrix=1}}; }
-main :: () { using,map(rename) procs := make(unknown).Nested; call := glClear; }
-JAI
-		,
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+make :: (value: string) -> Box(Child) {
+	return .{
+		Nested=.{
+			Clear=1
+		}
+	};
+}
+make :: (value: bool) -> Box(Other) {
+	return .{
+		Nested=.{
+			PushMatrix=1
+		}
+	};
+}
+main :: () {
+	using,map(rename) procs := make(unknown).Nested;
+	call := glClear;
+}
+JAI,
+
 		#string JAI
-Child :: struct { Clear: int; }
-Box :: struct (T: Type) { Nested: T; }
-make :: () -> Box(Child) { return .{Nested=Child.{Clear=1}}; }
-main :: () { value: type_of(missing()); using,map(rename) procs := value.Nested; call := glClear; }
-JAI
-		,
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+make :: () -> Box(Child) {
+	return .{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+}
+main :: () {
+	value: type_of(missing());
+	using,map(rename) procs := value.Nested;
+	call := glClear;
+}
+JAI,
+
 		#string JAI
-Child :: struct { Clear: int; }
-Box :: struct (T: Type) { Nested: T; }
-main :: () { original := Box(Child).{Nested=Child.{Clear=1}}; using,map(rename) procs := (cast(Box(Missing)) original).Nested; call := glClear; }
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: () {
+	original := Box(Child).{Nested=Child.{Clear=1}};
+	using,map(rename) procs := (cast(Box(Missing)) original).Nested;
+	call := glClear;
+}
 JAI
 	];
 	for unsupported_call_receiver_sources {
@@ -9366,8 +10546,12 @@ JAI
 
 	complete_receiver_inventory_sources: []string = .[
 		#string JAI
-Child :: struct { Clear: int; }
-Box :: struct (T: Type) { Nested: T; }
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
 main :: () {
 	using,map(rename) procs := Box(Child).{Nested=Child.{Clear=1}}.Nested;
 	call := glClear;
@@ -9385,26 +10569,34 @@ JAI
 
 	unsupported_receiver_inventory_sources: []string = .[
 		#string JAI
-Child :: struct { Clear: int; }
-Box :: struct (T: Type) { Nested: T; }
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
 main :: () {
 	box := Box(Child).{Nested=Child.{Clear=1}};
 	pointer := *box;
 	using,map(rename) procs := pointer.*.Nested;
 	call := glClear;
 }
-JAI
-		,
+JAI,
+
 		#string JAI
-Child :: struct { Clear: int; }
-Box :: struct (T: Type) { Nested: T; }
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
 main :: () {
 	boxes: [1] Box(Child) = .[Box(Child).{Nested=Child.{Clear=1}}];
 	using,map(rename) procs := boxes[0].Nested;
 	call := glClear;
 }
-JAI
-		,
+JAI,
+
 		#string JAI
 main :: () {
 	scalar := 1;
@@ -9422,7 +10614,29 @@ JAI
 		Extended.release_parser_names(*parsed);
 	}
 
-	OVERLOADED_ALIAS_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Procs { return .{Clear=1}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { make_alias :: make; using,map(rename) procs := make_alias(1); call := glClear; }";//
+	OVERLOADED_ALIAS_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: int) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+make :: (text: string) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	make_alias :: make;
+	using,map(rename) procs := make_alias(1);
+	call := glClear;
+}
+JAI;
 	overloaded_alias := Extended.parse_file(OVERLOADED_ALIAS_SOURCE, filename);
 	OVERLOADED_ALIAS_IMPORTS := Extended.resolve_file_imports(*overloaded_alias, map_names=test_using_map_fields);
 	assert(overloaded_alias.status == .COMPLETE && OVERLOADED_ALIAS_IMPORTS.mapped_names.count == 0 && OVERLOADED_ALIAS_IMPORTS.unsupported_using_filters.count == 1);
@@ -9430,7 +10644,21 @@ JAI
 	Extended.release_parser_tree(*overloaded_alias);
 	Extended.release_parser_names(*overloaded_alias);
 
-	POLYMORPHIC_ALIAS_SOURCE :: "Procs :: struct { Clear: int; } make :: (value: $T) -> Procs { return .{Clear=1}; } main :: () { make_alias :: make; using,map(rename) procs := make_alias(1); call := glClear; }";//
+	POLYMORPHIC_ALIAS_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+make :: (value: $T) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+main :: () {
+	make_alias :: make;
+	using,map(rename) procs := make_alias(1);
+	call := glClear;
+}
+JAI;
 	polymorphic_alias := Extended.parse_file(POLYMORPHIC_ALIAS_SOURCE, filename);
 	POLYMORPHIC_ALIAS_IMPORTS := Extended.resolve_file_imports(*polymorphic_alias, map_names=test_using_map_fields);
 	assert(polymorphic_alias.status == .COMPLETE && POLYMORPHIC_ALIAS_IMPORTS.mapped_names.count == 1 && POLYMORPHIC_ALIAS_IMPORTS.unsupported_using_filters.count == 0);
@@ -9438,7 +10666,21 @@ JAI
 	Extended.release_parser_tree(*polymorphic_alias);
 	Extended.release_parser_names(*polymorphic_alias);
 
-	MUTABLE_PROCEDURE_SOURCE :: "Procs :: struct { Clear: int; } make :: () -> Procs { return .{Clear=1}; } main :: () { make_alias := make; using,map(rename) procs := make_alias(); call := glClear; }";//
+	MUTABLE_PROCEDURE_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+make :: () -> Procs {
+	return .{
+		Clear=1
+	};
+}
+main :: () {
+	make_alias := make;
+	using,map(rename) procs := make_alias();
+	call := glClear;
+}
+JAI;
 	mutable_procedure := Extended.parse_file(MUTABLE_PROCEDURE_SOURCE, filename);
 	MUTABLE_PROCEDURE_IMPORTS := Extended.resolve_file_imports(*mutable_procedure, map_names=test_using_map_fields);
 	assert(mutable_procedure.status == .COMPLETE && MUTABLE_PROCEDURE_IMPORTS.mapped_names.count == 0 && MUTABLE_PROCEDURE_IMPORTS.unsupported_using_filters.count == 1);
@@ -9446,7 +10688,28 @@ JAI
 	Extended.release_parser_tree(*mutable_procedure);
 	Extended.release_parser_names(*mutable_procedure);
 
-	OVERLOADED_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Procs { return .{Clear=1}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(\"text\"); call := glClear; }";//
+	OVERLOADED_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: int) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+make :: (text: string) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make("text");
+	call := glClear;
+}
+JAI;
 	overloaded := Extended.parse_file(OVERLOADED_SOURCE, filename);
 	overloaded_imports := Extended.resolve_file_imports(*overloaded, map_names=test_using_map_fields);
 	assert(
@@ -9465,7 +10728,36 @@ JAI
 	Extended.release_parser_tree(*overloaded);
 	Extended.release_parser_names(*overloaded);
 
-	CONCRETE_OVERLOAD_SOURCE :: "Input :: struct { Value: int; } Alternate :: struct { Value: int; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (input: Input) -> Procs { return .{Clear=1}; } make :: (input: Alternate) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(Input.{Value=1}); call := glClear; }";//
+	CONCRETE_OVERLOAD_SOURCE :: #string JAI
+Input :: struct {
+	Value: int;
+}
+Alternate :: struct {
+	Value: int;
+}
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (input: Input) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+make :: (input: Alternate) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make(Input.{
+		Value=1
+	});
+	call := glClear;
+}
+JAI;
 	concrete_overload := Extended.parse_file(CONCRETE_OVERLOAD_SOURCE, filename);
 	concrete_overload_imports := Extended.resolve_file_imports(*concrete_overload, map_names=test_using_map_fields);
 	assert(concrete_overload.status == .COMPLETE && concrete_overload_imports.mapped_names.count == 1 && concrete_overload_imports.unsupported_using_filters.count == 0);
@@ -9475,7 +10767,43 @@ JAI
 	Extended.release_parser_tree(*concrete_overload);
 	Extended.release_parser_names(*concrete_overload);
 
-	INSTANCIATED_OVERLOAD_SOURCE :: "Input :: struct { Value: int; } Alternate :: struct { Value: int; } Box :: struct (T: Type) { Value: T; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (input: Box(Input)) -> Procs { return .{Clear=1}; } make :: (input: Box(Alternate)) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(Box(Input).{Value=Input.{Value=1}}); call := glClear; }";//
+	INSTANCIATED_OVERLOAD_SOURCE :: #string JAI
+Input :: struct {
+	Value: int;
+}
+Alternate :: struct {
+	Value: int;
+}
+Box :: struct (T: Type) {
+	Value: T;
+}
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (input: Box(Input)) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+make :: (input: Box(Alternate)) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make(
+		Box(Input).{
+			Value=Input.{
+				Value=1
+			}
+		}
+	);
+	call := glClear;
+}
+JAI;
 	instantiated_overload := Extended.parse_file(INSTANCIATED_OVERLOAD_SOURCE, filename);
 	instantiated_overload_imports := Extended.resolve_file_imports(*instantiated_overload, map_names=test_using_map_fields);
 	assert(instantiated_overload.status == .COMPLETE && instantiated_overload_imports.mapped_names.count == 1 && instantiated_overload_imports.unsupported_using_filters.count == 0);
@@ -9484,13 +10812,28 @@ JAI
 	Extended.release_parser_names(*instantiated_overload);
 
 	AGGREGATE_CONVERSION_SOURCE :: #string JAI
-Base :: struct { Value: int; }
-Wrapper :: struct { #as using base: Base; }
-Procs :: struct { Clear: int; }
-Other :: struct { PushMatrix: int; }
-make :: (value: Base) -> Procs { return .{Clear=1}; }
-make :: (value: string) -> Other { return .{PushMatrix=1}; }
-main :: () { using,map(rename) procs := make(Wrapper.{base=Base.{Value=1}}); call := glClear; }
+Base :: struct {
+	Value: int;
+}
+Wrapper :: struct {
+	#as using base: Base;
+}
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (value: Base) -> Procs {
+	return .{Clear=1};
+}
+make :: (value: string) -> Other {
+	return .{PushMatrix=1};
+}
+main :: () {
+	using,map(rename) procs := make(Wrapper.{base=Base.{Value=1}});
+	call := glClear;
+}
 JAI
 	aggregate_conversion := Extended.parse_file(AGGREGATE_CONVERSION_SOURCE, filename);
 	aggregate_conversion_imports := Extended.resolve_file_imports(*aggregate_conversion, map_names=test_using_map_fields);
@@ -9505,13 +10848,28 @@ JAI
 	Extended.release_parser_names(*aggregate_conversion);
 
 	AGGREGATE_EXACT_RANK_SOURCE :: #string JAI
-Base :: struct { Value: int; }
-Wrapper :: struct { #as using base: Base; }
-Procs :: struct { Clear: int; }
-Other :: struct { PushMatrix: int; }
-make :: (value: Base) -> Other { return .{PushMatrix=1}; }
-make :: (value: Wrapper) -> Procs { return .{Clear=1}; }
-main :: () { using,map(rename) procs := make(Wrapper.{base=Base.{Value=1}}); call := glClear; }
+Base :: struct {
+	Value: int;
+}
+Wrapper :: struct {
+	#as using base: Base;
+}
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (value: Base) -> Other {
+	return .{PushMatrix=1};
+}
+make :: (value: Wrapper) -> Procs {
+	return .{Clear=1};
+}
+main :: () {
+	using,map(rename) procs := make(Wrapper.{base=Base.{Value=1}});
+	call := glClear;
+}
 JAI
 	aggregate_exact_rank := Extended.parse_file(AGGREGATE_EXACT_RANK_SOURCE, filename);
 	aggregate_exact_rank_imports := Extended.resolve_file_imports(*aggregate_exact_rank, map_names=test_using_map_fields);
@@ -9525,7 +10883,33 @@ JAI
 	Extended.release_parser_tree(*aggregate_exact_rank);
 	Extended.release_parser_names(*aggregate_exact_rank);
 
-	ARY_OVERLOAD_SOURCE :: "Input :: struct { Value: int; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: () -> Other { return .{PushMatrix=1}; } make :: (input: Input) -> Procs { return .{Clear=1}; } main :: () { using,map(rename) procs := make(Input.{Value=1}); call := glClear; }";//
+	ARY_OVERLOAD_SOURCE :: #string JAI
+Input :: struct {
+	Value: int;
+}
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: () -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+make :: (input: Input) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make(Input.{
+		Value=1
+	});
+	call := glClear;
+}
+JAI;
 	ary_overload := Extended.parse_file(ARY_OVERLOAD_SOURCE, filename);
 	ary_overload_imports := Extended.resolve_file_imports(*ary_overload, map_names=test_using_map_fields);
 	assert(ary_overload.status == .COMPLETE && ary_overload_imports.mapped_names.count == 1 && ary_overload_imports.unsupported_using_filters.count == 0);
@@ -9533,7 +10917,28 @@ JAI
 	Extended.release_parser_tree(*ary_overload);
 	Extended.release_parser_names(*ary_overload);
 
-	PRIMITIVE_OVERLOAD_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: s64) -> Other { return .{PushMatrix=1}; } make :: (text: string) -> Procs { return .{Clear=1}; } main :: () { using,map(rename) procs := make(\"text\"); call := glClear; }";//
+	PRIMITIVE_OVERLOAD_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: s64) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+make :: (text: string) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make("text");
+	call := glClear;
+}
+JAI;
 	primitive_overload := Extended.parse_file(PRIMITIVE_OVERLOAD_SOURCE, filename);
 	primitive_overload_imports := Extended.resolve_file_imports(*primitive_overload, map_names=test_using_map_fields);
 	assert(primitive_overload.status == .COMPLETE && primitive_overload_imports.mapped_names.count == 1 && primitive_overload_imports.unsupported_using_filters.count == 0);
@@ -9541,7 +10946,28 @@ JAI
 	Extended.release_parser_tree(*primitive_overload);
 	Extended.release_parser_names(*primitive_overload);
 
-	INTEGER_OVERLOAD_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: s64) -> Procs { return .{Clear=1}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(1); call := glClear; }";//
+	INTEGER_OVERLOAD_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: s64) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+make :: (text: string) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make(1);
+	call := glClear;
+}
+JAI;
 	integer_overload := Extended.parse_file(INTEGER_OVERLOAD_SOURCE, filename);
 	integer_overload_imports := Extended.resolve_file_imports(*integer_overload, map_names=test_using_map_fields);
 	assert(integer_overload.status == .COMPLETE && integer_overload_imports.mapped_names.count == 1 && integer_overload_imports.unsupported_using_filters.count == 0);
@@ -9550,11 +10976,22 @@ JAI
 	Extended.release_parser_names(*integer_overload);
 
 	NUMERIC_RANK_SOURCE :: #string JAI
-Procs :: struct { Clear: int; }
-Other :: struct { PushMatrix: int; }
-make :: (number: float64) -> Other { return .{PushMatrix=1}; }
-make :: (number: s64) -> Procs { return .{Clear=1}; }
-main :: () { using,map(rename) procs := make(1); call := glClear; }
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: float64) -> Other {
+	return .{PushMatrix=1};
+}
+make :: (number: s64) -> Procs {
+	return .{Clear=1};
+}
+main :: () {
+	using,map(rename) procs := make(1);
+	call := glClear;
+}
 JAI
 	numeric_rank := Extended.parse_file(NUMERIC_RANK_SOURCE, filename);
 	numeric_rank_imports := Extended.resolve_file_imports(*numeric_rank, map_names=test_using_map_fields);
@@ -9564,11 +11001,22 @@ JAI
 	Extended.release_parser_names(*numeric_rank);
 
 	CONVERTED_RANK_SOURCE :: #string JAI
-Procs :: struct { Clear: int; }
-Other :: struct { PushMatrix: int; }
-make :: (number: float64) -> Procs { return .{Clear=1}; }
-make :: (text: string) -> Other { return .{PushMatrix=1}; }
-main :: () { using,map(rename) procs := make(1); call := glClear; }
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: float64) -> Procs {
+	return .{Clear=1};
+}
+make :: (text: string) -> Other {
+	return .{PushMatrix=1};
+}
+main :: () {
+	using,map(rename) procs := make(1);
+	call := glClear;
+}
 JAI
 	converted_rank := Extended.parse_file(CONVERTED_RANK_SOURCE, filename);
 	converted_rank_imports := Extended.resolve_file_imports(*converted_rank, map_names=test_using_map_fields);
@@ -9583,11 +11031,22 @@ JAI
 	Extended.release_parser_names(*converted_rank);
 
 	FLOAT_RANK_SOURCE :: #string JAI
-Procs :: struct { Clear: int; }
-Other :: struct { PushMatrix: int; }
-make :: (number: float64) -> Procs { return .{Clear=1}; }
-make :: (text: string) -> Other { return .{PushMatrix=1}; }
-main :: () { using,map(rename) procs := make(1.5); call := glClear; }
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: float64) -> Procs {
+	return .{Clear=1};
+}
+make :: (text: string) -> Other {
+	return .{PushMatrix=1};
+}
+main :: () {
+	using,map(rename) procs := make(1.5);
+	call := glClear;
+}
 JAI
 	float_rank := Extended.parse_file(FLOAT_RANK_SOURCE, filename);
 	float_rank_imports := Extended.resolve_file_imports(*float_rank, map_names=test_using_map_fields);
@@ -9596,7 +11055,36 @@ JAI
 	Extended.release_parser_tree(*float_rank);
 	Extended.release_parser_names(*float_rank);
 
-	NAMED_OVERLOAD_SOURCE :: "Input :: struct { Value: int; } Alternate :: struct { Value: int; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (input: Input) -> Procs { return .{Clear=1}; } make :: (input: Alternate) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(input=Input.{Value=1}); call := glClear; }";//
+	NAMED_OVERLOAD_SOURCE :: #string JAI
+Input :: struct {
+	Value: int;
+}
+Alternate :: struct {
+	Value: int;
+}
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (input: Input) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+make :: (input: Alternate) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make(input=Input.{
+		Value=1
+	});
+	call := glClear;
+}
+JAI;
 	named_overload := Extended.parse_file(NAMED_OVERLOAD_SOURCE, filename);
 	named_overload_imports := Extended.resolve_file_imports(*named_overload, map_names=test_using_map_fields);
 	assert(named_overload.status == .COMPLETE && named_overload_imports.mapped_names.count == 1 && named_overload_imports.unsupported_using_filters.count == 0);
@@ -9605,12 +11093,25 @@ JAI
 	Extended.release_parser_names(*named_overload);
 
 	DEFAULTED_OVERLOAD_SOURCE :: #string JAI
-Input :: struct { Value: int; }
-Procs :: struct { Clear: int; }
-Other :: struct { PushMatrix: int; }
-make :: (input: Input, enabled: bool = true) -> Procs { return .{Clear=1}; }
-make :: (input: Input, required: string) -> Other { return .{PushMatrix=1}; }
-main :: () { using,map(rename) procs := make(input=Input.{Value=1}); call := glClear; }
+Input :: struct {
+	Value: int;
+}
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (input: Input, enabled: bool = true) -> Procs {
+	return .{Clear=1};
+}
+make :: (input: Input, required: string) -> Other {
+	return .{PushMatrix=1};
+}
+main :: () {
+	using,map(rename) procs := make(input=Input.{Value=1});
+	call := glClear;
+}
 JAI
 	defaulted_overload := Extended.parse_file(DEFAULTED_OVERLOAD_SOURCE, filename);
 	defaulted_overload_imports := Extended.resolve_file_imports(*defaulted_overload, map_names=test_using_map_fields);
@@ -9625,12 +11126,25 @@ JAI
 	Extended.release_parser_names(*defaulted_overload);
 
 	DEFAULTED_POSITIONAL_SOURCE :: #string JAI
-Input :: struct { Value: int; }
-Procs :: struct { Clear: int; }
-Other :: struct { PushMatrix: int; }
-make :: (input: Input, enabled: bool = true) -> Procs { return .{Clear=1}; }
-make :: (input: Input, required: string) -> Other { return .{PushMatrix=1}; }
-main :: () { using,map(rename) procs := make(Input.{Value=1}); call := glClear; }
+Input :: struct {
+	Value: int;
+}
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (input: Input, enabled: bool = true) -> Procs {
+	return .{Clear=1};
+}
+make :: (input: Input, required: string) -> Other {
+	return .{PushMatrix=1};
+}
+main :: () {
+	using,map(rename) procs := make(Input.{Value=1});
+	call := glClear;
+}
 JAI
 	defaulted_positional := Extended.parse_file(DEFAULTED_POSITIONAL_SOURCE, filename);
 	defaulted_positional_imports := Extended.resolve_file_imports(*defaulted_positional, map_names=test_using_map_fields);
@@ -9644,7 +11158,30 @@ JAI
 	Extended.release_parser_tree(*defaulted_positional);
 	Extended.release_parser_names(*defaulted_positional);
 
-	TYPED_PRIMITIVE_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: s64) -> Other { return .{PushMatrix=1}; } make :: (text: string) -> Procs { return .{Clear=1}; } main :: () { original: string = \"text\"; text := original; using,map(rename) procs := make(text); call := glClear; }";//
+	TYPED_PRIMITIVE_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: s64) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+make :: (text: string) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+main :: () {
+	original: string = "text";
+	text := original;
+	using,map(rename) procs := make(text);
+	call := glClear;
+}
+JAI;
 	typed_primitive := Extended.parse_file(TYPED_PRIMITIVE_SOURCE, filename);
 	typed_primitive_imports := Extended.resolve_file_imports(*typed_primitive, map_names=test_using_map_fields);
 	assert(typed_primitive.status == .COMPLETE && typed_primitive_imports.mapped_names.count == 1 && typed_primitive_imports.unsupported_using_filters.count == 0);
@@ -9652,7 +11189,36 @@ JAI
 	Extended.release_parser_tree(*typed_primitive);
 	Extended.release_parser_names(*typed_primitive);
 
-	LATER_MISMATCH_SOURCE :: "Input :: struct { Value: int; } Alternate :: struct { Value: int; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: float64, input: Input) -> Other { return .{PushMatrix=1}; } make :: (number: s64, input: Alternate) -> Procs { return .{Clear=1}; } main :: () { using,map(rename) procs := make(1, Alternate.{Value=1}); call := glClear; }";//
+	LATER_MISMATCH_SOURCE :: #string JAI
+Input :: struct {
+	Value: int;
+}
+Alternate :: struct {
+	Value: int;
+}
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: float64, input: Input) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+make :: (number: s64, input: Alternate) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make(1, Alternate.{
+		Value=1
+	});
+	call := glClear;
+}
+JAI;
 	later_mismatch := Extended.parse_file(LATER_MISMATCH_SOURCE, filename);
 	later_mismatch_imports := Extended.resolve_file_imports(*later_mismatch, map_names=test_using_map_fields);
 	assert(later_mismatch.status == .COMPLETE && later_mismatch_imports.mapped_names.count == 1 && later_mismatch_imports.unsupported_using_filters.count == 0);
@@ -9660,7 +11226,35 @@ JAI
 	Extended.release_parser_tree(*later_mismatch);
 	Extended.release_parser_names(*later_mismatch);
 
-	CALLED_ALIAS_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Alternate :: struct { PushMatrix: int; } make :: (ready: bool) -> Container { return .{Nested=Child.{Clear=1}}; } make :: (ready: string) -> Alternate { return .{PushMatrix=1}; } main :: () { original := make(true); value := original; using,map(rename) procs := value.Nested; call := glClear; }";//
+	CALLED_ALIAS_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+Alternate :: struct {
+	PushMatrix: int;
+}
+make :: (ready: bool) -> Container {
+	return .{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+}
+make :: (ready: string) -> Alternate {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	original := make(true);
+	value := original;
+	using,map(rename) procs := value.Nested;
+	call := glClear;
+}
+JAI;
 	called_alias := Extended.parse_file(CALLED_ALIAS_SOURCE, filename);
 	called_alias_imports := Extended.resolve_file_imports(*called_alias, map_names=test_using_map_fields);
 	assert(called_alias.status == .COMPLETE && called_alias_imports.mapped_names.count == 1 && called_alias_imports.unsupported_using_filters.count == 0);
@@ -9668,7 +11262,33 @@ JAI
 	Extended.release_parser_tree(*called_alias);
 	Extended.release_parser_names(*called_alias);
 
-	SHADOWED_OVERLOADS_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (ready: bool) -> Other { return .{PushMatrix=1}; } main :: () { make :: (ready: bool) -> Procs { return .{Clear=1}; } make :: (ready: string) -> Other { return .{PushMatrix=2}; } using,map(rename) procs := make(true); call := glClear; }";//
+	SHADOWED_OVERLOADS_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (ready: bool) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	make :: (ready: bool) -> Procs {
+		return .{
+			Clear=1
+		};
+	}
+	make :: (ready: string) -> Other {
+		return .{
+			PushMatrix=2
+		};
+	}
+	using,map(rename) procs := make(true);
+	call := glClear;
+}
+JAI;
 	shadowed_overloads := Extended.parse_file(SHADOWED_OVERLOADS_SOURCE, filename);
 	shadowed_overloads_imports := Extended.resolve_file_imports(*shadowed_overloads, map_names=test_using_map_fields);
 	assert(shadowed_overloads.status == .COMPLETE && shadowed_overloads_imports.mapped_names.count == 1 && shadowed_overloads_imports.mapped_names[0].source_name == "Clear" && shadowed_overloads_imports.unsupported_using_filters.count == 0);
@@ -9678,41 +11298,383 @@ JAI
 
 	unsupported_calls: [] string = .[
 		#string JAI
-First :: struct { Value: int; }
-Second :: struct { Value: int; }
-Wrapper :: struct { #as using first: First; #as using second: Second; }
-Procs :: struct { Clear: int; }
-Other :: struct { PushMatrix: int; }
-make :: (value: First) -> Procs { return .{Clear=1}; }
-make :: (value: Second) -> Other { return .{PushMatrix=1}; }
-main :: () { using,map(rename) procs := make(Wrapper.{first=First.{Value=1}, second=Second.{Value=2}}); call := glClear; }
-JAI
-		,
-		#string JAI
-Procs :: struct { Clear: int; }
-make :: (input: int, enabled: bool = Missing) -> Procs { return .{Clear=1}; }
-main :: () { using,map(rename) procs := make(1); call := glClear; }
-JAI
-		,
-		#string JAI
-Procs :: struct { Clear: int; }
-make :: (input: int, required: string) -> Procs { return .{Clear=1}; }
-main :: () { using,map(rename) procs := make(input=1); call := glClear; }
+First :: struct {
+	Value: int;
+}
+Second :: struct {
+	Value: int;
+}
+Wrapper :: struct {
+	#as using first: First;
+	#as using second: Second;
+}
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (value: First) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+make :: (value: Second) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make(Wrapper.{
+		first=First.{
+			Value=1
+		}, second=Second.{
+			Value=2
+		}
+	});
+	call := glClear;
+}
 JAI,
-		"Input :: struct { Value: int; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (input: Input) -> Procs { return .{Clear=1}; } make :: (input: Input) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(Input.{Value=1}); call := glClear; }",//
-		"Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Box :: struct (T: Type) { Nested: T; } wrap :: (value: $T) -> Box(T) { return .{Nested=value}; } main :: (choose: bool) { using,map(rename) procs := (ifx choose then wrap(Child.{Clear=1}) else Box(Other).{Nested=Other.{PushMatrix=2}}).Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; #if Unknown { Hidden: int; } } Box :: struct (T: Type) { Nested: T; } wrap :: (value: $T) -> Box(T) { return .{Nested=value}; } main :: () { using,map(rename) procs := wrap(Child.{Clear=1}).Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; } make :: (value: $T/Child) -> T { return value; } main :: () { using,map(rename) procs := make(Child.{Clear=1}); call := glClear; }",//
-		"Child :: struct { Clear: int; } make :: (value: $T, other: $U) -> T { return value; } main :: () { using,map(rename) procs := make(Child.{Clear=1}); call := glClear; }",//
-		"Child :: struct { Clear: int; #if Unknown { Hidden: int; } } make :: (value: $T) -> T { return value; } main :: () { using,map(rename) procs := make(Child.{Clear=1}); call := glClear; }",//
-		"Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Other :: struct { PushMatrix: int; } make :: (ready: bool) -> Container { return .{Nested=Child.{Clear=1}}; } make :: (ready: bool) -> Other { return .{PushMatrix=1}; } main :: () { original := make(true); value := original; using,map(rename) procs := value.Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; } Container :: struct { Nested: Child; #if Unknown { Hidden: int; } } make :: () -> Container { return .{Nested=Child.{Clear=1}}; } main :: () { original := make(); value := original; using,map(rename) procs := value.Nested; call := glClear; }",//
-		"Input :: struct { Value: int; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (input: Input) -> Procs { return .{Clear=1}; } make :: (input: Missing) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(Input.{Value=1}); call := glClear; }",//
-		"Procs :: struct { Clear: int; } make :: () -> Procs { return .{Clear=1}; } main :: () { using,map(rename) procs := make(1); call := glClear; }",//
-		"Procs :: struct { Clear: int; } identity :: (value: $T) -> T { return value; } main :: () { using,map(rename) procs := identity(missing); call := glClear; }",//
-		"Procs :: struct { Clear: int; } Alias := Procs; main :: () { using,map(rename) procs: Alias; call := glClear; }",//
-		"Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Box :: struct (T: Type) { Nested: T; } main :: (choose: bool) { using,map(rename) procs := (ifx choose then Box(Child).{Nested=Child.{Clear=1}} else Box(Other).{Nested=Other.{PushMatrix=2}}).Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Box :: struct (T: Type) { Clear: int; Nested: T; } main :: (choose: bool) { left: type_of(Box(Child).{Nested=Child.{Clear=1}}); right: type_of(Box(Other).{Nested=Other.{PushMatrix=2}}); using,map(rename) box := ifx choose then left else right; call := glClear; }",//
+
+		#string JAI
+Procs :: struct {
+	Clear: int;
+}
+make :: (input: int, enabled: bool = Missing) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make(1);
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Procs :: struct {
+	Clear: int;
+}
+make :: (input: int, required: string) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make(input=1);
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Input :: struct {
+	Value: int;
+}
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (input: Input) -> Procs {
+	return .{Clear=1};
+}
+make :: (input: Input) -> Other {
+	return .{PushMatrix=1};
+}
+main :: () {
+	using,map(rename) procs := make(Input.{Value=1});
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+wrap :: (value: $T) -> Box(T) {
+	return .{
+		Nested=value
+	};
+}
+main :: (choose: bool) {
+	using,map(rename) procs := (
+		ifx choose
+			then wrap(Child.{
+				Clear=1
+			}) else Box(Other).{
+				Nested=Other.{
+					PushMatrix=2
+				}
+			}
+	).Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+	#if Unknown {
+		Hidden: int;
+	}
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+wrap :: (value: $T) -> Box(T) {
+	return .{
+		Nested=value
+	};
+}
+main :: () {
+	using,map(rename) procs := wrap(
+		Child.{
+			Clear=1
+		}
+	).Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+make :: (value: $T/Child) -> T {
+	return value;
+}
+main :: () {
+	using,map(rename) procs := make(
+		Child.{
+			Clear=1
+		}
+	);
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+make :: (value: $T, other: $U) -> T {
+	return value;
+}
+main :: () {
+	using,map(rename) procs := make(
+		Child.{
+			Clear=1
+		}
+	);
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+	#if Unknown {
+		Hidden: int;
+	}
+}
+make :: (value: $T) -> T {
+	return value;
+}
+main :: () {
+	using,map(rename) procs := make(
+		Child.{
+			Clear=1
+		}
+	);
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (ready: bool) -> Container {
+	return .{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+}
+make :: (ready: bool) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	original := make(true);
+	value := original;
+	using,map(rename) procs := value.Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Container :: struct {
+	Nested: Child;
+	#if Unknown {
+		Hidden: int;
+	}
+}
+make :: () -> Container {
+	return .{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+}
+main :: () {
+	original := make();
+	value := original;
+	using,map(rename) procs := value.Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Input :: struct {
+	Value: int;
+}
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (input: Input) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+make :: (input: Missing) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make(
+		Input.{
+			Value=1
+		}
+	);
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Procs :: struct {
+	Clear: int;
+}
+make :: () -> Procs {
+	return .{
+		Clear=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make(1);
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Procs :: struct {
+	Clear: int;
+}
+identity :: (value: $T) -> T {
+	return value;
+}
+main :: () {
+	using,map(rename) procs := identity(missing);
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Procs :: struct {
+	Clear: int;
+}
+Alias := Procs;
+main :: () {
+	using,map(rename) procs: Alias;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: (choose: bool) {
+	using,map(rename) procs := (
+		ifx choose
+			then Box(Child).{
+				Nested=Child.{
+					Clear=1
+				}
+			} else Box(Other).{
+				Nested=Other.{
+					PushMatrix=2
+				}
+			}
+	).Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Box :: struct (T: Type) {
+	Clear: int;
+	Nested: T;
+}
+main :: (choose: bool) {
+	left: type_of(Box(Child).{
+		Nested=Child.{
+			Clear=1
+		}
+	});
+	right: type_of(Box(Other).{
+		Nested=Other.{
+			PushMatrix=2
+		}
+	});
+	using,map(rename) box := ifx choose then left else right;
+	call := glClear;
+}
+JAI,
+
 	];
 	for unsupported_calls {
 		parsed_call := Extended.parse_file(it, filename);
@@ -9723,7 +11685,20 @@ JAI,
 		Extended.release_parser_names(*parsed_call);
 	}
 
-	POLYMORPHIC_SOURCE :: "Procs :: struct { Clear: int; } make :: (value: $T) -> Procs { return .{Clear=1}; } main :: () { using,map(rename) procs := make(1); call := glClear; }";//
+	POLYMORPHIC_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+make :: (value: $T) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+main :: () {
+	using,map(rename) procs := make(1);
+	call := glClear;
+}
+JAI;
 	polymorphic := Extended.parse_file(POLYMORPHIC_SOURCE, filename);
 	polymorphic_header := polymorphic.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
 	assert(polymorphic_header.procedure_flags & .POLYMORPHIC != 0);
@@ -9738,7 +11713,22 @@ JAI,
 	Extended.release_parser_tree(*polymorphic);
 	Extended.release_parser_names(*polymorphic);
 
-	IDENTITY_SOURCE :: "Procs :: struct { Clear: int; } identity :: (value: $T) -> T { return value; } main :: () { using,map(rename) procs := identity(Procs.{Clear=1}); call := glClear; }";//
+	IDENTITY_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+identity :: (value: $T) -> T {
+	return value;
+}
+main :: () {
+	using,map(rename) procs := identity(
+		Procs.{
+			Clear=1
+		}
+	);
+	call := glClear;
+}
+JAI;
 	identity := Extended.parse_file(IDENTITY_SOURCE, filename);
 	identity_imports := Extended.resolve_file_imports(*identity, map_names=test_using_map_fields);
 	assert(identity.status == .COMPLETE && identity_imports.mapped_names.count == 1 && identity_imports.unsupported_using_filters.count == 0);
@@ -9748,7 +11738,27 @@ JAI,
 	Extended.release_parser_tree(*identity);
 	Extended.release_parser_names(*identity);
 
-	MULTIPLE_POLYMORPHIC_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } choose :: (left: $T, right: $U) -> T { return left; } main :: () { using,map(rename) procs := choose(Child.{Clear=1}, Other.{PushMatrix=2}); call := glClear; }";//
+	MULTIPLE_POLYMORPHIC_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+choose :: (left: $T, right: $U) -> T {
+	return left;
+}
+main :: () {
+	using,map(rename) procs := choose(
+		Child.{
+			Clear=1
+		}, Other.{
+			PushMatrix=2
+		}
+	);
+	call := glClear;
+}
+JAI;
 	multiple_polymorphic := Extended.parse_file(MULTIPLE_POLYMORPHIC_SOURCE, filename);
 	multiple_polymorphic_imports := Extended.resolve_file_imports(*multiple_polymorphic, map_names=test_using_map_fields);
 	assert(multiple_polymorphic.status == .COMPLETE && multiple_polymorphic_imports.mapped_names.count == 1 && multiple_polymorphic_imports.unsupported_using_filters.count == 0);
@@ -9756,7 +11766,27 @@ JAI,
 	Extended.release_parser_tree(*multiple_polymorphic);
 	Extended.release_parser_names(*multiple_polymorphic);
 
-	NAMED_POLYMORPHIC_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } choose :: (left: $T, right: $U) -> T { return left; } main :: () { using,map(rename) procs := choose(right=Other.{PushMatrix=2}, left=Child.{Clear=1}); call := glClear; }";//
+	NAMED_POLYMORPHIC_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+choose :: (left: $T, right: $U) -> T {
+	return left;
+}
+main :: () {
+	using,map(rename) procs := choose(
+		right=Other.{
+			PushMatrix=2
+		}, left=Child.{
+			Clear=1
+		}
+	);
+	call := glClear;
+}
+JAI;
 	named_polymorphic := Extended.parse_file(NAMED_POLYMORPHIC_SOURCE, filename);
 	named_polymorphic_imports := Extended.resolve_file_imports(*named_polymorphic, map_names=test_using_map_fields);
 	assert(named_polymorphic.status == .COMPLETE && named_polymorphic_imports.mapped_names.count == 1 && named_polymorphic_imports.unsupported_using_filters.count == 0);
@@ -9764,7 +11794,28 @@ JAI,
 	Extended.release_parser_tree(*named_polymorphic);
 	Extended.release_parser_names(*named_polymorphic);
 
-	POLYMORPHIC_BOX_SOURCE :: "Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } wrap :: (value: $T) -> Box(T) { return .{Nested=value}; } main :: () { original := wrap(Child.{Clear=1}); using,map(rename) procs := original.Nested; call := glClear; }";//
+	POLYMORPHIC_BOX_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+wrap :: (value: $T) -> Box(T) {
+	return .{
+		Nested=value
+	};
+}
+main :: () {
+	original := wrap(
+		Child.{
+			Clear=1
+		}
+	);
+	using,map(rename) procs := original.Nested;
+	call := glClear;
+}
+JAI;
 	polymorphic_box := Extended.parse_file(POLYMORPHIC_BOX_SOURCE, filename);
 	box_header := polymorphic_box.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
 	assert(box_header.returns.count == 1 && box_header.returns[0].type_inst && box_header.returns[0].type_inst.type_valued_expression && box_header.returns[0].type_inst.type_valued_expression.kind == .PROCEDURE_CALL);
@@ -9774,7 +11825,32 @@ JAI,
 	Extended.release_parser_tree(*polymorphic_box);
 	Extended.release_parser_names(*polymorphic_box);
 
-	MATCHING_POLYMORPHIC_BOX_SOURCE :: "Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } wrap :: (value: $T) -> Box(T) { return .{Nested=value}; } main :: (choose: bool) { using,map(rename) procs := (ifx choose then wrap(Child.{Clear=1}) else Box(Child).{Nested=Child.{Clear=2}}).Nested; call := glClear; }";//
+	MATCHING_POLYMORPHIC_BOX_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+wrap :: (value: $T) -> Box(T) {
+	return .{
+		Nested=value
+	};
+}
+main :: (choose: bool) {
+	using,map(rename) procs := (
+		ifx choose
+			then wrap(Child.{
+				Clear=1
+			}) else Box(Child).{
+				Nested=Child.{
+					Clear=2
+				}
+			}
+	).Nested;
+	call := glClear;
+}
+JAI;
 	matching_polymorphic_box := Extended.parse_file(MATCHING_POLYMORPHIC_BOX_SOURCE, filename);
 	matching_polymorphic_box_imports := Extended.resolve_file_imports(*matching_polymorphic_box, map_names=test_using_map_fields);
 	assert(matching_polymorphic_box.status == .COMPLETE && matching_polymorphic_box_imports.mapped_names.count == 1 && matching_polymorphic_box_imports.unsupported_using_filters.count == 0);
@@ -9782,7 +11858,34 @@ JAI,
 	Extended.release_parser_tree(*matching_polymorphic_box);
 	Extended.release_parser_names(*matching_polymorphic_box);
 
-	POLYMORPHIC_PAIR_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } wrap :: (left: $T, right: $U) -> Pair(T, U) { return .{Left=left, Right=right}; } main :: () { using,map(rename) procs := wrap(Other.{PushMatrix=1}, Child.{Clear=2}).Right; call := glClear; }";//
+	POLYMORPHIC_PAIR_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Left: First;
+	Right: Second;
+}
+wrap :: (left: $T, right: $U) -> Pair(T, U) {
+	return .{
+		Left=left, Right=right
+	};
+}
+main :: () {
+	using,map(rename) procs := wrap(
+		Other.{
+			PushMatrix=1
+		},
+		Child.{
+			Clear=2
+		}
+	).Right;
+	call := glClear;
+}
+JAI;
 	polymorphic_pair := Extended.parse_file(POLYMORPHIC_PAIR_SOURCE, filename);
 	polymorphic_pair_imports := Extended.resolve_file_imports(*polymorphic_pair, map_names=test_using_map_fields);
 	assert(polymorphic_pair.status == .COMPLETE && polymorphic_pair_imports.mapped_names.count == 1 && polymorphic_pair_imports.unsupported_using_filters.count == 0);
@@ -9790,7 +11893,34 @@ JAI,
 	Extended.release_parser_tree(*polymorphic_pair);
 	Extended.release_parser_names(*polymorphic_pair);
 
-	REORDERED_POLYMORPHIC_PAIR_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } wrap :: (left: $T, right: $U) -> Pair(U, T) { return .{Left=right, Right=left}; } main :: () { using,map(rename) procs := wrap(right=Other.{PushMatrix=1}, left=Child.{Clear=2}).Right; call := glClear; }";//
+	REORDERED_POLYMORPHIC_PAIR_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Left: First;
+	Right: Second;
+}
+wrap :: (left: $T, right: $U) -> Pair(U, T) {
+	return .{
+		Left=right, Right=left
+	};
+}
+main :: () {
+	using,map(rename) procs := wrap(
+		right=Other.{
+			PushMatrix=1
+		},
+		left=Child.{
+			Clear=2
+		}
+	).Right;
+	call := glClear;
+}
+JAI;
 	reordered_polymorphic_pair := Extended.parse_file(REORDERED_POLYMORPHIC_PAIR_SOURCE, filename);
 	reordered_polymorphic_pair_imports := Extended.resolve_file_imports(*reordered_polymorphic_pair, map_names=test_using_map_fields);
 	assert(reordered_polymorphic_pair.status == .COMPLETE && reordered_polymorphic_pair_imports.mapped_names.count == 1 && reordered_polymorphic_pair_imports.unsupported_using_filters.count == 0);
@@ -9798,7 +11928,34 @@ JAI,
 	Extended.release_parser_tree(*reordered_polymorphic_pair);
 	Extended.release_parser_names(*reordered_polymorphic_pair);
 
-	NAMED_RETURN_PAIR_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } wrap :: (left: $T, right: $U) -> Pair(Second=T, First=U) { return .{Left=right, Right=left}; } main :: () { using,map(rename) procs := wrap(right=Other.{PushMatrix=1}, left=Child.{Clear=2}).Right; call := glClear; }";//
+	NAMED_RETURN_PAIR_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Left: First;
+	Right: Second;
+}
+wrap :: (left: $T, right: $U) -> Pair(Second=T, First=U) {
+	return .{
+		Left=right, Right=left
+	};
+}
+main :: () {
+	using,map(rename) procs := wrap(
+		right=Other.{
+			PushMatrix=1
+		},
+		left=Child.{
+			Clear=2
+		}
+	).Right;
+	call := glClear;
+}
+JAI;
 	named_return_pair := Extended.parse_file(NAMED_RETURN_PAIR_SOURCE, filename);
 	named_return_pair_imports := Extended.resolve_file_imports(*named_return_pair, map_names=test_using_map_fields);
 	assert(named_return_pair.status == .COMPLETE && named_return_pair_imports.mapped_names.count == 1 && named_return_pair_imports.unsupported_using_filters.count == 0);
@@ -9806,7 +11963,35 @@ JAI,
 	Extended.release_parser_tree(*named_return_pair);
 	Extended.release_parser_names(*named_return_pair);
 
-	ALIASED_RETURN_PAIR_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } Alias :: Pair; wrap :: (left: $T, right: $U) -> Alias(Second=T, First=U) { return .{Left=right, Right=left}; } main :: () { using,map(rename) procs := wrap(right=Other.{PushMatrix=1}, left=Child.{Clear=2}).Right; call := glClear; }";//
+	ALIASED_RETURN_PAIR_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Left: First;
+	Right: Second;
+}
+Alias :: Pair;
+wrap :: (left: $T, right: $U) -> Alias(Second=T, First=U) {
+	return .{
+		Left=right, Right=left
+	};
+}
+main :: () {
+	using,map(rename) procs := wrap(
+		right=Other.{
+			PushMatrix=1
+		},
+		left=Child.{
+			Clear=2
+		}
+	).Right;
+	call := glClear;
+}
+JAI;
 	aliased_return_pair := Extended.parse_file(ALIASED_RETURN_PAIR_SOURCE, filename);
 	aliased_return_pair_imports := Extended.resolve_file_imports(*aliased_return_pair, map_names=test_using_map_fields);
 	assert(aliased_return_pair.status == .COMPLETE && aliased_return_pair_imports.mapped_names.count == 1 && aliased_return_pair_imports.unsupported_using_filters.count == 0);
@@ -9815,9 +12000,53 @@ JAI,
 	Extended.release_parser_names(*aliased_return_pair);
 
 	generic_sources: [] string = .[
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Clear: int; } main :: () { using,map(rename) box: Box(Child); call := glClear; }",//
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } main :: () { box: Box(Child); using,map(rename) child := box.Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } main :: () { box: type_of(Box(Child).{Nested=Child.{Clear=1}}); using,map(rename) child := box.Nested; call := glClear; }",//
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Clear: int;
+}
+main :: () {
+	using,map(rename) box: Box(Child);
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: () {
+	box: Box(Child);
+	using,map(rename) child := box.Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: () {
+	box: type_of(
+		Box(Child).{
+			Nested=Child.{
+				Clear=1
+			}
+		}
+	);
+	using,map(rename) child := box.Nested;
+	call := glClear;
+}
+JAI,
+
 	];
 	for generic_sources {
 		generic := Extended.parse_file(it, filename);
@@ -9835,7 +12064,23 @@ JAI,
 		Extended.release_parser_names(*generic);
 	}
 
-	MULTIPLE_GENERIC_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } main :: () { pair: Pair(Other, Child); using,map(rename) value := pair.Right; call := glClear; }";//
+	MULTIPLE_GENERIC_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Left: First;
+	Right: Second;
+}
+main :: () {
+	pair: Pair(Other, Child);
+	using,map(rename) value := pair.Right;
+	call := glClear;
+}
+JAI;
 	multiple_generic := Extended.parse_file(MULTIPLE_GENERIC_SOURCE, filename);
 	multiple_generic_imports := Extended.resolve_file_imports(*multiple_generic, map_names=test_using_map_fields);
 	assert(multiple_generic.status == .COMPLETE && multiple_generic_imports.mapped_names.count == 1 && multiple_generic_imports.unsupported_using_filters.count == 0);
@@ -9843,7 +12088,25 @@ JAI,
 	Extended.release_parser_tree(*multiple_generic);
 	Extended.release_parser_names(*multiple_generic);
 
-	ALIASED_GENERIC_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } Alias :: Pair; AliasAgain :: Alias; main :: () { pair: AliasAgain(Second=Child, First=Other); using,map(rename) procs := pair.Right; call := glClear; }";//
+	ALIASED_GENERIC_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Left: First;
+	Right: Second;
+}
+Alias :: Pair;
+AliasAgain :: Alias;
+main :: () {
+	pair: AliasAgain(Second=Child, First=Other);
+	using,map(rename) procs := pair.Right;
+	call := glClear;
+}
+JAI;
 	aliased_generic := Extended.parse_file(ALIASED_GENERIC_SOURCE, filename);
 	aliased_generic_imports := Extended.resolve_file_imports(*aliased_generic, map_names=test_using_map_fields);
 	assert(aliased_generic.status == .COMPLETE && aliased_generic_imports.mapped_names.count == 1 && aliased_generic_imports.unsupported_using_filters.count == 0);
@@ -9851,7 +12114,25 @@ JAI,
 	Extended.release_parser_tree(*aliased_generic);
 	Extended.release_parser_names(*aliased_generic);
 
-	ALIASED_INSTANCE_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } Instance :: Pair(Second=Child, First=Other); Alias :: Instance; main :: () { pair: Alias; using,map(rename) procs := pair.Right; call := glClear; }";//
+	ALIASED_INSTANCE_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Left: First;
+	Right: Second;
+}
+Instance :: Pair(Second=Child, First=Other);
+Alias :: Instance;
+main :: () {
+	pair: Alias;
+	using,map(rename) procs := pair.Right;
+	call := glClear;
+}
+JAI;
 	aliased_instance := Extended.parse_file(ALIASED_INSTANCE_SOURCE, filename);
 	aliased_instance_imports := Extended.resolve_file_imports(*aliased_instance, map_names=test_using_map_fields);
 	assert(aliased_instance.status == .COMPLETE && aliased_instance_imports.mapped_names.count == 1 && aliased_instance_imports.unsupported_using_filters.count == 0);
@@ -9859,7 +12140,34 @@ JAI,
 	Extended.release_parser_tree(*aliased_instance);
 	Extended.release_parser_names(*aliased_instance);
 
-	EQUIVALENT_INSTANCE_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } Instance :: Pair(Second=Child, First=Other); main :: (choose: bool) { using,map(rename) procs := (ifx choose then Instance.{Right=Child.{Clear=1}} else Pair(Other, Child).{Right=Child.{Clear=2}}).Right; call := glClear; }";//
+	EQUIVALENT_INSTANCE_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Left: First;
+	Right: Second;
+}
+Instance :: Pair(Second=Child, First=Other);
+main :: (choose: bool) {
+	using,map(rename) procs := (
+		ifx choose
+			then Instance.{
+				Right=Child.{
+					Clear=1
+				}
+			} else Pair(Other, Child).{
+				Right=Child.{
+					Clear=2
+				}
+			}
+	).Right;
+	call := glClear;
+}
+JAI;
 	equivalent_instance := Extended.parse_file(EQUIVALENT_INSTANCE_SOURCE, filename);
 	equivalent_instance_imports := Extended.resolve_file_imports(*equivalent_instance, map_names=test_using_map_fields);
 	assert(equivalent_instance.status == .COMPLETE && equivalent_instance_imports.mapped_names.count == 1 && equivalent_instance_imports.unsupported_using_filters.count == 0);
@@ -9867,7 +12175,23 @@ JAI,
 	Extended.release_parser_tree(*equivalent_instance);
 	Extended.release_parser_names(*equivalent_instance);
 
-	NAMED_GENERIC_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } main :: () { pair: Pair(Second=Child, First=Other); using,map(rename) procs := pair.Right; call := glClear; }";//
+	NAMED_GENERIC_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Left: First;
+	Right: Second;
+}
+main :: () {
+	pair: Pair(Second=Child, First=Other);
+	using,map(rename) procs := pair.Right;
+	call := glClear;
+}
+JAI;
 	named_generic := Extended.parse_file(NAMED_GENERIC_SOURCE, filename);
 	named_generic_imports := Extended.resolve_file_imports(*named_generic, map_names=test_using_map_fields);
 	assert(named_generic.status == .COMPLETE && named_generic_imports.mapped_names.count == 1 && named_generic_imports.unsupported_using_filters.count == 0);
@@ -9875,7 +12199,23 @@ JAI,
 	Extended.release_parser_tree(*named_generic);
 	Extended.release_parser_names(*named_generic);
 
-	NESTED_GENERIC_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } main :: () { pair: Pair(Pair(Child, Other), Other); using,map(rename) procs := pair.Left.Left; call := glClear; }";//
+	NESTED_GENERIC_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Left: First;
+	Right: Second;
+}
+main :: () {
+	pair: Pair(Pair(Child, Other), Other);
+	using,map(rename) procs := pair.Left.Left;
+	call := glClear;
+}
+JAI;
 	nested_generic := Extended.parse_file(NESTED_GENERIC_SOURCE, filename);
 	nested_generic_imports := Extended.resolve_file_imports(*nested_generic, map_names=test_using_map_fields);
 	assert(nested_generic.status == .COMPLETE && nested_generic_imports.mapped_names.count == 1 && nested_generic_imports.unsupported_using_filters.count == 0);
@@ -9883,7 +12223,24 @@ JAI,
 	Extended.release_parser_tree(*nested_generic);
 	Extended.release_parser_names(*nested_generic);
 
-	NESTED_ALIAS_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } Inner :: Pair(Child, Other); main :: () { pair: Pair(Inner, Other); using,map(rename) procs := pair.Left.Left; call := glClear; }";//
+	NESTED_ALIAS_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Left: First;
+	Right: Second;
+}
+Inner :: Pair(Child, Other);
+main :: () {
+	pair: Pair(Inner, Other);
+	using,map(rename) procs := pair.Left.Left;
+	call := glClear;
+}
+JAI;
 	nested_alias := Extended.parse_file(NESTED_ALIAS_SOURCE, filename);
 	nested_alias_imports := Extended.resolve_file_imports(*nested_alias, map_names=test_using_map_fields);
 	assert(nested_alias.status == .COMPLETE && nested_alias_imports.mapped_names.count == 1 && nested_alias_imports.unsupported_using_filters.count == 0);
@@ -9891,7 +12248,22 @@ JAI,
 	Extended.release_parser_tree(*nested_alias);
 	Extended.release_parser_names(*nested_alias);
 
-	INSTANTIATED_FIELD_SOURCE :: "Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Container :: struct { Item: Box(Child); } main :: () { container: Container; using,map(rename) procs := container.Item.Nested; call := glClear; }";//
+	INSTANTIATED_FIELD_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+Container :: struct {
+	Item: Box(Child);
+}
+main :: () {
+	container: Container;
+	using,map(rename) procs := container.Item.Nested;
+	call := glClear;
+}
+JAI;
 	instantiated_field := Extended.parse_file(INSTANTIATED_FIELD_SOURCE, filename);
 	instantiated_field_imports := Extended.resolve_file_imports(*instantiated_field, map_names=test_using_map_fields);
 	assert(instantiated_field.status == .COMPLETE && instantiated_field_imports.mapped_names.count == 1 && instantiated_field_imports.unsupported_using_filters.count == 0);
@@ -9899,7 +12271,22 @@ JAI,
 	Extended.release_parser_tree(*instantiated_field);
 	Extended.release_parser_names(*instantiated_field);
 
-	PARAMETERIZED_FIELD_SOURCE :: "Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Container :: struct (T: Type) { Item: Box(T); } main :: () { container: Container(Child); using,map(rename) procs := container.Item.Nested; call := glClear; }";//
+	PARAMETERIZED_FIELD_SOURCE :: #string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+Container :: struct (T: Type) {
+	Item: Box(T);
+}
+main :: () {
+	container: Container(Child);
+	using,map(rename) procs := container.Item.Nested;
+	call := glClear;
+}
+JAI;
 	parameterized_field := Extended.parse_file(PARAMETERIZED_FIELD_SOURCE, filename);
 	parameterized_field_imports := Extended.resolve_file_imports(*parameterized_field, map_names=test_using_map_fields);
 	assert(parameterized_field.status == .COMPLETE && parameterized_field_imports.mapped_names.count == 1 && parameterized_field_imports.unsupported_using_filters.count == 0);
@@ -9913,8 +12300,44 @@ JAI,
 	Extended.release_parser_names(*parameterized_field);
 
 	nested_field_sources: []string = .[
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Container :: struct (T: Type) { Item: Box(Box(T)); } main :: () { container: Container(Child); using,map(rename) procs := container.Item.Nested.Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } Container :: struct (T: Type, U: Type) { Item: Pair(Second=T, First=U); } main :: () { container: Container(U=Other, T=Child); using,map(rename) procs := container.Item.Right; call := glClear; }",//
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+Container :: struct (T: Type) {
+	Item: Box(Box(T));
+}
+main :: () {
+	container: Container(Child);
+	using,map(rename) procs := container.Item.Nested.Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Left: First;
+	Right: Second;
+}
+Container :: struct (T: Type, U: Type) {
+	Item: Pair(Second=T, First=U);
+}
+main :: () {
+	container: Container(U=Other, T=Child);
+	using,map(rename) procs := container.Item.Right;
+	call := glClear;
+}
+JAI,
+
 	];
 	for nested_field_sources {
 		parsed := Extended.parse_file(it, filename);
@@ -9926,10 +12349,77 @@ JAI,
 	}
 
 	unsupported_nested_field_sources: []string = .[
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Container :: struct (T: Type) { Item: Box(T); } main :: () { using,map(rename) procs: Container; call := glClear; }",//
-		"Child :: struct { Clear: int; } Child :: struct { PushMatrix: int; } Box :: struct (T: Type) { Nested: T; } Container :: struct (T: Type) { Item: Box(T); } main :: () { container: Container(Child); using,map(rename) procs := container.Item.Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; #if Unknown { Hidden: int; } } Box :: struct (T: Type) { Nested: T; } Container :: struct (T: Type) { Item: Box(T); } main :: () { container: Container(Child); using,map(rename) procs := container.Item.Nested; call := glClear; }",//
-		"Box :: struct (T: Type) { Nested: T; } Container :: struct (T: Type) { Item: Box(T); } Self :: Container(Self); main :: () { container: Self; using,map(rename) procs := container.Item.Nested; call := glClear; }",//
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+Container :: struct (T: Type) {
+	Item: Box(T);
+}
+main :: () {
+	using,map(rename) procs: Container;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Child :: struct {
+	PushMatrix: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+Container :: struct (T: Type) {
+	Item: Box(T);
+}
+main :: () {
+	container: Container(Child);
+	using,map(rename) procs := container.Item.Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+	#if Unknown {
+		Hidden: int;
+	}
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+Container :: struct (T: Type) {
+	Item: Box(T);
+}
+main :: () {
+	container: Container(Child);
+	using,map(rename) procs := container.Item.Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Box :: struct (T: Type) {
+	Nested: T;
+}
+Container :: struct (T: Type) {
+	Item: Box(T);
+}
+Self :: Container(Self);
+main :: () {
+	container: Self;
+	using,map(rename) procs := container.Item.Nested;
+	call := glClear;
+}
+JAI,
+
 	];
 	for unsupported_nested_field_sources {
 		parsed := Extended.parse_file(it, filename);
@@ -9941,9 +12431,63 @@ JAI,
 	}
 
 	complete_alias_sources: [] string = .[
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Instance :: Box(Child); Alias :: Instance; main :: () { value: Alias; using,map(rename) procs := value.Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Instance :: Box(Child); Alias :: Instance; main :: () { original := Alias.{Nested=Child.{Clear=1}}; first := original; second := first; using,map(rename) procs := second.Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } main :: () { value: Box(Child) = .{Nested=Child.{Clear=1}}; alias := value; using,map(rename) procs := alias.Nested; call := glClear; }",//
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+Instance :: Box(Child);
+Alias :: Instance;
+main :: () {
+	value: Alias;
+	using,map(rename) procs := value.Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+Instance :: Box(Child);
+Alias :: Instance;
+main :: () {
+	original := Alias.{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+	first := original;
+	second := first;
+	using,map(rename) procs := second.Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: () {
+	value: Box(Child) = .{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+	alias := value;
+	using,map(rename) procs := alias.Nested;
+	call := glClear;
+}
+JAI,
+
 	];
 	for complete_alias_sources {
 		complete_alias := Extended.parse_file(it, filename);
@@ -9955,12 +12499,108 @@ JAI,
 	}
 
 	unsupported_alias_sources: [] string = .[
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Instance :: Box(Child); Instance :: Box(Child); main :: () { value: Instance; using,map(rename) procs := value.Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Instance :: Box(Child); main :: () { original := Instance.{Nested=Child.{Clear=1}}; original := Instance.{Nested=Child.{Clear=2}}; alias := original; using,map(rename) procs := alias.Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } First :: Second; Second :: First; main :: () { value: First; using,map(rename) procs := value.Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } main :: () { first := second; second := first; using,map(rename) procs := first.Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Instance :: Box; main :: () { value: Instance; using,map(rename) procs := value.Nested; call := glClear; }",//
-		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Instance :: Box(Missing); main :: () { value: Instance; using,map(rename) procs := value.Nested; call := glClear; }",//
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+Instance :: Box(Child);
+Instance :: Box(Child);
+main :: () {
+	value: Instance;
+	using,map(rename) procs := value.Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+Instance :: Box(Child);
+main :: () {
+	original := Instance.{
+		Nested=Child.{
+			Clear=1
+		}
+	};
+	original := Instance.{
+		Nested=Child.{
+			Clear=2
+		}
+	};
+	alias := original;
+	using,map(rename) procs := alias.Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+First :: Second;
+Second :: First;
+main :: () {
+	value: First;
+	using,map(rename) procs := value.Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: () {
+	first := second;
+	second := first;
+	using,map(rename) procs := first.Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+Instance :: Box;
+main :: () {
+	value: Instance;
+	using,map(rename) procs := value.Nested;
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+Instance :: Box(Missing);
+main :: () {
+	value: Instance;
+	using,map(rename) procs := value.Nested;
+	call := glClear;
+}
+JAI,
+
 	];
 	for unsupported_alias_sources {
 		unsupported_alias := Extended.parse_file(it, filename);
@@ -9971,7 +12611,16 @@ JAI,
 		Extended.release_parser_names(*unsupported_alias);
 	}
 
-	PRIMITIVE_GENERIC_SOURCE :: "Box :: struct (T: Type) { Clear: int; Nested: T; } main :: () { using,map(rename) box: Box(s64); call := glClear; }";//
+	PRIMITIVE_GENERIC_SOURCE :: #string JAI
+Box :: struct (T: Type) {
+	Clear: int;
+	Nested: T;
+}
+main :: () {
+	using,map(rename) box: Box(s64);
+	call := glClear;
+}
+JAI;
 	primitive_generic := Extended.parse_file(PRIMITIVE_GENERIC_SOURCE, filename);
 	primitive_generic_imports := Extended.resolve_file_imports(*primitive_generic, map_names=test_using_map_fields);
 	assert(primitive_generic.status == .COMPLETE && primitive_generic_imports.mapped_names.count == 2 && primitive_generic_imports.unsupported_using_filters.count == 0);
@@ -9980,18 +12629,186 @@ JAI,
 	Extended.release_parser_names(*primitive_generic);
 
 	unsupported_generic_sources: [] string = .[
-		"Box :: struct (T: Type) { Nested: T; } main :: () { using,map(rename) box: Box; call := glNested; }",//
-		"Box :: struct (T: Type) { Nested: T; } main :: () { using,map(rename) box: Box(Missing); call := glNested; }",//
-		"Child :: struct { Clear: int; } Alias :: Loop; Loop :: Alias; main :: () { using,map(rename) value: Alias(Child); call := glClear; }",//
-		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } Self :: Pair(Self, Child); main :: () { using,map(rename) pair: Self; call := glRight; }",//
-		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } Alias :: Pair; main :: () { using,map(rename) pair: Alias(Unknown=Child, Second=Child); call := glRight; }",//
-		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } Alias :: Pair(Child); main :: () { using,map(rename) pair: Alias; call := glRight; }",//
-		"Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } main :: (choose: bool) { using,map(rename) pair := ifx choose then Pair(Pair(Child, Other), Other).{Right=Other.{PushMatrix=1}} else Pair(Pair(Other, Child), Other).{Right=Other.{PushMatrix=2}}; call := glRight; }",//
-		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } wrap :: (left: $T, right: $U) -> Pair(Second=T, Second=U) { return .{Right=left}; } main :: () { using,map(rename) procs := wrap(Child.{Clear=1}, Child.{Clear=2}); call := glRight; }",//
-		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } main :: () { using,map(rename) pair: Pair(First=Child, First=Child); call := glRight; }",//
-		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } main :: () { using,map(rename) pair: Pair(Child); call := glRight; }",//
-		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } main :: () { using,map(rename) pair: Pair(Child, Missing); call := glRight; }",//
-		"Child :: struct { Clear: int; #if Unknown { PushMatrix: int; } } Box :: struct (T: Type) { Clear: int; } main :: () { using,map(rename) box: Box(Child); call := glClear; }",//
+		#string JAI
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: () {
+	using,map(rename) box: Box;
+	call := glNested;
+}
+JAI,
+
+		#string JAI
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: () {
+	using,map(rename) box: Box(Missing);
+	call := glNested;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Alias :: Loop;
+Loop :: Alias;
+main :: () {
+	using,map(rename) value: Alias(Child);
+	call := glClear;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Right: Second;
+}
+Self :: Pair(Self, Child);
+main :: () {
+	using,map(rename) pair: Self;
+	call := glRight;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Right: Second;
+}
+Alias :: Pair;
+main :: () {
+	using,map(rename) pair: Alias(Unknown=Child, Second=Child);
+	call := glRight;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Right: Second;
+}
+Alias :: Pair(Child);
+main :: () {
+	using,map(rename) pair: Alias;
+	call := glRight;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Left: First;
+	Right: Second;
+}
+main :: (choose: bool) {
+	using,map(rename) pair := ifx choose
+		then Pair(Pair(Child, Other), Other).{
+			Right=Other.{
+				PushMatrix=1
+			}
+		} else Pair(Pair(Other, Child), Other).{
+			Right=Other.{
+				PushMatrix=2
+			}
+		};
+	call := glRight;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Right: Second;
+}
+wrap :: (left: $T, right: $U) -> Pair(Second=T, Second=U) {
+	return .{
+		Right=left
+	};
+}
+main :: () {
+	using,map(rename) procs := wrap(
+		Child.{
+			Clear=1
+		},
+		Child.{
+			Clear=2
+		}
+	);
+	call := glRight;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Right: Second;
+}
+main :: () {
+	using,map(rename) pair: Pair(First=Child, First=Child);
+	call := glRight;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Right: Second;
+}
+main :: () {
+	using,map(rename) pair: Pair(Child);
+	call := glRight;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+}
+Pair :: struct (First: Type, Second: Type) {
+	Right: Second;
+}
+main :: () {
+	using,map(rename) pair: Pair(Child, Missing);
+	call := glRight;
+}
+JAI,
+
+		#string JAI
+Child :: struct {
+	Clear: int;
+	#if Unknown {
+		PushMatrix: int;
+	}
+}
+Box :: struct (T: Type) {
+	Clear: int;
+}
+main :: () {
+	using,map(rename) box: Box(Child);
+	call := glClear;
+}
+JAI,
+
 	];
 	for unsupported_generic_sources {
 		generic := Extended.parse_file(it, filename);
@@ -10002,7 +12819,19 @@ JAI,
 		Extended.release_parser_names(*generic);
 	}
 
-	TYPED_RUN_SOURCE :: "Procs :: struct { Clear: int; } main :: () { using,map(rename) procs := #run -> Procs { return .{Clear=1}; }; call := glClear; }";//
+	TYPED_RUN_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+main :: () {
+	using,map(rename) procs := #run -> Procs {
+		return .{
+			Clear=1
+		};
+	};
+	call := glClear;
+}
+JAI;
 	typed_run := Extended.parse_file(TYPED_RUN_SOURCE, filename);
 	typed_run_imports := Extended.resolve_file_imports(*typed_run, map_names=test_using_map_fields);
 	assert(typed_run.status == .COMPLETE);
@@ -10018,28 +12847,68 @@ JAI,
 
 	complete_conditional_receiver_sources: []string = .[
 		#string JAI
-C :: struct { Clear: int; }
-Box :: struct (T: Type) { Nested: T; }
-main :: () { using,map(rename) procs := (#run Box(C).{Nested=C.{Clear=1}}).Nested; call := glClear; }
-JAI
-		,
+C :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: () {
+	using,map(rename) procs := (#run Box(C).{Nested=C.{Clear=1}}).Nested;
+	call := glClear;
+}
+JAI,
+
 		#string JAI
-C :: struct { Clear: int; }
-Box :: struct (T: Type) { Nested: T; }
-main :: () { using,map(rename) procs := (#run -> Box(C) { return .{Nested=C.{Clear=1}}; }).Nested; call := glClear; }
-JAI
-		,
+C :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: () {
+	using,map(rename) procs := (#run -> Box(C) {
+		return .{Nested=C.{Clear=1}};
+	}).Nested;
+	call := glClear;
+}
+JAI,
+
 		#string JAI
-C :: struct { Clear: int; }
-Box :: struct (T: Type) { Nested: T; }
-main :: (choose: bool) { using,map(rename) procs := (ifx choose then Box(C).{Nested=C.{Clear=1}} else Box(C).{Nested=C.{Clear=2}}).Nested; call := glClear; }
-JAI
-		,
+C :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: (choose: bool) {
+	using,map(rename) procs := (
+		ifx choose
+			then Box(C).{Nested=C.{Clear=1}}
+			else Box(C).{Nested=C.{Clear=2}}
+	).Nested;
+	call := glClear;
+}
+JAI,
+
 		#string JAI
-C :: struct { Clear: int; }
-O :: struct { PushMatrix: int; }
-Box :: struct (T: Type) { Nested: T; }
-main :: () { using,map(rename) procs := (#ifx true then Box(C).{Nested=C.{Clear=1}} else Box(O).{Nested=O.{PushMatrix=2}}).Nested; call := glClear; }
+C :: struct {
+	Clear: int;
+}
+O :: struct {
+	PushMatrix: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: () {
+	using,map(rename) procs := (
+		#ifx true
+			then Box(C).{Nested=C.{Clear=1}}
+			else Box(O).{Nested=O.{PushMatrix=2}}
+	).Nested;
+	call := glClear;
+}
 JAI
 	];
 	for complete_conditional_receiver_sources {
@@ -10053,22 +12922,55 @@ JAI
 
 	unsupported_conditional_receiver_sources: []string = .[
 		#string JAI
-C :: struct { Clear: int; }
-O :: struct { PushMatrix: int; }
-Box :: struct (T: Type) { Nested: T; }
-main :: (choose: bool) { using,map(rename) procs := (ifx choose then Box(C).{Nested=C.{Clear=1}} else Box(O).{Nested=O.{PushMatrix=2}}).Nested; call := glClear; }
-JAI
-		,
+C :: struct {
+	Clear: int;
+}
+O :: struct {
+	PushMatrix: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: (choose: bool) {
+	using,map(rename) procs := (
+		#ifx choose
+			then Box(C).{Nested=C.{Clear=1}}
+			else Box(O).{Nested=O.{PushMatrix=2}}
+	).Nested;
+	call := glClear;
+}
+JAI,
+
 		#string JAI
-C :: struct { Clear: int; }
-Box :: struct (T: Type) { Nested: T; }
-main :: () { using,map(rename) procs := (#ifx Unknown then Box(C).{Nested=C.{Clear=1}} else Box(C).{Nested=C.{Clear=2}}).Nested; call := glClear; }
-JAI
-		,
+C :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: () {
+	using,map(rename) procs := (
+		#ifx Unknown
+			then Box(C).{Nested=C.{Clear=1}}
+			else Box(C).{Nested=C.{Clear=2}}
+	).Nested;
+	call := glClear;
+}
+JAI,
+
 		#string JAI
-C :: struct { Clear: int; }
-Box :: struct (T: Type) { Nested: T; }
-main :: () { using,map(rename) procs := (#run { return Box(C).{Nested=C.{Clear=1}}; }).Nested; call := glClear; }
+C :: struct {
+	Clear: int;
+}
+Box :: struct (T: Type) {
+	Nested: T;
+}
+main :: () {
+	using,map(rename) procs := (#run {
+		return Box(C).{Nested=C.{Clear=1}};
+	}).Nested;
+	call := glClear;
+}
 JAI
 	];
 	for unsupported_conditional_receiver_sources {
@@ -10080,7 +12982,17 @@ JAI
 		Extended.release_parser_names(*parsed);
 	}
 
-	EXPRESSION_RUN_SOURCE :: "Procs :: struct { Clear: int; } main :: () { using,map(rename) procs := #run Procs.{Clear=1}; call := glClear; }";//
+	EXPRESSION_RUN_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+main :: () {
+	using,map(rename) procs := #run Procs.{
+		Clear=1
+	};
+	call := glClear;
+}
+JAI;
 	expression_run := Extended.parse_file(EXPRESSION_RUN_SOURCE, filename);
 	expression_run_imports := Extended.resolve_file_imports(*expression_run, map_names=test_using_map_fields);
 	assert(expression_run.status == .COMPLETE);
@@ -10094,7 +13006,28 @@ JAI
 	Extended.release_parser_tree(*expression_run);
 	Extended.release_parser_names(*expression_run);
 
-	OVERLOADED_RUN_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Procs { return .{Clear=1}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := #run make(\"text\"); call := glClear; }";//
+	OVERLOADED_RUN_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+Other :: struct {
+	PushMatrix: int;
+}
+make :: (number: int) -> Procs {
+	return .{
+		Clear=1
+	};
+}
+make :: (text: string) -> Other {
+	return .{
+		PushMatrix=1
+	};
+}
+main :: () {
+	using,map(rename) procs := #run make("text");
+	call := glClear;
+}
+JAI;
 	overloaded_run := Extended.parse_file(OVERLOADED_RUN_SOURCE, filename);
 	overloaded_run_imports := Extended.resolve_file_imports(*overloaded_run, map_names=test_using_map_fields);
 	assert(
@@ -10108,7 +13041,19 @@ JAI
 	Extended.release_parser_tree(*overloaded_run);
 	Extended.release_parser_names(*overloaded_run);
 
-	UNTYPED_RUN_SOURCE :: "Procs :: struct { Clear: int; } main :: () { using,map(rename) procs := #run { return Procs.{Clear=1}; }; call := glClear; }";//
+	UNTYPED_RUN_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+main :: () {
+	using,map(rename) procs := #run {
+		return Procs.{
+			Clear=1
+		};
+	};
+	call := glClear;
+}
+JAI;
 	untyped_run := Extended.parse_file(UNTYPED_RUN_SOURCE, filename);
 	untyped_run_imports := Extended.resolve_file_imports(*untyped_run, map_names=test_using_map_fields);
 	assert(untyped_run.status == .COMPLETE && untyped_run_imports.mapped_names.count == 0 && untyped_run_imports.unsupported_using_filters.count == 1);
@@ -10116,7 +13061,12 @@ JAI
 	Extended.release_parser_tree(*untyped_run);
 	Extended.release_parser_names(*untyped_run);
 
-	UNRESOLVED_CALL_SOURCE :: "main :: () { using,map(rename) procs := missing(); call := glClear; }";//
+	UNRESOLVED_CALL_SOURCE :: #string JAI
+main :: () {
+	using,map(rename) procs := missing();
+	call := glClear;
+}
+JAI;
 	unresolved_call := Extended.parse_file(UNRESOLVED_CALL_SOURCE, filename);
 	unresolved_call_imports := Extended.resolve_file_imports(*unresolved_call, map_names=test_using_map_fields);
 	assert(unresolved_call_imports.mapped_names.count == 0 && unresolved_call_imports.unsupported_using_filters.count == 1);
@@ -10147,7 +13097,16 @@ JAI
 	Extended.release_parser_tree(*semantic_call);
 	Extended.release_parser_names(*semantic_call);
 
-	AGGREGATE_COLLISION_SOURCE :: "Procs :: struct { Clear: int; PushMatrix: int; } main :: () { using,map(rename) procs: Procs; call := same_name; }";//
+	AGGREGATE_COLLISION_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+	PushMatrix: int;
+}
+main :: () {
+	using,map(rename) procs: Procs;
+	call := same_name;
+}
+JAI;
 	aggregate_collision := Extended.parse_file(AGGREGATE_COLLISION_SOURCE, filename);
 	aggregate_collision_imports := Extended.resolve_file_imports(*aggregate_collision, map_names=test_using_map_collision);
 	assert(aggregate_collision_imports.map_collisions.count == 1);
@@ -10163,7 +13122,19 @@ JAI
 	Extended.release_parser_tree(*aggregate_collision);
 	Extended.release_parser_names(*aggregate_collision);
 
-	SEPARATE_SOURCE :: "First :: struct { alpha: int; } Second :: struct { beta: int; } main :: () { using,map(rename) a: First; using,map(rename) b: Second; call := same_name; }";//
+	SEPARATE_SOURCE :: #string JAI
+First :: struct {
+	alpha: int;
+}
+Second :: struct {
+	beta: int;
+}
+main :: () {
+	using,map(rename) a: First;
+	using,map(rename) b: Second;
+	call := same_name;
+}
+JAI;
 	separate := Extended.parse_file(SEPARATE_SOURCE, filename);
 	separate_imports := Extended.resolve_file_imports(*separate, map_names=test_using_map_collision);
 	assert(separate_imports.map_collisions.count == 1);
@@ -10176,7 +13147,16 @@ JAI
 	Extended.release_parser_tree(*separate);
 	Extended.release_parser_names(*separate);
 
-	LEXICAL_SOURCE :: "Procs :: struct { Clear: int; } main :: () { glClear :: 5; using,map(rename) procs: Procs; call := glClear; }";//
+	LEXICAL_SOURCE :: #string JAI
+Procs :: struct {
+	Clear: int;
+}
+main :: () {
+	glClear :: 5;
+	using,map(rename) procs: Procs;
+	call := glClear;
+}
+JAI;
 	lexical := Extended.parse_file(LEXICAL_SOURCE, filename);
 	lexical_imports := Extended.resolve_file_imports(*lexical, map_names=test_using_map_fields);
 	assert(lexical_imports.map_collisions.count == 1);
@@ -10186,7 +13166,11 @@ JAI
 	Extended.release_parser_tree(*lexical);
 	Extended.release_parser_names(*lexical);
 
-	LOCAL_SOURCE :: "#import,file \"files/specific.jai\"; mess_up_this_string :: 4; call := mess_up_this_string;";//
+	LOCAL_SOURCE :: #string JAI
+#import,file "files/specific.jai";
+mess_up_this_string :: 4;
+call := mess_up_this_string;
+JAI;
 	local := Extended.parse_file(LOCAL_SOURCE, filename);
 	local_imports := Extended.resolve_file_imports(*local);
 	local_statements := local.root.(*Extended.Parser_Block).statements;
@@ -11017,7 +14001,21 @@ test_procedure_types :: () {
 	assert(quick_block_header.arguments.count == 2);
 	assert((quick_block_header.procedure_flags & .QUICK_IN_BLOCK_FORM) != 0);
 
-	CALL_WITH_SOURCE :: "{ call_with :: (arg: $T, f: (T)) { f(arg); } call_with(5, x => { if x > 0 then #this(x-1); }); after(); }";//
+	CALL_WITH_SOURCE :: #string JAI
+{
+	call_with :: (arg: $T, f: (T)) {
+		f(arg);
+	}
+	call_with(
+		5,
+		x => {
+			if x > 0
+				then #this(x-1);
+		}
+	);
+	after();
+}
+JAI;
 	call_with := Extended.parse_block(CALL_WITH_SOURCE);
 	assert(call_with.status == .COMPLETE);
 	call_with_statements := call_with.root.(*Extended.Parser_Block).statements;
@@ -11086,7 +14084,17 @@ test_procedure_types :: () {
 	assert(assignment.left.(*Extended.Parser_Ident).name == "w");
 	assert(assignment.left.(*Extended.Parser_Ident).resolved_declaration == field);
 
-	DOTTED_SOURCE :: "Defaulted :: struct { info: Info; info.flavor = \"chocolate\"; position: Vector3; position.z = 1.5; brightness: float; brightness = 101.2; after: s64; }";//
+	DOTTED_SOURCE :: #string JAI
+Defaulted :: struct {
+	info: Info;
+	info.flavor = "chocolate";
+	position: Vector3;
+	position.z = 1.5;
+	brightness: float;
+	brightness = 101.2;
+	after: s64;
+}
+JAI;
 	dotted := Extended.parse_declaration(DOTTED_SOURCE);
 	assert(dotted.status == .COMPLETE);
 	dotted_members := dotted.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements;
@@ -11523,7 +14531,22 @@ test_basic_statements_and_blocks :: () {
 }
 
 test_loop_and_scoped_statements :: () {
-	parsed := Extended.parse_block("{ while ready { break; } for item, index: values { continue; } for 1..3 defer tick(); using state; using local: State; push_context new_context { return; } }");//
+	parsed := Extended.parse_block(#string JAI
+{
+	while ready {
+		break;
+	}
+	for item, index: values {
+		continue;
+	}
+	for 1..3	defer tick();
+	using state;
+	using local: State;
+	push_context new_context {
+		return;
+	}
+}
+JAI);
 	assert(parsed.status == .COMPLETE);
 	block := parsed.root.(*Extended.Parser_Block);
 	assert(block.statements.count == 6);
@@ -11997,7 +15020,17 @@ test_duplicate_for_flags :: () {
 }
 
 test_conditional_statements :: () {
-	parsed := Extended.parse_block("{ if ready then run(); else stop(); if outer then if inner accept(); else reject(); }");//
+	parsed := Extended.parse_block(#string JAI
+{
+	if ready
+		then run();
+		else stop();
+	if outer
+		then if inner
+			accept();
+			else reject();
+}
+JAI);
 	assert(parsed.status == .COMPLETE);
 	block := parsed.root.(*Extended.Parser_Block);
 	assert(block.statements.count == 2);
@@ -12007,7 +15040,22 @@ test_conditional_statements :: () {
 	nested_if := block.statements[1].(*Extended.Parser_If).then_block.statements[0].(*Extended.Parser_If);
 	assert(nested_if.else_block != null);
 
-	CONDITION_SOURCE :: "{ if (mode == .ALLOCATE) && (size == 42) { run(); } if (count % 2) { run(); } if (pointer) { run(); } while (pointer) { break; } }";//
+	CONDITION_SOURCE :: #string JAI
+{
+	if (mode == .ALLOCATE) && (size == 42) {
+		run();
+	}
+	if (count % 2) {
+		run();
+	}
+	if (pointer) {
+		run();
+	}
+	while (pointer) {
+		break;
+	}
+}
+JAI;
 	conditions := Extended.parse_block(CONDITION_SOURCE);
 	assert(conditions.status == .COMPLETE);
 	condition_statements := conditions.root.(*Extended.Parser_Block).statements;
@@ -12117,7 +15165,21 @@ test_conditional_statements :: () {
 	assert(declaration_semicolon.diagnostics[0].kind == .UNNECESSARY_SEMICOLON);
 	assert(Extended.parse_block("{ value := ifx ready then 1 else 2 next(); }").status == .RECOVERED);
 
-	SWITCH_SOURCE :: "{ if #complete value == { case 1; return 1; case 2; #through; case 3; return 3; case; return 0; } }";//
+	SWITCH_SOURCE :: #string JAI
+{
+	if #complete value == {
+		case 1;
+			return 1;
+
+		case 2; #through;
+		case 3;
+			return 3;
+
+		case;
+			return 0;
+	}
+}
+JAI;
 	switch_parsed := Extended.parse_block(SWITCH_SOURCE);
 	assert(switch_parsed.status == .COMPLETE);
 	switch_node := switch_parsed.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
@@ -12161,7 +15223,17 @@ test_static_if_directives :: () {
 	assert(static_ifx.then_block.statements[0].(*Extended.Parser_Literal)._u64 == 1);
 	assert(static_ifx.else_block.statements[0].(*Extended.Parser_Literal)._u64 == 2);
 
-	STATIC_IFX_SOURCE :: "{ value := #ifx ready { prepare(); 1; } else { 2; } next(); }";//
+	STATIC_IFX_SOURCE :: #string JAI
+{
+	value := #ifx ready {
+		prepare();
+		1;
+	} else {
+		2;
+	}
+	next();
+}
+JAI;
 	static_ifx_block := Extended.parse_block(STATIC_IFX_SOURCE);
 	assert(static_ifx_block.status == .COMPLETE);
 	static_ifx_statements := static_ifx_block.root.(*Extended.Parser_Block).statements;
@@ -12171,7 +15243,15 @@ test_static_if_directives :: () {
 	assert(Extended.reconstruct_source(*static_ifx_block) == STATIC_IFX_SOURCE);
 	assert(Extended.parse_block("{ value := #ifx ready then else 2; next(); }").status == .RECOVERED);
 
-	static_statement := Extended.parse_block("{ #if true { enabled := 1; } else #if false disabled := 2; else fallback := 3; }");//
+	static_statement := Extended.parse_block(#string JAI
+{
+	#if true {
+		enabled := 1;
+	} else #if false
+		disabled := 2;
+		else fallback := 3;
+}
+JAI);
 	assert(static_statement.status == .COMPLETE);
 	static_if := static_statement.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
 	assert((static_if.if_flags & .IS_STATIC) != 0);
@@ -12180,7 +15260,13 @@ test_static_if_directives :: () {
 	assert((nested_static_if.if_flags & .IS_STATIC) != 0);
 	assert(nested_static_if.else_block.statements[0].kind == .DECLARATION);
 
-	static_file := Extended.parse_file("#if true { first :: 1; } else second :: 2;\nafter :: 3;");//
+	static_file := Extended.parse_file(#string JAI
+#if true {
+	first :: 1;
+} else
+	second :: 2;
+after :: 3;
+JAI);
 	assert(static_file.status == .COMPLETE);
 	file_if := static_file.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
 	assert((file_if.if_flags & .IS_STATIC) != 0);
@@ -12188,13 +15274,33 @@ test_static_if_directives :: () {
 	assert(file_if.else_block.statements[0].kind == .DECLARATION);
 	assert(static_file.root.(*Extended.Parser_Block).statements.count == 2);
 
-	static_member := Extended.parse_declaration("Conditional :: struct { #if true { enabled: s64; } else disabled: s64; }");//
+	static_member := Extended.parse_declaration(#string JAI
+Conditional :: struct {
+	#if true {
+		enabled: s64;
+	} else
+		disabled: s64;
+}
+JAI);
 	assert(static_member.status == .COMPLETE);
 	member_if := static_member.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements[0].(*Extended.Parser_If);
 	assert((member_if.if_flags & .IS_STATIC) != 0);
 	assert(member_if.then_block.block_type == .DATA_DECLARATIONS);
 
-	ENUM_SOURCE :: "Spells :: enum { BASE; #if true { BLORPLE; #if false { HIDDEN; } else VISIBLE; } else FALLBACK; AFTER; }";//
+	ENUM_SOURCE :: #string JAI
+Spells :: enum {
+	BASE;
+	#if true {
+		BLORPLE;
+		#if false {
+			HIDDEN;
+		} else
+			VISIBLE;
+	} else
+		FALLBACK;
+	AFTER;
+}
+JAI;
 	static_enum := Extended.parse_declaration(ENUM_SOURCE);
 	assert(static_enum.status == .COMPLETE);
 	enum_statements := static_enum.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Enum).block.statements;
@@ -12209,7 +15315,15 @@ test_static_if_directives :: () {
 	assert(Extended.reconstruct_source(*static_enum) == ENUM_SOURCE);
 	assert(Extended.parse_declaration("Broken :: enum { #if true { NAME; ").status == .INCOMPLETE);
 
-	static_empty_default := Extended.parse_block("{ #if OS == { case .WINDOWS; return; case; } }");//
+	static_empty_default := Extended.parse_block(#string JAI
+{
+	#if OS == {
+		case .WINDOWS;
+			return;
+		case;
+	}
+}
+JAI);
 	assert(static_empty_default.status == .COMPLETE);
 	assert(static_empty_default.synthetic_tokens.count == 0);
 	static_cases := static_empty_default.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block.statements;
@@ -12234,7 +15348,13 @@ test_preserved_directive_forms :: () {
 		assert((using_node.expression.(*Extended.Parser_Declaration).flags & .IS_MARKED_AS_AS) != 0);
 	}
 
-	using_declarations := Extended.parse_file("using Global: State;\nContainer :: struct { using local: State; using #as base: Base; }");//
+	using_declarations := Extended.parse_file(#string JAI
+using Global: State;
+Container :: struct {
+	using local: State;
+	using #as base: Base;
+}
+JAI);
 	assert(using_declarations.status == .COMPLETE);
 	file_statements := using_declarations.root.(*Extended.Parser_Block).statements;
 	assert(file_statements[0].(*Extended.Parser_Using).expression.(*Extended.Parser_Declaration).name == "Global");
@@ -12245,7 +15365,15 @@ test_preserved_directive_forms :: () {
 	assert(suffix_as.name == "base");
 	assert((suffix_as.flags & .IS_MARKED_AS_AS) != 0);
 
-	USING_ENUM_SOURCE :: "{ using enum u16 { CHOCOLATE :: 0; VANILLA; } after(); }";//
+	USING_ENUM_SOURCE :: #string JAI
+{
+	using enum u16 {
+		CHOCOLATE :: 0;
+		VANILLA;
+	}
+	after();
+}
+JAI;
 	using_enum := Extended.parse_block(USING_ENUM_SOURCE);
 	assert(using_enum.status == .COMPLETE);
 	using_enum_statements := using_enum.root.(*Extended.Parser_Block).statements;
@@ -12259,7 +15387,17 @@ test_preserved_directive_forms :: () {
 	assert(ordinary_using.status == .RECOVERED);
 	assert(ordinary_using.diagnostics[0].expected_token == #char ";");
 
-	ASM_SOURCE :: "{ #asm AVX, AVX2 { mov apple:, 10; nested { ignored; }; } after(); }";//
+	ASM_SOURCE :: #string JAI
+{
+	#asm AVX, AVX2 {
+		mov apple:, 10;
+		nested {
+			ignored;
+		};
+	}
+	after();
+}
+JAI;
 	assembly := Extended.parse_block(ASM_SOURCE);
 	assert(assembly.status == .COMPLETE);
 	assembly_block := assembly.root.(*Extended.Parser_Block);
@@ -12289,7 +15427,20 @@ test_preserved_directive_forms :: () {
 	assert(asm_node.body_span.one_past_last > asm_node.body_span.first);
 	assert(Extended.reconstruct_source(*assembly) == ASM_SOURCE);
 
-	REGISTER_SOURCE :: "{ #asm { apple:; banana: gpr; mov cherry:, 10; mov w: gpr === 15, 10; t: gpr === a; v: vec === 9; x === a; mov y === a, z: gpr === 9; } }";//
+	REGISTER_SOURCE :: #string JAI
+{
+	#asm {
+		apple:;
+		banana: gpr;
+		mov cherry:, 10;
+		mov w: gpr === 15, 10;
+		t: gpr === a;
+		v: vec === 9;
+		x === a;
+		mov y === a, z: gpr === 9;
+	}
+}
+JAI;
 	registers := Extended.parse_block(REGISTER_SOURCE);
 	assert(registers.status == .COMPLETE);
 	register_statements := registers.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements;
@@ -12340,7 +15491,18 @@ test_preserved_directive_forms :: () {
 	assert(Extended.token_at(*registers, register_statements[7].instruction.operands[1].register_declaration.pinning.target.span.first).original_text == "9");
 	assert(Extended.reconstruct_source(*registers) == REGISTER_SOURCE);
 
-	ASM_NUMERIC_SOURCE :: "{ #asm { mov dst, -10; mov dst, +0x2A; mov dst, -10.5; mov dst, +1.25; mov dst, 4294967296; mov dst, [base - 10]; } }";//
+	ASM_NUMERIC_SOURCE :: #string JAI
+{
+	#asm {
+		mov dst, -10;
+		mov dst, +0x2A;
+		mov dst, -10.5;
+		mov dst, +1.25;
+		mov dst, 4294967296;
+		mov dst, [base - 10];
+	}
+}
+JAI;
 	asm_numeric := Extended.parse_block(ASM_NUMERIC_SOURCE);
 	assert(asm_numeric.status == .COMPLETE);
 	asm_numeric_statements := asm_numeric.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements;
@@ -12370,7 +15532,22 @@ test_preserved_directive_forms :: () {
 	assert((asm_numeric_statements[5].instruction.operands[1].memory.displacement.expression.(*Extended.Parser_Literal).value_flags & .MINUS_SIGN) != 0);
 	assert(Extended.reconstruct_source(*asm_numeric) == ASM_NUMERIC_SOURCE);
 
-	ASM_MEMORY_SOURCE :: "{ #asm { mov dst, [b]; mov dst, [base + index]; mov dst, [base + index*8 - 10]; mov dst, [base + vector_index*4 + (OFFSET * 2)]; mov dst, [base + (OFFSET + 1)]; mov dst, [base - (-10.5)]; mov dst, [base + index*(SCALE + 1)]; mov dst, []; mov dst, [base +]; mov dst, [base + index*]; } }";//
+	ASM_MEMORY_SOURCE :: #string JAI
+{
+	#asm {
+		mov dst, [b];
+		mov dst, [base + index];
+		mov dst, [base + index*8 - 10];
+		mov dst, [base + vector_index*4 + (OFFSET * 2)];
+		mov dst, [base + (OFFSET + 1)];
+		mov dst, [base - (-10.5)];
+		mov dst, [base + index*(SCALE + 1)];
+		mov dst, [];
+		mov dst, [base +];
+		mov dst, [base + index*];
+	}
+}
+JAI;
 	asm_memory := Extended.parse_block(ASM_MEMORY_SOURCE);
 	assert(asm_memory.status == .RECOVERED);
 	assert(asm_memory.diagnostics.count == 3);
@@ -12406,7 +15583,14 @@ test_preserved_directive_forms :: () {
 	assert(Extended.reconstruct_source(*asm_memory) == ASM_MEMORY_SOURCE);
 
 	// Tutorial addresses exercise symbolic scales and high-level constant subexpressions.
-	TUTORIAL_MEMORY_SOURCE :: "{ #asm { mov t, [dummy_array_pointer + dummy_array_index*DUMMY_SCALE + DUMMY_DISP]; mov t, [dummy_array_pointer + dummy_array_index*(size_of(u64)) + (-10 * 2 + 13)]; } }";//
+	TUTORIAL_MEMORY_SOURCE :: #string JAI
+{
+	#asm {
+		mov t, [dummy_array_pointer + dummy_array_index*DUMMY_SCALE + DUMMY_DISP];
+		mov t, [dummy_array_pointer + dummy_array_index*(size_of(u64)) + (-10 * 2 + 13)];
+	}
+}
+JAI;
 	tutorial_memory := Extended.parse_block(TUTORIAL_MEMORY_SOURCE);
 	assert(tutorial_memory.status == .COMPLETE);
 	tutorial_address := tutorial_memory.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements[0].instruction.operands[1];
@@ -12419,7 +15603,17 @@ test_preserved_directive_forms :: () {
 	assert(inline_address.memory.displacement.expression.(*Extended.Parser_Unary_Operator).subexpression.kind == .BINARY_OPERATOR);
 	assert(Extended.reconstruct_source(*tutorial_memory) == TUTORIAL_MEMORY_SOURCE);
 
-	ASM_MODIFIER_SOURCE :: "{ #asm { vload dst, [base]!; vop a!, b!n, c!d, d!u, e!z; vadd dst & mask, src &* mask; vop [base + vector_index*4 - 10]!z &* mask, -10!, bad!x, bad &*; vop [base + (OFFSET & FLAG)]!z; } }";//
+	ASM_MODIFIER_SOURCE :: #string JAI
+{
+	#asm {
+		vload dst, [base]!;
+		vop a!, b!n, c!d, d!u, e!z;
+		vadd dst & mask, src &* mask;
+		vop [base + vector_index*4 - 10]!z &* mask, -10!, bad!x, bad &*;
+		vop [base + (OFFSET & FLAG)]!z;
+	}
+}
+JAI;
 	asm_modifiers := Extended.parse_block(ASM_MODIFIER_SOURCE);
 	assert(asm_modifiers.status == .RECOVERED);
 	assert(asm_modifiers.diagnostics.count == 2);
@@ -12464,7 +15658,21 @@ test_preserved_directive_forms :: () {
 	assert(nested_ampersand.modifiers.count == 1 && nested_ampersand.modifiers[0].kind == .BANG_Z);
 	assert(Extended.reconstruct_source(*asm_modifiers) == ASM_MODIFIER_SOURCE);
 
-	ASM_VALUE_SOURCE :: "{ #asm { mov dst, source_value; mov dst, MY_CONSTANT; mov dst, s64; mov dst, register_param; mov dst, (MY_CONSTANT + 1); mov dst, (register_param); mov dst, (MY_CONSTANT * (2 + 3)) &* mask; mov dst, [base + (MY_CONSTANT * 2)]; mov dst, some_call(1); } }";//
+	ASM_VALUE_SOURCE :: #string JAI
+{
+	#asm {
+		mov dst, source_value;
+		mov dst, MY_CONSTANT;
+		mov dst, s64;
+		mov dst, register_param;
+		mov dst, (MY_CONSTANT + 1);
+		mov dst, (register_param);
+		mov dst, (MY_CONSTANT * (2 + 3)) &* mask;
+		mov dst, [base + (MY_CONSTANT * 2)];
+		mov dst, some_call(1);
+	}
+}
+JAI;
 	asm_values := Extended.parse_block(ASM_VALUE_SOURCE);
 	assert(asm_values.status == .COMPLETE);
 	value_statements := asm_values.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements;
@@ -12496,7 +15704,13 @@ test_preserved_directive_forms :: () {
 	assert(value_statements[8].instruction.operands[1].kind == .UNPARSED);
 	assert(Extended.reconstruct_source(*asm_values) == ASM_VALUE_SOURCE);
 
-	ASM_MACRO_SOURCE :: "fixture_macro :: (register_param: __reg, type_param: Type) #expand { #asm { mov register_param, (type_param); } }";//
+	ASM_MACRO_SOURCE :: #string JAI
+fixture_macro :: (register_param: __reg, type_param: Type) #expand {
+	#asm {
+		mov register_param, (type_param);
+	}
+}
+JAI;
 	asm_macro := Extended.parse_file(ASM_MACRO_SOURCE);
 	assert(asm_macro.status == .COMPLETE);
 	macro_header := asm_macro.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
@@ -12515,7 +15729,21 @@ test_preserved_directive_forms :: () {
 	assert(bare_asm_node.statements.count == 0);
 	assert(bare_asm_node.body_span.first == bare_asm_node.body_span.one_past_last);
 
-	shared_scope := Extended.parse_block("{ #asm { first: gpr; } #asm { mov first, 1; } { #asm { nested: gpr; } } }");//
+	shared_scope := Extended.parse_block(#string JAI
+{
+	#asm {
+		first: gpr;
+	}
+	#asm {
+		mov first, 1;
+	}
+	{
+		#asm {
+			nested: gpr;
+		}
+	}
+}
+JAI);
 	assert(shared_scope.status == .COMPLETE);
 	shared_scope_block := shared_scope.root.(*Extended.Parser_Block);
 	first_asm := shared_scope_block.statements[0].(*Extended.Parser_Asm);
@@ -12535,7 +15763,15 @@ test_preserved_directive_forms :: () {
 	assert(nested_asm.enclosing_scope == nested_block);
 	assert(nested_asm.enclosing_scope != first_asm.enclosing_scope);
 
-	conditional_asm := Extended.parse_block("{ #if BITS == 8 #asm { mov.8 result:, value; } else #asm { mov.64 result:, value; } }");//
+	conditional_asm := Extended.parse_block(#string JAI
+{
+	#if BITS == 8 #asm {
+		mov.8 result:, value;
+	} else #asm {
+		mov.64 result:, value;
+	}
+}
+JAI);
 	assert(conditional_asm.status == .COMPLETE);
 	conditional_scope := conditional_asm.root.(*Extended.Parser_Block);
 	conditional := conditional_scope.statements[0].(*Extended.Parser_If);
@@ -12553,7 +15789,14 @@ test_preserved_directive_forms :: () {
 	assert(else_asm.statements[0].instruction.size.kind == .FIXED);
 	assert(Extended.token_at(*conditional_asm, else_asm.statements[0].instruction.size.span.first).original_text == ".64");
 
-	polymorphic_asm := Extended.parse_block("{ #asm { popcnt?BITS result, value; popcnt?T other, value; } }");//
+	polymorphic_asm := Extended.parse_block(#string JAI
+{
+	#asm {
+		popcnt?BITS result, value;
+		popcnt?T other, value;
+	}
+}
+JAI);
 	assert(polymorphic_asm.status == .COMPLETE);
 	polymorphic_statements := polymorphic_asm.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements;
 	assert(polymorphic_statements.count == 2);
@@ -12563,7 +15806,14 @@ test_preserved_directive_forms :: () {
 	assert(polymorphic_statements[0].instruction.operands.count == 2);
 	assert(polymorphic_statements[1].instruction.operands.count == 2);
 
-	missing_asm_semicolon := Extended.parse_block("{ #asm { mov result:, value } after(); }");//
+	missing_asm_semicolon := Extended.parse_block(#string JAI
+{
+	#asm {
+		mov result:, value
+	}
+	after();
+}
+JAI);
 	assert(missing_asm_semicolon.status == .RECOVERED);
 	assert(missing_asm_semicolon.diagnostics.count == 1);
 	assert(missing_asm_semicolon.diagnostics[0].kind == .EXPECTED_TOKEN);
@@ -12573,7 +15823,13 @@ test_preserved_directive_forms :: () {
 	assert(missing_semicolon_asm.statements[0].kind == .INSTRUCTION);
 	assert(missing_semicolon_asm.statements[0].instruction.operands.count == 2);
 
-	truncated_asm := Extended.parse_block("{ #asm { mov value:, 1;");//
+	truncated_asm := Extended.parse_block(
+		#string JAINot
+{
+	#asm {
+		mov value:, 1;
+JAINot
+	);
 	assert(truncated_asm.status == .INCOMPLETE);
 	truncated_asm_node := truncated_asm.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm);
 	assert(truncated_asm_node.statements.count == 1);
@@ -12581,7 +15837,15 @@ test_preserved_directive_forms :: () {
 }
 
 test_assembly_recovery :: () {
-	SOURCE :: "{ #asm { mov destination source; add destination, 1; } after(); }";//
+	SOURCE :: #string JAI
+{
+	#asm {
+		mov destination source;
+		add destination, 1;
+	}
+	after();
+}
+JAI;
 	parsed := Extended.parse_block(SOURCE);
 	assert(parsed.status == .RECOVERED);
 	assert(parsed.diagnostics.count == 1);
@@ -12598,7 +15862,15 @@ test_assembly_recovery :: () {
 	assert(block.statements[1].kind == .PROCEDURE_CALL);
 	assert(Extended.reconstruct_source(*parsed) == SOURCE);
 
-	NUMERIC_SOURCE :: "{ #asm { mov destination 10; add destination, 1; } after(); }";//
+	NUMERIC_SOURCE :: #string JAI
+{
+	#asm {
+		mov destination 10;
+		add destination, 1;
+	}
+	after();
+}
+JAI;
 	numeric := Extended.parse_block(NUMERIC_SOURCE);
 	assert(numeric.status == .RECOVERED);
 	assert(numeric.diagnostics.count == 1 && numeric.diagnostics[0].expected_token == #char ",");
@@ -12611,7 +15883,15 @@ test_assembly_recovery :: () {
 	assert(numeric_block.statements[1].kind == .PROCEDURE_CALL);
 	assert(Extended.reconstruct_source(*numeric) == NUMERIC_SOURCE);
 
-	BAD_MEMORY_SOURCE :: "{ #asm { mov dst, [base +]; add dst, 1; } after(); }";//
+	BAD_MEMORY_SOURCE :: #string JAI
+{
+	#asm {
+		mov dst, [base +];
+		add dst, 1;
+	}
+	after();
+}
+JAI;
 	bad_memory := Extended.parse_block(BAD_MEMORY_SOURCE);
 	assert(bad_memory.status == .RECOVERED);
 	assert(bad_memory.diagnostics.count == 1);
@@ -12626,7 +15906,15 @@ test_assembly_recovery :: () {
 	assert(bad_memory_block.statements[1].kind == .PROCEDURE_CALL);
 	assert(Extended.reconstruct_source(*bad_memory) == BAD_MEMORY_SOURCE);
 
-	UNCLOSED_MEMORY_SOURCE :: "{ #asm { mov dst, [base +; add dst, 1; } after(); }";//
+	UNCLOSED_MEMORY_SOURCE :: #string JAI
+{
+	#asm {
+		mov dst, [base +;
+		add dst, 1;
+	}
+	after();
+}
+JAI;
 	unclosed_memory := Extended.parse_block(UNCLOSED_MEMORY_SOURCE);
 	assert(unclosed_memory.status == .RECOVERED && unclosed_memory.diagnostics.count == 1);
 	unclosed_block := unclosed_memory.root.(*Extended.Parser_Block);
@@ -12638,7 +15926,15 @@ test_assembly_recovery :: () {
 	assert(unclosed_block.statements[1].kind == .PROCEDURE_CALL);
 	assert(Extended.reconstruct_source(*unclosed_memory) == UNCLOSED_MEMORY_SOURCE);
 
-	BAD_MODIFIER_SOURCE :: "{ #asm { vop bad!x, bad &*; add dst, 1; } after(); }";//
+	BAD_MODIFIER_SOURCE :: #string JAI
+{
+	#asm {
+		vop bad!x, bad &*;
+		add dst, 1;
+	}
+	after();
+}
+JAI;
 	bad_modifier := Extended.parse_block(BAD_MODIFIER_SOURCE);
 	assert(bad_modifier.status == .RECOVERED);
 	assert(bad_modifier.diagnostics.count == 2);
@@ -12704,7 +16000,17 @@ test_statement_recovery :: () {
 	assert(bad_expression.root.(*Extended.Parser_Block).statements.count == 2);
 	assert(bad_expression.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).name == "next");
 
-	nested_recovery := Extended.parse_file("outer :: () { #unknown { leaked := 1; } after := 2; }\nfinal :: 3;");//
+	nested_recovery := Extended.parse_file(
+		#string JAI
+outer :: () {
+	#unknown {
+		leaked := 1;
+	}
+	after := 2;
+}
+final :: 3;
+JAI
+	);
 	assert(nested_recovery.status == .RECOVERED);
 	nested_root := nested_recovery.root.(*Extended.Parser_Block);
 	assert(nested_root.statements.count == 2);
@@ -12714,7 +16020,14 @@ test_statement_recovery :: () {
 	assert(outer_body.statements.count == 1);
 	assert(outer_body.statements[0].(*Extended.Parser_Declaration).name == "after");
 
-	declaration_recovery := Extended.parse_file("broken :: () #unknown { leaked := 1; }\nafter :: 2;");//
+	declaration_recovery := Extended.parse_file(
+		#string JAI
+broken :: () #unknown {
+	leaked := 1;
+}
+after :: 2;
+JAI
+	);
 	assert(declaration_recovery.status == .RECOVERED);
 	declaration_root := declaration_recovery.root.(*Extended.Parser_Block);
 	assert(declaration_root.statements.count == 2);

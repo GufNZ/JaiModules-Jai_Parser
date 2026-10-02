@@ -1827,6 +1827,11 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 		}
 	}
 
+	// Skip the UTF-8 BOM if present at the beginning of the input.
+	if lexer.input_cursor == 0 && lexer.input.count >= 3 && slice(lexer.input, 0, 3) == "\xEF\xBB\xBF" {
+		lexer.input_cursor = 3;
+	}
+
 	while 1 {
 		// We used to recurse by calling compose_new_token further, but that is not so great.
 		// At least in theory you could compose an input that would cause a stack overflow.
