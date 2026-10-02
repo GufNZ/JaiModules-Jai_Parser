@@ -186,7 +186,12 @@ Both `#as using field: Struct_Type` and `using #as field: Struct_Type` mark that
 `using enum u16 { ... }` ends at its closing brace or an explicit semicolon before the next statement; ordinary `using` expressions still require a semicolon.
 Parenthesised name lists become arrays of string literals, while array literals, named arrays, and `#run` expressions remain source-spelled filter expressions.
 `using,map(expression)` retains its parenthesised expression as a `.MAP` filter.
-The advanced-using guide parses completely with zero syntax diagnostics; applying the mapping remains semantic work.
+The advanced-using guide parses completely with zero syntax diagnostics.  `resolve_file_imports` applies mappings when the caller supplies `map_names`; it does not execute Jai map procedures.
+For aggregate values whose fields cannot be recovered from parsed syntax, the optional `aggregate_fields` callback can supply a complete list of `Parser_Binding` records, including generated fields.
+Return `true` only for a complete list; returning `false` discards the list and tries parsed struct fields.
+Each binding needs a nonempty name and a declaration pointer that the caller keeps alive through `release_file_imports`.
+The result copies source and exported names, but does not own declarations.
+Without a usable field list, the exposure remains in `unsupported_using_filters`.
 Aggregate field default assignments such as `w: float; w = 1;` and `info.flavor = "chocolate";` remain ordered binary-expression statements.
 Bare assignment identifiers and the base identifiers of dotted assignments link back to their matching parser-owned field declarations, including `#as using` fields.
 `Parser_Enum` represents enums and enum flags, including underlying types, `#complete`, `#specified`, explicit values, and bare members.

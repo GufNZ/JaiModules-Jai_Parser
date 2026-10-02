@@ -158,6 +158,7 @@ main :: () {
 	test_restart_points();
 	test_incomplete_diagnostics();
 	test_lexical_bindings();
+	test_file_import_resolution();
 	test_diagnostic_tab_rendering();
 
 	// Expression and declaration grammar.
@@ -216,8 +217,8 @@ test_for_expansion_tutorial_source :: () {
 }
 
 test_asm_tutorial_forms :: () {
-	basics_source :: "{ #asm { mov apple:, 10; banana: gpr; mov.64 banana, 17; } #asm { sub banana, apple; add count, banana; } }";
-	basics := Extended.parse_block(basics_source);
+	BASICS_SOURCE :: "{ #asm { mov apple:, 10; banana: gpr; mov.64 banana, 17; } #asm { sub banana, apple; add count, banana; } }";//
+	basics := Extended.parse_block(BASICS_SOURCE);
 	assert(basics.status == .COMPLETE);
 	basics_statements := basics.root.(*Extended.Parser_Block).statements;
 	assert(basics_statements.count == 2);
@@ -226,10 +227,10 @@ test_asm_tutorial_forms :: () {
 	assert(basics_asm.statements[1].register_declaration.register_class.name == "gpr");
 	assert(basics_asm.statements[2].instruction.size.kind == .FIXED);
 	assert(basics_statements[0].(*Extended.Parser_Asm).enclosing_scope == basics_statements[1].(*Extended.Parser_Asm).enclosing_scope);
-	assert(Extended.reconstruct_source(*basics) == basics_source);
+	assert(Extended.reconstruct_source(*basics) == BASICS_SOURCE);
 
-	immediate_source :: "{ #asm { mov.8 b1:, 255; mov.8 b2:, -127; mov.16 w1:, 65535; mov.32 d1:, 4294967295; mov.64 q3:, 18446744073709551615; mov.64 q4:, -9223372036854775808; mov.32 f1:, 133.247; mov.64 f2:, 133.247; } }";
-	immediates := Extended.parse_block(immediate_source);
+	IMMEDIATE_SOURCE :: "{ #asm { mov.8 b1:, 255; mov.8 b2:, -127; mov.16 w1:, 65535; mov.32 d1:, 4294967295; mov.64 q3:, 18446744073709551615; mov.64 q4:, -9223372036854775808; mov.32 f1:, 133.247; mov.64 f2:, 133.247; } }";//
+	immediates := Extended.parse_block(IMMEDIATE_SOURCE);
 	assert(immediates.status == .COMPLETE);
 	immediate_statements := immediates.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements;
 	assert(immediate_statements.count == 8);
@@ -238,10 +239,10 @@ test_asm_tutorial_forms :: () {
 	assert((immediate_statements[5].instruction.operands[1].value.expression.(*Extended.Parser_Literal).value_flags & .MINUS_SIGN) != 0);
 	assert(immediate_statements[6].instruction.operands[1].value.expression.kind == .LITERAL);
 	assert(immediate_statements[7].instruction.operands[1].value.expression.kind == .LITERAL);
-	assert(Extended.reconstruct_source(*immediates) == immediate_source);
+	assert(Extended.reconstruct_source(*immediates) == IMMEDIATE_SOURCE);
 
-	feature_source :: "{ #asm AVX, AVX2 {} #asm AVX2 { pxor v1:, v1, v1; } }";
-	features := Extended.parse_block(feature_source);
+	FEATURE_SOURCE :: "{ #asm AVX, AVX2 {} #asm AVX2 { pxor v1:, v1, v1; } }";//
+	features := Extended.parse_block(FEATURE_SOURCE);
 	assert(features.status == .COMPLETE);
 	feature_blocks := features.root.(*Extended.Parser_Block).statements;
 	assert(feature_blocks.count == 2);
@@ -249,10 +250,10 @@ test_asm_tutorial_forms :: () {
 	assert(feature_blocks[0].(*Extended.Parser_Asm).statements.count == 0);
 	assert(feature_blocks[1].(*Extended.Parser_Asm).features[0].name.name == "AVX2");
 	assert(feature_blocks[1].(*Extended.Parser_Asm).statements[0].instruction.mnemonic.name == "pxor");
-	assert(Extended.reconstruct_source(*features) == feature_source);
+	assert(Extended.reconstruct_source(*features) == FEATURE_SOURCE);
 
-	macro_source :: "{ reg :: __reg; add_the_two_regs :: (left: reg, right: reg) #expand { #asm { add left, right; } } #asm { mov a:, 12; mov b:, 18; } add_the_two_regs(b, a); }";
-	macro := Extended.parse_block(macro_source);
+	MACRO_SOURCE :: "{ reg :: __reg; add_the_two_regs :: (left: reg, right: reg) #expand { #asm { add left, right; } } #asm { mov a:, 12; mov b:, 18; } add_the_two_regs(b, a); }";//
+	macro := Extended.parse_block(MACRO_SOURCE);
 	assert(macro.status == .COMPLETE);
 	macro_statements := macro.root.(*Extended.Parser_Block).statements;
 	assert(macro_statements.count == 4);
@@ -263,19 +264,19 @@ test_asm_tutorial_forms :: () {
 	assert(macro_header.arguments[1].type_inst.type_valued_expression.(*Extended.Parser_Ident).name == "reg");
 	assert(macro_header.body_or_null.block.statements[0].(*Extended.Parser_Asm).statements[0].instruction.operands[0].value.expression.(*Extended.Parser_Ident).name == "left");
 	assert(macro_statements[3].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*macro) == macro_source);
+	assert(Extended.reconstruct_source(*macro) == MACRO_SOURCE);
 
-	run_source :: "{ do_some_work :: (a: int, b: int) -> int { #asm { add a, b; } return a; } A :: #run do_some_work(10, 13); }";
-	run_file := Extended.parse_block(run_source);
+	RUN_SOURCE :: "{ do_some_work :: (a: int, b: int) -> int { #asm { add a, b; } return a; } A :: #run do_some_work(10, 13); }";//
+	run_file := Extended.parse_block(RUN_SOURCE);
 	assert(run_file.status == .COMPLETE);
 	run_statements := run_file.root.(*Extended.Parser_Block).statements;
 	work_body := run_statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
 	assert(work_body.statements[0].(*Extended.Parser_Asm).statements[0].instruction.mnemonic.name == "add");
 	assert(run_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Directive_Run).expression.kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*run_file) == run_source);
+	assert(Extended.reconstruct_source(*run_file) == RUN_SOURCE);
 
-	vsib_source :: "{ #asm AVX, AVX2 { gatherdps gather_dest:, [original_float_array_pointer + vindex*4], gather_mask; } }";
-	vsib := Extended.parse_block(vsib_source);
+	VSIB_SOURCE :: "{ #asm AVX, AVX2 { gatherdps gather_dest:, [original_float_array_pointer + vindex*4], gather_mask; } }";//
+	vsib := Extended.parse_block(VSIB_SOURCE);
 	assert(vsib.status == .COMPLETE);
 	vsib_asm := vsib.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm);
 	assert(vsib_asm.features.count == 2);
@@ -287,10 +288,10 @@ test_asm_tutorial_forms :: () {
 	assert(gather.operands[1].memory.index.expression.(*Extended.Parser_Ident).name == "vindex");
 	assert(gather.operands[1].memory.scale.expression.(*Extended.Parser_Literal)._u64 == 4);
 	assert(gather.operands[2].value.expression.(*Extended.Parser_Ident).name == "gather_mask");
-	assert(Extended.reconstruct_source(*vsib) == vsib_source);
+	assert(Extended.reconstruct_source(*vsib) == VSIB_SOURCE);
 
-	evex_source :: "{ #asm AVX512F { cvtps2dq v1:, [value_pointer]!; cvtps2dq v3:, v2 !z; cvtps2dq v5: &* mask, v4 !z; } }";
-	evex := Extended.parse_block(evex_source);
+	EVEX_SOURCE :: "{ #asm AVX512F { cvtps2dq v1:, [value_pointer]!; cvtps2dq v3:, v2 !z; cvtps2dq v5: &* mask, v4 !z; } }";//
+	evex := Extended.parse_block(EVEX_SOURCE);
 	assert(evex.status == .COMPLETE);
 	evex_asm := evex.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm);
 	assert(evex_asm.features[0].name.name == "AVX512F");
@@ -304,10 +305,10 @@ test_asm_tutorial_forms :: () {
 	assert(masked.modifiers[0].kind == .AMPERSAND_STAR);
 	assert(masked.modifiers[0].argument.expression.(*Extended.Parser_Ident).name == "mask");
 	assert(evex_asm.statements[2].instruction.operands[1].modifiers[0].kind == .BANG_Z);
-	assert(Extended.reconstruct_source(*evex) == evex_source);
+	assert(Extended.reconstruct_source(*evex) == EVEX_SOURCE);
 
-	size_source :: "{ #if BITS == 8 #asm { popcnt.16 result, two_bytes; } else #asm { popcnt?BITS result, value; popcnt?T result, value; } }";
-	sizes := Extended.parse_block(size_source);
+	SIZE_SOURCE :: "{ #if BITS == 8 #asm { popcnt.16 result, two_bytes; } else #asm { popcnt?BITS result, value; popcnt?T result, value; } }";//
+	sizes := Extended.parse_block(SIZE_SOURCE);
 	assert(sizes.status == .COMPLETE);
 	size_branch := sizes.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
 	assert((size_branch.if_flags & .IS_STATIC) != 0);
@@ -318,7 +319,7 @@ test_asm_tutorial_forms :: () {
 	assert(polymorphic[0].instruction.size.kind == .POLYMORPHIC);
 	assert(polymorphic[0].instruction.size.polymorphic_name.name == "BITS");
 	assert(polymorphic[1].instruction.size.polymorphic_name.name == "T");
-	assert(Extended.reconstruct_source(*sizes) == size_source);
+	assert(Extended.reconstruct_source(*sizes) == SIZE_SOURCE);
 }
 
 test_default_tokens :: () {
@@ -330,17 +331,17 @@ test_default_tokens :: () {
 }
 
 test_lexer_only_recovery :: () {
-	identifier_length :: Extended.MAX_IDENTIFIER_LENGTH + 8;
-	suffix :: " :: 1;";
+	IDENTIFIER_LENGTH :: Extended.MAX_IDENTIFIER_LENGTH + 8;
+	SUFFIX :: " :: 1;";
 
-	source := alloc_string(identifier_length + suffix.count);
+	source := alloc_string(IDENTIFIER_LENGTH + SUFFIX.count);
 	defer free(source);
 
-	for index: 0..identifier_length-1 {
+	for index: 0..IDENTIFIER_LENGTH-1 {
 		source.data[index] = #char "a";
 	}
 
-	memcpy(source.data + identifier_length, suffix.data, suffix.count);
+	memcpy(source.data + IDENTIFIER_LENGTH, SUFFIX.data, SUFFIX.count);
 
 	parsed := Extended.parse_file(source);
 	defer Extended.release_parser_tree(*parsed);
@@ -436,17 +437,18 @@ test_star_token_contract :: () {
 }
 
 test_asm_token_contract :: () {
-	source :: "#asm AVX, AVX2 {\n\t// declaration and pinning\n\tmov.8 apple:, -10;\n\tt: future_class === source;\n\tpopcnt?BITS result, value;\n\tcvtps2dq destination:, [base + index*8 - (-10.5)]!z &* mask; /* tail */\n}";
-	parsed := Extended.materialise_tokens(source);
+	SOURCE :: "#asm AVX, AVX2 {\n\t// declaration and pinning\n\tmov.8 apple:, -10;\n\tt: future_class === source;\n\tpopcnt?BITS result, value;\n\tcvtps2dq destination:, [base + index*8 - (-10.5)]!z &* mask; /* tail */\n}";//
+	parsed := Extended.materialise_tokens(SOURCE);
 	assert(parsed.status == .COMPLETE);
-	assert(Extended.reconstruct_source(*parsed) == source);
+	assert(Extended.reconstruct_source(*parsed) == SOURCE);
 
 	expected_types := Extended.Token_Type.[
 		#char "#", .IDENT, .IDENT, #char ",", .IDENT, #char "{",
 		.IDENT, .NUMBER, .IDENT, #char ":", #char ",", #char "-", .NUMBER, #char ";",
 		.IDENT, #char ":", .IDENT, .TRIPLE_EQUALS, .IDENT, #char ";",
 		.IDENT, #char "?", .IDENT, .IDENT, #char ",", .IDENT, #char ";",
-		.IDENT, .IDENT, #char ":", #char ",", #char "[", .IDENT, #char "+", .IDENT, #char "*", .NUMBER, #char "-", #char "(", #char "-", .NUMBER, #char ")", #char "]", #char "!", .IDENT, .BITWISE_AND, #char "*", .IDENT, #char ";",
+		.IDENT, .IDENT, #char ":", #char ",", #char "[", .IDENT, #char "+", .IDENT, #char "*", .NUMBER, #char "-", #char "(", #char "-",
+		.NUMBER, #char ")", #char "]", #char "!", .IDENT, .BITWISE_AND, #char "*", .IDENT, #char ";",
 		#char "}",
 		.END_OF_INPUT,
 	];
@@ -466,14 +468,14 @@ test_asm_token_contract :: () {
 		assert(token.type == expected_types[it_index], "Assembly token % ('%') has type %, expected %.", it_index, token.original_text, token.type, expected_types[it_index]);
 		assert(token.original_text == expected_spellings[it_index], "Assembly token % has spelling '%', expected '%'.", it_index, token.original_text, expected_spellings[it_index]);
 		assert(token.byte_end - token.byte_start == token.original_text.count);
-		assert(slice(source, token.byte_start, token.byte_end - token.byte_start) == token.original_text);
+		assert(slice(SOURCE, token.byte_start, token.byte_end - token.byte_start) == token.original_text);
 	}
 
 	assert(parsed.tokens[6].preceding_trivia == "\n\t// declaration and pinning\n\t");
 	assert(parsed.tokens[parsed.tokens.count - 2].preceding_trivia == " /* tail */\n");
 
-	modifier_source :: "value! value!n value!d value!u value!z value & mask value &* mask -10 +20 -10.5 +20.5";
-	modifiers := Extended.materialise_tokens(modifier_source);
+	MODIFIER_SOURCE :: "value! value!n value!d value!u value!z value & mask value &* mask -10 +20 -10.5 +20.5";
+	modifiers := Extended.materialise_tokens(MODIFIER_SOURCE);
 	expected_modifier_spellings := string.[
 		"value", "!", "value", "!", "n", "value", "!", "d", "value", "!", "u", "value", "!", "z",
 		"value", "&", "mask", "value", "&", "*", "mask",
@@ -482,7 +484,7 @@ test_asm_token_contract :: () {
 	assert(modifiers.tokens.count == expected_modifier_spellings.count);
 	for token: modifiers.tokens {
 		assert(token.original_text == expected_modifier_spellings[it_index]);
-		assert(slice(modifier_source, token.byte_start, token.byte_end - token.byte_start) == token.original_text);
+		assert(slice(MODIFIER_SOURCE, token.byte_start, token.byte_end - token.byte_start) == token.original_text);
 	}
 
 	assert(modifiers.tokens[1].type == #char "!");
@@ -493,10 +495,10 @@ test_asm_token_contract :: () {
 	assert(modifiers.tokens[22].type == .NUMBER);
 	assert(modifiers.tokens[23].type == #char "+");
 	assert(modifiers.tokens[24].type == .NUMBER);
-	assert(Extended.reconstruct_source(*modifiers) == modifier_source);
+	assert(Extended.reconstruct_source(*modifiers) == MODIFIER_SOURCE);
 
-	suffix_source :: "mov.8 mov.64 popcnt?BITS popcnt?T";
-	suffixes := Extended.materialise_tokens(suffix_source);
+	SUFFIX_SOURCE :: "mov.8 mov.64 popcnt?BITS popcnt?T";
+	suffixes := Extended.materialise_tokens(SUFFIX_SOURCE);
 	expected_suffix_types := Extended.Token_Type.[
 		.IDENT, .NUMBER,
 		.IDENT, .NUMBER,
@@ -518,10 +520,10 @@ test_asm_token_contract :: () {
 		assert(token.original_text == expected_suffix_spellings[it_index]);
 	}
 
-	assert(Extended.reconstruct_source(*suffixes) == suffix_source);
+	assert(Extended.reconstruct_source(*suffixes) == SUFFIX_SOURCE);
 
-	ordinary_source :: "object.member value?T";
-	ordinary := Extended.materialise_tokens(ordinary_source);
+	ORDINARY_SOURCE :: "object.member value?T";
+	ordinary := Extended.materialise_tokens(ORDINARY_SOURCE);
 	expected_ordinary_types := Extended.Token_Type.[
 		.IDENT, #char ".", .IDENT,
 		.IDENT, #char "?", .IDENT,
@@ -534,12 +536,12 @@ test_asm_token_contract :: () {
 
 	assert(ordinary.tokens[1].original_text == ".");
 	assert(ordinary.tokens[4].original_text == "?");
-	assert(Extended.reconstruct_source(*ordinary) == ordinary_source);
+	assert(Extended.reconstruct_source(*ordinary) == ORDINARY_SOURCE);
 }
 
 test_trivia_round_trip :: () {
-	source :: "\xC2\xA0str :: #string /**/ , /**/ cr END\n123\nEND; // tail";
-	parsed := Extended.materialise_tokens(source);
+	SOURCE :: "\xC2\xA0str :: #string /**/ , /**/ cr END\n123\nEND; // tail";//
+	parsed := Extended.materialise_tokens(SOURCE);
 	assert(parsed.status == .COMPLETE);
 
 	for token: parsed.tokens {
@@ -551,10 +553,10 @@ test_trivia_round_trip :: () {
 	assert((body.value_flags & .HERE_STRING) != 0);
 	assert(body.preceding_trivia == "\n");
 	assert(body.original_text == "123\n");
-	assert(slice(source, body.byte_start, body.byte_end - body.byte_start) == body.original_text);
+	assert(slice(SOURCE, body.byte_start, body.byte_end - body.byte_start) == body.original_text);
 
 	reconstructed := Extended.reconstruct_source(*parsed);
-	assert(reconstructed == source);
+	assert(reconstructed == SOURCE);
 }
 
 test_token_navigation :: () {
@@ -681,8 +683,8 @@ test_identifier_storage_lifetime :: () {
 	assert(file.tokens[0].ident_value.name == "value");
 	Extended.release_parser_names(*file);
 
-	first_file_source := copy_string("entry :: entry; // first\n");
-	second_file_source := copy_string("entry :: entry; // second\n");
+	first_file_source :=	copy_string("entry :: entry; // first\n");
+	second_file_source :=	copy_string("entry :: entry; // second\n");
 	first_file := Extended.parse_file(first_file_source);
 	second_file := Extended.parse_file(second_file_source);
 	assert(first_file.status == .COMPLETE && second_file.status == .COMPLETE);
@@ -783,7 +785,7 @@ test_edit_snapshot_lifetime :: () {
 
 test_reuse_snapshot_lifetime :: () {
 	for release_old_first: bool.[true, false] {
-		old_source := copy_string("target :: 1; left, right :: target; blocked := #run target; #if true { inner := target; }");
+		old_source := copy_string(			   "target :: 1; left, right :: target; blocked := #run target; #if true { inner := target; }");
 		new_source := copy_string("added :: 0;\ntarget :: 1; left, right :: target; blocked := #run target; #if true { inner := target; }");
 		old := Extended.parse_file(old_source);
 		updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -841,9 +843,9 @@ test_reuse_snapshot_lifetime :: () {
 }
 
 test_file_edit_api :: () {
-	old_source := copy_string("value := missing;");
-	old := Extended.parse_file(old_source, "edited.jai");
+	old_source := copy_string(				 "value := missing;");
 	new_source := copy_string("missing :: 1;\nvalue := missing;");
+	old := Extended.parse_file(old_source, "edited.jai");
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
 	assert(ok && updated.status == .COMPLETE);
 	assert(updated.fully_pathed_filename == "edited.jai");
@@ -885,25 +887,100 @@ test_file_edit_api :: () {
 	Extended.release_parser_names(*replaced);
 	free(replaced_source);
 
-	check_regional_lex("a :: 1; b := a;", "new :: 2; a :: 1; b := a;", 0, 0);
-	check_regional_lex("a :: 1; b := a;", "a :: 1;\n b := a;", 7, 7);
-	check_regional_lex("a :: 1;\nb := a;", "a :: 1;\n\nb := a;", 8, 8);
-	check_regional_lex("a :: 1; b := a;", "a :: 1;b := a;", 7, 8);
-	check_regional_lex("alpha := 1; beta := 2;", "al := 1; beta := 2;", 2, 5);
-	check_regional_lex("a :: 1; /* comment */\nb := a;", "a :: 1; \nb := a;", 8, 21);
-	check_regional_lex("a :: 1; b := 2;", "a :: 1; /*b := 2;", 8, 8);
-	check_regional_lex("broken: ; stable :: 1;", "broken: s64; stable :: 1;", "broken: ".count, "broken: ".count);
-	check_regional_lex("bad :: 18446744073709551616; stable :: 1;", "bad :: 1; stable :: 1;", "bad :: ".count, "bad :: 18446744073709551616".count);
-	check_regional_lex("bad :: 1; stable :: 1;", "bad :: 18446744073709551616; stable :: 1;", "bad :: ".count, "bad :: 1".count);
-	check_regional_lex("a :: \"x\"; b := 2;", "a :: \"xy\"; b := 2;", 7, 7);
-	check_regional_lex("first :: 1; middle :: 1; last :: 1; use := last;", "first :: 11; middle :: 1; last :: 1; use := last;", "first :: 1".count, "first :: 1".count);
-	check_regional_lex("text :: #string END\nhello\nEND\nnext :: 1;", "text :: #string END\nworld\nEND\nnext :: 1;", "text :: #string END\n".count, "text :: #string END\nhello".count);
-	check_regional_lex("text :: #string END\nhello\nEND\nnext :: 1;", "prefix :: 0;\ntext :: #string END\nhello\nEND\nnext :: 1;", 0, 0);
-	check_regional_lex("a :: 1; // tail", "a :: 1; // tail\n", "a :: 1; // tail".count, "a :: 1; // tail".count);
+	check_regional_lex(
+				  "a :: 1; b := a;",
+		"new :: 2; a :: 1; b := a;",
+		0,
+		0
+	);
+	check_regional_lex(
+		"a :: 1; b := a;",
+		"a :: 1;\n b := a;",
+		7,
+		7
+	);
+	check_regional_lex(
+		"a :: 1;\nb := a;",
+		"a :: 1;\n\nb := a;",
+		8,
+		8
+	);
+	check_regional_lex(
+		"a :: 1; b := a;",
+		"a :: 1;b := a;",
+		7,
+		8
+	);
+	check_regional_lex(
+		"alpha := 1; beta := 2;",
+		"al := 1; beta := 2;",
+		2,
+		5
+	);
+	check_regional_lex(
+		"a :: 1; /* comment */\nb := a;",
+		"a :: 1; \nb := a;",
+		8,
+		21
+	);
+	check_regional_lex(
+		"a :: 1; b := 2;",
+		"a :: 1; /*b := 2;",
+		8,
+		8
+	);
+	check_regional_lex(
+		"broken: ; stable :: 1;",
+		"broken: s64; stable :: 1;",
+		"broken: ".count,
+		"broken: ".count
+	);
+	check_regional_lex(
+		"bad :: 18446744073709551616; stable :: 1;",
+		"bad :: 1; stable :: 1;",
+		"bad :: ".count,
+		"bad :: 18446744073709551616".count
+	);
+	check_regional_lex(
+		"bad :: 1; stable :: 1;",
+		"bad :: 18446744073709551616; stable :: 1;",
+		"bad :: ".count,
+		"bad :: 1".count
+	);
+	check_regional_lex(
+		"a :: \"x\"; b := 2;",
+		"a :: \"xy\"; b := 2;",
+		7,
+		7
+	);
+	check_regional_lex(
+		"first :: 1; middle :: 1; last :: 1; use := last;",
+		"first :: 11; middle :: 1; last :: 1; use := last;",
+		"first :: 1".count,
+		"first :: 1".count
+	);
+	check_regional_lex(
+		"text :: #string END\nhello\nEND\nnext :: 1;",
+		"text :: #string END\nworld\nEND\nnext :: 1;",
+		"text :: #string END\n".count,
+		"text :: #string END\nhello".count
+	);
+	check_regional_lex(
+		"text :: #string END\nhello\nEND\nnext :: 1;",
+		"prefix :: 0;\ntext :: #string END\nhello\nEND\nnext :: 1;",
+		0,
+		0
+	);
+	check_regional_lex(
+		"a :: 1; // tail",
+		"a :: 1; // tail\n",
+		"a :: 1; // tail".count,
+		"a :: 1; // tail".count
+	);
 }
 
 test_numeric_ast_reuse :: () {
-	old_source := copy_string("use := missing; missing :: 2; tail :: 3;");
+	old_source := copy_string(				"use := missing; missing :: 2; tail :: 3;");
 	new_source := copy_string("prefix :: 1;\nuse := missing; missing :: 2; tail :: 3;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -980,7 +1057,7 @@ test_numeric_ast_reuse :: () {
 	Extended.release_parser_names(*old_binding);
 	Extended.release_parser_tree(*new_binding);
 	Extended.release_parser_names(*new_binding);
-	check_removed_binding_ast_reuse("use := target;", 0, "target :: 1; ".count);
+	check_removed_binding_ast_reuse(			"use := target;", 0, "target :: 1; ".count);
 	check_removed_binding_ast_reuse("other :: 1; use := target;", 0, "target".count);
 }
 
@@ -1144,7 +1221,13 @@ test_recovered_snapshot_ast_reuse_fallback :: () {
 	parser_fresh := Extended.parse_file(parser_repaired_source);
 	assert(parser_repaired_ok && parser_recovery.status != .COMPLETE && parser_repaired.status == .COMPLETE && parser_fresh.status == .COMPLETE);
 	parser_probe_tokens := Extended.materialise_tokens(parser_repaired_source);
-	parser_probe := Extended.Parser.{parsed=*parser_probe_tokens, edit_source=*parser_recovery, edit_start="broken: ".count, edit_end="broken: ".count, cursor=parser_repaired.root.(*Extended.Parser_Block).statements[1].first_token.(s64)};
+	parser_probe := Extended.Parser.{
+		parsed=*parser_probe_tokens,
+		edit_source=*parser_recovery,
+		edit_start="broken: ".count,
+		edit_end="broken: ".count,
+		cursor=parser_repaired.root.(*Extended.Parser_Block).statements[1].first_token.(s64),
+	};
 	set_allocators(*parser_probe_tokens.node_pool, context.default_allocator);
 	parser_probe.current_scope = Extended.push_lexical_scope(*parser_probe);
 	assert(Extended.reuse_simple_declaration(*parser_probe) == null);
@@ -1343,8 +1426,8 @@ check_semicolon_candidate_edit :: (before: string, after: string, edit_start: s6
 check_nested_candidate_syntax_edit :: () {
 	old_source := copy_string("#if true { left :: 1; result := left + 2; keep := result; }");
 	new_source := copy_string("#if true { left :: 1; result := (left + 2); keep := result; }");
-	edit_start := "#if true { left :: 1; result := ".count;
-	edit_end := "#if true { left :: 1; result := left + 2".count;
+	edit_start :=	"#if true { left :: 1; result := ".count;
+	edit_end :=		"#if true { left :: 1; result := left + 2".count;
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
 	fresh := Extended.parse_file(new_source);
@@ -1488,7 +1571,7 @@ test_semicolon_boundary_ast_reuse :: () {
 }
 
 test_typed_declaration_ast_reuse :: () {
-	old_source := copy_string("use: Target = value; Target :: 1; value :: 2;");
+	old_source := copy_string(			   "use: Target = value; Target :: 1; value :: 2;");
 	new_source := copy_string("added :: 0;\nuse: Target = value; Target :: 1; value :: 2;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -1529,7 +1612,7 @@ test_typed_declaration_ast_reuse :: () {
 	Extended.release_parser_names(*fresh);
 	free(new_source);
 
-	pointer_old_source := copy_string("use: *Target = value; Target :: 1; value :: 2;");
+	pointer_old_source := copy_string(			   "use: *Target = value; Target :: 1; value :: 2;");
 	pointer_new_source := copy_string("added :: 0;\nuse: *Target = value; Target :: 1; value :: 2;");
 	pointer_old := Extended.parse_file(pointer_old_source);
 	pointer_updated, pointer_ok := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
@@ -1550,7 +1633,10 @@ test_typed_declaration_ast_reuse :: () {
 	pointer_fresh_decl := pointer_fresh_statements[1].(*Extended.Parser_Declaration);
 	assert(pointer_decl.first_token == pointer_fresh_decl.first_token && pointer_decl.one_past_last_token == pointer_fresh_decl.one_past_last_token);
 	assert(pointer_decl.type_inst.first_token == pointer_fresh_decl.type_inst.first_token && pointer_decl.type_inst.one_past_last_token == pointer_fresh_decl.type_inst.one_past_last_token);
-	assert(pointer_decl.type_inst.pointer_to.first_token == pointer_fresh_decl.type_inst.pointer_to.first_token && pointer_decl.type_inst.pointer_to.one_past_last_token == pointer_fresh_decl.type_inst.pointer_to.one_past_last_token);
+	assert(
+		pointer_decl.type_inst.pointer_to.first_token == pointer_fresh_decl.type_inst.pointer_to.first_token
+		&& pointer_decl.type_inst.pointer_to.one_past_last_token == pointer_fresh_decl.type_inst.pointer_to.one_past_last_token
+	);
 	pointer_name := pointer_decl.type_inst.pointer_to.type_valued_expression.(*Extended.Parser_Ident);
 	assert(pointer_name.resolved_declaration == pointer_statements[2].(*Extended.Parser_Declaration));
 	assert(pointer_fresh_decl.type_inst.pointer_to.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == pointer_fresh_statements[2].(*Extended.Parser_Declaration));
@@ -1566,7 +1652,7 @@ test_typed_declaration_ast_reuse :: () {
 	Extended.release_parser_names(*pointer_fresh);
 	free(pointer_new_source);
 
-	constant_old_source := copy_string("Target :: s64; value :: 2; result: Target : value;");
+	constant_old_source := copy_string(			    "Target :: s64; value :: 2; result: Target : value;");
 	constant_new_source := copy_string("added :: 0;\nTarget :: s64; value :: 2; result: Target : value;");
 	constant_old := Extended.parse_file(constant_old_source);
 	constant_updated, constant_ok := Extended.parse_file_edit(*constant_old, 0, 0, constant_new_source);
@@ -1608,8 +1694,8 @@ test_typed_declaration_ast_reuse :: () {
 	Extended.release_parser_names(*constant_fresh);
 	free(constant_new_source);
 
-	changed_old_source := copy_string("Target :: s64; value :: 2; result: Target : value;");
-	changed_source := copy_string("Target :: s64; value :: 2; result: Target = value;");
+	changed_old_source :=	copy_string("Target :: s64; value :: 2; result: Target : value;");
+	changed_source :=		copy_string("Target :: s64; value :: 2; result: Target = value;");
 	changed_old := Extended.parse_file(changed_old_source);
 	separator_start := "Target :: s64; value :: 2; result: Target ".count;
 	changed, changed_ok := Extended.parse_file_edit(*changed_old, separator_start, separator_start + 1, changed_source);
@@ -1645,7 +1731,7 @@ test_typed_declaration_ast_reuse :: () {
 }
 
 test_nested_type_instantiation_reuse :: () {
-	old_source := copy_string("value: *[size + 1][..]Target; keep := value; size :: 4; Target :: s64;");
+	old_source := copy_string(			   "value: *[size + 1][..]Target; keep := value; size :: 4; Target :: s64;");
 	new_source := copy_string("added :: 0;\nvalue: *[size + 1][..]Target; keep := value; size :: 4; Target :: s64;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -1775,7 +1861,7 @@ test_type_instantiation_fallback :: () {
 }
 
 check_excluded_type_instantiation :: (type_source: string) {
-	old_source := copy_string(tprint("Target :: s64; size :: 4; value: %; keep := value;", type_source));
+	old_source := copy_string(tprint(			  "Target :: s64; size :: 4; value: %; keep := value;", type_source));
 	new_source := copy_string(tprint("added :: 0;\nTarget :: s64; size :: 4; value: %; keep := value;", type_source));
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -1894,7 +1980,7 @@ check_excluded_type_instantiation :: (type_source: string) {
 }
 
 test_array_view_declaration_ast_reuse :: () {
-	old_source := copy_string("use: []Target = value; Target :: 1; value :: 2;");
+	old_source := copy_string(			   "use: []Target = value; Target :: 1; value :: 2;");
 	new_source := copy_string("added :: 0;\nuse: []Target = value; Target :: 1; value :: 2;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -1955,7 +2041,7 @@ test_array_view_declaration_ast_reuse :: () {
 	Extended.release_parser_names(*changed_fresh);
 	free(changed_source);
 
-	resizable_old_source := copy_string("use: [..]Target = value; Target :: 1; value :: 2;");
+	resizable_old_source := copy_string(			 "use: [..]Target = value; Target :: 1; value :: 2;");
 	resizable_new_source := copy_string("added :: 0;\nuse: [..]Target = value; Target :: 1; value :: 2;");
 	resizable_old := Extended.parse_file(resizable_old_source);
 	resizable_updated, resizable_ok := Extended.parse_file_edit(*resizable_old, 0, 0, resizable_new_source);
@@ -1980,7 +2066,10 @@ test_array_view_declaration_ast_reuse :: () {
 	assert(resizable_type.first_token == resizable_fresh_type.first_token && resizable_type.one_past_last_token == resizable_fresh_type.one_past_last_token);
 	assert(resizable_type.l0 == resizable_fresh_type.l0 && resizable_type.c0 == resizable_fresh_type.c0);
 	assert(resizable_type.l1 == resizable_fresh_type.l1 && resizable_type.c1 == resizable_fresh_type.c1);
-	assert(resizable_type.array_element_type.first_token == resizable_fresh_type.array_element_type.first_token && resizable_type.array_element_type.one_past_last_token == resizable_fresh_type.array_element_type.one_past_last_token);
+	assert(
+		resizable_type.array_element_type.first_token == resizable_fresh_type.array_element_type.first_token
+		&& resizable_type.array_element_type.one_past_last_token == resizable_fresh_type.array_element_type.one_past_last_token
+	);
 	resizable_name := resizable_type.array_element_type.type_valued_expression.(*Extended.Parser_Ident);
 	assert(resizable_name.resolved_declaration == resizable_statements[2].(*Extended.Parser_Declaration));
 	assert(resizable_fresh_type.array_element_type.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == resizable_fresh_statements[2].(*Extended.Parser_Declaration));
@@ -2010,7 +2099,7 @@ test_array_view_declaration_ast_reuse :: () {
 }
 
 test_fixed_array_declaration_ast_reuse :: () {
-	old_source := copy_string("use: [size]Target = value; size :: 4; Target :: 1; value :: 2;");
+	old_source := copy_string(			   "use: [size]Target = value; size :: 4; Target :: 1; value :: 2;");
 	new_source := copy_string("added :: 0;\nuse: [size]Target = value; size :: 4; Target :: 1; value :: 2;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -2086,7 +2175,7 @@ test_fixed_array_declaration_ast_reuse :: () {
 }
 
 test_double_pointer_declaration_ast_reuse :: () {
-	old_source := copy_string("use: **Target = value; Target :: 1; value :: 2;");
+	old_source := copy_string(			   "use: **Target = value; Target :: 1; value :: 2;");
 	new_source := copy_string("added :: 0;\nuse: **Target = value; Target :: 1; value :: 2;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -2156,7 +2245,7 @@ test_double_pointer_declaration_ast_reuse :: () {
 }
 
 test_uninitialized_typed_declaration_ast_reuse :: () {
-	old_source := copy_string("item: Target; Target :: 1; use := item;");
+	old_source := copy_string(			   "item: Target; Target :: 1; use := item;");
 	new_source := copy_string("added :: 0;\nitem: Target; Target :: 1; use := item;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -2196,7 +2285,7 @@ test_uninitialized_typed_declaration_ast_reuse :: () {
 	Extended.release_parser_names(*fresh);
 	free(new_source);
 
-	pointer_old_source := copy_string("item: *Target; Target :: 1; use := item;");
+	pointer_old_source := copy_string(			   "item: *Target; Target :: 1; use := item;");
 	pointer_new_source := copy_string("added :: 0;\nitem: *Target; Target :: 1; use := item;");
 	pointer_old := Extended.parse_file(pointer_old_source);
 	pointer_updated, pointer_ok := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
@@ -2216,7 +2305,10 @@ test_uninitialized_typed_declaration_ast_reuse :: () {
 	pointer_fresh_decl := pointer_fresh_statements[1].(*Extended.Parser_Declaration);
 	assert(!pointer_decl.expression && !pointer_fresh_decl.expression);
 	assert(pointer_decl.type_inst.first_token == pointer_fresh_decl.type_inst.first_token && pointer_decl.type_inst.one_past_last_token == pointer_fresh_decl.type_inst.one_past_last_token);
-	assert(pointer_decl.type_inst.pointer_to.first_token == pointer_fresh_decl.type_inst.pointer_to.first_token && pointer_decl.type_inst.pointer_to.one_past_last_token == pointer_fresh_decl.type_inst.pointer_to.one_past_last_token);
+	assert(
+		pointer_decl.type_inst.pointer_to.first_token == pointer_fresh_decl.type_inst.pointer_to.first_token
+		&& pointer_decl.type_inst.pointer_to.one_past_last_token == pointer_fresh_decl.type_inst.pointer_to.one_past_last_token
+	);
 	pointer_name := pointer_decl.type_inst.pointer_to.type_valued_expression.(*Extended.Parser_Ident);
 	assert(pointer_name.resolved_declaration == pointer_statements[2].(*Extended.Parser_Declaration));
 	assert(pointer_fresh_decl.type_inst.pointer_to.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == pointer_fresh_statements[2].(*Extended.Parser_Declaration));
@@ -2232,7 +2324,7 @@ test_uninitialized_typed_declaration_ast_reuse :: () {
 	Extended.release_parser_names(*pointer_fresh);
 	free(pointer_new_source);
 
-	uninitialized_old_source := copy_string("Target :: s64; item: Target = ---; use := item;");
+	uninitialized_old_source := copy_string(			 "Target :: s64; item: Target = ---; use := item;");
 	uninitialized_new_source := copy_string("added :: 0;\nTarget :: s64; item: Target = ---; use := item;");
 	uninitialized_old := Extended.parse_file(uninitialized_old_source);
 	uninitialized_updated, uninitialized_ok := Extended.parse_file_edit(*uninitialized_old, 0, 0, uninitialized_new_source);
@@ -2269,7 +2361,7 @@ test_uninitialized_typed_declaration_ast_reuse :: () {
 	Extended.release_parser_names(*uninitialized_fresh);
 	free(uninitialized_new_source);
 
-	import_old_source := copy_string("Basic :: #import \"Basic\"; use := Basic;");
+	import_old_source := copy_string(			  "Basic :: #import \"Basic\"; use := Basic;");
 	import_new_source := copy_string("added :: 0;\nBasic :: #import \"Basic\"; use := Basic;");
 	import_old := Extended.parse_file(import_old_source);
 	import_updated, import_ok := Extended.parse_file_edit(*import_old, 0, 0, import_new_source);
@@ -2306,7 +2398,7 @@ test_uninitialized_typed_declaration_ast_reuse :: () {
 	Extended.release_parser_names(*import_fresh);
 	free(import_new_source);
 
-	using_old_source := copy_string("State :: struct { member: s64; }; using global: State; after := 1;");
+	using_old_source := copy_string(			 "State :: struct { member: s64; }; using global: State; after := 1;");
 	using_new_source := copy_string("added :: 0;\nState :: struct { member: s64; }; using global: State; after := 1;");
 	using_old := Extended.parse_file(using_old_source);
 	using_updated, using_ok := Extended.parse_file_edit(*using_old, 0, 0, using_new_source);
@@ -2343,7 +2435,7 @@ test_uninitialized_typed_declaration_ast_reuse :: () {
 }
 
 test_typed_compound_ast_reuse :: () {
-	old_source := copy_string("left, right: Target = value; Target :: 1; value :: 2; use := right;");
+	old_source := copy_string(			   "left, right: Target = value; Target :: 1; value :: 2; use := right;");
 	new_source := copy_string("added :: 0;\nleft, right: Target = value; Target :: 1; value :: 2; use := right;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -2392,7 +2484,7 @@ test_typed_compound_ast_reuse :: () {
 	Extended.release_parser_names(*fresh);
 	free(new_source);
 
-	pointer_old_source := copy_string("left, middle, right: *Target = value; Target :: 1; value :: 2; use := middle;");
+	pointer_old_source := copy_string(			   "left, middle, right: *Target = value; Target :: 1; value :: 2; use := middle;");
 	pointer_new_source := copy_string("added :: 0;\nleft, middle, right: *Target = value; Target :: 1; value :: 2; use := middle;");
 	pointer_old := Extended.parse_file(pointer_old_source);
 	pointer_updated, pointer_ok := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
@@ -2433,7 +2525,7 @@ test_typed_compound_ast_reuse :: () {
 	Extended.release_parser_names(*pointer_fresh);
 	free(pointer_new_source);
 
-	double_old_source := copy_string("left, right: **Target = value; Target :: 1; value :: 2; use := right;");
+	double_old_source := copy_string(			  "left, right: **Target = value; Target :: 1; value :: 2; use := right;");
 	double_new_source := copy_string("added :: 0;\nleft, right: **Target = value; Target :: 1; value :: 2; use := right;");
 	double_old := Extended.parse_file(double_old_source);
 	double_updated, double_ok := Extended.parse_file_edit(*double_old, 0, 0, double_new_source);
@@ -2482,7 +2574,7 @@ test_typed_compound_ast_reuse :: () {
 	Extended.release_parser_names(*double_fresh);
 	free(double_new_source);
 
-	array_old_source := copy_string("left, right: [size]Target = value; size :: 4; Target :: u8; value :: 2; use := right;");
+	array_old_source := copy_string(			 "left, right: [size]Target = value; size :: 4; Target :: u8; value :: 2; use := right;");
 	array_new_source := copy_string("added :: 0;\nleft, right: [size]Target = value; size :: 4; Target :: u8; value :: 2; use := right;");
 	array_old := Extended.parse_file(array_old_source);
 	array_updated, array_ok := Extended.parse_file_edit(*array_old, 0, 0, array_new_source);
@@ -2528,7 +2620,7 @@ test_typed_compound_ast_reuse :: () {
 	Extended.release_parser_names(*array_fresh);
 	free(array_new_source);
 
-	fixed_value_old_source := copy_string("Target :: s64; value: [2]Target : .[1, 2]; left, right: [2]Target = value; main :: () { use_left := left; use_right := right; }");
+	fixed_value_old_source := copy_string(			   "Target :: s64; value: [2]Target : .[1, 2]; left, right: [2]Target = value; main :: () { use_left := left; use_right := right; }");
 	fixed_value_new_source := copy_string("added :: 0;\nTarget :: s64; value: [2]Target : .[1, 2]; left, right: [2]Target = value; main :: () { use_left := left; use_right := right; }");
 	fixed_value_old := Extended.parse_file(fixed_value_old_source);
 	fixed_value_updated, fixed_value_ok := Extended.parse_file_edit(*fixed_value_old, 0, 0, fixed_value_new_source);
@@ -2585,7 +2677,7 @@ test_typed_compound_ast_reuse :: () {
 }
 
 test_uninitialized_typed_compound_ast_reuse :: () {
-	old_source := copy_string("left, right: Target; Target :: 1; use := right;");
+	old_source := copy_string(			   "left, right: Target; Target :: 1; use := right;");
 	new_source := copy_string("added :: 0;\nleft, right: Target; Target :: 1; use := right;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -2633,7 +2725,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	Extended.release_parser_names(*fresh);
 	free(new_source);
 
-	pointer_old_source := copy_string("left, middle, right: *Target; Target :: 1; use := middle;");
+	pointer_old_source := copy_string(			   "left, middle, right: *Target; Target :: 1; use := middle;");
 	pointer_new_source := copy_string("added :: 0;\nleft, middle, right: *Target; Target :: 1; use := middle;");
 	pointer_old := Extended.parse_file(pointer_old_source);
 	pointer_updated, pointer_ok := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
@@ -2674,7 +2766,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	Extended.release_parser_names(*pointer_fresh);
 	free(pointer_new_source);
 
-	double_old_source := copy_string("left, right: **Target; Target :: 1; use := right;");
+	double_old_source := copy_string(			  "left, right: **Target; Target :: 1; use := right;");
 	double_new_source := copy_string("added :: 0;\nleft, right: **Target; Target :: 1; use := right;");
 	double_old := Extended.parse_file(double_old_source);
 	double_updated, double_ok := Extended.parse_file_edit(*double_old, 0, 0, double_new_source);
@@ -2720,7 +2812,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	Extended.release_parser_names(*double_fresh);
 	free(double_new_source);
 
-	array_old_source := copy_string("left, right: [size]Target; size :: 4; Target :: u8; use := right;");
+	array_old_source := copy_string(			 "left, right: [size]Target; size :: 4; Target :: u8; use := right;");
 	array_new_source := copy_string("added :: 0;\nleft, right: [size]Target; size :: 4; Target :: u8; use := right;");
 	array_old := Extended.parse_file(array_old_source);
 	array_updated, array_ok := Extended.parse_file_edit(*array_old, 0, 0, array_new_source);
@@ -2765,7 +2857,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	Extended.release_parser_names(*array_fresh);
 	free(array_new_source);
 
-	dimension_old_source := copy_string("size :: 1; Target :: s64; left, right: [size + 1]Target; main :: () { use_left := left; use_right := right; }");
+	dimension_old_source := copy_string(			 "size :: 1; Target :: s64; left, right: [size + 1]Target; main :: () { use_left := left; use_right := right; }");
 	dimension_new_source := copy_string("added :: 0;\nsize :: 1; Target :: s64; left, right: [size + 1]Target; main :: () { use_left := left; use_right := right; }");
 	dimension_old := Extended.parse_file(dimension_old_source);
 	dimension_updated, dimension_ok := Extended.parse_file_edit(*dimension_old, 0, 0, dimension_new_source);
@@ -2794,7 +2886,12 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	dimension_fresh_expression := dimension_fresh_type.array_dimension.(*Extended.Parser_Binary_Operator);
 	assert(dimension_expression.operator_type == #char "+" && dimension_expression.operator_type == dimension_fresh_expression.operator_type);
 	assert(dimension_expression.first_token == dimension_fresh_expression.first_token && dimension_expression.one_past_last_token == dimension_fresh_expression.one_past_last_token);
-	assert(dimension_expression.l0 == dimension_fresh_expression.l0 && dimension_expression.c0 == dimension_fresh_expression.c0 && dimension_expression.l1 == dimension_fresh_expression.l1 && dimension_expression.c1 == dimension_fresh_expression.c1);
+	assert(
+		dimension_expression.l0 == dimension_fresh_expression.l0
+		&& dimension_expression.c0 == dimension_fresh_expression.c0
+		&& dimension_expression.l1 == dimension_fresh_expression.l1
+		&& dimension_expression.c1 == dimension_fresh_expression.c1
+	);
 	dimension_name := dimension_expression.left.(*Extended.Parser_Ident);
 	assert(dimension_name.resolved_declaration == dimension_statements[1].(*Extended.Parser_Declaration));
 	assert(dimension_fresh_expression.left.(*Extended.Parser_Ident).resolved_declaration == dimension_fresh_statements[1].(*Extended.Parser_Declaration));
@@ -2820,7 +2917,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	Extended.release_parser_names(*dimension_fresh);
 	free(dimension_new_source);
 
-	resizable_old_source := copy_string("Target :: s64; left, right: [..]Target; main :: () { use := right; }");
+	resizable_old_source := copy_string(			 "Target :: s64; left, right: [..]Target; main :: () { use := right; }");
 	resizable_new_source := copy_string("added :: 0;\nTarget :: s64; left, right: [..]Target; main :: () { use := right; }");
 	resizable_old := Extended.parse_file(resizable_old_source);
 	resizable_updated, resizable_ok := Extended.parse_file_edit(*resizable_old, 0, 0, resizable_new_source);
@@ -2846,8 +2943,16 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	assert(resizable_compound.first_token == resizable_fresh_compound.first_token && resizable_compound.one_past_last_token == resizable_fresh_compound.one_past_last_token);
 	assert(resizable_type.first_token == resizable_fresh_type.first_token && resizable_type.one_past_last_token == resizable_fresh_type.one_past_last_token);
 	assert(resizable_type.l0 == resizable_fresh_type.l0 && resizable_type.c0 == resizable_fresh_type.c0 && resizable_type.l1 == resizable_fresh_type.l1 && resizable_type.c1 == resizable_fresh_type.c1);
-	assert(resizable_type.array_element_type.first_token == resizable_fresh_type.array_element_type.first_token && resizable_type.array_element_type.one_past_last_token == resizable_fresh_type.array_element_type.one_past_last_token);
-	assert(resizable_type.array_element_type.l0 == resizable_fresh_type.array_element_type.l0 && resizable_type.array_element_type.c0 == resizable_fresh_type.array_element_type.c0 && resizable_type.array_element_type.l1 == resizable_fresh_type.array_element_type.l1 && resizable_type.array_element_type.c1 == resizable_fresh_type.array_element_type.c1);
+	assert(
+		resizable_type.array_element_type.first_token == resizable_fresh_type.array_element_type.first_token
+		&& resizable_type.array_element_type.one_past_last_token == resizable_fresh_type.array_element_type.one_past_last_token
+	);
+	assert(
+		resizable_type.array_element_type.l0 == resizable_fresh_type.array_element_type.l0
+		&& resizable_type.array_element_type.c0 == resizable_fresh_type.array_element_type.c0
+		&& resizable_type.array_element_type.l1 == resizable_fresh_type.array_element_type.l1
+		&& resizable_type.array_element_type.c1 == resizable_fresh_type.array_element_type.c1
+	);
 	resizable_name := resizable_type.array_element_type.type_valued_expression.(*Extended.Parser_Ident);
 	assert(resizable_name.resolved_declaration == resizable_statements[1].(*Extended.Parser_Declaration));
 	assert(resizable_fresh_type.array_element_type.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == resizable_fresh_statements[1].(*Extended.Parser_Declaration));
@@ -2867,7 +2972,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	Extended.release_parser_names(*resizable_fresh);
 	free(resizable_new_source);
 
-	view_old_source := copy_string("Target :: s64; left, right: []Target; main :: () { use_left := left; use_right := right; }");
+	view_old_source := copy_string(				"Target :: s64; left, right: []Target; main :: () { use_left := left; use_right := right; }");
 	view_new_source := copy_string("added :: 0;\nTarget :: s64; left, right: []Target; main :: () { use_left := left; use_right := right; }");
 	view_old := Extended.parse_file(view_old_source);
 	view_updated, view_ok := Extended.parse_file_edit(*view_old, 0, 0, view_new_source);
@@ -2894,7 +2999,12 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	assert(view_type.first_token == view_fresh_type.first_token && view_type.one_past_last_token == view_fresh_type.one_past_last_token);
 	assert(view_type.l0 == view_fresh_type.l0 && view_type.c0 == view_fresh_type.c0 && view_type.l1 == view_fresh_type.l1 && view_type.c1 == view_fresh_type.c1);
 	assert(view_type.array_element_type.first_token == view_fresh_type.array_element_type.first_token && view_type.array_element_type.one_past_last_token == view_fresh_type.array_element_type.one_past_last_token);
-	assert(view_type.array_element_type.l0 == view_fresh_type.array_element_type.l0 && view_type.array_element_type.c0 == view_fresh_type.array_element_type.c0 && view_type.array_element_type.l1 == view_fresh_type.array_element_type.l1 && view_type.array_element_type.c1 == view_fresh_type.array_element_type.c1);
+	assert(
+		view_type.array_element_type.l0 == view_fresh_type.array_element_type.l0
+		&& view_type.array_element_type.c0 == view_fresh_type.array_element_type.c0
+		&& view_type.array_element_type.l1 == view_fresh_type.array_element_type.l1
+		&& view_type.array_element_type.c1 == view_fresh_type.array_element_type.c1
+	);
 	view_name := view_type.array_element_type.type_valued_expression.(*Extended.Parser_Ident);
 	assert(view_name.resolved_declaration == view_statements[1].(*Extended.Parser_Declaration));
 	assert(view_fresh_type.array_element_type.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == view_fresh_statements[1].(*Extended.Parser_Declaration));
@@ -2918,7 +3028,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	Extended.release_parser_names(*view_fresh);
 	free(view_new_source);
 
-	view_pointer_old_source := copy_string("Target :: s64; left, right: *[]Target; main :: () { use_left := left; use_right := right; }");
+	view_pointer_old_source := copy_string(				"Target :: s64; left, right: *[]Target; main :: () { use_left := left; use_right := right; }");
 	view_pointer_new_source := copy_string("added :: 0;\nTarget :: s64; left, right: *[]Target; main :: () { use_left := left; use_right := right; }");
 	view_pointer_old := Extended.parse_file(view_pointer_old_source);
 	view_pointer_updated, view_pointer_ok := Extended.parse_file_edit(*view_pointer_old, 0, 0, view_pointer_new_source);
@@ -2943,12 +3053,25 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	assert(view_pointer_type.pointer_to && view_pointer_type.pointer_to.inst_flags == .ARRAY_VIEW && !view_pointer_type.pointer_to.array_dimension);
 	assert(view_pointer_compound.first_token == view_pointer_fresh_compound.first_token && view_pointer_compound.one_past_last_token == view_pointer_fresh_compound.one_past_last_token);
 	assert(view_pointer_type.first_token == view_pointer_fresh_type.first_token && view_pointer_type.one_past_last_token == view_pointer_fresh_type.one_past_last_token);
-	assert(view_pointer_type.l0 == view_pointer_fresh_type.l0 && view_pointer_type.c0 == view_pointer_fresh_type.c0 && view_pointer_type.l1 == view_pointer_fresh_type.l1 && view_pointer_type.c1 == view_pointer_fresh_type.c1);
+	assert(
+		view_pointer_type.l0 == view_pointer_fresh_type.l0
+		&& view_pointer_type.c0 == view_pointer_fresh_type.c0
+		&& view_pointer_type.l1 == view_pointer_fresh_type.l1
+		&& view_pointer_type.c1 == view_pointer_fresh_type.c1
+	);
 	view_pointer_view := view_pointer_type.pointer_to;
 	view_pointer_fresh_view := view_pointer_fresh_type.pointer_to;
 	assert(view_pointer_view.first_token == view_pointer_fresh_view.first_token && view_pointer_view.one_past_last_token == view_pointer_fresh_view.one_past_last_token);
-	assert(view_pointer_view.l0 == view_pointer_fresh_view.l0 && view_pointer_view.c0 == view_pointer_fresh_view.c0 && view_pointer_view.l1 == view_pointer_fresh_view.l1 && view_pointer_view.c1 == view_pointer_fresh_view.c1);
-	assert(view_pointer_view.array_element_type.first_token == view_pointer_fresh_view.array_element_type.first_token && view_pointer_view.array_element_type.one_past_last_token == view_pointer_fresh_view.array_element_type.one_past_last_token);
+	assert(
+		view_pointer_view.l0 == view_pointer_fresh_view.l0
+		&& view_pointer_view.c0 == view_pointer_fresh_view.c0
+		&& view_pointer_view.l1 == view_pointer_fresh_view.l1
+		&& view_pointer_view.c1 == view_pointer_fresh_view.c1
+	);
+	assert(
+		view_pointer_view.array_element_type.first_token == view_pointer_fresh_view.array_element_type.first_token
+		&& view_pointer_view.array_element_type.one_past_last_token == view_pointer_fresh_view.array_element_type.one_past_last_token
+	);
 	view_pointer_name := view_pointer_view.array_element_type.type_valued_expression.(*Extended.Parser_Ident);
 	assert(view_pointer_name.resolved_declaration == view_pointer_statements[1].(*Extended.Parser_Declaration));
 	assert(view_pointer_fresh_view.array_element_type.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == view_pointer_fresh_statements[1].(*Extended.Parser_Declaration));
@@ -2977,7 +3100,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 }
 
 test_compound_ast_reuse :: () {
-	old_source := copy_string("left, right :: value; value :: 1; sum := left + right;");
+	old_source := copy_string(			   "left, right :: value; value :: 1; sum := left + right;");
 	new_source := copy_string("added :: 2;\nleft, right :: value; value :: 1; sum := left + right;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -3032,7 +3155,7 @@ test_compound_ast_reuse :: () {
 }
 
 test_compound_reassignment_ast_reuse :: () {
-	old_source := copy_string("left :: 1; right :: 2; left, right = value; value :: 3; use := left;");
+	old_source := copy_string(			   "left :: 1; right :: 2; left, right = value; value :: 3; use := left;");
 	new_source := copy_string("added :: 0;\nleft :: 1; right :: 2; left, right = value; value :: 3; use := left;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -3078,7 +3201,7 @@ test_compound_reassignment_ast_reuse :: () {
 	Extended.release_parser_names(*fresh);
 	free(new_source);
 
-	three_old_source := copy_string("a :: 1; b :: 2; c :: 3; a, b, c = value; value :: 4; use := c;");
+	three_old_source := copy_string(			 "a :: 1; b :: 2; c :: 3; a, b, c = value; value :: 4; use := c;");
 	three_new_source := copy_string("added :: 0;\na :: 1; b :: 2; c :: 3; a, b, c = value; value :: 4; use := c;");
 	three_old := Extended.parse_file(three_old_source);
 	three_updated, three_ok := Extended.parse_file_edit(*three_old, 0, 0, three_new_source);
@@ -3120,7 +3243,7 @@ test_compound_reassignment_ast_reuse :: () {
 	free(three_new_source);
 	check_compound_reuse_fallback("left:, right = value;");
 
-	mixed_old_source := copy_string("right := 2; value :: 3; left:, right = value; use_left := left; use_right := right;");
+	mixed_old_source := copy_string(			 "right := 2; value :: 3; left:, right = value; use_left := left; use_right := right;");
 	mixed_new_source := copy_string("added :: 0;\nright := 2; value :: 3; left:, right = value; use_left := left; use_right := right;");
 	mixed_old := Extended.parse_file(mixed_old_source);
 	mixed_updated, mixed_ok := Extended.parse_file_edit(*mixed_old, 0, 0, mixed_new_source);
@@ -3160,8 +3283,12 @@ test_compound_reassignment_ast_reuse :: () {
 	Extended.release_parser_names(*mixed_fresh);
 	free(mixed_new_source);
 
-	member_old_source := copy_string("Container :: struct { x: s64; y: s64; }; container: Container; main :: () { container.x, container.y = 1, 2; values: [2]s64; index :: 0; values[index], values[index + 1] = 3, 4; }");
-	member_new_source := copy_string("added :: 0;\nContainer :: struct { x: s64; y: s64; }; container: Container; main :: () { container.x, container.y = 1, 2; values: [2]s64; index :: 0; values[index], values[index + 1] = 3, 4; }");
+	member_old_source := copy_string(
+					 "Container :: struct { x: s64; y: s64; }; container: Container; main :: () { container.x, container.y = 1, 2; values: [2]s64; index :: 0; values[index], values[index + 1] = 3, 4; }"
+	);
+	member_new_source := copy_string(
+		"added :: 0;\nContainer :: struct { x: s64; y: s64; }; container: Container; main :: () { container.x, container.y = 1, 2; values: [2]s64; index :: 0; values[index], values[index + 1] = 3, 4; }"
+	);
 	member_old := Extended.parse_file(member_old_source);
 	member_updated, member_ok := Extended.parse_file_edit(*member_old, 0, 0, member_new_source);
 	member_fresh := Extended.parse_file(member_new_source);
@@ -3209,8 +3336,14 @@ test_compound_reassignment_ast_reuse :: () {
 	second_index := indexed_compound.comma_separated_assignment.arguments[1].node.(*Extended.Parser_Binary_Operator).right.(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Ident);
 	assert(first_index.resolved_declaration == member_body.statements[2].(*Extended.Parser_Declaration));
 	assert(second_index.resolved_declaration == member_body.statements[2].(*Extended.Parser_Declaration));
-	assert(indexed_fresh_compound.comma_separated_assignment.arguments[0].node.(*Extended.Parser_Binary_Operator).right.(*Extended.Parser_Ident).resolved_declaration == member_fresh_body.statements[2].(*Extended.Parser_Declaration));
-	assert(indexed_fresh_compound.comma_separated_assignment.arguments[1].node.(*Extended.Parser_Binary_Operator).right.(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Ident).resolved_declaration == member_fresh_body.statements[2].(*Extended.Parser_Declaration));
+	assert(
+		indexed_fresh_compound.comma_separated_assignment.arguments[0].node.(*Extended.Parser_Binary_Operator).right.(*Extended.Parser_Ident).resolved_declaration
+		== member_fresh_body.statements[2].(*Extended.Parser_Declaration)
+	);
+	assert(
+		indexed_fresh_compound.comma_separated_assignment.arguments[1].node.(*Extended.Parser_Binary_Operator).right.(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Ident).resolved_declaration
+		== member_fresh_body.statements[2].(*Extended.Parser_Declaration)
+	);
 	assert(member_updated.diagnostics.count == member_fresh.diagnostics.count && member_updated.restart_points.count == member_fresh.restart_points.count);
 	Extended.release_parser_tree(*member_old);
 	Extended.release_parser_names(*member_old);
@@ -3224,7 +3357,7 @@ test_compound_reassignment_ast_reuse :: () {
 	Extended.release_parser_names(*member_fresh);
 	free(member_new_source);
 
-	deref_old_source := copy_string("main :: () { left: s64; pointer := *left; right: s64; pointer.*, right = 1, 2; use_right := right; right=, new_value := 3; use_new := new_value; use_right_again := right; }");
+	deref_old_source := copy_string(			 "main :: () { left: s64; pointer := *left; right: s64; pointer.*, right = 1, 2; use_right := right; right=, new_value := 3; use_new := new_value; use_right_again := right; }");
 	deref_new_source := copy_string("added :: 0;\nmain :: () { left: s64; pointer := *left; right: s64; pointer.*, right = 1, 2; use_right := right; right=, new_value := 3; use_new := new_value; use_right_again := right; }");
 	deref_old := Extended.parse_file(deref_old_source);
 	deref_updated, deref_ok := Extended.parse_file_edit(*deref_old, 0, 0, deref_new_source);
@@ -3280,14 +3413,14 @@ test_compound_reassignment_ast_reuse :: () {
 }
 
 test_compound_candidate_edits :: () {
-	base :: "left, right: s64; keep := right;";
-	check_compound_candidate_edit(base, "left, middle, right: s64; keep := right;", "left, ".count, "left, ".count);
-	check_compound_candidate_edit(base, "left, right :: s64; keep := right;", "left, right".count, "left, right:".count);
-	check_compound_candidate_edit(base, "other, right: s64; keep := right;", 0, "left".count);
-	check_compound_candidate_edit(base, "left, right: u64; keep := right;", "left, right: ".count, "left, right: s64".count);
+	BASE :: "left, right: s64; keep := right;";
+	check_compound_candidate_edit(BASE, "left, middle, right: s64; keep := right;", "left, ".count, "left, ".count);
+	check_compound_candidate_edit(BASE, "left, right :: s64; keep := right;", "left, right".count, "left, right:".count);
+	check_compound_candidate_edit(BASE, "other, right: s64; keep := right;", 0, "left".count);
+	check_compound_candidate_edit(BASE, "left, right: u64; keep := right;", "left, right: ".count, "left, right: s64".count);
 	check_compound_candidate_edit("left, right :: 1; keep := right;", "left, right := 1; keep := right;", "left, right ".count, "left, right ::".count);
 
-	old_source := copy_string(base);
+	old_source := copy_string(BASE);
 	new_source := copy_string("left, right: s64 keep := right;");
 	old := Extended.parse_file(old_source);
 	semicolon_start := "left, right: s64".count;
@@ -3379,7 +3512,7 @@ check_compound_candidate_edit :: (before: string, after: string, edit_start: s64
 }
 
 test_three_name_compound_ast_reuse :: () {
-	old_source := copy_string("left, middle, right :: value; value :: 1; use := middle;");
+	old_source := copy_string(			   "left, middle, right :: value; value :: 1; use := middle;");
 	new_source := copy_string("added :: 2;\nleft, middle, right :: value; value :: 1; use := middle;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -3428,7 +3561,7 @@ test_three_name_compound_ast_reuse :: () {
 }
 
 test_four_name_compound_ast_reuse :: () {
-	old_source := copy_string("a, b, c, d :: value; value :: 1; use := d;");
+	old_source := copy_string(			   "a, b, c, d :: value; value :: 1; use := d;");
 	new_source := copy_string("added :: 2;\na, b, c, d :: value; value :: 1; use := d;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -3471,7 +3604,15 @@ test_four_name_compound_ast_reuse :: () {
 	free(new_source);
 }
 
-check_compound_reuse_fallback :: (source: string, check_procedure_type := false, check_type_query := false, check_skipped_initialization := false, expected_note := "", expected_alignment: u64 = 0, check_run_dimension := false) {
+check_compound_reuse_fallback :: (
+	source: string,
+	check_procedure_type := false,
+	check_type_query := false,
+	check_skipped_initialization := false,
+	expected_note := "",
+	expected_alignment: u64 = 0,
+	check_run_dimension := false,
+) {
 	old_source := copy_string(source);
 	new_source := copy_string(tprint("added :: 0;\n%", old_source));
 	old := Extended.parse_file(old_source);
@@ -3594,7 +3735,7 @@ check_compound_reuse_fallback :: (source: string, check_procedure_type := false,
 
 test_scalar_literal_ast_reuse :: () {
 	for expression: string.["42", "0xFF", "0b101", "3.5", "true", "false", "#char \"A\""] {
-		old_source := copy_string(tprint("value := %; use := value;", expression));
+		old_source := copy_string(tprint(			   "value := %; use := value;", expression));
 		new_source := copy_string(tprint("prefix :: 0;\nvalue := %; use := value;", expression));
 		old := Extended.parse_file(old_source);
 		updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -3658,15 +3799,15 @@ test_scalar_literal_ast_reuse :: () {
 }
 
 test_source_position_ast_reuse :: () {
-	base :: "label :: \"one\\ntwo\"; use := label;";
-	check_source_position_edit(base, "// before\nlabel :: \"one\\ntwo\"; use := label;", 0, 0, true, "one\ntwo");
-	check_source_position_edit(base, " \tlabel :: \"one\\ntwo\"; use := label;", 0, 0, true, "one\ntwo");
-	check_source_position_edit("// before\nlabel :: \"one\\ntwo\"; use := label;", base, 0, "// before\n".count, true, "one\ntwo");
-	check_source_position_edit(base, "label \n :: \"one\\ntwo\"; use := label;", "label ".count, "label ".count, false, "one\ntwo");
-	check_source_position_edit(base, "label :: \"one\\ntwo\" /* note */; use := label;", "label :: \"one\\ntwo\"".count, "label :: \"one\\ntwo\"".count, true, "one\ntwo");
-	check_source_position_edit(base, "label :: \"one\\nthree\"; use := label;", "label :: \"one\\n".count, "label :: \"one\\ntwo".count, false, "one\nthree");
-	check_source_position_edit(base, "label :: \"one\\ntwo\"; // between\nuse := label;", "label :: \"one\\ntwo\"; ".count, "label :: \"one\\ntwo\"; ".count, true, "one\ntwo");
-	check_source_position_edit(base, "label :: \"one\\ntwo\"; use := label; // trailing\n", base.count, base.count, true, "one\ntwo");
+	BASE :: "label :: \"one\\ntwo\"; use := label;";
+	check_source_position_edit(BASE, "// before\nlabel :: \"one\\ntwo\"; use := label;", 0, 0, true, "one\ntwo");
+	check_source_position_edit(BASE, " \tlabel :: \"one\\ntwo\"; use := label;", 0, 0, true, "one\ntwo");
+	check_source_position_edit("// before\nlabel :: \"one\\ntwo\"; use := label;", BASE, 0, "// before\n".count, true, "one\ntwo");
+	check_source_position_edit(BASE, "label \n :: \"one\\ntwo\"; use := label;", "label ".count, "label ".count, false, "one\ntwo");
+	check_source_position_edit(BASE, "label :: \"one\\ntwo\" /* note */; use := label;", "label :: \"one\\ntwo\"".count, "label :: \"one\\ntwo\"".count, true, "one\ntwo");
+	check_source_position_edit(BASE, "label :: \"one\\nthree\"; use := label;", "label :: \"one\\n".count, "label :: \"one\\ntwo".count, false, "one\nthree");
+	check_source_position_edit(BASE, "label :: \"one\\ntwo\"; // between\nuse := label;", "label :: \"one\\ntwo\"; ".count, "label :: \"one\\ntwo\"; ".count, true, "one\ntwo");
+	check_source_position_edit(BASE, "label :: \"one\\ntwo\"; use := label; // trailing\n", BASE.count, BASE.count, true, "one\ntwo");
 }
 
 check_source_position_edit :: (before: string, after: string, edit_start: s64, edit_end: s64, reuse_first: bool, expected_string: string) {
@@ -3731,7 +3872,7 @@ check_source_position_edit :: (before: string, after: string, edit_start: s64, e
 }
 
 test_source_backed_ast_reuse :: () {
-	old_source := copy_string("label :: \"one\\ntwo\"; enabled :: true;");
+	old_source := copy_string(			   "label :: \"one\\ntwo\"; enabled :: true;");
 	new_source := copy_string("prefix :: 0; label :: \"one\\ntwo\"; enabled :: true;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -3779,12 +3920,12 @@ test_source_backed_ast_reuse :: () {
 	Extended.release_parser_names(*fresh);
 	free(new_source);
 
-	filepath_old_source := copy_string("path :: #filepath; use := path;");
+	filepath_old_source := copy_string(				 "path :: #filepath; use := path;");
 	filepath_new_source := copy_string("prefix :: 0;\npath :: #filepath; use := path;");
-	filepath_filename :: "C:/fixtures/source.jai";
-	filepath_old := Extended.parse_file(filepath_old_source, filepath_filename);
+	FILEPATH_FILENAME :: "C:/fixtures/source.jai";
+	filepath_old := Extended.parse_file(filepath_old_source, FILEPATH_FILENAME);
 	filepath_updated, filepath_ok := Extended.parse_file_edit(*filepath_old, 0, 0, filepath_new_source);
-	filepath_fresh := Extended.parse_file(filepath_new_source, filepath_filename);
+	filepath_fresh := Extended.parse_file(filepath_new_source, FILEPATH_FILENAME);
 	assert(filepath_ok && filepath_old.status == .COMPLETE && filepath_updated.status == .COMPLETE && filepath_fresh.status == .COMPLETE);
 	filepath_statements := filepath_updated.root.(*Extended.Parser_Block).statements;
 	filepath_fresh_statements := filepath_fresh.root.(*Extended.Parser_Block).statements;
@@ -3821,7 +3962,7 @@ test_excluded_literal_ast_reuse_fallback :: () {
 		"value := .{field = 1};",
 		"value := #string END\nbody\nEND\n",
 	] {
-		old_source := copy_string(tprint("%\nuse := value;", declaration_source));
+		old_source := copy_string(tprint(			   "%\nuse := value;", declaration_source));
 		new_source := copy_string(tprint("prefix :: 0;\n%\nuse := value;", declaration_source));
 		old := Extended.parse_file(old_source);
 		updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -3865,9 +4006,15 @@ test_excluded_literal_ast_reuse_fallback :: () {
 test_aggregate_payload_edits :: () {
 	for replacement: string.["3", "\"new\""] {
 		array_case := replacement == "3";
-		prefix := ifx array_case then "value := .[1, " else "value := .{";
-		suffix := ifx array_case then "]; use := value;" else "}; use := value;";
-		old_payload := ifx array_case then "2" else "\"old\"";
+		prefix := ifx array_case
+			then "value := .[1, "
+			else "value := .{";
+		suffix := ifx array_case
+			then "]; use := value;"
+			else "}; use := value;";
+		old_payload := ifx array_case
+			then "2"
+			else "\"old\"";
 		old_source := copy_string(tprint("%%%", prefix, old_payload, suffix));
 		new_source := copy_string(tprint("%%%", prefix, replacement, suffix));
 		old := Extended.parse_file(old_source);
@@ -3918,7 +4065,7 @@ test_aggregate_payload_edits :: () {
 }
 
 test_nested_ast_reuse :: () {
-	old_source := copy_string("base :: 2; value := (base + 3) * 4;");
+	old_source := copy_string(				"base :: 2; value := (base + 3) * 4;");
 	new_source := copy_string("prefix :: 1;\nbase :: 2; value := (base + 3) * 4;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -4021,7 +4168,7 @@ check_changed_candidate_ast_reuse :: (new_text: string, edit_start: s64, edit_en
 }
 
 test_remainder_ast_reuse :: () {
-	old_source := copy_string("left :: 7; right :: 3; remainder := left % right;");
+	old_source := copy_string(			   "left :: 7; right :: 3; remainder := left % right;");
 	new_source := copy_string("added :: 0;\nleft :: 7; right :: 3; remainder := left % right;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -4066,7 +4213,7 @@ test_remainder_ast_reuse :: () {
 }
 
 test_equality_ast_reuse :: () {
-	old_source := copy_string("left :: 7; right :: 3; equal := left == right;");
+	old_source := copy_string(			   "left :: 7; right :: 3; equal := left == right;");
 	new_source := copy_string("added :: 0;\nleft :: 7; right :: 3; equal := left == right;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -4141,7 +4288,7 @@ test_equality_ast_reuse :: () {
 }
 
 test_inequality_ast_reuse :: () {
-	old_source := copy_string("left :: 7; right :: 3; unequal := left != right;");
+	old_source := copy_string(			   "left :: 7; right :: 3; unequal := left != right;");
 	new_source := copy_string("added :: 0;\nleft :: 7; right :: 3; unequal := left != right;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -4272,7 +4419,7 @@ check_binary_ast_reuse :: (spelling: string, expected_type: Operator_Type) {
 }
 
 test_logical_ast_reuse :: () {
-	old_source := copy_string("left :: true; middle :: false; right :: true; result := left || middle && right;");
+	old_source := copy_string(				   "left :: true; middle :: false; right :: true; result := left || middle && right;");
 	new_source := copy_string("added :: false;\nleft :: true; middle :: false; right :: true; result := left || middle && right;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -4348,7 +4495,7 @@ test_logical_ast_reuse :: () {
 }
 
 test_bitwise_ast_reuse :: () {
-	old_source := copy_string("left :: 1; middle :: 2; right :: 3; last :: 4; result := left | middle & right ^ last;");
+	old_source := copy_string(			   "left :: 1; middle :: 2; right :: 3; last :: 4; result := left | middle & right ^ last;");
 	new_source := copy_string("added :: 0;\nleft :: 1; middle :: 2; right :: 3; last :: 4; result := left | middle & right ^ last;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -4614,7 +4761,7 @@ assert_eligible_edit_matches_fresh :: (updated: *Extended.Parsed_Source, fresh: 
 }
 
 check_excluded_operator_fallback :: (expression: string, expected_operator: Operator_Type, is_unary: bool, unowned_child := false, non_ident_member := false) {
-	old_source := copy_string(tprint("left :: 1; right :: 2; value := %; keep := value;", expression));
+	old_source := copy_string(tprint(			  "left :: 1; right :: 2; value := %; keep := value;", expression));
 	new_source := copy_string(tprint("added :: 0;\nleft :: 1; right :: 2; value := %; keep := value;", expression));
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -4678,7 +4825,7 @@ check_excluded_operator_fallback :: (expression: string, expected_operator: Oper
 }
 
 test_query_fallback :: () {
-	old_source := copy_string("value :: 1; result := type_of(null); keep := result;");
+	old_source := copy_string(			   "value :: 1; result := type_of(null); keep := result;");
 	new_source := copy_string("added :: 0;\nvalue :: 1; result := type_of(null); keep := result;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -4869,7 +5016,7 @@ test_excluded_statement_nodes :: () {
 }
 
 test_imperative_body_fallback :: () {
-	old_source := copy_string("outer :: true; run :: () { local := outer; if local { local := false; defer tick(); while local { return; } } } tail := outer;");
+	old_source := copy_string(			   "outer :: true; run :: () { local := outer; if local { local := false; defer tick(); while local { return; } } } tail := outer;");
 	new_source := copy_string("added :: 0;\nouter :: true; run :: () { local := outer; if local { local := false; defer tick(); while local { return; } } } tail := outer;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -4903,7 +5050,7 @@ test_imperative_body_fallback :: () {
 		assert(it.kind == other.kind && it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
 	}
 
-	edit_start := "outer :: true; run :: () { local := outer; if local { local := ".count;
+	edit_start :=				"outer :: true; run :: () { local := outer; if local { local := ".count;
 	inner_source := copy_string("outer :: true; run :: () { local := outer; if local { local := outer; defer tick(); while local { return; } } } tail := outer;");
 	inner_updated, inner_ok := Extended.parse_file_edit(*old, edit_start, edit_start + "false".count, inner_source);
 	inner_fresh := Extended.parse_file(inner_source);
@@ -4941,7 +5088,7 @@ test_imperative_body_fallback :: () {
 }
 
 test_aggregate_body_fallback :: () {
-	old_source := copy_string("Thing :: struct { field: s64; use := field; field = 1; } tail := 2;");
+	old_source := copy_string(			   "Thing :: struct { field: s64; use := field; field = 1; } tail := 2;");
 	new_source := copy_string("added :: 0;\nThing :: struct { field: s64; use := field; field = 1; } tail := 2;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -4995,7 +5142,7 @@ test_aggregate_body_fallback :: () {
 }
 
 test_aggregate_parameter_block_fallback :: () {
-	old_source := copy_string("Thing :: struct (T: Type, N := 2) { value: T; C :: N; } tail := 2;");
+	old_source := copy_string(			   "Thing :: struct (T: Type, N := 2) { value: T; C :: N; } tail := 2;");
 	new_source := copy_string("added :: 0;\nThing :: struct (T: Type, N := 2) { value: T; C :: N; } tail := 2;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -5007,7 +5154,10 @@ test_aggregate_parameter_block_fallback :: () {
 	assert(structure.arguments_block != old_struct.arguments_block && structure.arguments_block.block_type == .STRUCT_ARGUMENTS);
 	assert(structure.arguments_block.statements.count == 2 && structure.arguments_block.statements[0] != old_struct.arguments_block.statements[0]);
 	assert(structure.arguments_block.first_token == fresh_struct.arguments_block.first_token && structure.arguments_block.one_past_last_token == fresh_struct.arguments_block.one_past_last_token);
-	assert(structure.block.statements[0].(*Extended.Parser_Declaration).type_inst.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == structure.arguments_block.statements[0].(*Extended.Parser_Declaration));
+	assert(
+		structure.block.statements[0].(*Extended.Parser_Declaration).type_inst.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration
+		== structure.arguments_block.statements[0].(*Extended.Parser_Declaration)
+	);
 	assert(fresh_struct.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_struct.arguments_block.statements[1].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
 
@@ -5044,7 +5194,7 @@ test_aggregate_parameter_block_fallback :: () {
 }
 
 test_single_declaration_branch_fallback :: () {
-	old_source := copy_string("#if true target :: 1; use := target;");
+	old_source := copy_string(			   "#if true target :: 1; use := target;");
 	new_source := copy_string("added :: 0;\n#if true target :: 1; use := target;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -5073,7 +5223,7 @@ test_single_declaration_branch_fallback :: () {
 }
 
 test_synthetic_imperative_block_fallback :: () {
-	old_source := copy_string("lambda := x => x; value := ifx true then 1 else 2;");
+	old_source := copy_string(			   "lambda := x => x; value := ifx true then 1 else 2;");
 	new_source := copy_string("added :: 0;\nlambda := x => x; value := ifx true then 1 else 2;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -5110,7 +5260,7 @@ test_synthetic_imperative_block_fallback :: () {
 }
 
 test_enum_body_fallback :: () {
-	old_source := copy_string("Mode :: enum u16 { FIRST; #if true { SECOND; } THIRD; } tail := 2;");
+	old_source := copy_string(			   "Mode :: enum u16 { FIRST; #if true { SECOND; } THIRD; } tail := 2;");
 	new_source := copy_string("added :: 0;\nMode :: enum u16 { FIRST; #if true { SECOND; } THIRD; } tail := 2;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -5166,7 +5316,7 @@ test_enum_body_fallback :: () {
 }
 
 test_case_arm_fallback :: () {
-	old_source := copy_string("run :: () { outer := 1; if outer == { case 1; local := outer; case 2; local := 2; inner := local; case; return; } } tail := 2;");
+	old_source := copy_string(			   "run :: () { outer := 1; if outer == { case 1; local := outer; case 2; local := 2; inner := local; case; return; } } tail := 2;");
 	new_source := copy_string("added :: 0;\nrun :: () { outer := 1; if outer == { case 1; local := outer; case 2; local := 2; inner := local; case; return; } } tail := 2;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -5193,7 +5343,10 @@ test_case_arm_fallback :: () {
 	second_arm := switch_node.then_block.statements[1].(*Extended.Parser_Case);
 	assert(first_arm.then_block.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == body.statements[0].(*Extended.Parser_Declaration));
 	assert(second_arm.then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == second_arm.then_block.statements[0].(*Extended.Parser_Declaration));
-	assert(fresh_switch.then_block.statements[1].(*Extended.Parser_Case).then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_switch.then_block.statements[1].(*Extended.Parser_Case).then_block.statements[0].(*Extended.Parser_Declaration));
+	assert(
+		fresh_switch.then_block.statements[1].(*Extended.Parser_Case).then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration
+		== fresh_switch.then_block.statements[1].(*Extended.Parser_Case).then_block.statements[0].(*Extended.Parser_Declaration)
+	);
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
 
 	inner_source := copy_string("run :: () { outer := 1; if outer == { case 1; local := outer; case 2; local := 3; inner := local; case; return; } } tail := 2;");
@@ -5210,7 +5363,10 @@ test_case_arm_fallback :: () {
 	inner_decl := inner_arm.then_block.statements[0].(*Extended.Parser_Declaration);
 	assert(inner_arm != old_switch.then_block.statements[1].(*Extended.Parser_Case) && inner_decl.expression.(*Extended.Parser_Literal)._u64 == 3);
 	assert(inner_arm.then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inner_decl);
-	assert(inner_fresh_switch.then_block.statements[1].(*Extended.Parser_Case).then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inner_fresh_switch.then_block.statements[1].(*Extended.Parser_Case).then_block.statements[0].(*Extended.Parser_Declaration));
+	assert(
+		inner_fresh_switch.then_block.statements[1].(*Extended.Parser_Case).then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration
+		== inner_fresh_switch.then_block.statements[1].(*Extended.Parser_Case).then_block.statements[0].(*Extended.Parser_Declaration)
+	);
 	assert(inner_updated.diagnostics.count == inner_fresh.diagnostics.count && inner_updated.restart_points.count == inner_fresh.restart_points.count);
 	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	assert_eligible_edit_matches_fresh(*inner_updated, *inner_fresh);
@@ -5234,7 +5390,7 @@ test_case_arm_fallback :: () {
 }
 
 check_excluded_statement_node :: (statement: string, expected_kind: type_of(Extended.Parser_Node.kind)) {
-	old_source := copy_string(tprint("value :: 1; run :: () { % keep := value; } tail := value;", statement));
+	old_source := copy_string(tprint(			  "value :: 1; run :: () { % keep := value; } tail := value;", statement));
 	new_source := copy_string(tprint("added :: 0;\nvalue :: 1; run :: () { % keep := value; } tail := value;", statement));
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -5309,7 +5465,7 @@ check_excluded_statement_node :: (statement: string, expected_kind: type_of(Exte
 }
 
 check_excluded_expression_node :: (expression: string, expected_kind: type_of(Extended.Parser_Node.kind)) {
-	old_source := copy_string(tprint("Target :: s64; value :: 1; result := %; keep := result;", expression));
+	old_source := copy_string(tprint(			  "Target :: s64; value :: 1; result := %; keep := result;", expression));
 	new_source := copy_string(tprint("added :: 0;\nTarget :: s64; value :: 1; result := %; keep := result;", expression));
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -5475,7 +5631,7 @@ check_excluded_expression_node :: (expression: string, expected_kind: type_of(Ex
 test_lowered_directive_ast_reuse :: () {
 	expressions: []string = .["#char \"A\"", "#procedure_of_call Target(value)"];
 	for expressions {
-		old_source := copy_string(tprint("Target :: 1; value :: 2; result := %;", it));
+		old_source := copy_string(tprint(			  "Target :: 1; value :: 2; result := %;", it));
 		new_source := copy_string(tprint("added :: 0;\nTarget :: 1; value :: 2; result := %;", it));
 		old := Extended.parse_file(old_source);
 		updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -5527,17 +5683,17 @@ test_lowered_directive_ast_reuse :: () {
 }
 
 test_excluded_directive_payload_edit :: () {
-	prefix :: "Target :: s64; value :: 1; result := #code ";
-	old_source := copy_string(tprint("%value; keep := result;", prefix));
-	new_source := copy_string(tprint("%Target; keep := result;", prefix));
+	PREFIX :: "Target :: s64; value :: 1; result := #code ";
+	old_source := copy_string(tprint("%value; keep := result;", PREFIX));
+	new_source := copy_string(tprint("%Target; keep := result;", PREFIX));
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, prefix.count, prefix.count + "value".count, new_source);
+	updated, ok := Extended.parse_file_edit(*old, PREFIX.count, PREFIX.count + "value".count, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	probe_tokens := Extended.materialise_tokens(new_source);
-	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=prefix.count, edit_end=prefix.count + "value".count, cursor=statements[2].first_token.(s64)};
+	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=PREFIX.count, edit_end=PREFIX.count + "value".count, cursor=statements[2].first_token.(s64)};
 	set_allocators(*probe_tokens.node_pool, context.default_allocator);
 	probe.current_scope = Extended.push_lexical_scope(*probe);
 	assert(Extended.reuse_simple_declaration(*probe) == null);
@@ -5568,7 +5724,7 @@ test_excluded_directive_payload_edit :: () {
 }
 
 test_expression_query_ast_reuse :: () {
-	old_source := copy_string("value :: 1; result := type_of(value);");
+	old_source := copy_string(			   "value :: 1; result := type_of(value);");
 	new_source := copy_string("added :: 2;\nvalue :: 1; result := type_of(value);");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -5639,7 +5795,7 @@ test_expression_query_ast_reuse :: () {
 	Extended.release_parser_names(*other_fresh);
 	free(other_new_source);
 
-	code_old_source := copy_string("value :: 1; result := code_of(value);");
+	code_old_source := copy_string(				"value :: 1; result := code_of(value);");
 	code_new_source := copy_string("added :: 2;\nvalue :: 1; result := code_of(value);");
 	code_old := Extended.parse_file(code_old_source);
 	code_updated, code_ok := Extended.parse_file_edit(*code_old, 0, 0, code_new_source);
@@ -5717,7 +5873,7 @@ test_expression_query_ast_reuse :: () {
 }
 
 test_type_query_ast_reuse :: () {
-	old_source := copy_string("Target :: s64; result := size_of(Target);");
+	old_source := copy_string(			   "Target :: s64; result := size_of(Target);");
 	new_source := copy_string("added :: 2;\nTarget :: s64; result := size_of(Target);");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -5760,7 +5916,7 @@ test_type_query_ast_reuse :: () {
 	Extended.release_parser_names(*fresh);
 	free(new_source);
 
-	info_old_source := copy_string("Target :: s64; result := type_info(Target);");
+	info_old_source := copy_string(				"Target :: s64; result := type_info(Target);");
 	info_new_source := copy_string("added :: 2;\nTarget :: s64; result := type_info(Target);");
 	info_old := Extended.parse_file(info_old_source);
 	info_updated, info_ok := Extended.parse_file_edit(*info_old, 0, 0, info_new_source);
@@ -5802,7 +5958,7 @@ test_type_query_ast_reuse :: () {
 	Extended.release_parser_names(*info_fresh);
 	free(info_new_source);
 
-	initializer_old_source := copy_string("Target :: struct { value: s64 = 42; }; result := initializer_of(Target);");
+	initializer_old_source := copy_string(			   "Target :: struct { value: s64 = 42; }; result := initializer_of(Target);");
 	initializer_new_source := copy_string("added :: 2;\nTarget :: struct { value: s64 = 42; }; result := initializer_of(Target);");
 	initializer_old := Extended.parse_file(initializer_old_source);
 	initializer_updated, initializer_ok := Extended.parse_file_edit(*initializer_old, 0, 0, initializer_new_source);
@@ -5825,7 +5981,10 @@ test_type_query_ast_reuse :: () {
 	assert(initializer_query.first_token == initializer_fresh_query.first_token && initializer_query.one_past_last_token == initializer_fresh_query.one_past_last_token);
 	assert(initializer_query.l0 == initializer_fresh_query.l0 && initializer_query.c0 == initializer_fresh_query.c0);
 	assert(initializer_query.l1 == initializer_fresh_query.l1 && initializer_query.c1 == initializer_fresh_query.c1);
-	assert(initializer_query.type_to_query.first_token == initializer_fresh_query.type_to_query.first_token && initializer_query.type_to_query.one_past_last_token == initializer_fresh_query.type_to_query.one_past_last_token);
+	assert(
+		initializer_query.type_to_query.first_token == initializer_fresh_query.type_to_query.first_token
+		&& initializer_query.type_to_query.one_past_last_token == initializer_fresh_query.type_to_query.one_past_last_token
+	);
 	assert(initializer_query.type_to_query.l0 == initializer_fresh_query.type_to_query.l0 && initializer_query.type_to_query.c0 == initializer_fresh_query.type_to_query.c0);
 	assert(initializer_query.type_to_query.l1 == initializer_fresh_query.type_to_query.l1 && initializer_query.type_to_query.c1 == initializer_fresh_query.type_to_query.c1);
 	initializer_target := initializer_query.type_to_query.type_valued_expression.(*Extended.Parser_Ident);
@@ -5844,15 +6003,21 @@ test_type_query_ast_reuse :: () {
 	Extended.release_parser_names(*initializer_fresh);
 	free(initializer_new_source);
 
-	changed_source := copy_string("Target :: s64; result := type_info(Target);");
-	changed_old_source := copy_string("Target :: s64; result := size_of(Target);");
+	changed_source :=		copy_string("Target :: s64; result := type_info(Target);");
+	changed_old_source :=	copy_string("Target :: s64; result := size_of(Target);");
 	changed_old := Extended.parse_file(changed_old_source);
 	query_start := "Target :: s64; result := ".count;
 	changed, changed_ok := Extended.parse_file_edit(*changed_old, query_start, query_start + "size_of".count, changed_source);
 	changed_fresh := Extended.parse_file(changed_source);
 	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
 	changed_tokens := Extended.materialise_tokens(changed_source);
-	changed_probe := Extended.Parser.{parsed=*changed_tokens, edit_source=*changed_old, edit_start=query_start, edit_end=query_start + "size_of".count, cursor=changed.root.(*Extended.Parser_Block).statements[1].first_token.(s64)};
+	changed_probe := Extended.Parser.{
+		parsed=*changed_tokens,
+		edit_source=*changed_old,
+		edit_start=query_start,
+		edit_end=query_start + "size_of".count,
+		cursor=changed.root.(*Extended.Parser_Block).statements[1].first_token.(s64),
+	};
 	set_allocators(*changed_tokens.node_pool, context.default_allocator);
 	changed_probe.current_scope = Extended.push_lexical_scope(*changed_probe);
 	assert(Extended.reuse_simple_declaration(*changed_probe) == null);
@@ -5875,7 +6040,7 @@ test_type_query_ast_reuse :: () {
 }
 
 test_positive_unary_ast_reuse :: () {
-	old_source := copy_string("value :: 1; result := +value;");
+	old_source := copy_string(			   "value :: 1; result := +value;");
 	new_source := copy_string("added :: 2;\nvalue :: 1; result := +value;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -5946,7 +6111,7 @@ test_positive_unary_ast_reuse :: () {
 }
 
 test_negative_unary_ast_reuse :: () {
-	old_source := copy_string("value :: 1; result := -value;");
+	old_source := copy_string(			   "value :: 1; result := -value;");
 	new_source := copy_string("added :: 2;\nvalue :: 1; result := -value;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -5988,7 +6153,7 @@ test_negative_unary_ast_reuse :: () {
 }
 
 test_prefix_dereference_ast_reuse :: () {
-	old_source := copy_string("value :: 1; result := *value;");
+	old_source := copy_string(			   "value :: 1; result := *value;");
 	new_source := copy_string("added :: 2;\nvalue :: 1; result := *value;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -6059,7 +6224,7 @@ test_prefix_dereference_ast_reuse :: () {
 }
 
 test_pointer_dereference_ast_reuse :: () {
-	old_source := copy_string("value :: 1; result := (.*)value;");
+	old_source := copy_string(			   "value :: 1; result := (.*)value;");
 	new_source := copy_string("added :: 2;\nvalue :: 1; result := (.*)value;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -6130,7 +6295,7 @@ test_pointer_dereference_ast_reuse :: () {
 }
 
 test_postfix_dereference_ast_reuse :: () {
-	old_source := copy_string("pointer :: 1; result := pointer.*;");
+	old_source := copy_string(			   "pointer :: 1; result := pointer.*;");
 	new_source := copy_string("added :: 2;\npointer :: 1; result := pointer.*;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -6173,7 +6338,7 @@ test_postfix_dereference_ast_reuse :: () {
 }
 
 test_cast_ast_reuse :: () {
-	old_source := copy_string("value :: 1; result := cast(Target) value;");
+	old_source := copy_string(				"value :: 1; result := cast(Target) value;");
 	new_source := copy_string("Target :: 2;\nvalue :: 1; result := cast(Target) value;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -6216,7 +6381,7 @@ test_cast_ast_reuse :: () {
 	Extended.release_parser_names(*fresh);
 	free(new_source);
 
-	pointer_old_source := copy_string("value :: 1; result := cast(*Target) value;");
+	pointer_old_source := copy_string(				"value :: 1; result := cast(*Target) value;");
 	pointer_new_source := copy_string("Target :: 2;\nvalue :: 1; result := cast(*Target) value;");
 	pointer_old := Extended.parse_file(pointer_old_source);
 	pointer_updated, pointer_ok := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
@@ -6238,7 +6403,10 @@ test_cast_ast_reuse :: () {
 	assert(pointer_cast.target_type.first_token == pointer_fresh_cast.target_type.first_token && pointer_cast.target_type.one_past_last_token == pointer_fresh_cast.target_type.one_past_last_token);
 	assert(pointer_cast.target_type.l0 == pointer_fresh_cast.target_type.l0 && pointer_cast.target_type.c0 == pointer_fresh_cast.target_type.c0);
 	assert(pointer_cast.target_type.l1 == pointer_fresh_cast.target_type.l1 && pointer_cast.target_type.c1 == pointer_fresh_cast.target_type.c1);
-	assert(pointer_cast.target_type.pointer_to.first_token == pointer_fresh_cast.target_type.pointer_to.first_token && pointer_cast.target_type.pointer_to.one_past_last_token == pointer_fresh_cast.target_type.pointer_to.one_past_last_token);
+	assert(
+		pointer_cast.target_type.pointer_to.first_token == pointer_fresh_cast.target_type.pointer_to.first_token
+		&& pointer_cast.target_type.pointer_to.one_past_last_token == pointer_fresh_cast.target_type.pointer_to.one_past_last_token
+	);
 	pointer_ident := pointer_cast.target_type.pointer_to.type_valued_expression.(*Extended.Parser_Ident);
 	assert(pointer_ident.resolved_declaration == pointer_statements[0].(*Extended.Parser_Declaration));
 	assert(pointer_fresh_cast.target_type.pointer_to.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == pointer_fresh_statements[0].(*Extended.Parser_Declaration));
@@ -6254,7 +6422,7 @@ test_cast_ast_reuse :: () {
 	Extended.release_parser_names(*pointer_fresh);
 	free(pointer_new_source);
 
-	view_old_source := copy_string("value :: 1; result := cast([]Target) value;");
+	view_old_source := copy_string(				 "value :: 1; result := cast([]Target) value;");
 	view_new_source := copy_string("Target :: 2;\nvalue :: 1; result := cast([]Target) value;");
 	view_old := Extended.parse_file(view_old_source);
 	view_updated, view_ok := Extended.parse_file_edit(*view_old, 0, 0, view_new_source);
@@ -6293,7 +6461,7 @@ test_cast_ast_reuse :: () {
 	Extended.release_parser_names(*view_fresh);
 	free(view_new_source);
 
-	array_old_source := copy_string("value :: 1; result := cast([size]Target) value;");
+	array_old_source := copy_string(						 "value :: 1; result := cast([size]Target) value;");
 	array_new_source := copy_string("size :: 4; Target :: 2;\nvalue :: 1; result := cast([size]Target) value;");
 	array_old := Extended.parse_file(array_old_source);
 	array_updated, array_ok := Extended.parse_file_edit(*array_old, 0, 0, array_new_source);
@@ -6334,7 +6502,7 @@ test_cast_ast_reuse :: () {
 	Extended.release_parser_names(*array_fresh);
 	free(array_new_source);
 
-	double_old_source := copy_string("value :: 1; result := cast(**Target) value;");
+	double_old_source := copy_string(			   "value :: 1; result := cast(**Target) value;");
 	double_new_source := copy_string("Target :: 2;\nvalue :: 1; result := cast(**Target) value;");
 	double_old := Extended.parse_file(double_old_source);
 	double_updated, double_ok := Extended.parse_file_edit(*double_old, 0, 0, double_new_source);
@@ -6379,7 +6547,7 @@ test_cast_ast_reuse :: () {
 test_cast_flags_ast_reuse :: () {
 	expressions: []string = .["cast,no_check(Target) value", "value.(Target)"];
 	for expressions {
-		old_source := copy_string(tprint("Target :: 1; value :: 2; result := %;", it));
+		old_source := copy_string(tprint(			  "Target :: 1; value :: 2; result := %;", it));
 		new_source := copy_string(tprint("added :: 0;\nTarget :: 1; value :: 2; result := %;", it));
 		old := Extended.parse_file(old_source);
 		updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -6427,7 +6595,7 @@ test_cast_flags_ast_reuse :: () {
 }
 
 test_call_ast_reuse :: () {
-	old_source := copy_string("value :: 2; result := f(value, 3 + 4);");
+	old_source := copy_string(		   "value :: 2; result := f(value, 3 + 4);");
 	new_source := copy_string("f :: 1;\nvalue :: 2; result := f(value, 3 + 4);");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -6476,8 +6644,8 @@ test_call_ast_reuse :: () {
 	Extended.release_parser_names(*fresh);
 	free(new_source);
 
-	named_old_source := copy_string("result := f(name=3);");
-	named_new := copy_string("name :: 0; result := f(name=3);");
+	named_old_source :=	copy_string(		   "result := f(name=3);");
+	named_new :=		copy_string("name :: 0; result := f(name=3);");
 	named_old := Extended.parse_file(named_old_source);
 	named_updated, named_ok := Extended.parse_file_edit(*named_old, 0, 0, named_new);
 	named_fresh := Extended.parse_file(named_new);
@@ -6507,7 +6675,7 @@ test_call_ast_reuse :: () {
 }
 
 test_member_callee_ast_reuse :: () {
-	old_source := copy_string("object :: 1; value :: 2; result := object.method(named=value + 1);");
+	old_source := copy_string(			   "object :: 1; value :: 2; result := object.method(named=value + 1);");
 	new_source := copy_string("named :: 0;\nobject :: 1; value :: 2; result := object.method(named=value + 1);");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -6554,7 +6722,7 @@ test_member_callee_ast_reuse :: () {
 }
 
 test_call_context_ast_reuse :: () {
-	old_source := copy_string("extra :: 2; result := f(1,, extra);");
+	old_source := copy_string(		   "extra :: 2; result := f(1,, extra);");
 	new_source := copy_string("f :: 1;\nextra :: 2; result := f(1,, extra);");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -6594,7 +6762,7 @@ test_call_context_ast_reuse :: () {
 }
 
 test_call_context_fallback :: () {
-	old_source := copy_string("f :: 1; extra :: 2; result := f(1,, allocator = extra); keep := result;");
+	old_source := copy_string(			   "f :: 1; extra :: 2; result := f(1,, allocator = extra); keep := result;");
 	new_source := copy_string("added :: 0;\nf :: 1; extra :: 2; result := f(1,, allocator = extra); keep := result;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -6642,7 +6810,7 @@ test_call_context_fallback :: () {
 test_call_cast_fallback :: () {
 	expressions: []string = .["null(value)", "target(null)", "target(value,, null)", "xx value", "cast([#run 4] target) value", "cast((s64) -> s64) value", "cast(target) null"];
 	for expressions {
-		old_source := copy_string(tprint("target :: 1; value :: 2; result := %; keep := result;", it));
+		old_source := copy_string(tprint(			  "target :: 1; value :: 2; result := %; keep := result;", it));
 		new_source := copy_string(tprint("added :: 0;\ntarget :: 1; value :: 2; result := %; keep := result;", it));
 		old := Extended.parse_file(old_source);
 		updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -6692,17 +6860,17 @@ test_call_cast_candidate_edits :: () {
 }
 
 check_call_cast_candidate_edit :: (old_expression: string, new_expression: string, edit_first: s64, edit_last: s64) {
-	prefix :: "Target :: 1; value :: 2; result := ";
-	old_source := copy_string(tprint("%%; keep := result;", prefix, old_expression));
-	new_source := copy_string(tprint("%%; keep := result;", prefix, new_expression));
+	PREFIX :: "Target :: 1; value :: 2; result := ";
+	old_source := copy_string(tprint("%%; keep := result;", PREFIX, old_expression));
+	new_source := copy_string(tprint("%%; keep := result;", PREFIX, new_expression));
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, prefix.count + edit_first, prefix.count + edit_last, new_source);
+	updated, ok := Extended.parse_file_edit(*old, PREFIX.count + edit_first, PREFIX.count + edit_last, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "% -> %", old_expression, new_expression);
 	statements := updated.root.(*Extended.Parser_Block).statements;
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	probe_tokens := Extended.materialise_tokens(new_source);
-	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=prefix.count + edit_first, edit_end=prefix.count + edit_last, cursor=statements[2].first_token.(s64)};
+	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=PREFIX.count + edit_first, edit_end=PREFIX.count + edit_last, cursor=statements[2].first_token.(s64)};
 	set_allocators(*probe_tokens.node_pool, context.default_allocator);
 	probe.current_scope = Extended.push_lexical_scope(*probe);
 	assert(Extended.reuse_simple_declaration(*probe) == null);
@@ -6722,7 +6890,10 @@ check_call_cast_candidate_edit :: (old_expression: string, new_expression: strin
 		call := expression.(*Extended.Parser_Procedure_Call);
 		fresh_call := fresh_expression.(*Extended.Parser_Procedure_Call);
 		callee_index := 0;
-		if call.procedure_expression.(*Extended.Parser_Ident).name == "value" callee_index = 1;
+		if call.procedure_expression.(*Extended.Parser_Ident).name == "value" {
+			callee_index = 1;
+		}
+
 		assert(call.procedure_expression.(*Extended.Parser_Ident).resolved_declaration == statements[callee_index].(*Extended.Parser_Declaration));
 		assert(fresh_call.procedure_expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[callee_index].(*Extended.Parser_Declaration));
 		assert(call.arguments_unsorted.count == fresh_call.arguments_unsorted.count);
@@ -6769,7 +6940,7 @@ check_call_cast_candidate_edit :: (old_expression: string, new_expression: strin
 }
 
 test_member_ast_reuse :: () {
-	old_source := copy_string("object :: 1; result := object.field;");
+	old_source := copy_string(			   "object :: 1; result := object.field;");
 	new_source := copy_string("field :: 5;\nobject :: 1; result := object.field;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -6804,7 +6975,7 @@ test_member_ast_reuse :: () {
 	Extended.release_parser_names(*fresh);
 	free(new_source);
 
-	chain_old_source := copy_string("index :: 0; object :: 1; result := (object.field)[index].member;");
+	chain_old_source := copy_string(						  "index :: 0; object :: 1; result := (object.field)[index].member;");
 	chain_new_source := copy_string("field :: 5; member :: 6;\nindex :: 0; object :: 1; result := (object.field)[index].member;");
 	chain_old := Extended.parse_file(chain_old_source);
 	chain_updated, chain_ok := Extended.parse_file_edit(*chain_old, 0, 0, chain_new_source);
@@ -6852,7 +7023,7 @@ test_member_ast_reuse :: () {
 }
 
 test_subscript_ast_reuse :: () {
-	old_source := copy_string("values := .[10]; result := values[index];");
+	old_source := copy_string(			   "values := .[10]; result := values[index];");
 	new_source := copy_string("index :: 0;\nvalues := .[10]; result := values[index];");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -6889,7 +7060,7 @@ test_subscript_ast_reuse :: () {
 }
 
 test_aggregate_ast_reuse :: () {
-	old_source := copy_string("name :: 1; items := .[name, .{2, \"blue\"}];");
+	old_source := copy_string(				"name :: 1; items := .[name, .{2, \"blue\"}];");
 	new_source := copy_string("prefix :: 0;\nname :: 1; items := .[name, .{2, \"blue\"}];");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -6942,7 +7113,7 @@ test_aggregate_ast_reuse :: () {
 	free(new_source);
 
 	typed_old := Extended.parse_file("items := u8.[1, 2];");
-	typed_new := "u8 :: 0; items := u8.[1, 2];";
+	typed_new := 			"u8 :: 0; items := u8.[1, 2];";
 	typed_updated, typed_ok := Extended.parse_file_edit(*typed_old, 0, 0, typed_new);
 	typed_fresh := Extended.parse_file(typed_new);
 	assert(typed_ok && typed_updated.status == .COMPLETE && typed_fresh.status == .COMPLETE);
@@ -6970,14 +7141,17 @@ test_aggregate_ast_reuse :: () {
 	Extended.release_parser_names(*typed_tokens);
 
 	struct_old := Extended.parse_file("item := Thing.{1, 2};");
-	struct_new := "Thing :: 0; item := Thing.{1, 2};";
+	struct_new := 		  "Thing :: 0; item := Thing.{1, 2};";
 	struct_updated, struct_ok := Extended.parse_file_edit(*struct_old, 0, 0, struct_new);
 	struct_fresh := Extended.parse_file(struct_new);
 	assert(struct_ok && struct_updated.status == .COMPLETE && struct_fresh.status == .COMPLETE);
 	struct_literal := struct_updated.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Literal);
 	struct_original := struct_old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Literal);
 	assert(struct_literal.struct_literal_info.type_expression != struct_original.struct_literal_info.type_expression);
-	assert(struct_literal.struct_literal_info.type_expression.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == struct_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration));
+	assert(
+		struct_literal.struct_literal_info.type_expression.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration
+		== struct_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration)
+	);
 	assert(struct_literal.first_token == struct_fresh.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.first_token);
 	assert(struct_literal.node_flags == struct_fresh.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.node_flags);
 	assert_eligible_edit_matches_fresh(*struct_updated, *struct_fresh);
@@ -7250,10 +7424,35 @@ test_nested_shadowing_ast_reuse :: () {
 }
 
 test_dependency_forward_binding_edit :: () {
-	check_dependency_declaration_edit("target :: 1; use := target;", "other :: 0; target :: 1; use := target;", 0, 0, 1);
-	check_dependency_declaration_edit("target :: 1; use := target;", "use := target;", 0, "target :: 1; ".count, -1);
-	check_dependency_declaration_edit("target :: 1; use := target;", "other :: 1; use := target;", 0, "target".count, -1);
-	check_dependency_declaration_edit("other :: 0; target :: 1; use := target;", "target :: 1; other :: 0; use := target;", 0, "other :: 0; target :: 1; ".count, 0);
+	check_dependency_declaration_edit(
+					"target :: 1; use := target;",
+		"other :: 0; target :: 1; use := target;",
+		0,
+		0,
+		1
+	);
+	check_dependency_declaration_edit(
+		"target :: 1; use := target;",
+					 "use := target;",
+		0,
+		"target :: 1; ".count,
+		-1
+	);
+	check_dependency_declaration_edit(
+		"target :: 1; use := target;",
+		 "other :: 1; use := target;",
+		0,
+		"target".count,
+		-1
+	);
+	check_dependency_declaration_edit(
+					 "other :: 0; target :: 1; use := target;",
+		"target :: 1; other :: 0; use := target;",
+		0,
+		"other :: 0; target :: 1; ".count,
+		0
+	);
+
 	test_import_dependency_edit();
 	test_using_dependency_edit();
 	test_dependency_scope_move();
@@ -7343,7 +7542,10 @@ test_using_dependency_edit :: () {
 	statements := updated.root.(*Extended.Parser_Block).statements;
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	old_using := old.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Using);
-	assert(old_using.expression.(*Extended.Parser_Declaration).type_inst.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration));
+	assert(
+		old_using.expression.(*Extended.Parser_Declaration).type_inst.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration
+		== old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration)
+	);
 	probe_tokens := Extended.materialise_tokens(new_source);
 	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=0, edit_end="State".count, cursor=statements[1].first_token.(s64)};
 	set_allocators(*probe_tokens.node_pool, context.default_allocator);
@@ -7652,14 +7854,23 @@ test_recovery_synchronization :: () {
 	assert(!Extended.parser_ensure_progress(*parser, guard));
 }
 
-test_complete_file_parsing :: () {
-	source :: "first :: 1;\nsecond: s64 = 2;\ntyped_constant: s64 : 3;\n#scope_file\nmain :: () { value := cast,no_check(s32) 1; }\nthird := 3;";
-	parsed := Extended.parse_file(source, "fixture.jai");
+test_complete_file_parsing :: () {//
+	SOURCE :: "first :: 1;\nsecond: s64 = 2;\ntyped_constant: s64 : 3;\n#scope_file\nmain :: () { value := cast,no_check(s32) 1; }\nthird := 3;";//
+	parsed := Extended.parse_file(SOURCE, "fixture.jai");
 	root := parsed.root.(*Extended.Parser_Block);
 	if parsed.status != .COMPLETE {
 		diagnostic := parsed.diagnostics[0];
 		diagnostic_token := Extended.token_at(*parsed, diagnostic.span.first);
-		assert(false, "Status %, diagnostics %, kind %, expected %, actual %, token '%'.", parsed.status, parsed.diagnostics.count, diagnostic.kind, diagnostic.expected_token, diagnostic.actual_token, diagnostic_token.original_text);
+		assert(
+			false,
+			"Status %, diagnostics %, kind %, expected %, actual %, token '%'.",
+			parsed.status,
+			parsed.diagnostics.count,
+			diagnostic.kind,
+			diagnostic.expected_token,
+			diagnostic.actual_token,
+			diagnostic_token.original_text,
+		);
 	}
 
 	assert(parsed.fully_pathed_filename == "fixture.jai");
@@ -7667,17 +7878,17 @@ test_complete_file_parsing :: () {
 	assert(!(root.node_flags & .IS_PARENTHESIZED));
 	assert(root.statements.count == 6);
 	assert((root.statements[2].(*Extended.Parser_Declaration).flags & .IS_CONSTANT) != 0);
-	assert(Extended.reconstruct_source(*parsed) == source);
+	assert(Extended.reconstruct_source(*parsed) == SOURCE);
 
-	no_reset_source :: "#no_reset x1: int;\n#no_reset x2: int;\nafter :: 1;";
-	no_reset := Extended.parse_file(no_reset_source);
+	NO_RESET_SOURCE :: "#no_reset x1: int;\n#no_reset x2: int;\nafter :: 1;";//
+	no_reset := Extended.parse_file(NO_RESET_SOURCE);
 	assert(no_reset.status == .COMPLETE);
 	no_reset_statements := no_reset.root.(*Extended.Parser_Block).statements;
 	assert(no_reset_statements.count == 3);
 	assert((no_reset_statements[0].(*Extended.Parser_Declaration).flags & .NO_RESET) != 0);
 	assert((no_reset_statements[1].(*Extended.Parser_Declaration).flags & .NO_RESET) != 0);
 	assert((no_reset_statements[2].(*Extended.Parser_Declaration).flags & .NO_RESET) == 0);
-	assert(Extended.reconstruct_source(*no_reset) == no_reset_source);
+	assert(Extended.reconstruct_source(*no_reset) == NO_RESET_SOURCE);
 	malformed_no_reset := Extended.parse_file("#no_reset x: ;\nafter :: 1;");
 	assert(malformed_no_reset.status == .RECOVERED);
 	assert(malformed_no_reset.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).name == "after");
@@ -7702,8 +7913,8 @@ test_complete_file_parsing :: () {
 	assert(empty_root.statements.count == 0);
 	assert(empty_root.first_token == empty_root.one_past_last_token);
 
-	terminators_source :: "normal :: () {}\nafter_normal :: 1;\nquick_block :: () => {}\n#scope_file\nquick_expression :: value => value + 1;\nRecord :: struct {}\nafter_struct :: 2;\nChoice :: enum { ONLY; }\nouter :: () { nested :: () {}\nnext := 3;\nNested_Record :: struct {}\nNested_Choice :: enum { ONLY; } }\nfinal :: () {}";
-	terminators := Extended.parse_file(terminators_source);
+	TERMINATORS_SOURCE :: "normal :: () {}\nafter_normal :: 1;\nquick_block :: () => {}\n#scope_file\nquick_expression :: value => value + 1;\nRecord :: struct {}\nafter_struct :: 2;\nChoice :: enum { ONLY; }\nouter :: () { nested :: () {}\nnext := 3;\nNested_Record :: struct {}\nNested_Choice :: enum { ONLY; } }\nfinal :: () {}";//
+	terminators := Extended.parse_file(TERMINATORS_SOURCE);
 	terminators_root := terminators.root.(*Extended.Parser_Block);
 	assert(terminators.status == .COMPLETE);
 	assert(terminators.diagnostics.count == 0);
@@ -7869,36 +8080,37 @@ test_aggregate_literals :: () {
 	assert(bare_struct.status == .COMPLETE);
 	assert(bare_struct.root.(*Extended.Parser_Literal).value_type == .STRUCT);
 
-	expression_contexts_source :: "{ value := {}; items := .[{1, 2}, {3, 4}]; if value == {} { return {}; } }";
-	expression_contexts := Extended.parse_block(expression_contexts_source);
+	EXPRESSION_CONTEXTS_SOURCE :: "{ value := {}; items := .[{1, 2}, {3, 4}]; if value == {} { return {}; } }";
+	expression_contexts := Extended.parse_block(EXPRESSION_CONTEXTS_SOURCE);
 	assert(expression_contexts.status == .COMPLETE);
 	assert(expression_contexts.diagnostics.count == 0);
-	assert(Extended.reconstruct_source(*expression_contexts) == expression_contexts_source);
+	assert(Extended.reconstruct_source(*expression_contexts) == EXPRESSION_CONTEXTS_SOURCE);
 
-	nested_condition_source :: "{ if values[{1, 2}] { return {}; } }";
-	nested_condition := Extended.parse_block(nested_condition_source);
+	NESTED_CONDITION_SOURCE :: "{ if values[{1, 2}] { return {}; } }";
+	nested_condition := Extended.parse_block(NESTED_CONDITION_SOURCE);
 	assert(nested_condition.status == .COMPLETE);
 	assert(nested_condition.diagnostics.count == 0);
-	assert(Extended.reconstruct_source(*nested_condition) == nested_condition_source);
-	empty_switch_source :: "{ if fruit == {\n    // all cases commented out\n} }";
-	empty_switch := Extended.parse_block(empty_switch_source);
+	assert(Extended.reconstruct_source(*nested_condition) == NESTED_CONDITION_SOURCE);
+
+	EMPTY_SWITCH_SOURCE :: "{ if fruit == {\n    // all cases commented out\n} }";
+	empty_switch := Extended.parse_block(EMPTY_SWITCH_SOURCE);
 	assert(empty_switch.status == .COMPLETE);
 	empty_switch_if := empty_switch.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
 	assert((empty_switch_if.if_flags & .IS_SWITCH_STATEMENT) != 0);
 	assert(empty_switch_if.then_block.statements.count == 0);
-	assert(Extended.reconstruct_source(*empty_switch) == empty_switch_source);
+	assert(Extended.reconstruct_source(*empty_switch) == EMPTY_SWITCH_SOURCE);
 
-	inline_literal_source :: "{ if fruit == { /* no cases */ } { return; } }";
-	inline_literal := Extended.parse_block(inline_literal_source);
+	INLINE_LITERAL_SOURCE :: "{ if fruit == { /* no cases */ } { return; } }";
+	inline_literal := Extended.parse_block(INLINE_LITERAL_SOURCE);
 	assert(inline_literal.status == .COMPLETE);
 	assert((inline_literal.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).if_flags & .IS_SWITCH_STATEMENT) == 0);
-	assert(Extended.reconstruct_source(*inline_literal) == inline_literal_source);
+	assert(Extended.reconstruct_source(*inline_literal) == INLINE_LITERAL_SOURCE);
 
-	leading_literal_condition_source :: "{ if {1} == {1} { return; } }";
-	leading_literal_condition := Extended.parse_block(leading_literal_condition_source);
+	LEADING_LITERAL_CONDITION_SOURCE :: "{ if {1} == {1} { return; } }";
+	leading_literal_condition := Extended.parse_block(LEADING_LITERAL_CONDITION_SOURCE);
 	assert(leading_literal_condition.status == .COMPLETE);
 	assert(leading_literal_condition.diagnostics.count == 0);
-	assert(Extended.reconstruct_source(*leading_literal_condition) == leading_literal_condition_source);
+	assert(Extended.reconstruct_source(*leading_literal_condition) == LEADING_LITERAL_CONDITION_SOURCE);
 
 	missing_condition_body := Extended.parse_block("{ if value == {} }");
 	assert(missing_condition_body.status == .RECOVERED);
@@ -7927,23 +8139,23 @@ test_uninitialized_indicator_and_here_string :: () {
 	assert(uninitialized_value.root.(*Extended.Parser_Literal).value_type == .UNINITIALIZED);
 	assert(Extended.reconstruct_source(*uninitialized_value) == "---");
 
-	source :: "#string END\nbody\nEND";
-	here_string := Extended.parse_expression(source);
+	SOURCE :: "#string END\nbody\nEND";
+	here_string := Extended.parse_expression(SOURCE);
 	assert(here_string.status == .COMPLETE, "Here-string status %, token count %, diagnostics %.", here_string.status, here_string.tokens.count, here_string.diagnostics.count);
 	literal := here_string.root.(*Extended.Parser_Literal);
 	assert(literal.value_type == .STRING);
 	assert((literal.value_flags & .HERE_STRING) != 0);
 	assert(literal._string == "body\n");
-	assert(Extended.reconstruct_source(*here_string) == source);
+	assert(Extended.reconstruct_source(*here_string) == SOURCE);
 
-	cr_source :: "#string,cr END\nbody\nEND";
-	cr_here_string := Extended.parse_expression(cr_source);
+	CR_SOURCE :: "#string,cr END\nbody\nEND";
+	cr_here_string := Extended.parse_expression(CR_SOURCE);
 	assert(cr_here_string.status == .COMPLETE);
 	assert(cr_here_string.root.(*Extended.Parser_Literal)._string == "body\r\n");
-	assert(Extended.reconstruct_source(*cr_here_string) == cr_source);
+	assert(Extended.reconstruct_source(*cr_here_string) == CR_SOURCE);
 
-	percent_source :: "#string,\\% END\n%\\%\nEND";
-	percent_here_string := Extended.parse_expression(percent_source);
+	PERCENT_SOURCE :: "#string,\\% END\n%\\%\nEND";
+	percent_here_string := Extended.parse_expression(PERCENT_SOURCE);
 	assert(percent_here_string.status == .COMPLETE);
 	percent_value := percent_here_string.root.(*Extended.Parser_Literal)._string;
 	assert(percent_value.count == 3);
@@ -7951,13 +8163,13 @@ test_uninitialized_indicator_and_here_string :: () {
 	assert(percent_value[1] == 31);
 	assert(percent_value[2] == #char "\n");
 	assert(percent_value == COMPILER_PERCENT_HERE_STRING);
-	assert(Extended.reconstruct_source(*percent_here_string) == percent_source);
+	assert(Extended.reconstruct_source(*percent_here_string) == PERCENT_SOURCE);
 
-	file_source :: "FIRST :: #string END\nfirst line\nEND\nSECOND :: #string,\\% DONE\n%\\%\nDONE\nafter :: 1;";
-	file := Extended.parse_file(file_source);
+	FILE_SOURCE :: "FIRST :: #string END\nfirst line\nEND\nSECOND :: #string,\\% DONE\n%\\%\nDONE\nafter :: 1;";
+	file := Extended.parse_file(FILE_SOURCE);
 	assert(file.status == .COMPLETE);
 	assert(file.root.(*Extended.Parser_Block).statements.count == 3);
-	assert(Extended.reconstruct_source(*file) == file_source);
+	assert(Extended.reconstruct_source(*file) == FILE_SOURCE);
 
 	plain_string := Extended.parse_file("first :: \"text\"\nsecond :: 1;");
 	assert(plain_string.status == .RECOVERED);
@@ -7977,8 +8189,8 @@ test_parenthesized_expression :: () {
 }
 
 test_missing_close_parenthesis :: () {
-	source :: "(identifier";
-	parsed := Extended.parse_expression(source);
+	SOURCE :: "(identifier";
+	parsed := Extended.parse_expression(SOURCE);
 	assert(parsed.status == .INCOMPLETE);
 	assert(parsed.root.kind == .IDENT);
 	assert((parsed.root.node_flags & .IS_PARENTHESIZED) != 0);
@@ -8000,7 +8212,7 @@ test_missing_close_parenthesis :: () {
 	assert(diagnostic.recovery_action == .INSERT_MISSING_TOKEN);
 
 	reconstructed := Extended.reconstruct_source(*parsed);
-	assert(reconstructed == source);
+	assert(reconstructed == SOURCE);
 
 	empty_group := Extended.parse_expression("(");
 	assert(empty_group.status == .INCOMPLETE);
@@ -8073,13 +8285,13 @@ test_recovery_records :: () {
 	assert(skipped.diagnostics[skipped_record.diagnostic_index].recovery_action == .SKIP_TOKENS);
 	assert(Extended.reconstruct_source(*skipped) == "first second third");
 
-	continued_source :: "{ first := 1 second := 2; }";
-	continued := Extended.parse_block(continued_source);
+	CONTINUED_SOURCE :: "{ first := 1 second := 2; }";
+	continued := Extended.parse_block(CONTINUED_SOURCE);
 	assert(continued.root.(*Extended.Parser_Block).statements.count == 2);
 	assert(continued.recovery_records.count == 1);
 	assert(continued.recovery_records[0].kind == .MISSING_TOKEN);
 	assert(continued.recovery_records[0].span.first == continued.synthetic_tokens[0].insertion_index);
-	assert(Extended.reconstruct_source(*continued) == continued_source);
+	assert(Extended.reconstruct_source(*continued) == CONTINUED_SOURCE);
 }
 
 test_restart_points :: () {
@@ -8091,8 +8303,8 @@ test_restart_points :: () {
 	assert(complete.status == .COMPLETE && complete.restart_points.count == 2);
 	assert(Extended.parse_expression("value").restart_points.count == 0);
 
-	source :: "main :: () { bad: ; next := 2; }\nafter :: 3;";
-	parsed := Extended.parse_file(source);
+	SOURCE :: "main :: () { bad: ; next := 2; }\nafter :: 3;";
+	parsed := Extended.parse_file(SOURCE);
 	assert(parsed.status == .RECOVERED);
 	assert(parsed.root.(*Extended.Parser_Block).statements.count == 2);
 	saw_root := false;
@@ -8120,7 +8332,7 @@ test_restart_points :: () {
 	}
 
 	assert(saw_root && saw_body && saw_main && saw_next && saw_after);
-	assert(Extended.reconstruct_source(*parsed) == source);
+	assert(Extended.reconstruct_source(*parsed) == SOURCE);
 	point_count := parsed.restart_points.count;
 	Extended.release_parser_tree(*parsed);
 	assert(parsed.restart_points.count == point_count);
@@ -8159,10 +8371,10 @@ test_incomplete_diagnostics :: () {
 		assert(Extended.reconstruct_source(*parsed) == source);
 	}
 
-	source :: "broken :: () { bad: ; next := ";
-	first := Extended.parse_file(source);
+	SOURCE :: "broken :: () { bad: ; next := ";
+	first := Extended.parse_file(SOURCE);
 	assert(first.status == .RECOVERED && first.diagnostics.count > 0);
-	assert(Extended.reconstruct_source(*first) == source);
+	assert(Extended.reconstruct_source(*first) == SOURCE);
 
 	extended := Extended.parse_file("broken :: () { bad: ; next := 1;");
 	assert(extended.diagnostics.count > 0);
@@ -8174,8 +8386,8 @@ test_incomplete_diagnostics :: () {
 }
 
 test_lexical_bindings :: () {
-	source :: "global :: 1; main :: (arg: s64) { local := arg; { local := 2; inner := local + global; } after := local; } forward := later; later :: 3;";
-	parsed := Extended.parse_file(source);
+	SOURCE :: "global :: 1; main :: (arg: s64) { local := arg; { local := 2; inner := local + global; } after := local; } forward := later; later :: 3;";//
+	parsed := Extended.parse_file(SOURCE);
 	assert(parsed.status == .COMPLETE);
 	root := parsed.root.(*Extended.Parser_Block);
 	global := root.statements[0].(*Extended.Parser_Declaration);
@@ -8204,7 +8416,7 @@ test_lexical_bindings :: () {
 	assert(header_scope.owner == header && header_scope.parent == parsed.root_scope);
 	assert(header_scope.bindings[0].declaration == argument);
 	assert(header_scope.children[0].owner == body);
-	assert(Extended.reconstruct_source(*parsed) == source);
+	assert(Extended.reconstruct_source(*parsed) == SOURCE);
 	Extended.release_parser_tree(*parsed);
 	assert(parsed.root_scope == null);
 
@@ -8243,6 +8455,1745 @@ test_lexical_bindings :: () {
 	quick_header := quick.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
 	quick_return := quick_header.body_or_null.block.statements[0].(*Extended.Parser_Return);
 	assert(quick_return.arguments_unsorted[0].expression.(*Extended.Parser_Ident).resolved_declaration == quick_header.arguments[0]);
+}
+
+test_using_map_names :: (using_node: *Extended.Parser_Using, names: [] string) -> bool {
+	assert(using_node.filter_expression.(*Extended.Parser_Ident).name == "rename");
+	for * names {
+		it.* = ifx it.* == "pete"
+			then "renamed_pete"
+			else "";
+	}
+
+	return true;
+}
+
+test_using_map_collision :: (using_node: *Extended.Parser_Using, names: [] string) -> bool {
+	for * names {
+		it.* = "same_name";
+	}
+
+	return true;
+}
+
+test_using_map_fields :: (using_node: *Extended.Parser_Using, names: [] string) -> bool {
+	for * names {
+		it.* = ifx it.* == "Clear"
+			then "glClear"
+			else "";
+	}
+
+	return true;
+}
+
+test_semantic_field: Extended.Parser_Declaration;
+test_semantic_field_name: string;
+
+test_using_map_semantic_fields :: (using_node: *Extended.Parser_Using, bindings: *[..] Extended.Parser_Binding) -> bool {
+	assert(using_node.expression.kind == .DECLARATION);
+	array_add(bindings, .{name = test_semantic_field_name, declaration = *test_semantic_field});
+	return true;
+}
+
+test_using_map_decline_fields :: (using_node: *Extended.Parser_Using, bindings: *[..] Extended.Parser_Binding) -> bool {
+	array_add(bindings, .{name = "Ignored", declaration = *test_semantic_field});
+	return false;
+}
+
+test_file_import_resolution :: () {
+	filename := join(#filepath, "../../../how_to/040_import_and_load/main.jai");
+	syntax := Extended.parse_file("item :: 1; value := item;", resolve_identifiers=false);
+	syntax_statements := syntax.root.(*Extended.Parser_Block).statements;
+	assert(syntax_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_parser_tree(*syntax);
+	Extended.release_parser_names(*syntax);
+
+	EDIT_OLD_SOURCE :: "item :: 1; value := item;";
+	EDIT_NEW_SOURCE :: "item :: 2; value := item;";
+	edit_old := Extended.parse_file(EDIT_OLD_SOURCE);
+	edit_start := "item :: ".count;
+	edit_syntax, edit_success := Extended.parse_file_edit(*edit_old, edit_start, edit_start + 1, EDIT_NEW_SOURCE, resolve_identifiers=false);
+	assert(edit_success);
+	assert(edit_syntax.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_parser_tree(*edit_syntax);
+	Extended.release_parser_names(*edit_syntax);
+	Extended.release_parser_tree(*edit_old);
+	Extended.release_parser_names(*edit_old);
+
+	LOAD_SOURCE :: "#load \"files/From_Subdirectory/another_file.jai\"; call := pete;";
+	load_parsed := Extended.parse_file(LOAD_SOURCE, filename);
+	load_use := load_parsed.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	assert(load_use.resolved_declaration == null);
+	no_follow := Extended.resolve_file_imports(*load_parsed, follow=xx 0);
+	assert(no_follow.loaded_files.count == 0 && load_use.resolved_declaration == null);
+	Extended.release_file_imports(*no_follow);
+	no_loads := Extended.resolve_file_imports(*load_parsed, follow=.ALL_IMPORTS);
+	assert(no_loads.loaded_files.count == 0 && load_use.resolved_declaration == null);
+	Extended.release_file_imports(*no_loads);
+	loads := Extended.resolve_file_imports(*load_parsed, follow=.LOAD);
+	assert(loads.loaded_files.count == 1);
+	assert(load_use.resolved_declaration && load_use.resolved_declaration.name == "pete");
+	Extended.release_file_imports(*loads);
+	Extended.release_parser_tree(*load_parsed);
+	Extended.release_parser_names(*load_parsed);
+
+	SOURCE :: "Specific :: #import,file \"files/specific.jai\"; value := Specific.mess_up_this_string; nested := Specific.mess_up_this_string(\"text\");";//
+	parsed := Extended.parse_file(SOURCE, filename);
+	assert(parsed.status == .COMPLETE);
+	root := parsed.root.(*Extended.Parser_Block);
+	import_declaration := root.statements[0].(*Extended.Parser_Declaration);
+	member := root.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
+	assert(member.left.(*Extended.Parser_Ident).resolved_declaration == import_declaration);
+	assert(member.right.(*Extended.Parser_Ident).resolved_declaration == null);
+	file_only := Extended.resolve_file_imports(*parsed, follow=.IMPORT_FILE);
+	assert(file_only.modules.count == 1 && file_only.modules[0].loaded_files.count == 0);
+	Extended.release_file_imports(*file_only);
+	skipped := Extended.resolve_file_imports(*parsed, follow=.LOAD);
+	assert(skipped.modules.count == 0 && skipped.unresolved_imports.count == 0);
+	assert(member.right.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_file_imports(*skipped);
+	imports := Extended.resolve_file_imports(*parsed);
+	assert(imports.modules.count == 1);
+	assert(member.right.(*Extended.Parser_Ident).resolved_declaration != null);
+	assert(member.right.(*Extended.Parser_Ident).resolved_declaration.name == "mess_up_this_string");
+	nested_call := root.statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Call);
+	nested_member := nested_call.procedure_expression.(*Extended.Parser_Binary_Operator).right.(*Extended.Parser_Ident);
+	assert(nested_member.resolved_declaration && nested_member.resolved_declaration.name == "mess_up_this_string");
+	assert(Extended.reconstruct_source(*parsed) == SOURCE);
+	Extended.release_file_imports(*imports);
+	Extended.release_parser_tree(*parsed);
+	Extended.release_parser_names(*parsed);
+
+	DIRECTORY_SOURCE :: "Subdir :: #import,dir \"files/From_Subdirectory\"; call := Subdir.repeat; other := Subdir.pete;";//
+	directory := Extended.parse_file(DIRECTORY_SOURCE, filename);
+	directory_only := Extended.resolve_file_imports(*directory, follow=.IMPORT_DIR);
+	assert(directory_only.modules.count == 1 && directory_only.modules[0].loaded_files.count == 0);
+	Extended.release_file_imports(*directory_only);
+	directory_without_loads := Extended.resolve_file_imports(*directory, follow=.ALL_IMPORTS);
+	assert(directory_without_loads.modules.count == 1);
+	assert(directory_without_loads.modules[0].loaded_files.count == 0);
+	Extended.release_file_imports(*directory_without_loads);
+	directory_imports := Extended.resolve_file_imports(*directory);
+	assert(directory_imports.modules.count == 1);
+	directory_member := directory.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator).right.(*Extended.Parser_Ident);
+	assert(directory_member.resolved_declaration && directory_member.resolved_declaration.name == "repeat");
+	loaded_member := directory.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator).right.(*Extended.Parser_Ident);
+	assert(loaded_member.resolved_declaration && loaded_member.resolved_declaration.name == "pete");
+	Extended.release_file_imports(*directory_imports);
+	Extended.release_parser_tree(*directory);
+	Extended.release_parser_names(*directory);
+
+	EXCEPT_SOURCE :: "Subdir :: #import,dir \"files/From_Subdirectory\"; using,except(repeat) Subdir; yes := pete; no := repeat;";//
+	except_parsed := Extended.parse_file(EXCEPT_SOURCE, filename);
+	except_imports := Extended.resolve_file_imports(*except_parsed);
+	except_statements := except_parsed.root.(*Extended.Parser_Block).statements;
+	assert(except_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration != null);
+	assert(except_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_file_imports(*except_imports);
+	Extended.release_parser_tree(*except_parsed);
+	Extended.release_parser_names(*except_parsed);
+
+	MISSING_SOURCE :: "Missing :: #import,file \"files/does_not_exist.jai\";";//
+	missing := Extended.parse_file(MISSING_SOURCE, filename);
+	missing_imports := Extended.resolve_file_imports(*missing);
+	assert(missing_imports.modules.count == 0);
+	assert(missing_imports.unresolved_imports.count == 1);
+	Extended.release_file_imports(*missing_imports);
+	Extended.release_parser_tree(*missing);
+	Extended.release_parser_names(*missing);
+
+	search_path := join(#filepath, "../../../how_to/040_import_and_load/files");
+	BARE_SOURCE :: "#import \"specific\"; call := mess_up_this_string;";//
+	bare := Extended.parse_file(BARE_SOURCE, filename);
+	bare_skipped := Extended.resolve_file_imports(*bare, .[search_path], follow=.IMPORT_FILE | .IMPORT_DIR);
+	assert(bare_skipped.modules.count == 0 && bare_skipped.unresolved_imports.count == 0);
+	Extended.release_file_imports(*bare_skipped);
+	bare_only := Extended.resolve_file_imports(*bare, .[search_path], follow=.IMPORT);
+	assert(bare_only.modules.count == 1 && bare_only.modules[0].loaded_files.count == 0);
+	Extended.release_file_imports(*bare_only);
+	bare_imports := Extended.resolve_file_imports(*bare, .[search_path]);
+	assert(bare_imports.modules.count == 1);
+	bare_use := bare.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	assert(bare_use.resolved_declaration && bare_use.resolved_declaration.name == "mess_up_this_string");
+	Extended.release_file_imports(*bare_imports);
+	Extended.release_parser_tree(*bare);
+	Extended.release_parser_names(*bare);
+	free(search_path);
+
+	USING_SOURCE :: "using Specific :: #import,file \"files/specific.jai\"; call := mess_up_this_string;";//
+	using_parsed := Extended.parse_file(USING_SOURCE, filename);
+	using_imports := Extended.resolve_file_imports(*using_parsed);
+	assert(using_imports.modules.count == 1);
+	using_use := using_parsed.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	assert(using_use.resolved_declaration && using_use.resolved_declaration.name == "mess_up_this_string");
+	Extended.release_file_imports(*using_imports);
+	Extended.release_parser_tree(*using_parsed);
+	Extended.release_parser_names(*using_parsed);
+
+	FILTERED_SOURCE :: "Subdir :: #import,dir \"files/From_Subdirectory\"; using,only(repeat) Subdir; call := repeat; hidden := pete;";//
+	filtered := Extended.parse_file(FILTERED_SOURCE, filename);
+	filtered_imports := Extended.resolve_file_imports(*filtered);
+	filtered_use := filtered.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	assert(filtered_use.resolved_declaration && filtered_use.resolved_declaration.name == "repeat");
+	filtered_hidden := filtered.root.(*Extended.Parser_Block).statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	assert(filtered_hidden.resolved_declaration == null);
+	Extended.release_file_imports(*filtered_imports);
+	Extended.release_parser_tree(*filtered);
+	Extended.release_parser_names(*filtered);
+
+	MULTIPLE_SOURCE :: "Subdir :: #import,dir \"files/From_Subdirectory\"; using,only(repeat) Subdir; using,only(pete) Subdir; first := repeat; second := pete;";//
+	multiple := Extended.parse_file(MULTIPLE_SOURCE, filename);
+	multiple_imports := Extended.resolve_file_imports(*multiple);
+	multiple_statements := multiple.root.(*Extended.Parser_Block).statements;
+	assert(multiple_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration != null);
+	assert(multiple_statements[4].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration != null);
+	Extended.release_file_imports(*multiple_imports);
+	assert(multiple_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	assert(multiple_statements[4].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_parser_tree(*multiple);
+	Extended.release_parser_names(*multiple);
+
+	PLAIN_USING_SOURCE :: "Specific :: #import,file \"files/specific.jai\"; using Specific; call := mess_up_this_string;";//
+	plain_using := Extended.parse_file(PLAIN_USING_SOURCE, filename, resolve_identifiers=false);
+	assert(plain_using.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	plain_imports := Extended.resolve_file_imports(*plain_using);
+	plain_use := plain_using.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	assert(plain_use.resolved_declaration && plain_use.resolved_declaration.name == "mess_up_this_string");
+	Extended.release_file_imports(*plain_imports);
+	Extended.release_parser_tree(*plain_using);
+	Extended.release_parser_names(*plain_using);
+
+	NESTED_USING_SOURCE :: "Specific :: #import,file \"files/specific.jai\"; first :: () { using Specific; call := mess_up_this_string; } second :: () { call := mess_up_this_string; }";//
+	nested_using := Extended.parse_file(NESTED_USING_SOURCE, filename);
+	nested_imports := Extended.resolve_file_imports(*nested_using);
+	nested_uses: [..]*Extended.Parser_Ident;
+	for procedure_scope: nested_using.root_scope.children {
+		for scope: procedure_scope.children {
+			for reference: scope.references {
+				if reference.name == "mess_up_this_string" {
+					array_add(*nested_uses, reference);
+				}
+			}
+		}
+	}
+
+	assert(nested_uses.count == 2);
+	assert(nested_uses[0].resolved_declaration && nested_uses[0].resolved_declaration.name == "mess_up_this_string");
+	assert(nested_uses[1].resolved_declaration == null);
+	array_free(nested_uses);
+	Extended.release_file_imports(*nested_imports);
+	Extended.release_parser_tree(*nested_using);
+	Extended.release_parser_names(*nested_using);
+
+	MAP_SOURCE :: "Specific :: #import,file \"files/specific.jai\"; using,map(rename) Specific; call := mess_up_this_string;";//
+	map_parsed := Extended.parse_file(MAP_SOURCE, filename);
+	map_imports := Extended.resolve_file_imports(*map_parsed);
+	assert(map_imports.unsupported_using_filters.count == 1);
+	assert(map_parsed.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_file_imports(*map_imports);
+	Extended.release_parser_tree(*map_parsed);
+	Extended.release_parser_names(*map_parsed);
+
+	MAPPED_SOURCE :: "Subdir :: #import,dir \"files/From_Subdirectory\"; using,map(rename) Subdir; call := renamed_pete; hidden := pete; skipped := repeat;";//
+	mapped := Extended.parse_file(MAPPED_SOURCE, filename);
+	mapped_imports := Extended.resolve_file_imports(*mapped, map_names=test_using_map_names);
+	mapped_statements := mapped.root.(*Extended.Parser_Block).statements;
+	assert(mapped_imports.unsupported_using_filters.count == 0);
+	assert(mapped_imports.mapped_names.count == 2);
+	found_pete_mapping := false;
+	for mapped_imports.mapped_names {
+		if it.source_name == "pete" {
+			assert(it.exported_name == "renamed_pete" && it.declaration.name == "pete");
+			found_pete_mapping = true;
+		}
+	}
+
+	assert(found_pete_mapping);
+	assert(mapped_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration.name == "pete");
+	assert(mapped_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	assert(mapped_statements[4].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_file_imports(*mapped_imports);
+	assert(mapped_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_parser_tree(*mapped);
+	Extended.release_parser_names(*mapped);
+
+	COLLISION_SOURCE :: "Subdir :: #import,dir \"files/From_Subdirectory\"; using,map(rename) Subdir; call := same_name;";//
+	collision := Extended.parse_file(COLLISION_SOURCE, filename);
+	collision_imports := Extended.resolve_file_imports(*collision, map_names=test_using_map_collision);
+	assert(collision_imports.map_collisions.count == 1);
+	assert(collision_imports.map_collisions[0].exported_name == "same_name");
+	assert(collision_imports.map_collisions[0].first != collision_imports.map_collisions[0].second);
+	assert(collision.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_file_imports(*collision_imports);
+	Extended.release_parser_tree(*collision);
+	Extended.release_parser_names(*collision);
+
+	AGGREGATE_SOURCE :: "Procs :: struct { Clear: int; PushMatrix: int; } main :: () { using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	aggregate := Extended.parse_file(AGGREGATE_SOURCE, filename);
+	aggregate_imports := Extended.resolve_file_imports(*aggregate, map_names=test_using_map_fields);
+	assert(aggregate_imports.mapped_names.count == 2);
+	aggregate_scope := aggregate.root_scope.children[1].children[0];
+	for reference: aggregate_scope.references {
+		if reference.name == "glClear" {
+			assert(reference.resolved_declaration && reference.resolved_declaration.name == "Clear");
+		}
+
+		if reference.name == "PushMatrix" {
+			assert(reference.resolved_declaration == null);
+		}
+	}
+
+	Extended.release_file_imports(*aggregate_imports);
+	for reference: aggregate_scope.references {
+		if reference.name == "glClear" {
+			assert(reference.resolved_declaration == null);
+		}
+	}
+
+	Extended.release_parser_tree(*aggregate);
+	Extended.release_parser_names(*aggregate);
+
+	STATIC_SOURCE :: "Procs :: struct { #if true { Clear: int; } else { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	static_value := Extended.parse_file(STATIC_SOURCE, filename);
+	static_imports := Extended.resolve_file_imports(*static_value, map_names=test_using_map_fields);
+	assert(static_value.status == .COMPLETE && static_imports.mapped_names.count == 1);
+	static_statements := static_value.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(static_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == static_imports.mapped_names[0].declaration);
+	assert(static_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_file_imports(*static_imports);
+	Extended.release_parser_tree(*static_value);
+	Extended.release_parser_names(*static_value);
+
+	FALSE_SOURCE :: "Procs :: struct { #if false { PushMatrix: int; } else { #if true { Clear: int; } } } main :: () { using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	false_value := Extended.parse_file(FALSE_SOURCE, filename);
+	false_imports := Extended.resolve_file_imports(*false_value, map_names=test_using_map_fields);
+	assert(false_value.status == .COMPLETE && false_imports.mapped_names.count == 1);
+	assert(false_imports.mapped_names[0].declaration.name == "Clear");
+	false_statements := false_value.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(false_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == false_imports.mapped_names[0].declaration);
+	assert(false_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_file_imports(*false_imports);
+	Extended.release_parser_tree(*false_value);
+	Extended.release_parser_names(*false_value);
+
+	NEGATED_SOURCE :: "Procs :: struct { #if !false { Clear: int; } else { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	negated_value := Extended.parse_file(NEGATED_SOURCE, filename);
+	negated_imports := Extended.resolve_file_imports(*negated_value, map_names=test_using_map_fields);
+	assert(negated_value.status == .COMPLETE && negated_imports.mapped_names.count == 1);
+	negated_statements := negated_value.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(negated_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == negated_imports.mapped_names[0].declaration);
+	assert(negated_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_file_imports(*negated_imports);
+	Extended.release_parser_tree(*negated_value);
+	Extended.release_parser_names(*negated_value);
+
+	NEGATED_FALSE_SOURCE :: "Procs :: struct { #if !true { PushMatrix: int; } else { Clear: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	negated_false := Extended.parse_file(NEGATED_FALSE_SOURCE, filename);
+	negated_false_imports := Extended.resolve_file_imports(*negated_false, map_names=test_using_map_fields);
+	assert(negated_false.status == .COMPLETE && negated_false_imports.mapped_names.count == 1);
+	assert(negated_false_imports.mapped_names[0].declaration.name == "Clear");
+	negated_false_statements := negated_false.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(negated_false_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == negated_false_imports.mapped_names[0].declaration);
+	assert(negated_false_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_file_imports(*negated_false_imports);
+	Extended.release_parser_tree(*negated_false);
+	Extended.release_parser_names(*negated_false);
+
+	CONSTANT_SOURCE :: "Enabled :: true; Procs :: struct { #if Enabled { Clear: int; } else { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	constant_value := Extended.parse_file(CONSTANT_SOURCE, filename);
+	constant_imports := Extended.resolve_file_imports(*constant_value, map_names=test_using_map_fields);
+	assert(constant_value.status == .COMPLETE && constant_imports.mapped_names.count == 1);
+	constant_statements := constant_value.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(constant_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == constant_imports.mapped_names[0].declaration);
+	assert(constant_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_file_imports(*constant_imports);
+	Extended.release_parser_tree(*constant_value);
+	Extended.release_parser_names(*constant_value);
+
+	AMBIGUOUS_CONSTANT_SOURCE :: "Enabled :: true; Enabled :: false; Procs :: struct { #if Enabled { Clear: int; } else { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	ambiguous_constant := Extended.parse_file(AMBIGUOUS_CONSTANT_SOURCE, filename);
+	ambiguous_constant_imports := Extended.resolve_file_imports(*ambiguous_constant, map_names=test_using_map_fields);
+	assert(ambiguous_constant.status == .COMPLETE && ambiguous_constant_imports.mapped_names.count == 0 && ambiguous_constant_imports.unsupported_using_filters.count == 1);
+	ambiguous_constant_call := (
+		ambiguous_constant.root.(*Extended.Parser_Block).statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(ambiguous_constant_call.resolved_declaration == null);
+	Extended.release_file_imports(*ambiguous_constant_imports);
+	Extended.release_parser_tree(*ambiguous_constant);
+	Extended.release_parser_names(*ambiguous_constant);
+
+	AMBIGUOUS_CONDITION_ALIAS_SOURCE :: "Enabled :: true; Enabled :: false; Selected :: Enabled; Procs :: struct { #if Selected { Clear: int; } else { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	ambiguous_condition_alias := Extended.parse_file(AMBIGUOUS_CONDITION_ALIAS_SOURCE, filename);
+	ambiguous_condition_alias_imports := Extended.resolve_file_imports(*ambiguous_condition_alias, map_names=test_using_map_fields);
+	assert(ambiguous_condition_alias.status == .COMPLETE && ambiguous_condition_alias_imports.mapped_names.count == 0 && ambiguous_condition_alias_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*ambiguous_condition_alias_imports);
+	Extended.release_parser_tree(*ambiguous_condition_alias);
+	Extended.release_parser_names(*ambiguous_condition_alias);
+
+	COMBINED_SOURCE :: "Left :: false; Right :: true; Enabled :: Left || Right && !false; Procs :: struct { #if Enabled { Clear: int; } else { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	combined := Extended.parse_file(COMBINED_SOURCE, filename);
+	combined_imports := Extended.resolve_file_imports(*combined, map_names=test_using_map_fields);
+	assert(combined.status == .COMPLETE && combined_imports.mapped_names.count == 1);
+	assert(combined_imports.mapped_names[0].declaration.name == "Clear");
+	Extended.release_file_imports(*combined_imports);
+	Extended.release_parser_tree(*combined);
+	Extended.release_parser_names(*combined);
+
+	MUTABLE_SOURCE :: "Enabled := true; Procs :: struct { Clear: int; #if Enabled { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	mutable_value := Extended.parse_file(MUTABLE_SOURCE, filename);
+	mutable_imports := Extended.resolve_file_imports(*mutable_value, map_names=test_using_map_fields);
+	assert(mutable_value.status == .COMPLETE && mutable_imports.mapped_names.count == 0 && mutable_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*mutable_imports);
+	Extended.release_parser_tree(*mutable_value);
+	Extended.release_parser_names(*mutable_value);
+
+	CONSTANT_CYCLE_SOURCE :: "First :: Second; Second :: First; Procs :: struct { Clear: int; #if First { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	constant_cycle := Extended.parse_file(CONSTANT_CYCLE_SOURCE, filename);
+	constant_cycle_imports := Extended.resolve_file_imports(*constant_cycle, map_names=test_using_map_fields);
+	assert(constant_cycle.status == .COMPLETE && constant_cycle_imports.mapped_names.count == 0 && constant_cycle_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*constant_cycle_imports);
+	Extended.release_parser_tree(*constant_cycle);
+	Extended.release_parser_names(*constant_cycle);
+
+	UNKNOWN_SOURCE :: "Procs :: struct { Clear: int; #if Unknown { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	unknown_value := Extended.parse_file(UNKNOWN_SOURCE, filename);
+	unknown_imports := Extended.resolve_file_imports(*unknown_value, map_names=test_using_map_fields);
+	assert(unknown_value.status == .COMPLETE && unknown_imports.mapped_names.count == 0 && unknown_imports.unsupported_using_filters.count == 1);
+	unknown_call := (
+		unknown_value.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(unknown_call.resolved_declaration == null);
+	Extended.release_file_imports(*unknown_imports);
+	Extended.release_parser_tree(*unknown_value);
+	Extended.release_parser_names(*unknown_value);
+
+	NEGATED_UNKNOWN_SOURCE :: "Procs :: struct { Clear: int; #if !Unknown { PushMatrix: int; } } main :: () { using,map(rename) procs: Procs; call := glClear; }";//
+	negated_unknown := Extended.parse_file(NEGATED_UNKNOWN_SOURCE, filename);
+	negated_unknown_imports := Extended.resolve_file_imports(*negated_unknown, map_names=test_using_map_fields);
+	assert(negated_unknown.status == .COMPLETE && negated_unknown_imports.mapped_names.count == 0 && negated_unknown_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*negated_unknown_imports);
+	Extended.release_parser_tree(*negated_unknown);
+	Extended.release_parser_names(*negated_unknown);
+
+	ALIAS_SOURCE :: "Procs :: struct { Clear: int; } Alias :: Procs; main :: () { using,map(rename) procs: Alias; call := glClear; }";//
+	alias := Extended.parse_file(ALIAS_SOURCE, filename);
+	alias_imports := Extended.resolve_file_imports(*alias, map_names=test_using_map_fields);
+	assert(alias_imports.mapped_names.count == 1);
+	alias_call := (
+		alias.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(alias_call.resolved_declaration && alias_call.resolved_declaration.name == "Clear");
+	Extended.release_file_imports(*alias_imports);
+	Extended.release_parser_tree(*alias);
+	Extended.release_parser_names(*alias);
+
+	QUERY_TYPE_SOURCE :: "Procs :: struct { Clear: int; } main :: () { original := Procs.{Clear=1}; using,map(rename) procs: type_of(original); call := glClear; }";//
+	query_type := Extended.parse_file(QUERY_TYPE_SOURCE, filename);
+	query_type_imports := Extended.resolve_file_imports(*query_type, map_names=test_using_map_fields);
+	assert(query_type.status == .COMPLETE && query_type_imports.mapped_names.count == 1 && query_type_imports.unsupported_using_filters.count == 0);
+	query_type_statements := query_type.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(query_type_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == query_type_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*query_type_imports);
+	Extended.release_parser_tree(*query_type);
+	Extended.release_parser_names(*query_type);
+
+	MEMBER_TYPE_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { using,map(rename) procs := Container.{Nested=Child.{Clear=1}}.Nested; call := glClear; }";//
+	member_type := Extended.parse_file(MEMBER_TYPE_SOURCE, filename);
+	member_type_imports := Extended.resolve_file_imports(*member_type, map_names=test_using_map_fields);
+	assert(member_type.status == .COMPLETE && member_type_imports.mapped_names.count == 1 && member_type_imports.unsupported_using_filters.count == 0);
+	member_type_statements := member_type.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(member_type_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == member_type_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*member_type_imports);
+	Extended.release_parser_tree(*member_type);
+	Extended.release_parser_names(*member_type);
+
+	TYPED_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { container: Container = .{Nested=Child.{Clear=1}}; using,map(rename) procs := container.Nested; call := glClear; }";//
+	typed_member := Extended.parse_file(TYPED_MEMBER_SOURCE, filename);
+	typed_member_imports := Extended.resolve_file_imports(*typed_member, map_names=test_using_map_fields);
+	assert(typed_member.status == .COMPLETE && typed_member_imports.mapped_names.count == 1 && typed_member_imports.unsupported_using_filters.count == 0);
+	typed_member_statements := typed_member.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(typed_member_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == typed_member_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*typed_member_imports);
+	Extended.release_parser_tree(*typed_member);
+	Extended.release_parser_names(*typed_member);
+
+	INFERRED_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { container := Container.{Nested=Child.{Clear=1}}; using,map(rename) procs := container.Nested; call := glClear; }";//
+	inferred_member := Extended.parse_file(INFERRED_MEMBER_SOURCE, filename);
+	inferred_member_imports := Extended.resolve_file_imports(*inferred_member, map_names=test_using_map_fields);
+	assert(inferred_member.status == .COMPLETE && inferred_member_imports.mapped_names.count == 1 && inferred_member_imports.unsupported_using_filters.count == 0);
+	inferred_member_statements := inferred_member.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(inferred_member_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inferred_member_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*inferred_member_imports);
+	Extended.release_parser_tree(*inferred_member);
+	Extended.release_parser_names(*inferred_member);
+
+	CALLED_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } make :: () -> Container { return .{Nested=Child.{Clear=1}}; } main :: () { using,map(rename) procs := make().Nested; call := glClear; }";//
+	called_member := Extended.parse_file(CALLED_MEMBER_SOURCE, filename);
+	called_member_imports := Extended.resolve_file_imports(*called_member, map_names=test_using_map_fields);
+	assert(called_member.status == .COMPLETE && called_member_imports.mapped_names.count == 1 && called_member_imports.unsupported_using_filters.count == 0);
+	called_member_statements := called_member.root.(*Extended.Parser_Block).statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(called_member_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == called_member_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*called_member_imports);
+	Extended.release_parser_tree(*called_member);
+	Extended.release_parser_names(*called_member);
+
+	CAST_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { original := Container.{Nested=Child.{Clear=1}}; using,map(rename) procs := (cast(Container) original).Nested; call := glClear; }";//
+	cast_member := Extended.parse_file(CAST_MEMBER_SOURCE, filename);
+	cast_member_imports := Extended.resolve_file_imports(*cast_member, map_names=test_using_map_fields);
+	assert(cast_member.status == .COMPLETE && cast_member_imports.mapped_names.count == 1 && cast_member_imports.unsupported_using_filters.count == 0);
+	cast_member_statements := cast_member.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(cast_member_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == cast_member_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*cast_member_imports);
+	Extended.release_parser_tree(*cast_member);
+	Extended.release_parser_names(*cast_member);
+
+	RUN_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { using,map(rename) procs := (#run Container.{Nested=Child.{Clear=1}}).Nested; call := glClear; }";//
+	run_member := Extended.parse_file(RUN_MEMBER_SOURCE, filename);
+	run_member_imports := Extended.resolve_file_imports(*run_member, map_names=test_using_map_fields);
+	assert(run_member.status == .COMPLETE && run_member_imports.mapped_names.count == 1 && run_member_imports.unsupported_using_filters.count == 0);
+	run_member_statements := run_member.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(run_member_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == run_member_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*run_member_imports);
+	Extended.release_parser_tree(*run_member);
+	Extended.release_parser_names(*run_member);
+
+	CONDITIONAL_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: (ready: bool) { using,map(rename) procs := (ifx ready then Container.{Nested=Child.{Clear=1}} else Container.{Nested=Child.{Clear=2}}).Nested; call := glClear; }";//
+	conditional_member := Extended.parse_file(CONDITIONAL_MEMBER_SOURCE, filename);
+	conditional_member_imports := Extended.resolve_file_imports(*conditional_member, map_names=test_using_map_fields);
+	assert(conditional_member.status == .COMPLETE && conditional_member_imports.mapped_names.count == 1 && conditional_member_imports.unsupported_using_filters.count == 0);
+	conditional_member_statements := conditional_member.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(conditional_member_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == conditional_member_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*conditional_member_imports);
+	Extended.release_parser_tree(*conditional_member);
+	Extended.release_parser_names(*conditional_member);
+
+	MISMATCHED_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Other :: struct { Nested: Child; } main :: (ready: bool) { using,map(rename) procs := (ifx ready then Container.{Nested=Child.{Clear=1}} else Other.{Nested=Child.{Clear=2}}).Nested; call := glClear; }";//
+	mismatched_member := Extended.parse_file(MISMATCHED_MEMBER_SOURCE, filename);
+	mismatched_member_imports := Extended.resolve_file_imports(*mismatched_member, map_names=test_using_map_fields);
+	assert(mismatched_member.status == .COMPLETE && mismatched_member_imports.mapped_names.count == 0 && mismatched_member_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*mismatched_member_imports);
+	Extended.release_parser_tree(*mismatched_member);
+	Extended.release_parser_names(*mismatched_member);
+
+	STATIC_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Other :: struct { PushMatrix: int; } main :: () { using,map(rename) procs := (#ifx true then Container.{Nested=Child.{Clear=1}} else Other.{PushMatrix=2}).Nested; call := glClear; }";//
+	static_member := Extended.parse_file(STATIC_MEMBER_SOURCE, filename);
+	static_member_imports := Extended.resolve_file_imports(*static_member, map_names=test_using_map_fields);
+	assert(static_member.status == .COMPLETE && static_member_imports.mapped_names.count == 1 && static_member_imports.unsupported_using_filters.count == 0);
+	static_member_statements := static_member.root.(*Extended.Parser_Block).statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(static_member_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == static_member_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*static_member_imports);
+	Extended.release_parser_tree(*static_member);
+	Extended.release_parser_names(*static_member);
+
+	OVERLOADED_RUN_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Container { return .{Nested=Child.{Clear=1}}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := (#run make(1)).Nested; call := glClear; }";//
+	overloaded_run_member := Extended.parse_file(OVERLOADED_RUN_MEMBER_SOURCE, filename);
+	overloaded_run_member_imports := Extended.resolve_file_imports(*overloaded_run_member, map_names=test_using_map_fields);
+	assert(overloaded_run_member.status == .COMPLETE && overloaded_run_member_imports.mapped_names.count == 0 && overloaded_run_member_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*overloaded_run_member_imports);
+	Extended.release_parser_tree(*overloaded_run_member);
+	Extended.release_parser_names(*overloaded_run_member);
+
+	AMBIGUOUS_CAST_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Container :: struct { PushMatrix: int; } main :: () { original := Child.{Clear=1}; using,map(rename) procs := (cast(Container) original).Nested; call := glClear; }";//
+	ambiguous_cast_member := Extended.parse_file(AMBIGUOUS_CAST_MEMBER_SOURCE, filename);
+	ambiguous_cast_member_imports := Extended.resolve_file_imports(*ambiguous_cast_member, map_names=test_using_map_fields);
+	assert(ambiguous_cast_member.status == .COMPLETE && ambiguous_cast_member_imports.mapped_names.count == 0 && ambiguous_cast_member_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*ambiguous_cast_member_imports);
+	Extended.release_parser_tree(*ambiguous_cast_member);
+	Extended.release_parser_names(*ambiguous_cast_member);
+
+	CALLED_OVERLOAD_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Container { return .{Nested=Child.{Clear=1}}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(1).Nested; call := glClear; }";//
+	called_overload_member := Extended.parse_file(CALLED_OVERLOAD_MEMBER_SOURCE, filename);
+	called_overload_member_imports := Extended.resolve_file_imports(*called_overload_member, map_names=test_using_map_fields);
+	assert(called_overload_member.status == .COMPLETE && called_overload_member_imports.mapped_names.count == 0 && called_overload_member_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*called_overload_member_imports);
+	Extended.release_parser_tree(*called_overload_member);
+	Extended.release_parser_names(*called_overload_member);
+
+	CALLED_POLYMORPHIC_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } make :: (value: $T) -> Container { return .{Nested=Child.{Clear=1}}; } main :: () { using,map(rename) procs := make(1).Nested; call := glClear; }";//
+	called_polymorphic_member := Extended.parse_file(CALLED_POLYMORPHIC_MEMBER_SOURCE, filename);
+	called_polymorphic_member_imports := Extended.resolve_file_imports(*called_polymorphic_member, map_names=test_using_map_fields);
+	assert(called_polymorphic_member.status == .COMPLETE && called_polymorphic_member_imports.mapped_names.count == 1 && called_polymorphic_member_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*called_polymorphic_member_imports);
+	Extended.release_parser_tree(*called_polymorphic_member);
+	Extended.release_parser_names(*called_polymorphic_member);
+
+	ALIASED_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { original := Container.{Nested=Child.{Clear=1}}; container := original; using,map(rename) procs := container.Nested; call := glClear; }";//
+	aliased_member := Extended.parse_file(ALIASED_MEMBER_SOURCE, filename);
+	aliased_member_imports := Extended.resolve_file_imports(*aliased_member, map_names=test_using_map_fields);
+	assert(aliased_member.status == .COMPLETE && aliased_member_imports.mapped_names.count == 1 && aliased_member_imports.unsupported_using_filters.count == 0);
+	aliased_member_statements := aliased_member.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(aliased_member_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == aliased_member_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*aliased_member_imports);
+	Extended.release_parser_tree(*aliased_member);
+	Extended.release_parser_names(*aliased_member);
+
+	CYCLIC_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { first := second; second := first; using,map(rename) procs := first.Nested; call := glClear; }";//
+	cyclic_member := Extended.parse_file(CYCLIC_MEMBER_SOURCE, filename);
+	cyclic_member_imports := Extended.resolve_file_imports(*cyclic_member, map_names=test_using_map_fields);
+	assert(cyclic_member.status == .COMPLETE && cyclic_member_imports.mapped_names.count == 0 && cyclic_member_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*cyclic_member_imports);
+	Extended.release_parser_tree(*cyclic_member);
+	Extended.release_parser_names(*cyclic_member);
+
+	OVERLOADED_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Container { return .{Nested=Child.{Clear=1}}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { original := make(1); container := original; using,map(rename) procs := container.Nested; call := glClear; }";//
+	overloaded_member := Extended.parse_file(OVERLOADED_MEMBER_SOURCE, filename);
+	overloaded_member_imports := Extended.resolve_file_imports(*overloaded_member, map_names=test_using_map_fields);
+	assert(overloaded_member.status == .COMPLETE && overloaded_member_imports.mapped_names.count == 0 && overloaded_member_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*overloaded_member_imports);
+	Extended.release_parser_tree(*overloaded_member);
+	Extended.release_parser_names(*overloaded_member);
+
+	AMBIGUOUS_ALIAS_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { original := Container.{Nested=Child.{Clear=1}}; original := Container.{Nested=Child.{Clear=2}}; container := original; using,map(rename) procs := container.Nested; call := glClear; }";//
+	ambiguous_alias_member := Extended.parse_file(AMBIGUOUS_ALIAS_MEMBER_SOURCE, filename);
+	ambiguous_alias_member_imports := Extended.resolve_file_imports(*ambiguous_alias_member, map_names=test_using_map_fields);
+	assert(ambiguous_alias_member.status == .COMPLETE && ambiguous_alias_member_imports.mapped_names.count == 0 && ambiguous_alias_member_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*ambiguous_alias_member_imports);
+	Extended.release_parser_tree(*ambiguous_alias_member);
+	Extended.release_parser_names(*ambiguous_alias_member);
+
+	AMBIGUOUS_VALUE_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { container: Container; container: Container; using,map(rename) procs := container.Nested; call := glClear; }";//
+	ambiguous_value_member := Extended.parse_file(AMBIGUOUS_VALUE_MEMBER_SOURCE, filename);
+	ambiguous_value_member_imports := Extended.resolve_file_imports(*ambiguous_value_member, map_names=test_using_map_fields);
+	assert(ambiguous_value_member.status == .COMPLETE && ambiguous_value_member_imports.mapped_names.count == 0 && ambiguous_value_member_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*ambiguous_value_member_imports);
+	Extended.release_parser_tree(*ambiguous_value_member);
+	Extended.release_parser_names(*ambiguous_value_member);
+
+	MISSING_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } main :: () { using,map(rename) procs := Container.{Nested=Child.{Clear=1}}.Missing; call := glClear; }";//
+	missing_member := Extended.parse_file(MISSING_MEMBER_SOURCE, filename);
+	missing_member_imports := Extended.resolve_file_imports(*missing_member, map_names=test_using_map_fields);
+	assert(missing_member.status == .COMPLETE && missing_member_imports.mapped_names.count == 0 && missing_member_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*missing_member_imports);
+	Extended.release_parser_tree(*missing_member);
+	Extended.release_parser_names(*missing_member);
+
+	AMBIGUOUS_MEMBER_SOURCE :: "Child :: struct { Clear: int; } Child :: struct { PushMatrix: int; } Container :: struct { Nested: Child; } main :: () { using,map(rename) procs := Container.{Nested=Child.{Clear=1}}.Nested; call := glClear; }";//
+	ambiguous_member := Extended.parse_file(AMBIGUOUS_MEMBER_SOURCE, filename);
+	ambiguous_member_imports := Extended.resolve_file_imports(*ambiguous_member, map_names=test_using_map_fields);
+	assert(ambiguous_member.status == .COMPLETE && ambiguous_member_imports.mapped_names.count == 0 && ambiguous_member_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*ambiguous_member_imports);
+	Extended.release_parser_tree(*ambiguous_member);
+	Extended.release_parser_names(*ambiguous_member);
+
+	UNKNOWN_QUERY_SOURCE :: "Procs :: struct { Clear: int; } main :: () { using,map(rename) procs: type_of(missing); call := glClear; }";//
+	unknown_query := Extended.parse_file(UNKNOWN_QUERY_SOURCE, filename);
+	unknown_query_imports := Extended.resolve_file_imports(*unknown_query, map_names=test_using_map_fields);
+	assert(unknown_query.status == .COMPLETE && unknown_query_imports.mapped_names.count == 0 && unknown_query_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*unknown_query_imports);
+	Extended.release_parser_tree(*unknown_query);
+	Extended.release_parser_names(*unknown_query);
+
+	CYCLIC_QUERY_SOURCE :: "main :: () { value: type_of(value); using,map(rename) procs: type_of(value); call := glClear; }";//
+	cyclic_query := Extended.parse_file(CYCLIC_QUERY_SOURCE, filename);
+	cyclic_query_imports := Extended.resolve_file_imports(*cyclic_query, map_names=test_using_map_fields);
+	assert(cyclic_query.status == .COMPLETE && cyclic_query_imports.mapped_names.count == 0 && cyclic_query_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*cyclic_query_imports);
+	Extended.release_parser_tree(*cyclic_query);
+	Extended.release_parser_names(*cyclic_query);
+
+	OVERLOADED_QUERY_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Procs { return .{Clear=1}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs: type_of(make(1)); call := glClear; }";//
+	overloaded_query := Extended.parse_file(OVERLOADED_QUERY_SOURCE, filename);
+	overloaded_query_imports := Extended.resolve_file_imports(*overloaded_query, map_names=test_using_map_fields);
+	assert(overloaded_query.status == .COMPLETE && overloaded_query_imports.mapped_names.count == 0 && overloaded_query_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*overloaded_query_imports);
+	Extended.release_parser_tree(*overloaded_query);
+	Extended.release_parser_names(*overloaded_query);
+
+	AMBIGUOUS_TYPE_SOURCE :: "Procs :: struct { Clear: int; } Procs :: struct { PushMatrix: int; } Alias :: Procs; main :: () { using,map(rename) procs: Alias; call := glClear; }";//
+	ambiguous_type := Extended.parse_file(AMBIGUOUS_TYPE_SOURCE, filename);
+	ambiguous_type_imports := Extended.resolve_file_imports(*ambiguous_type, map_names=test_using_map_fields);
+	assert(ambiguous_type.status == .COMPLETE && ambiguous_type_imports.mapped_names.count == 0 && ambiguous_type_imports.unsupported_using_filters.count == 1);
+	ambiguous_type_call := ambiguous_type.root.(*Extended.Parser_Block).statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	assert(ambiguous_type_call.resolved_declaration == null);
+	Extended.release_file_imports(*ambiguous_type_imports);
+	Extended.release_parser_tree(*ambiguous_type);
+	Extended.release_parser_names(*ambiguous_type);
+
+	SHADOWED_TYPE_SOURCE :: "Procs :: struct { PushMatrix: int; } main :: () { Procs :: struct { Clear: int; } using,map(rename) procs: Procs; call := glClear; hidden := PushMatrix; }";//
+	shadowed_type := Extended.parse_file(SHADOWED_TYPE_SOURCE, filename);
+	shadowed_type_imports := Extended.resolve_file_imports(*shadowed_type, map_names=test_using_map_fields);
+	assert(shadowed_type.status == .COMPLETE && shadowed_type_imports.mapped_names.count == 1 && shadowed_type_imports.mapped_names[0].declaration.name == "Clear");
+	shadowed_type_statements := shadowed_type.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(shadowed_type_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == shadowed_type_imports.mapped_names[0].declaration);
+	assert(shadowed_type_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_file_imports(*shadowed_type_imports);
+	Extended.release_parser_tree(*shadowed_type);
+	Extended.release_parser_names(*shadowed_type);
+
+	LITERAL_SOURCE :: "Procs :: struct { Clear: int; } main :: () { using,map(rename) procs := Procs.{Clear=1}; call := glClear; }";//
+	literal := Extended.parse_file(LITERAL_SOURCE, filename);
+	literal_imports := Extended.resolve_file_imports(*literal, map_names=test_using_map_fields, aggregate_fields=test_using_map_decline_fields);
+	assert(literal_imports.mapped_names.count == 1);
+	literal_call := (
+		literal.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(literal_call.resolved_declaration && literal_call.resolved_declaration.name == "Clear");
+	Extended.release_file_imports(*literal_imports);
+	Extended.release_parser_tree(*literal);
+	Extended.release_parser_names(*literal);
+
+	INFERRED_SOURCE :: "Procs :: struct { Clear: int; } main :: () { original := Procs.{Clear=1}; using,map(rename) procs := original; call := glClear; }";//
+	inferred := Extended.parse_file(INFERRED_SOURCE, filename);
+	inferred_imports := Extended.resolve_file_imports(*inferred, map_names=test_using_map_fields);
+	assert(inferred_imports.mapped_names.count == 1 && inferred_imports.unsupported_using_filters.count == 0);
+	inferred_statements := inferred.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(inferred_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inferred_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*inferred_imports);
+	Extended.release_parser_tree(*inferred);
+	Extended.release_parser_names(*inferred);
+
+	CONDITIONAL_SOURCE :: "Procs :: struct { Clear: int; } main :: (ready: bool) { using,map(rename) procs := ifx ready then Procs.{Clear=1} else Procs.{Clear=2}; call := glClear; }";//
+	conditional := Extended.parse_file(CONDITIONAL_SOURCE, filename);
+	conditional_imports := Extended.resolve_file_imports(*conditional, map_names=test_using_map_fields);
+	assert(conditional.status == .COMPLETE && conditional_imports.mapped_names.count == 1 && conditional_imports.unsupported_using_filters.count == 0);
+	conditional_statements := conditional.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(conditional_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == conditional_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*conditional_imports);
+	Extended.release_parser_tree(*conditional);
+	Extended.release_parser_names(*conditional);
+
+	CONDITIONAL_ALIAS_SOURCE :: "Procs :: struct { Clear: int; } Alias :: Procs; main :: (ready: bool) { first := Procs.{Clear=1}; second := Alias.{Clear=2}; using,map(rename) procs := ifx ready then first else second; call := glClear; }";//
+	conditional_alias := Extended.parse_file(CONDITIONAL_ALIAS_SOURCE, filename);
+	conditional_alias_imports := Extended.resolve_file_imports(*conditional_alias, map_names=test_using_map_fields);
+	assert(conditional_alias.status == .COMPLETE && conditional_alias_imports.mapped_names.count == 1 && conditional_alias_imports.unsupported_using_filters.count == 0);
+	conditional_alias_statements := conditional_alias.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(conditional_alias_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == conditional_alias_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*conditional_alias_imports);
+	Extended.release_parser_tree(*conditional_alias);
+	Extended.release_parser_names(*conditional_alias);
+
+	MISMATCHED_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { Clear: int; } main :: (ready: bool) { using,map(rename) procs := ifx ready then Procs.{Clear=1} else Other.{Clear=2}; call := glClear; }";//
+	mismatched := Extended.parse_file(MISMATCHED_SOURCE, filename);
+	mismatched_imports := Extended.resolve_file_imports(*mismatched, map_names=test_using_map_fields);
+	assert(mismatched.status == .COMPLETE && mismatched_imports.mapped_names.count == 0 && mismatched_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*mismatched_imports);
+	Extended.release_parser_tree(*mismatched);
+	Extended.release_parser_names(*mismatched);
+
+	STATIC_VALUE_SOURCE :: "Enabled :: false; Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } main :: () { using,map(rename) procs := #ifx Enabled then Other.{PushMatrix=1} else Procs.{Clear=2}; call := glClear; hidden := PushMatrix; }";//
+	static_ifx_value := Extended.parse_file(STATIC_VALUE_SOURCE, filename);
+	static_value_imports := Extended.resolve_file_imports(*static_ifx_value, map_names=test_using_map_fields);
+	assert(static_ifx_value.status == .COMPLETE && static_value_imports.mapped_names.count == 1);
+	static_value_statements := static_ifx_value.root.(*Extended.Parser_Block).statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(static_value_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == static_value_imports.mapped_names[0].declaration);
+	assert(static_value_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_file_imports(*static_value_imports);
+	Extended.release_parser_tree(*static_ifx_value);
+	Extended.release_parser_names(*static_ifx_value);
+
+	AMBIGUOUS_STATIC_IFX_SOURCE :: "Enabled :: true; Enabled :: false; Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } main :: () { using,map(rename) procs := #ifx Enabled then Procs.{Clear=1} else Other.{PushMatrix=2}; call := glClear; }";//
+	ambiguous_static_ifx := Extended.parse_file(AMBIGUOUS_STATIC_IFX_SOURCE, filename);
+	ambiguous_static_ifx_imports := Extended.resolve_file_imports(*ambiguous_static_ifx, map_names=test_using_map_fields);
+	assert(ambiguous_static_ifx.status == .COMPLETE && ambiguous_static_ifx_imports.mapped_names.count == 0 && ambiguous_static_ifx_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*ambiguous_static_ifx_imports);
+	Extended.release_parser_tree(*ambiguous_static_ifx);
+	Extended.release_parser_names(*ambiguous_static_ifx);
+
+	STATIC_THEN_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } main :: () { using,map(rename) procs := #ifx true then Procs.{Clear=1} else Other.{PushMatrix=2}; call := glClear; hidden := PushMatrix; }";//
+	static_then := Extended.parse_file(STATIC_THEN_SOURCE, filename);
+	static_then_imports := Extended.resolve_file_imports(*static_then, map_names=test_using_map_fields);
+	assert(static_then.status == .COMPLETE && static_then_imports.mapped_names.count == 1 && static_then_imports.mapped_names[0].declaration.name == "Clear");
+	static_then_statements := static_then.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(static_then_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == static_then_imports.mapped_names[0].declaration);
+	assert(static_then_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+	Extended.release_file_imports(*static_then_imports);
+	Extended.release_parser_tree(*static_then);
+	Extended.release_parser_names(*static_then);
+
+	STATIC_UNKNOWN_SOURCE :: "Procs :: struct { Clear: int; } main :: () { using,map(rename) procs := #ifx Unknown then Procs.{Clear=1} else Procs.{Clear=2}; call := glClear; }";//
+	static_unknown := Extended.parse_file(STATIC_UNKNOWN_SOURCE, filename);
+	static_unknown_imports := Extended.resolve_file_imports(*static_unknown, map_names=test_using_map_fields);
+	assert(static_unknown.status == .COMPLETE && static_unknown_imports.mapped_names.count == 0 && static_unknown_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*static_unknown_imports);
+	Extended.release_parser_tree(*static_unknown);
+	Extended.release_parser_names(*static_unknown);
+
+	CYCLE_SOURCE :: "main :: () { first := second; second := first; using,map(rename) procs := first; call := glClear; }";//
+	cycle := Extended.parse_file(CYCLE_SOURCE, filename);
+	cycle_imports := Extended.resolve_file_imports(*cycle, map_names=test_using_map_fields);
+	assert(cycle_imports.mapped_names.count == 0 && cycle_imports.unsupported_using_filters.count == 1);
+	cycle_call := (
+		cycle.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(cycle_call.resolved_declaration == null);
+	Extended.release_file_imports(*cycle_imports);
+	Extended.release_parser_tree(*cycle);
+	Extended.release_parser_names(*cycle);
+
+	AMBIGUOUS_VALUE_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } main :: () { original := Procs.{Clear=1}; original := Other.{PushMatrix=2}; using,map(rename) procs := original; call := glClear; }";//
+	ambiguous_value := Extended.parse_file(AMBIGUOUS_VALUE_SOURCE, filename);
+	ambiguous_value_imports := Extended.resolve_file_imports(*ambiguous_value, map_names=test_using_map_fields);
+	assert(ambiguous_value.status == .COMPLETE && ambiguous_value_imports.mapped_names.count == 0 && ambiguous_value_imports.unsupported_using_filters.count == 1);
+	ambiguous_value_call := (
+		ambiguous_value.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(ambiguous_value_call.resolved_declaration == null);
+	Extended.release_file_imports(*ambiguous_value_imports);
+	Extended.release_parser_tree(*ambiguous_value);
+	Extended.release_parser_names(*ambiguous_value);
+
+	SHADOWED_VALUE_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } original := Other.{PushMatrix=1}; main :: () { original := Procs.{Clear=2}; using,map(rename) procs := original; call := glClear; }";//
+	shadowed_value := Extended.parse_file(SHADOWED_VALUE_SOURCE, filename);
+	shadowed_value_imports := Extended.resolve_file_imports(*shadowed_value, map_names=test_using_map_fields);
+	assert(shadowed_value.status == .COMPLETE && shadowed_value_imports.mapped_names.count == 1 && shadowed_value_imports.unsupported_using_filters.count == 0);
+	shadowed_value_call := (
+		shadowed_value.root.(*Extended.Parser_Block).statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(shadowed_value_call.resolved_declaration == shadowed_value_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*shadowed_value_imports);
+	Extended.release_parser_tree(*shadowed_value);
+	Extended.release_parser_names(*shadowed_value);
+
+	CAST_SOURCE :: "Procs :: struct { Clear: int; } main :: () { original: Procs; using,map(rename) procs := cast(Procs) original; call := glClear; }";//
+	cast_value := Extended.parse_file(CAST_SOURCE, filename);
+	cast_imports := Extended.resolve_file_imports(*cast_value, map_names=test_using_map_fields);
+	assert(cast_value.status == .COMPLETE && cast_imports.mapped_names.count == 1);
+	cast_statements := cast_value.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(cast_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == cast_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*cast_imports);
+	Extended.release_parser_tree(*cast_value);
+	Extended.release_parser_names(*cast_value);
+
+	CALL_SOURCE :: "Procs :: struct { Clear: int; } make :: () -> Procs { return .{Clear=1}; } main :: () { using,map(rename) procs := make(); call := glClear; }";//
+	call := Extended.parse_file(CALL_SOURCE, filename);
+	call_imports := Extended.resolve_file_imports(*call, map_names=test_using_map_fields);
+	assert(call.status == .COMPLETE && call_imports.mapped_names.count == 1);
+	call_reference := (
+		call.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(call_reference.resolved_declaration && call_reference.resolved_declaration.name == "Clear");
+	Extended.release_file_imports(*call_imports);
+	Extended.release_parser_tree(*call);
+	Extended.release_parser_names(*call);
+
+	ALIASED_CALL_SOURCE :: "Procs :: struct { Clear: int; } make :: () -> Procs { return .{Clear=1}; } main :: () { make_alias :: make; using,map(rename) procs := make_alias(); call := glClear; }";//
+	aliased_call := Extended.parse_file(ALIASED_CALL_SOURCE, filename);
+	aliased_call_imports := Extended.resolve_file_imports(*aliased_call, map_names=test_using_map_fields);
+	assert(aliased_call.status == .COMPLETE && aliased_call_imports.mapped_names.count == 1 && aliased_call_imports.unsupported_using_filters.count == 0);
+	aliased_call_statements := aliased_call.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(aliased_call_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == aliased_call_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*aliased_call_imports);
+	Extended.release_parser_tree(*aliased_call);
+	Extended.release_parser_names(*aliased_call);
+
+	complete_call_receiver_sources: []string = .[
+		#string JAI
+Child :: struct { Clear: int; }
+Box :: struct (T: Type) { Nested: T; }
+make :: (value: Child) -> Box(Child) { return .{Nested=value}; }
+main :: () { alias :: make; using,map(rename) procs := alias(Child.{Clear=1}).Nested; call := glClear; }
+JAI
+		,
+		#string JAI
+Child :: struct { Clear: int; }
+Other :: struct { PushMatrix: int; }
+Box :: struct (T: Type) { Nested: T; }
+make :: (value: string) -> Box(Child) { return .{Nested=.{Clear=1}}; }
+make :: (value: bool) -> Box(Other) { return .{Nested=.{PushMatrix=1}}; }
+main :: () { using,map(rename) procs := make("a").Nested; call := glClear; }
+JAI
+		,
+		#string JAI
+Child :: struct { Clear: int; }
+Box :: struct (T: Type) { Nested: T; }
+main :: () { original := Box(Child).{Nested=Child.{Clear=1}}; using,map(rename) procs := (cast(Box(Child)) original).Nested; call := glClear; }
+JAI
+		,
+		#string JAI
+Child :: struct { Clear: int; }
+Box :: struct (T: Type) { Nested: T; }
+make :: () -> Box(Child) { return .{Nested=Child.{Clear=1}}; }
+main :: () { value: type_of(make()); using,map(rename) procs := value.Nested; call := glClear; }
+JAI
+	];
+	for complete_call_receiver_sources {
+		parsed := Extended.parse_file(it, filename);
+		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 1 && imports.unsupported_using_filters.count == 0, "Complete call receiver fixture: %", it);
+		Extended.release_file_imports(*imports);
+		Extended.release_parser_tree(*parsed);
+		Extended.release_parser_names(*parsed);
+	}
+
+	unsupported_call_receiver_sources: []string = .[
+		#string JAI
+Child :: struct { Clear: int; }
+Other :: struct { PushMatrix: int; }
+Box :: struct (T: Type) { Nested: T; }
+make :: (value: string) -> Box(Child) { return .{Nested=.{Clear=1}}; }
+make :: (value: bool) -> Box(Other) { return .{Nested=.{PushMatrix=1}}; }
+main :: () { alias :: make; using,map(rename) procs := alias("a").Nested; call := glClear; }
+JAI
+		,
+		#string JAI
+Child :: struct { Clear: int; }
+Other :: struct { PushMatrix: int; }
+Box :: struct (T: Type) { Nested: T; }
+make :: (value: string) -> Box(Child) { return .{Nested=.{Clear=1}}; }
+make :: (value: bool) -> Box(Other) { return .{Nested=.{PushMatrix=1}}; }
+main :: () { using,map(rename) procs := make(unknown).Nested; call := glClear; }
+JAI
+		,
+		#string JAI
+Child :: struct { Clear: int; }
+Box :: struct (T: Type) { Nested: T; }
+make :: () -> Box(Child) { return .{Nested=Child.{Clear=1}}; }
+main :: () { value: type_of(missing()); using,map(rename) procs := value.Nested; call := glClear; }
+JAI
+		,
+		#string JAI
+Child :: struct { Clear: int; }
+Box :: struct (T: Type) { Nested: T; }
+main :: () { original := Box(Child).{Nested=Child.{Clear=1}}; using,map(rename) procs := (cast(Box(Missing)) original).Nested; call := glClear; }
+JAI
+	];
+	for unsupported_call_receiver_sources {
+		parsed := Extended.parse_file(it, filename);
+		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 0 && imports.unsupported_using_filters.count == 1, "Unsupported call receiver fixture: %", it);
+		Extended.release_file_imports(*imports);
+		Extended.release_parser_tree(*parsed);
+		Extended.release_parser_names(*parsed);
+	}
+
+	complete_receiver_inventory_sources: []string = .[
+		#string JAI
+Child :: struct { Clear: int; }
+Box :: struct (T: Type) { Nested: T; }
+main :: () {
+	using,map(rename) procs := Box(Child).{Nested=Child.{Clear=1}}.Nested;
+	call := glClear;
+}
+JAI
+	];
+	for complete_receiver_inventory_sources {
+		parsed := Extended.parse_file(it, filename);
+		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 1 && imports.unsupported_using_filters.count == 0, "Complete receiver inventory fixture: %", it);
+		Extended.release_file_imports(*imports);
+		Extended.release_parser_tree(*parsed);
+		Extended.release_parser_names(*parsed);
+	}
+
+	unsupported_receiver_inventory_sources: []string = .[
+		#string JAI
+Child :: struct { Clear: int; }
+Box :: struct (T: Type) { Nested: T; }
+main :: () {
+	box := Box(Child).{Nested=Child.{Clear=1}};
+	pointer := *box;
+	using,map(rename) procs := pointer.*.Nested;
+	call := glClear;
+}
+JAI
+		,
+		#string JAI
+Child :: struct { Clear: int; }
+Box :: struct (T: Type) { Nested: T; }
+main :: () {
+	boxes: [1] Box(Child) = .[Box(Child).{Nested=Child.{Clear=1}}];
+	using,map(rename) procs := boxes[0].Nested;
+	call := glClear;
+}
+JAI
+		,
+		#string JAI
+main :: () {
+	scalar := 1;
+	using,map(rename) procs := scalar.Nested;
+	call := glClear;
+}
+JAI
+	];
+	for unsupported_receiver_inventory_sources {
+		parsed := Extended.parse_file(it, filename);
+		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 0 && imports.unsupported_using_filters.count == 1, "Unsupported receiver inventory fixture: %", it);
+		Extended.release_file_imports(*imports);
+		Extended.release_parser_tree(*parsed);
+		Extended.release_parser_names(*parsed);
+	}
+
+	OVERLOADED_ALIAS_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Procs { return .{Clear=1}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { make_alias :: make; using,map(rename) procs := make_alias(1); call := glClear; }";//
+	overloaded_alias := Extended.parse_file(OVERLOADED_ALIAS_SOURCE, filename);
+	OVERLOADED_ALIAS_IMPORTS := Extended.resolve_file_imports(*overloaded_alias, map_names=test_using_map_fields);
+	assert(overloaded_alias.status == .COMPLETE && OVERLOADED_ALIAS_IMPORTS.mapped_names.count == 0 && OVERLOADED_ALIAS_IMPORTS.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*OVERLOADED_ALIAS_IMPORTS);
+	Extended.release_parser_tree(*overloaded_alias);
+	Extended.release_parser_names(*overloaded_alias);
+
+	POLYMORPHIC_ALIAS_SOURCE :: "Procs :: struct { Clear: int; } make :: (value: $T) -> Procs { return .{Clear=1}; } main :: () { make_alias :: make; using,map(rename) procs := make_alias(1); call := glClear; }";//
+	polymorphic_alias := Extended.parse_file(POLYMORPHIC_ALIAS_SOURCE, filename);
+	POLYMORPHIC_ALIAS_IMPORTS := Extended.resolve_file_imports(*polymorphic_alias, map_names=test_using_map_fields);
+	assert(polymorphic_alias.status == .COMPLETE && POLYMORPHIC_ALIAS_IMPORTS.mapped_names.count == 1 && POLYMORPHIC_ALIAS_IMPORTS.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*POLYMORPHIC_ALIAS_IMPORTS);
+	Extended.release_parser_tree(*polymorphic_alias);
+	Extended.release_parser_names(*polymorphic_alias);
+
+	MUTABLE_PROCEDURE_SOURCE :: "Procs :: struct { Clear: int; } make :: () -> Procs { return .{Clear=1}; } main :: () { make_alias := make; using,map(rename) procs := make_alias(); call := glClear; }";//
+	mutable_procedure := Extended.parse_file(MUTABLE_PROCEDURE_SOURCE, filename);
+	MUTABLE_PROCEDURE_IMPORTS := Extended.resolve_file_imports(*mutable_procedure, map_names=test_using_map_fields);
+	assert(mutable_procedure.status == .COMPLETE && MUTABLE_PROCEDURE_IMPORTS.mapped_names.count == 0 && MUTABLE_PROCEDURE_IMPORTS.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*MUTABLE_PROCEDURE_IMPORTS);
+	Extended.release_parser_tree(*mutable_procedure);
+	Extended.release_parser_names(*mutable_procedure);
+
+	OVERLOADED_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Procs { return .{Clear=1}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(\"text\"); call := glClear; }";//
+	overloaded := Extended.parse_file(OVERLOADED_SOURCE, filename);
+	overloaded_imports := Extended.resolve_file_imports(*overloaded, map_names=test_using_map_fields);
+	assert(
+		overloaded.status == .COMPLETE
+		&& overloaded_imports.mapped_names.count == 1
+		&& overloaded_imports.mapped_names[0].source_name == "PushMatrix"
+		&& !overloaded_imports.mapped_names[0].exported_name
+		&& overloaded_imports.unsupported_using_filters.count == 0
+	);
+	overloaded_call := (
+		overloaded.root.(*Extended.Parser_Block).statements[4].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(overloaded_call.resolved_declaration == null);
+	Extended.release_file_imports(*overloaded_imports);
+	Extended.release_parser_tree(*overloaded);
+	Extended.release_parser_names(*overloaded);
+
+	CONCRETE_OVERLOAD_SOURCE :: "Input :: struct { Value: int; } Alternate :: struct { Value: int; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (input: Input) -> Procs { return .{Clear=1}; } make :: (input: Alternate) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(Input.{Value=1}); call := glClear; }";//
+	concrete_overload := Extended.parse_file(CONCRETE_OVERLOAD_SOURCE, filename);
+	concrete_overload_imports := Extended.resolve_file_imports(*concrete_overload, map_names=test_using_map_fields);
+	assert(concrete_overload.status == .COMPLETE && concrete_overload_imports.mapped_names.count == 1 && concrete_overload_imports.unsupported_using_filters.count == 0);
+	concrete_overload_statements := concrete_overload.root.(*Extended.Parser_Block).statements[6].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(concrete_overload_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == concrete_overload_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*concrete_overload_imports);
+	Extended.release_parser_tree(*concrete_overload);
+	Extended.release_parser_names(*concrete_overload);
+
+	INSTANCIATED_OVERLOAD_SOURCE :: "Input :: struct { Value: int; } Alternate :: struct { Value: int; } Box :: struct (T: Type) { Value: T; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (input: Box(Input)) -> Procs { return .{Clear=1}; } make :: (input: Box(Alternate)) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(Box(Input).{Value=Input.{Value=1}}); call := glClear; }";//
+	instantiated_overload := Extended.parse_file(INSTANCIATED_OVERLOAD_SOURCE, filename);
+	instantiated_overload_imports := Extended.resolve_file_imports(*instantiated_overload, map_names=test_using_map_fields);
+	assert(instantiated_overload.status == .COMPLETE && instantiated_overload_imports.mapped_names.count == 1 && instantiated_overload_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*instantiated_overload_imports);
+	Extended.release_parser_tree(*instantiated_overload);
+	Extended.release_parser_names(*instantiated_overload);
+
+	AGGREGATE_CONVERSION_SOURCE :: #string JAI
+Base :: struct { Value: int; }
+Wrapper :: struct { #as using base: Base; }
+Procs :: struct { Clear: int; }
+Other :: struct { PushMatrix: int; }
+make :: (value: Base) -> Procs { return .{Clear=1}; }
+make :: (value: string) -> Other { return .{PushMatrix=1}; }
+main :: () { using,map(rename) procs := make(Wrapper.{base=Base.{Value=1}}); call := glClear; }
+JAI
+	aggregate_conversion := Extended.parse_file(AGGREGATE_CONVERSION_SOURCE, filename);
+	aggregate_conversion_imports := Extended.resolve_file_imports(*aggregate_conversion, map_names=test_using_map_fields);
+	assert(
+		aggregate_conversion.status == .COMPLETE
+		&& aggregate_conversion_imports.mapped_names.count == 1
+		&& aggregate_conversion_imports.mapped_names[0].source_name == "Clear"
+		&& aggregate_conversion_imports.unsupported_using_filters.count == 0
+	);
+	Extended.release_file_imports(*aggregate_conversion_imports);
+	Extended.release_parser_tree(*aggregate_conversion);
+	Extended.release_parser_names(*aggregate_conversion);
+
+	AGGREGATE_EXACT_RANK_SOURCE :: #string JAI
+Base :: struct { Value: int; }
+Wrapper :: struct { #as using base: Base; }
+Procs :: struct { Clear: int; }
+Other :: struct { PushMatrix: int; }
+make :: (value: Base) -> Other { return .{PushMatrix=1}; }
+make :: (value: Wrapper) -> Procs { return .{Clear=1}; }
+main :: () { using,map(rename) procs := make(Wrapper.{base=Base.{Value=1}}); call := glClear; }
+JAI
+	aggregate_exact_rank := Extended.parse_file(AGGREGATE_EXACT_RANK_SOURCE, filename);
+	aggregate_exact_rank_imports := Extended.resolve_file_imports(*aggregate_exact_rank, map_names=test_using_map_fields);
+	assert(
+		aggregate_exact_rank.status == .COMPLETE
+		&& aggregate_exact_rank_imports.mapped_names.count == 1
+		&& aggregate_exact_rank_imports.mapped_names[0].source_name == "Clear"
+		&& aggregate_exact_rank_imports.unsupported_using_filters.count == 0
+	);
+	Extended.release_file_imports(*aggregate_exact_rank_imports);
+	Extended.release_parser_tree(*aggregate_exact_rank);
+	Extended.release_parser_names(*aggregate_exact_rank);
+
+	ARY_OVERLOAD_SOURCE :: "Input :: struct { Value: int; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: () -> Other { return .{PushMatrix=1}; } make :: (input: Input) -> Procs { return .{Clear=1}; } main :: () { using,map(rename) procs := make(Input.{Value=1}); call := glClear; }";//
+	ary_overload := Extended.parse_file(ARY_OVERLOAD_SOURCE, filename);
+	ary_overload_imports := Extended.resolve_file_imports(*ary_overload, map_names=test_using_map_fields);
+	assert(ary_overload.status == .COMPLETE && ary_overload_imports.mapped_names.count == 1 && ary_overload_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*ary_overload_imports);
+	Extended.release_parser_tree(*ary_overload);
+	Extended.release_parser_names(*ary_overload);
+
+	PRIMITIVE_OVERLOAD_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: s64) -> Other { return .{PushMatrix=1}; } make :: (text: string) -> Procs { return .{Clear=1}; } main :: () { using,map(rename) procs := make(\"text\"); call := glClear; }";//
+	primitive_overload := Extended.parse_file(PRIMITIVE_OVERLOAD_SOURCE, filename);
+	primitive_overload_imports := Extended.resolve_file_imports(*primitive_overload, map_names=test_using_map_fields);
+	assert(primitive_overload.status == .COMPLETE && primitive_overload_imports.mapped_names.count == 1 && primitive_overload_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*primitive_overload_imports);
+	Extended.release_parser_tree(*primitive_overload);
+	Extended.release_parser_names(*primitive_overload);
+
+	INTEGER_OVERLOAD_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: s64) -> Procs { return .{Clear=1}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(1); call := glClear; }";//
+	integer_overload := Extended.parse_file(INTEGER_OVERLOAD_SOURCE, filename);
+	integer_overload_imports := Extended.resolve_file_imports(*integer_overload, map_names=test_using_map_fields);
+	assert(integer_overload.status == .COMPLETE && integer_overload_imports.mapped_names.count == 1 && integer_overload_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*integer_overload_imports);
+	Extended.release_parser_tree(*integer_overload);
+	Extended.release_parser_names(*integer_overload);
+
+	NUMERIC_RANK_SOURCE :: #string JAI
+Procs :: struct { Clear: int; }
+Other :: struct { PushMatrix: int; }
+make :: (number: float64) -> Other { return .{PushMatrix=1}; }
+make :: (number: s64) -> Procs { return .{Clear=1}; }
+main :: () { using,map(rename) procs := make(1); call := glClear; }
+JAI
+	numeric_rank := Extended.parse_file(NUMERIC_RANK_SOURCE, filename);
+	numeric_rank_imports := Extended.resolve_file_imports(*numeric_rank, map_names=test_using_map_fields);
+	assert(numeric_rank.status == .COMPLETE && numeric_rank_imports.mapped_names.count == 1 && numeric_rank_imports.mapped_names[0].source_name == "Clear" && numeric_rank_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*numeric_rank_imports);
+	Extended.release_parser_tree(*numeric_rank);
+	Extended.release_parser_names(*numeric_rank);
+
+	CONVERTED_RANK_SOURCE :: #string JAI
+Procs :: struct { Clear: int; }
+Other :: struct { PushMatrix: int; }
+make :: (number: float64) -> Procs { return .{Clear=1}; }
+make :: (text: string) -> Other { return .{PushMatrix=1}; }
+main :: () { using,map(rename) procs := make(1); call := glClear; }
+JAI
+	converted_rank := Extended.parse_file(CONVERTED_RANK_SOURCE, filename);
+	converted_rank_imports := Extended.resolve_file_imports(*converted_rank, map_names=test_using_map_fields);
+	assert(
+		converted_rank.status == .COMPLETE
+		&& converted_rank_imports.mapped_names.count == 1
+		&& converted_rank_imports.mapped_names[0].source_name == "Clear"
+		&& converted_rank_imports.unsupported_using_filters.count == 0
+	);
+	Extended.release_file_imports(*converted_rank_imports);
+	Extended.release_parser_tree(*converted_rank);
+	Extended.release_parser_names(*converted_rank);
+
+	FLOAT_RANK_SOURCE :: #string JAI
+Procs :: struct { Clear: int; }
+Other :: struct { PushMatrix: int; }
+make :: (number: float64) -> Procs { return .{Clear=1}; }
+make :: (text: string) -> Other { return .{PushMatrix=1}; }
+main :: () { using,map(rename) procs := make(1.5); call := glClear; }
+JAI
+	float_rank := Extended.parse_file(FLOAT_RANK_SOURCE, filename);
+	float_rank_imports := Extended.resolve_file_imports(*float_rank, map_names=test_using_map_fields);
+	assert(float_rank.status == .COMPLETE && float_rank_imports.mapped_names.count == 1 && float_rank_imports.mapped_names[0].source_name == "Clear" && float_rank_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*float_rank_imports);
+	Extended.release_parser_tree(*float_rank);
+	Extended.release_parser_names(*float_rank);
+
+	NAMED_OVERLOAD_SOURCE :: "Input :: struct { Value: int; } Alternate :: struct { Value: int; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (input: Input) -> Procs { return .{Clear=1}; } make :: (input: Alternate) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(input=Input.{Value=1}); call := glClear; }";//
+	named_overload := Extended.parse_file(NAMED_OVERLOAD_SOURCE, filename);
+	named_overload_imports := Extended.resolve_file_imports(*named_overload, map_names=test_using_map_fields);
+	assert(named_overload.status == .COMPLETE && named_overload_imports.mapped_names.count == 1 && named_overload_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*named_overload_imports);
+	Extended.release_parser_tree(*named_overload);
+	Extended.release_parser_names(*named_overload);
+
+	DEFAULTED_OVERLOAD_SOURCE :: #string JAI
+Input :: struct { Value: int; }
+Procs :: struct { Clear: int; }
+Other :: struct { PushMatrix: int; }
+make :: (input: Input, enabled: bool = true) -> Procs { return .{Clear=1}; }
+make :: (input: Input, required: string) -> Other { return .{PushMatrix=1}; }
+main :: () { using,map(rename) procs := make(input=Input.{Value=1}); call := glClear; }
+JAI
+	defaulted_overload := Extended.parse_file(DEFAULTED_OVERLOAD_SOURCE, filename);
+	defaulted_overload_imports := Extended.resolve_file_imports(*defaulted_overload, map_names=test_using_map_fields);
+	assert(
+		defaulted_overload.status == .COMPLETE
+		&& defaulted_overload_imports.mapped_names.count == 1
+		&& defaulted_overload_imports.mapped_names[0].source_name == "Clear"
+		&& defaulted_overload_imports.unsupported_using_filters.count == 0
+	);
+	Extended.release_file_imports(*defaulted_overload_imports);
+	Extended.release_parser_tree(*defaulted_overload);
+	Extended.release_parser_names(*defaulted_overload);
+
+	DEFAULTED_POSITIONAL_SOURCE :: #string JAI
+Input :: struct { Value: int; }
+Procs :: struct { Clear: int; }
+Other :: struct { PushMatrix: int; }
+make :: (input: Input, enabled: bool = true) -> Procs { return .{Clear=1}; }
+make :: (input: Input, required: string) -> Other { return .{PushMatrix=1}; }
+main :: () { using,map(rename) procs := make(Input.{Value=1}); call := glClear; }
+JAI
+	defaulted_positional := Extended.parse_file(DEFAULTED_POSITIONAL_SOURCE, filename);
+	defaulted_positional_imports := Extended.resolve_file_imports(*defaulted_positional, map_names=test_using_map_fields);
+	assert(
+		defaulted_positional.status == .COMPLETE
+		&& defaulted_positional_imports.mapped_names.count == 1
+		&& defaulted_positional_imports.mapped_names[0].source_name == "Clear"
+		&& defaulted_positional_imports.unsupported_using_filters.count == 0
+	);
+	Extended.release_file_imports(*defaulted_positional_imports);
+	Extended.release_parser_tree(*defaulted_positional);
+	Extended.release_parser_names(*defaulted_positional);
+
+	TYPED_PRIMITIVE_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: s64) -> Other { return .{PushMatrix=1}; } make :: (text: string) -> Procs { return .{Clear=1}; } main :: () { original: string = \"text\"; text := original; using,map(rename) procs := make(text); call := glClear; }";//
+	typed_primitive := Extended.parse_file(TYPED_PRIMITIVE_SOURCE, filename);
+	typed_primitive_imports := Extended.resolve_file_imports(*typed_primitive, map_names=test_using_map_fields);
+	assert(typed_primitive.status == .COMPLETE && typed_primitive_imports.mapped_names.count == 1 && typed_primitive_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*typed_primitive_imports);
+	Extended.release_parser_tree(*typed_primitive);
+	Extended.release_parser_names(*typed_primitive);
+
+	LATER_MISMATCH_SOURCE :: "Input :: struct { Value: int; } Alternate :: struct { Value: int; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: float64, input: Input) -> Other { return .{PushMatrix=1}; } make :: (number: s64, input: Alternate) -> Procs { return .{Clear=1}; } main :: () { using,map(rename) procs := make(1, Alternate.{Value=1}); call := glClear; }";//
+	later_mismatch := Extended.parse_file(LATER_MISMATCH_SOURCE, filename);
+	later_mismatch_imports := Extended.resolve_file_imports(*later_mismatch, map_names=test_using_map_fields);
+	assert(later_mismatch.status == .COMPLETE && later_mismatch_imports.mapped_names.count == 1 && later_mismatch_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*later_mismatch_imports);
+	Extended.release_parser_tree(*later_mismatch);
+	Extended.release_parser_names(*later_mismatch);
+
+	CALLED_ALIAS_SOURCE :: "Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Alternate :: struct { PushMatrix: int; } make :: (ready: bool) -> Container { return .{Nested=Child.{Clear=1}}; } make :: (ready: string) -> Alternate { return .{PushMatrix=1}; } main :: () { original := make(true); value := original; using,map(rename) procs := value.Nested; call := glClear; }";//
+	called_alias := Extended.parse_file(CALLED_ALIAS_SOURCE, filename);
+	called_alias_imports := Extended.resolve_file_imports(*called_alias, map_names=test_using_map_fields);
+	assert(called_alias.status == .COMPLETE && called_alias_imports.mapped_names.count == 1 && called_alias_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*called_alias_imports);
+	Extended.release_parser_tree(*called_alias);
+	Extended.release_parser_names(*called_alias);
+
+	SHADOWED_OVERLOADS_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (ready: bool) -> Other { return .{PushMatrix=1}; } main :: () { make :: (ready: bool) -> Procs { return .{Clear=1}; } make :: (ready: string) -> Other { return .{PushMatrix=2}; } using,map(rename) procs := make(true); call := glClear; }";//
+	shadowed_overloads := Extended.parse_file(SHADOWED_OVERLOADS_SOURCE, filename);
+	shadowed_overloads_imports := Extended.resolve_file_imports(*shadowed_overloads, map_names=test_using_map_fields);
+	assert(shadowed_overloads.status == .COMPLETE && shadowed_overloads_imports.mapped_names.count == 1 && shadowed_overloads_imports.mapped_names[0].source_name == "Clear" && shadowed_overloads_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*shadowed_overloads_imports);
+	Extended.release_parser_tree(*shadowed_overloads);
+	Extended.release_parser_names(*shadowed_overloads);
+
+	unsupported_calls: [] string = .[
+		#string JAI
+First :: struct { Value: int; }
+Second :: struct { Value: int; }
+Wrapper :: struct { #as using first: First; #as using second: Second; }
+Procs :: struct { Clear: int; }
+Other :: struct { PushMatrix: int; }
+make :: (value: First) -> Procs { return .{Clear=1}; }
+make :: (value: Second) -> Other { return .{PushMatrix=1}; }
+main :: () { using,map(rename) procs := make(Wrapper.{first=First.{Value=1}, second=Second.{Value=2}}); call := glClear; }
+JAI
+		,
+		#string JAI
+Procs :: struct { Clear: int; }
+make :: (input: int, enabled: bool = Missing) -> Procs { return .{Clear=1}; }
+main :: () { using,map(rename) procs := make(1); call := glClear; }
+JAI
+		,
+		#string JAI
+Procs :: struct { Clear: int; }
+make :: (input: int, required: string) -> Procs { return .{Clear=1}; }
+main :: () { using,map(rename) procs := make(input=1); call := glClear; }
+JAI,
+		"Input :: struct { Value: int; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (input: Input) -> Procs { return .{Clear=1}; } make :: (input: Input) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(Input.{Value=1}); call := glClear; }",//
+		"Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Box :: struct (T: Type) { Nested: T; } wrap :: (value: $T) -> Box(T) { return .{Nested=value}; } main :: (choose: bool) { using,map(rename) procs := (ifx choose then wrap(Child.{Clear=1}) else Box(Other).{Nested=Other.{PushMatrix=2}}).Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; #if Unknown { Hidden: int; } } Box :: struct (T: Type) { Nested: T; } wrap :: (value: $T) -> Box(T) { return .{Nested=value}; } main :: () { using,map(rename) procs := wrap(Child.{Clear=1}).Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; } make :: (value: $T/Child) -> T { return value; } main :: () { using,map(rename) procs := make(Child.{Clear=1}); call := glClear; }",//
+		"Child :: struct { Clear: int; } make :: (value: $T, other: $U) -> T { return value; } main :: () { using,map(rename) procs := make(Child.{Clear=1}); call := glClear; }",//
+		"Child :: struct { Clear: int; #if Unknown { Hidden: int; } } make :: (value: $T) -> T { return value; } main :: () { using,map(rename) procs := make(Child.{Clear=1}); call := glClear; }",//
+		"Child :: struct { Clear: int; } Container :: struct { Nested: Child; } Other :: struct { PushMatrix: int; } make :: (ready: bool) -> Container { return .{Nested=Child.{Clear=1}}; } make :: (ready: bool) -> Other { return .{PushMatrix=1}; } main :: () { original := make(true); value := original; using,map(rename) procs := value.Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; } Container :: struct { Nested: Child; #if Unknown { Hidden: int; } } make :: () -> Container { return .{Nested=Child.{Clear=1}}; } main :: () { original := make(); value := original; using,map(rename) procs := value.Nested; call := glClear; }",//
+		"Input :: struct { Value: int; } Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (input: Input) -> Procs { return .{Clear=1}; } make :: (input: Missing) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := make(Input.{Value=1}); call := glClear; }",//
+		"Procs :: struct { Clear: int; } make :: () -> Procs { return .{Clear=1}; } main :: () { using,map(rename) procs := make(1); call := glClear; }",//
+		"Procs :: struct { Clear: int; } identity :: (value: $T) -> T { return value; } main :: () { using,map(rename) procs := identity(missing); call := glClear; }",//
+		"Procs :: struct { Clear: int; } Alias := Procs; main :: () { using,map(rename) procs: Alias; call := glClear; }",//
+		"Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Box :: struct (T: Type) { Nested: T; } main :: (choose: bool) { using,map(rename) procs := (ifx choose then Box(Child).{Nested=Child.{Clear=1}} else Box(Other).{Nested=Other.{PushMatrix=2}}).Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Box :: struct (T: Type) { Clear: int; Nested: T; } main :: (choose: bool) { left: type_of(Box(Child).{Nested=Child.{Clear=1}}); right: type_of(Box(Other).{Nested=Other.{PushMatrix=2}}); using,map(rename) box := ifx choose then left else right; call := glClear; }",//
+	];
+	for unsupported_calls {
+		parsed_call := Extended.parse_file(it, filename);
+		call_imports := Extended.resolve_file_imports(*parsed_call, map_names=test_using_map_fields);
+		assert(parsed_call.status == .COMPLETE && call_imports.mapped_names.count == 0 && call_imports.unsupported_using_filters.count == 1);
+		Extended.release_file_imports(*call_imports);
+		Extended.release_parser_tree(*parsed_call);
+		Extended.release_parser_names(*parsed_call);
+	}
+
+	POLYMORPHIC_SOURCE :: "Procs :: struct { Clear: int; } make :: (value: $T) -> Procs { return .{Clear=1}; } main :: () { using,map(rename) procs := make(1); call := glClear; }";//
+	polymorphic := Extended.parse_file(POLYMORPHIC_SOURCE, filename);
+	polymorphic_header := polymorphic.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
+	assert(polymorphic_header.procedure_flags & .POLYMORPHIC != 0);
+	polymorphic_imports := Extended.resolve_file_imports(*polymorphic, map_names=test_using_map_fields);
+	assert(polymorphic.status == .COMPLETE && polymorphic_imports.mapped_names.count == 1 && polymorphic_imports.unsupported_using_filters.count == 0);
+	polymorphic_call := (
+		polymorphic.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(polymorphic_call.resolved_declaration == polymorphic_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*polymorphic_imports);
+	Extended.release_parser_tree(*polymorphic);
+	Extended.release_parser_names(*polymorphic);
+
+	IDENTITY_SOURCE :: "Procs :: struct { Clear: int; } identity :: (value: $T) -> T { return value; } main :: () { using,map(rename) procs := identity(Procs.{Clear=1}); call := glClear; }";//
+	identity := Extended.parse_file(IDENTITY_SOURCE, filename);
+	identity_imports := Extended.resolve_file_imports(*identity, map_names=test_using_map_fields);
+	assert(identity.status == .COMPLETE && identity_imports.mapped_names.count == 1 && identity_imports.unsupported_using_filters.count == 0);
+	identity_statements := identity.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(identity_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == identity_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*identity_imports);
+	Extended.release_parser_tree(*identity);
+	Extended.release_parser_names(*identity);
+
+	MULTIPLE_POLYMORPHIC_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } choose :: (left: $T, right: $U) -> T { return left; } main :: () { using,map(rename) procs := choose(Child.{Clear=1}, Other.{PushMatrix=2}); call := glClear; }";//
+	multiple_polymorphic := Extended.parse_file(MULTIPLE_POLYMORPHIC_SOURCE, filename);
+	multiple_polymorphic_imports := Extended.resolve_file_imports(*multiple_polymorphic, map_names=test_using_map_fields);
+	assert(multiple_polymorphic.status == .COMPLETE && multiple_polymorphic_imports.mapped_names.count == 1 && multiple_polymorphic_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*multiple_polymorphic_imports);
+	Extended.release_parser_tree(*multiple_polymorphic);
+	Extended.release_parser_names(*multiple_polymorphic);
+
+	NAMED_POLYMORPHIC_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } choose :: (left: $T, right: $U) -> T { return left; } main :: () { using,map(rename) procs := choose(right=Other.{PushMatrix=2}, left=Child.{Clear=1}); call := glClear; }";//
+	named_polymorphic := Extended.parse_file(NAMED_POLYMORPHIC_SOURCE, filename);
+	named_polymorphic_imports := Extended.resolve_file_imports(*named_polymorphic, map_names=test_using_map_fields);
+	assert(named_polymorphic.status == .COMPLETE && named_polymorphic_imports.mapped_names.count == 1 && named_polymorphic_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*named_polymorphic_imports);
+	Extended.release_parser_tree(*named_polymorphic);
+	Extended.release_parser_names(*named_polymorphic);
+
+	POLYMORPHIC_BOX_SOURCE :: "Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } wrap :: (value: $T) -> Box(T) { return .{Nested=value}; } main :: () { original := wrap(Child.{Clear=1}); using,map(rename) procs := original.Nested; call := glClear; }";//
+	polymorphic_box := Extended.parse_file(POLYMORPHIC_BOX_SOURCE, filename);
+	box_header := polymorphic_box.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
+	assert(box_header.returns.count == 1 && box_header.returns[0].type_inst && box_header.returns[0].type_inst.type_valued_expression && box_header.returns[0].type_inst.type_valued_expression.kind == .PROCEDURE_CALL);
+	polymorphic_box_imports := Extended.resolve_file_imports(*polymorphic_box, map_names=test_using_map_fields);
+	assert(polymorphic_box.status == .COMPLETE && polymorphic_box_imports.mapped_names.count == 1 && polymorphic_box_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*polymorphic_box_imports);
+	Extended.release_parser_tree(*polymorphic_box);
+	Extended.release_parser_names(*polymorphic_box);
+
+	MATCHING_POLYMORPHIC_BOX_SOURCE :: "Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } wrap :: (value: $T) -> Box(T) { return .{Nested=value}; } main :: (choose: bool) { using,map(rename) procs := (ifx choose then wrap(Child.{Clear=1}) else Box(Child).{Nested=Child.{Clear=2}}).Nested; call := glClear; }";//
+	matching_polymorphic_box := Extended.parse_file(MATCHING_POLYMORPHIC_BOX_SOURCE, filename);
+	matching_polymorphic_box_imports := Extended.resolve_file_imports(*matching_polymorphic_box, map_names=test_using_map_fields);
+	assert(matching_polymorphic_box.status == .COMPLETE && matching_polymorphic_box_imports.mapped_names.count == 1 && matching_polymorphic_box_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*matching_polymorphic_box_imports);
+	Extended.release_parser_tree(*matching_polymorphic_box);
+	Extended.release_parser_names(*matching_polymorphic_box);
+
+	POLYMORPHIC_PAIR_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } wrap :: (left: $T, right: $U) -> Pair(T, U) { return .{Left=left, Right=right}; } main :: () { using,map(rename) procs := wrap(Other.{PushMatrix=1}, Child.{Clear=2}).Right; call := glClear; }";//
+	polymorphic_pair := Extended.parse_file(POLYMORPHIC_PAIR_SOURCE, filename);
+	polymorphic_pair_imports := Extended.resolve_file_imports(*polymorphic_pair, map_names=test_using_map_fields);
+	assert(polymorphic_pair.status == .COMPLETE && polymorphic_pair_imports.mapped_names.count == 1 && polymorphic_pair_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*polymorphic_pair_imports);
+	Extended.release_parser_tree(*polymorphic_pair);
+	Extended.release_parser_names(*polymorphic_pair);
+
+	REORDERED_POLYMORPHIC_PAIR_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } wrap :: (left: $T, right: $U) -> Pair(U, T) { return .{Left=right, Right=left}; } main :: () { using,map(rename) procs := wrap(right=Other.{PushMatrix=1}, left=Child.{Clear=2}).Right; call := glClear; }";//
+	reordered_polymorphic_pair := Extended.parse_file(REORDERED_POLYMORPHIC_PAIR_SOURCE, filename);
+	reordered_polymorphic_pair_imports := Extended.resolve_file_imports(*reordered_polymorphic_pair, map_names=test_using_map_fields);
+	assert(reordered_polymorphic_pair.status == .COMPLETE && reordered_polymorphic_pair_imports.mapped_names.count == 1 && reordered_polymorphic_pair_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*reordered_polymorphic_pair_imports);
+	Extended.release_parser_tree(*reordered_polymorphic_pair);
+	Extended.release_parser_names(*reordered_polymorphic_pair);
+
+	NAMED_RETURN_PAIR_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } wrap :: (left: $T, right: $U) -> Pair(Second=T, First=U) { return .{Left=right, Right=left}; } main :: () { using,map(rename) procs := wrap(right=Other.{PushMatrix=1}, left=Child.{Clear=2}).Right; call := glClear; }";//
+	named_return_pair := Extended.parse_file(NAMED_RETURN_PAIR_SOURCE, filename);
+	named_return_pair_imports := Extended.resolve_file_imports(*named_return_pair, map_names=test_using_map_fields);
+	assert(named_return_pair.status == .COMPLETE && named_return_pair_imports.mapped_names.count == 1 && named_return_pair_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*named_return_pair_imports);
+	Extended.release_parser_tree(*named_return_pair);
+	Extended.release_parser_names(*named_return_pair);
+
+	ALIASED_RETURN_PAIR_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } Alias :: Pair; wrap :: (left: $T, right: $U) -> Alias(Second=T, First=U) { return .{Left=right, Right=left}; } main :: () { using,map(rename) procs := wrap(right=Other.{PushMatrix=1}, left=Child.{Clear=2}).Right; call := glClear; }";//
+	aliased_return_pair := Extended.parse_file(ALIASED_RETURN_PAIR_SOURCE, filename);
+	aliased_return_pair_imports := Extended.resolve_file_imports(*aliased_return_pair, map_names=test_using_map_fields);
+	assert(aliased_return_pair.status == .COMPLETE && aliased_return_pair_imports.mapped_names.count == 1 && aliased_return_pair_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*aliased_return_pair_imports);
+	Extended.release_parser_tree(*aliased_return_pair);
+	Extended.release_parser_names(*aliased_return_pair);
+
+	generic_sources: [] string = .[
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Clear: int; } main :: () { using,map(rename) box: Box(Child); call := glClear; }",//
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } main :: () { box: Box(Child); using,map(rename) child := box.Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } main :: () { box: type_of(Box(Child).{Nested=Child.{Clear=1}}); using,map(rename) child := box.Nested; call := glClear; }",//
+	];
+	for generic_sources {
+		generic := Extended.parse_file(it, filename);
+		generic_imports := Extended.resolve_file_imports(*generic, map_names=test_using_map_fields);
+		assert(generic.status == .COMPLETE && generic_imports.mapped_names.count == 1 && generic_imports.unsupported_using_filters.count == 0);
+		if it == generic_sources[1] {
+			structure := generic.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct);
+			parameter := structure.arguments_block.statements[0].(*Extended.Parser_Declaration);
+			field := structure.block.statements[0].(*Extended.Parser_Declaration);
+			assert(field.type_inst.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == parameter);
+		}
+
+		Extended.release_file_imports(*generic_imports);
+		Extended.release_parser_tree(*generic);
+		Extended.release_parser_names(*generic);
+	}
+
+	MULTIPLE_GENERIC_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } main :: () { pair: Pair(Other, Child); using,map(rename) value := pair.Right; call := glClear; }";//
+	multiple_generic := Extended.parse_file(MULTIPLE_GENERIC_SOURCE, filename);
+	multiple_generic_imports := Extended.resolve_file_imports(*multiple_generic, map_names=test_using_map_fields);
+	assert(multiple_generic.status == .COMPLETE && multiple_generic_imports.mapped_names.count == 1 && multiple_generic_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*multiple_generic_imports);
+	Extended.release_parser_tree(*multiple_generic);
+	Extended.release_parser_names(*multiple_generic);
+
+	ALIASED_GENERIC_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } Alias :: Pair; AliasAgain :: Alias; main :: () { pair: AliasAgain(Second=Child, First=Other); using,map(rename) procs := pair.Right; call := glClear; }";//
+	aliased_generic := Extended.parse_file(ALIASED_GENERIC_SOURCE, filename);
+	aliased_generic_imports := Extended.resolve_file_imports(*aliased_generic, map_names=test_using_map_fields);
+	assert(aliased_generic.status == .COMPLETE && aliased_generic_imports.mapped_names.count == 1 && aliased_generic_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*aliased_generic_imports);
+	Extended.release_parser_tree(*aliased_generic);
+	Extended.release_parser_names(*aliased_generic);
+
+	ALIASED_INSTANCE_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } Instance :: Pair(Second=Child, First=Other); Alias :: Instance; main :: () { pair: Alias; using,map(rename) procs := pair.Right; call := glClear; }";//
+	aliased_instance := Extended.parse_file(ALIASED_INSTANCE_SOURCE, filename);
+	aliased_instance_imports := Extended.resolve_file_imports(*aliased_instance, map_names=test_using_map_fields);
+	assert(aliased_instance.status == .COMPLETE && aliased_instance_imports.mapped_names.count == 1 && aliased_instance_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*aliased_instance_imports);
+	Extended.release_parser_tree(*aliased_instance);
+	Extended.release_parser_names(*aliased_instance);
+
+	EQUIVALENT_INSTANCE_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } Instance :: Pair(Second=Child, First=Other); main :: (choose: bool) { using,map(rename) procs := (ifx choose then Instance.{Right=Child.{Clear=1}} else Pair(Other, Child).{Right=Child.{Clear=2}}).Right; call := glClear; }";//
+	equivalent_instance := Extended.parse_file(EQUIVALENT_INSTANCE_SOURCE, filename);
+	equivalent_instance_imports := Extended.resolve_file_imports(*equivalent_instance, map_names=test_using_map_fields);
+	assert(equivalent_instance.status == .COMPLETE && equivalent_instance_imports.mapped_names.count == 1 && equivalent_instance_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*equivalent_instance_imports);
+	Extended.release_parser_tree(*equivalent_instance);
+	Extended.release_parser_names(*equivalent_instance);
+
+	NAMED_GENERIC_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } main :: () { pair: Pair(Second=Child, First=Other); using,map(rename) procs := pair.Right; call := glClear; }";//
+	named_generic := Extended.parse_file(NAMED_GENERIC_SOURCE, filename);
+	named_generic_imports := Extended.resolve_file_imports(*named_generic, map_names=test_using_map_fields);
+	assert(named_generic.status == .COMPLETE && named_generic_imports.mapped_names.count == 1 && named_generic_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*named_generic_imports);
+	Extended.release_parser_tree(*named_generic);
+	Extended.release_parser_names(*named_generic);
+
+	NESTED_GENERIC_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } main :: () { pair: Pair(Pair(Child, Other), Other); using,map(rename) procs := pair.Left.Left; call := glClear; }";//
+	nested_generic := Extended.parse_file(NESTED_GENERIC_SOURCE, filename);
+	nested_generic_imports := Extended.resolve_file_imports(*nested_generic, map_names=test_using_map_fields);
+	assert(nested_generic.status == .COMPLETE && nested_generic_imports.mapped_names.count == 1 && nested_generic_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*nested_generic_imports);
+	Extended.release_parser_tree(*nested_generic);
+	Extended.release_parser_names(*nested_generic);
+
+	NESTED_ALIAS_SOURCE :: "Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } Inner :: Pair(Child, Other); main :: () { pair: Pair(Inner, Other); using,map(rename) procs := pair.Left.Left; call := glClear; }";//
+	nested_alias := Extended.parse_file(NESTED_ALIAS_SOURCE, filename);
+	nested_alias_imports := Extended.resolve_file_imports(*nested_alias, map_names=test_using_map_fields);
+	assert(nested_alias.status == .COMPLETE && nested_alias_imports.mapped_names.count == 1 && nested_alias_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*nested_alias_imports);
+	Extended.release_parser_tree(*nested_alias);
+	Extended.release_parser_names(*nested_alias);
+
+	INSTANTIATED_FIELD_SOURCE :: "Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Container :: struct { Item: Box(Child); } main :: () { container: Container; using,map(rename) procs := container.Item.Nested; call := glClear; }";//
+	instantiated_field := Extended.parse_file(INSTANTIATED_FIELD_SOURCE, filename);
+	instantiated_field_imports := Extended.resolve_file_imports(*instantiated_field, map_names=test_using_map_fields);
+	assert(instantiated_field.status == .COMPLETE && instantiated_field_imports.mapped_names.count == 1 && instantiated_field_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*instantiated_field_imports);
+	Extended.release_parser_tree(*instantiated_field);
+	Extended.release_parser_names(*instantiated_field);
+
+	PARAMETERIZED_FIELD_SOURCE :: "Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Container :: struct (T: Type) { Item: Box(T); } main :: () { container: Container(Child); using,map(rename) procs := container.Item.Nested; call := glClear; }";//
+	parameterized_field := Extended.parse_file(PARAMETERIZED_FIELD_SOURCE, filename);
+	parameterized_field_imports := Extended.resolve_file_imports(*parameterized_field, map_names=test_using_map_fields);
+	assert(parameterized_field.status == .COMPLETE && parameterized_field_imports.mapped_names.count == 1 && parameterized_field_imports.unsupported_using_filters.count == 0);
+	assert(parameterized_field.root_scope.inference_pool == null);
+	Extended.release_file_imports(*parameterized_field_imports);
+	parameterized_field_imports = Extended.resolve_file_imports(*parameterized_field, map_names=test_using_map_fields);
+	assert(parameterized_field_imports.mapped_names.count == 1 && parameterized_field_imports.unsupported_using_filters.count == 0);
+	assert(parameterized_field.root_scope.inference_pool == null);
+	Extended.release_file_imports(*parameterized_field_imports);
+	Extended.release_parser_tree(*parameterized_field);
+	Extended.release_parser_names(*parameterized_field);
+
+	nested_field_sources: []string = .[
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Container :: struct (T: Type) { Item: Box(Box(T)); } main :: () { container: Container(Child); using,map(rename) procs := container.Item.Nested.Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } Container :: struct (T: Type, U: Type) { Item: Pair(Second=T, First=U); } main :: () { container: Container(U=Other, T=Child); using,map(rename) procs := container.Item.Right; call := glClear; }",//
+	];
+	for nested_field_sources {
+		parsed := Extended.parse_file(it, filename);
+		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 1 && imports.unsupported_using_filters.count == 0, "Nested field fixture: %", it);
+		Extended.release_file_imports(*imports);
+		Extended.release_parser_tree(*parsed);
+		Extended.release_parser_names(*parsed);
+	}
+
+	unsupported_nested_field_sources: []string = .[
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Container :: struct (T: Type) { Item: Box(T); } main :: () { using,map(rename) procs: Container; call := glClear; }",//
+		"Child :: struct { Clear: int; } Child :: struct { PushMatrix: int; } Box :: struct (T: Type) { Nested: T; } Container :: struct (T: Type) { Item: Box(T); } main :: () { container: Container(Child); using,map(rename) procs := container.Item.Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; #if Unknown { Hidden: int; } } Box :: struct (T: Type) { Nested: T; } Container :: struct (T: Type) { Item: Box(T); } main :: () { container: Container(Child); using,map(rename) procs := container.Item.Nested; call := glClear; }",//
+		"Box :: struct (T: Type) { Nested: T; } Container :: struct (T: Type) { Item: Box(T); } Self :: Container(Self); main :: () { container: Self; using,map(rename) procs := container.Item.Nested; call := glClear; }",//
+	];
+	for unsupported_nested_field_sources {
+		parsed := Extended.parse_file(it, filename);
+		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 0 && imports.unsupported_using_filters.count == 1, "Unsupported nested field fixture: %", it);
+		Extended.release_file_imports(*imports);
+		Extended.release_parser_tree(*parsed);
+		Extended.release_parser_names(*parsed);
+	}
+
+	complete_alias_sources: [] string = .[
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Instance :: Box(Child); Alias :: Instance; main :: () { value: Alias; using,map(rename) procs := value.Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Instance :: Box(Child); Alias :: Instance; main :: () { original := Alias.{Nested=Child.{Clear=1}}; first := original; second := first; using,map(rename) procs := second.Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } main :: () { value: Box(Child) = .{Nested=Child.{Clear=1}}; alias := value; using,map(rename) procs := alias.Nested; call := glClear; }",//
+	];
+	for complete_alias_sources {
+		complete_alias := Extended.parse_file(it, filename);
+		complete_alias_imports := Extended.resolve_file_imports(*complete_alias, map_names=test_using_map_fields);
+		assert(complete_alias.status == .COMPLETE && complete_alias_imports.mapped_names.count == 1 && complete_alias_imports.unsupported_using_filters.count == 0, "Complete alias fixture: %", it);
+		Extended.release_file_imports(*complete_alias_imports);
+		Extended.release_parser_tree(*complete_alias);
+		Extended.release_parser_names(*complete_alias);
+	}
+
+	unsupported_alias_sources: [] string = .[
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Instance :: Box(Child); Instance :: Box(Child); main :: () { value: Instance; using,map(rename) procs := value.Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Instance :: Box(Child); main :: () { original := Instance.{Nested=Child.{Clear=1}}; original := Instance.{Nested=Child.{Clear=2}}; alias := original; using,map(rename) procs := alias.Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } First :: Second; Second :: First; main :: () { value: First; using,map(rename) procs := value.Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } main :: () { first := second; second := first; using,map(rename) procs := first.Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Instance :: Box; main :: () { value: Instance; using,map(rename) procs := value.Nested; call := glClear; }",//
+		"Child :: struct { Clear: int; } Box :: struct (T: Type) { Nested: T; } Instance :: Box(Missing); main :: () { value: Instance; using,map(rename) procs := value.Nested; call := glClear; }",//
+	];
+	for unsupported_alias_sources {
+		unsupported_alias := Extended.parse_file(it, filename);
+		unsupported_alias_imports := Extended.resolve_file_imports(*unsupported_alias, map_names=test_using_map_fields);
+		assert(unsupported_alias.status == .COMPLETE && unsupported_alias_imports.mapped_names.count == 0 && unsupported_alias_imports.unsupported_using_filters.count == 1, "Unsupported alias fixture: %", it);
+		Extended.release_file_imports(*unsupported_alias_imports);
+		Extended.release_parser_tree(*unsupported_alias);
+		Extended.release_parser_names(*unsupported_alias);
+	}
+
+	PRIMITIVE_GENERIC_SOURCE :: "Box :: struct (T: Type) { Clear: int; Nested: T; } main :: () { using,map(rename) box: Box(s64); call := glClear; }";//
+	primitive_generic := Extended.parse_file(PRIMITIVE_GENERIC_SOURCE, filename);
+	primitive_generic_imports := Extended.resolve_file_imports(*primitive_generic, map_names=test_using_map_fields);
+	assert(primitive_generic.status == .COMPLETE && primitive_generic_imports.mapped_names.count == 2 && primitive_generic_imports.unsupported_using_filters.count == 0);
+	Extended.release_file_imports(*primitive_generic_imports);
+	Extended.release_parser_tree(*primitive_generic);
+	Extended.release_parser_names(*primitive_generic);
+
+	unsupported_generic_sources: [] string = .[
+		"Box :: struct (T: Type) { Nested: T; } main :: () { using,map(rename) box: Box; call := glNested; }",//
+		"Box :: struct (T: Type) { Nested: T; } main :: () { using,map(rename) box: Box(Missing); call := glNested; }",//
+		"Child :: struct { Clear: int; } Alias :: Loop; Loop :: Alias; main :: () { using,map(rename) value: Alias(Child); call := glClear; }",//
+		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } Self :: Pair(Self, Child); main :: () { using,map(rename) pair: Self; call := glRight; }",//
+		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } Alias :: Pair; main :: () { using,map(rename) pair: Alias(Unknown=Child, Second=Child); call := glRight; }",//
+		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } Alias :: Pair(Child); main :: () { using,map(rename) pair: Alias; call := glRight; }",//
+		"Child :: struct { Clear: int; } Other :: struct { PushMatrix: int; } Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; } main :: (choose: bool) { using,map(rename) pair := ifx choose then Pair(Pair(Child, Other), Other).{Right=Other.{PushMatrix=1}} else Pair(Pair(Other, Child), Other).{Right=Other.{PushMatrix=2}}; call := glRight; }",//
+		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } wrap :: (left: $T, right: $U) -> Pair(Second=T, Second=U) { return .{Right=left}; } main :: () { using,map(rename) procs := wrap(Child.{Clear=1}, Child.{Clear=2}); call := glRight; }",//
+		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } main :: () { using,map(rename) pair: Pair(First=Child, First=Child); call := glRight; }",//
+		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } main :: () { using,map(rename) pair: Pair(Child); call := glRight; }",//
+		"Child :: struct { Clear: int; } Pair :: struct (First: Type, Second: Type) { Right: Second; } main :: () { using,map(rename) pair: Pair(Child, Missing); call := glRight; }",//
+		"Child :: struct { Clear: int; #if Unknown { PushMatrix: int; } } Box :: struct (T: Type) { Clear: int; } main :: () { using,map(rename) box: Box(Child); call := glClear; }",//
+	];
+	for unsupported_generic_sources {
+		generic := Extended.parse_file(it, filename);
+		generic_imports := Extended.resolve_file_imports(*generic, map_names=test_using_map_fields);
+		assert(generic.status == .COMPLETE && generic_imports.mapped_names.count == 0 && generic_imports.unsupported_using_filters.count == 1, "Unsupported generic fixture: %", it);
+		Extended.release_file_imports(*generic_imports);
+		Extended.release_parser_tree(*generic);
+		Extended.release_parser_names(*generic);
+	}
+
+	TYPED_RUN_SOURCE :: "Procs :: struct { Clear: int; } main :: () { using,map(rename) procs := #run -> Procs { return .{Clear=1}; }; call := glClear; }";//
+	typed_run := Extended.parse_file(TYPED_RUN_SOURCE, filename);
+	typed_run_imports := Extended.resolve_file_imports(*typed_run, map_names=test_using_map_fields);
+	assert(typed_run.status == .COMPLETE);
+	assert(typed_run_imports.mapped_names.count == 1 && typed_run_imports.unsupported_using_filters.count == 0);
+	typed_run_call := (
+		typed_run.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(typed_run_call.resolved_declaration == typed_run_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*typed_run_imports);
+	Extended.release_parser_tree(*typed_run);
+	Extended.release_parser_names(*typed_run);
+
+	complete_conditional_receiver_sources: []string = .[
+		#string JAI
+C :: struct { Clear: int; }
+Box :: struct (T: Type) { Nested: T; }
+main :: () { using,map(rename) procs := (#run Box(C).{Nested=C.{Clear=1}}).Nested; call := glClear; }
+JAI
+		,
+		#string JAI
+C :: struct { Clear: int; }
+Box :: struct (T: Type) { Nested: T; }
+main :: () { using,map(rename) procs := (#run -> Box(C) { return .{Nested=C.{Clear=1}}; }).Nested; call := glClear; }
+JAI
+		,
+		#string JAI
+C :: struct { Clear: int; }
+Box :: struct (T: Type) { Nested: T; }
+main :: (choose: bool) { using,map(rename) procs := (ifx choose then Box(C).{Nested=C.{Clear=1}} else Box(C).{Nested=C.{Clear=2}}).Nested; call := glClear; }
+JAI
+		,
+		#string JAI
+C :: struct { Clear: int; }
+O :: struct { PushMatrix: int; }
+Box :: struct (T: Type) { Nested: T; }
+main :: () { using,map(rename) procs := (#ifx true then Box(C).{Nested=C.{Clear=1}} else Box(O).{Nested=O.{PushMatrix=2}}).Nested; call := glClear; }
+JAI
+	];
+	for complete_conditional_receiver_sources {
+		parsed := Extended.parse_file(it, filename);
+		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 1 && imports.unsupported_using_filters.count == 0, "Complete conditional receiver fixture: %", it);
+		Extended.release_file_imports(*imports);
+		Extended.release_parser_tree(*parsed);
+		Extended.release_parser_names(*parsed);
+	}
+
+	unsupported_conditional_receiver_sources: []string = .[
+		#string JAI
+C :: struct { Clear: int; }
+O :: struct { PushMatrix: int; }
+Box :: struct (T: Type) { Nested: T; }
+main :: (choose: bool) { using,map(rename) procs := (ifx choose then Box(C).{Nested=C.{Clear=1}} else Box(O).{Nested=O.{PushMatrix=2}}).Nested; call := glClear; }
+JAI
+		,
+		#string JAI
+C :: struct { Clear: int; }
+Box :: struct (T: Type) { Nested: T; }
+main :: () { using,map(rename) procs := (#ifx Unknown then Box(C).{Nested=C.{Clear=1}} else Box(C).{Nested=C.{Clear=2}}).Nested; call := glClear; }
+JAI
+		,
+		#string JAI
+C :: struct { Clear: int; }
+Box :: struct (T: Type) { Nested: T; }
+main :: () { using,map(rename) procs := (#run { return Box(C).{Nested=C.{Clear=1}}; }).Nested; call := glClear; }
+JAI
+	];
+	for unsupported_conditional_receiver_sources {
+		parsed := Extended.parse_file(it, filename);
+		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 0 && imports.unsupported_using_filters.count == 1, "Unsupported conditional receiver fixture: %", it);
+		Extended.release_file_imports(*imports);
+		Extended.release_parser_tree(*parsed);
+		Extended.release_parser_names(*parsed);
+	}
+
+	EXPRESSION_RUN_SOURCE :: "Procs :: struct { Clear: int; } main :: () { using,map(rename) procs := #run Procs.{Clear=1}; call := glClear; }";//
+	expression_run := Extended.parse_file(EXPRESSION_RUN_SOURCE, filename);
+	expression_run_imports := Extended.resolve_file_imports(*expression_run, map_names=test_using_map_fields);
+	assert(expression_run.status == .COMPLETE);
+	assert(expression_run_imports.mapped_names.count == 1 && expression_run_imports.unsupported_using_filters.count == 0);
+	expression_run_call := (
+		expression_run.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(expression_run_call.resolved_declaration == expression_run_imports.mapped_names[0].declaration);
+	Extended.release_file_imports(*expression_run_imports);
+	Extended.release_parser_tree(*expression_run);
+	Extended.release_parser_names(*expression_run);
+
+	OVERLOADED_RUN_SOURCE :: "Procs :: struct { Clear: int; } Other :: struct { PushMatrix: int; } make :: (number: int) -> Procs { return .{Clear=1}; } make :: (text: string) -> Other { return .{PushMatrix=1}; } main :: () { using,map(rename) procs := #run make(\"text\"); call := glClear; }";//
+	overloaded_run := Extended.parse_file(OVERLOADED_RUN_SOURCE, filename);
+	overloaded_run_imports := Extended.resolve_file_imports(*overloaded_run, map_names=test_using_map_fields);
+	assert(
+		overloaded_run.status == .COMPLETE
+		&& overloaded_run_imports.mapped_names.count == 1
+		&& overloaded_run_imports.mapped_names[0].source_name == "PushMatrix"
+		&& !overloaded_run_imports.mapped_names[0].exported_name
+		&& overloaded_run_imports.unsupported_using_filters.count == 0
+	);
+	Extended.release_file_imports(*overloaded_run_imports);
+	Extended.release_parser_tree(*overloaded_run);
+	Extended.release_parser_names(*overloaded_run);
+
+	UNTYPED_RUN_SOURCE :: "Procs :: struct { Clear: int; } main :: () { using,map(rename) procs := #run { return Procs.{Clear=1}; }; call := glClear; }";//
+	untyped_run := Extended.parse_file(UNTYPED_RUN_SOURCE, filename);
+	untyped_run_imports := Extended.resolve_file_imports(*untyped_run, map_names=test_using_map_fields);
+	assert(untyped_run.status == .COMPLETE && untyped_run_imports.mapped_names.count == 0 && untyped_run_imports.unsupported_using_filters.count == 1);
+	Extended.release_file_imports(*untyped_run_imports);
+	Extended.release_parser_tree(*untyped_run);
+	Extended.release_parser_names(*untyped_run);
+
+	UNRESOLVED_CALL_SOURCE :: "main :: () { using,map(rename) procs := missing(); call := glClear; }";//
+	unresolved_call := Extended.parse_file(UNRESOLVED_CALL_SOURCE, filename);
+	unresolved_call_imports := Extended.resolve_file_imports(*unresolved_call, map_names=test_using_map_fields);
+	assert(unresolved_call_imports.mapped_names.count == 0 && unresolved_call_imports.unsupported_using_filters.count == 1);
+	unresolved_call_reference := (
+		unresolved_call.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(unresolved_call_reference.resolved_declaration == null);
+	Extended.release_file_imports(*unresolved_call_imports);
+	Extended.release_parser_tree(*unresolved_call);
+	Extended.release_parser_names(*unresolved_call);
+
+	test_semantic_field.name = "Clear";
+	test_semantic_field_name = copy_string("Clear");
+	semantic_call := Extended.parse_file(UNRESOLVED_CALL_SOURCE, filename);
+	semantic_imports := Extended.resolve_file_imports(*semantic_call, map_names=test_using_map_fields, aggregate_fields=test_using_map_semantic_fields);
+	free(test_semantic_field_name);
+	test_semantic_field_name = "";
+	assert(semantic_imports.unsupported_using_filters.count == 0 && semantic_imports.mapped_names.count == 1);
+	assert(semantic_imports.mapped_names[0].source_name == "Clear" && semantic_imports.mapped_names[0].exported_name == "glClear");
+	semantic_reference := (
+		semantic_call.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(semantic_reference.resolved_declaration == *test_semantic_field);
+	Extended.release_file_imports(*semantic_imports);
+	assert(semantic_reference.resolved_declaration == null);
+	Extended.release_parser_tree(*semantic_call);
+	Extended.release_parser_names(*semantic_call);
+
+	AGGREGATE_COLLISION_SOURCE :: "Procs :: struct { Clear: int; PushMatrix: int; } main :: () { using,map(rename) procs: Procs; call := same_name; }";//
+	aggregate_collision := Extended.parse_file(AGGREGATE_COLLISION_SOURCE, filename);
+	aggregate_collision_imports := Extended.resolve_file_imports(*aggregate_collision, map_names=test_using_map_collision);
+	assert(aggregate_collision_imports.map_collisions.count == 1);
+	for scope: aggregate_collision.root_scope.children[1].children {
+		for reference: scope.references {
+			if reference.name == "same_name" {
+				assert(reference.resolved_declaration == null);
+			}
+		}
+	}
+
+	Extended.release_file_imports(*aggregate_collision_imports);
+	Extended.release_parser_tree(*aggregate_collision);
+	Extended.release_parser_names(*aggregate_collision);
+
+	SEPARATE_SOURCE :: "First :: struct { alpha: int; } Second :: struct { beta: int; } main :: () { using,map(rename) a: First; using,map(rename) b: Second; call := same_name; }";//
+	separate := Extended.parse_file(SEPARATE_SOURCE, filename);
+	separate_imports := Extended.resolve_file_imports(*separate, map_names=test_using_map_collision);
+	assert(separate_imports.map_collisions.count == 1);
+	separate_call := (
+		separate.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header)
+			.body_or_null.block.statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident)
+	);
+	assert(separate_call.resolved_declaration == null);
+	Extended.release_file_imports(*separate_imports);
+	Extended.release_parser_tree(*separate);
+	Extended.release_parser_names(*separate);
+
+	LEXICAL_SOURCE :: "Procs :: struct { Clear: int; } main :: () { glClear :: 5; using,map(rename) procs: Procs; call := glClear; }";//
+	lexical := Extended.parse_file(LEXICAL_SOURCE, filename);
+	lexical_imports := Extended.resolve_file_imports(*lexical, map_names=test_using_map_fields);
+	assert(lexical_imports.map_collisions.count == 1);
+	lexical_statements := lexical.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
+	assert(lexical_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == lexical_statements[0].(*Extended.Parser_Declaration));
+	Extended.release_file_imports(*lexical_imports);
+	Extended.release_parser_tree(*lexical);
+	Extended.release_parser_names(*lexical);
+
+	LOCAL_SOURCE :: "#import,file \"files/specific.jai\"; mess_up_this_string :: 4; call := mess_up_this_string;";//
+	local := Extended.parse_file(LOCAL_SOURCE, filename);
+	local_imports := Extended.resolve_file_imports(*local);
+	local_statements := local.root.(*Extended.Parser_Block).statements;
+	assert(local_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == local_statements[1].(*Extended.Parser_Declaration));
+	Extended.release_file_imports(*local_imports);
+	Extended.release_parser_tree(*local);
+	Extended.release_parser_names(*local);
 }
 
 test_diagnostic_tab_rendering :: () {
@@ -8313,8 +10264,8 @@ test_postfix_expressions :: () {
 }
 
 test_call_context_modification :: () {
-	source :: "f(16, 8,, allocator = pool_allocator, logger = my_logger)";
-	parsed := Extended.parse_expression(source);
+	SOURCE :: "f(16, 8,, allocator = pool_allocator, logger = my_logger)";
+	parsed := Extended.parse_expression(SOURCE);
 	assert(parsed.status == .COMPLETE);
 	call := parsed.root.(*Extended.Parser_Procedure_Call);
 	assert(call.arguments_unsorted.count == 2);
@@ -8328,7 +10279,7 @@ test_call_context_modification :: () {
 	assert(second.operator_type == #char "=");
 	assert(second.left.(*Extended.Parser_Ident).name == "logger");
 	assert(second.right.(*Extended.Parser_Ident).name == "my_logger");
-	assert(Extended.reconstruct_source(*parsed) == source);
+	assert(Extended.reconstruct_source(*parsed) == SOURCE);
 
 	shorthand := Extended.parse_expression("f(1000, 3,, pool_allocator)");
 	assert(shorthand.status == .COMPLETE);
@@ -8525,8 +10476,8 @@ test_expression_directives :: () {
 	assert(host_block_run_node.expression.(*Extended.Parser_Block).statements.count == 1);
 
 	// Typed block runs own their return signature and leave the next declaration separate.
-	typed_run_source :: "VALUE :: #run -> [] string { return .[\"ready\"]; }\nafter :: 1;";
-	typed_run_file := Extended.parse_file(typed_run_source);
+	TYPED_RUN_SOURCE :: "VALUE :: #run -> [] string { return .[\"ready\"]; }\nafter :: 1;";
+	typed_run_file := Extended.parse_file(TYPED_RUN_SOURCE);
 	assert(typed_run_file.status == .COMPLETE);
 	typed_run_statements := typed_run_file.root.(*Extended.Parser_Block).statements;
 	assert(typed_run_statements.count == 2);
@@ -8535,7 +10486,7 @@ test_expression_directives :: () {
 	assert(typed_run.procedure.returns.count == 1);
 	assert(typed_run.expression == typed_run.procedure.body_or_null.block);
 	assert(typed_run.expression.(*Extended.Parser_Block).statements.count == 1);
-	assert(Extended.reconstruct_source(*typed_run_file) == typed_run_source);
+	assert(Extended.reconstruct_source(*typed_run_file) == TYPED_RUN_SOURCE);
 	host_typed_run := Extended.parse_file("VALUE :: #run,host -> string { return \"ready\"; };\nafter :: 1;");
 	assert(host_typed_run.status == .COMPLETE);
 	host_typed_statements := host_typed_run.root.(*Extended.Parser_Block).statements;
@@ -8547,8 +10498,8 @@ test_expression_directives :: () {
 	assert(host_typed_directive.expression == host_typed_directive.procedure.body_or_null.block);
 	assert(Extended.parse_expression("#run -> string").status == .INCOMPLETE);
 
-	assert_source :: "{ #assert ready \"not ready\"; after(); }";
-	assert_parsed := Extended.parse_block(assert_source);
+	ASSERT_SOURCE :: "{ #assert ready \"not ready\"; after(); }";
+	assert_parsed := Extended.parse_block(ASSERT_SOURCE);
 	assert(assert_parsed.status == .COMPLETE);
 	assert_statements := assert_parsed.root.(*Extended.Parser_Block).statements;
 	assert(assert_statements.count == 2);
@@ -8557,29 +10508,29 @@ test_expression_directives :: () {
 	assert((assert_run.flags & .HAS_IMPLICIT_RETURN_TYPES) != 0);
 	assert(assert_run.expression.(*Extended.Parser_Ident).name == "ready");
 	assert(assert_run.assertion_string == "not ready");
-	assert(Extended.reconstruct_source(*assert_parsed) == assert_source);
+	assert(Extended.reconstruct_source(*assert_parsed) == ASSERT_SOURCE);
 	module_assert := Extended.parse_file("#assert(is_constant(VERBOSE));\nrender :: () {}");
 	assert(module_assert.status == .COMPLETE);
 	assert(module_assert.root.(*Extended.Parser_Block).statements[0].kind == .DIRECTIVE_RUN);
 	assert(Extended.parse_block("{ #assert; after(); }").status == .RECOVERED);
 
-	run_source :: "{ #run { compile_step(); } after(); #run compute(); }";
-	run_statements := Extended.parse_block(run_source);
+	RUN_SOURCE :: "{ #run { compile_step(); } after(); #run compute(); }";
+	run_statements := Extended.parse_block(RUN_SOURCE);
 	assert(run_statements.status == .COMPLETE);
 	assert(run_statements.root.(*Extended.Parser_Block).statements.count == 3);
 	assert(run_statements.root.(*Extended.Parser_Block).statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*run_statements) == run_source);
+	assert(Extended.reconstruct_source(*run_statements) == RUN_SOURCE);
 
-	file_run_source :: "#run { compile_step(); }\nmain :: () {}";
-	file_run := Extended.parse_file(file_run_source);
+	FILE_RUN_SOURCE :: "#run { compile_step(); }\nmain :: () {}";
+	file_run := Extended.parse_file(FILE_RUN_SOURCE);
 	assert(file_run.status == .COMPLETE);
 	assert(file_run.root.(*Extended.Parser_Block).statements.count == 2);
-	assert(Extended.reconstruct_source(*file_run) == file_run_source);
+	assert(Extended.reconstruct_source(*file_run) == FILE_RUN_SOURCE);
 	assert(Extended.parse_block("{ #run { compile_step(); }; after(); }").status == .COMPLETE);
 	assert(Extended.parse_block("{ #run compute() after(); }").status == .RECOVERED);
 
-	plain_insert_source :: "#insert body";
-	insert := Extended.parse_expression(plain_insert_source);
+	PLAIN_INSERT_SOURCE :: "#insert body";
+	insert := Extended.parse_expression(PLAIN_INSERT_SOURCE);
 	assert(insert.status == .COMPLETE);
 	plain_insert := insert.root.(*Extended.Parser_Directive_Insert);
 	assert(plain_insert.expression.(*Extended.Parser_Ident).name == "body");
@@ -8588,10 +10539,10 @@ test_expression_directives :: () {
 	assert(plain_insert.continue_replacement == null);
 	assert(plain_insert.remove_replacement == null);
 	assert(plain_insert.expansion == null);
-	assert(Extended.reconstruct_source(*insert) == plain_insert_source);
+	assert(Extended.reconstruct_source(*insert) == PLAIN_INSERT_SOURCE);
 
-	empty_scope_source :: "{ code :: #code { value := 1; }; #insert,scope() code; after(); }";
-	empty_scope := Extended.parse_block(empty_scope_source);
+	EMPTY_SCOPE_SOURCE :: "{ code :: #code { value := 1; }; #insert,scope() code; after(); }";
+	empty_scope := Extended.parse_block(EMPTY_SCOPE_SOURCE);
 	assert(empty_scope.status == .COMPLETE);
 	empty_statements := empty_scope.root.(*Extended.Parser_Block).statements;
 	assert(empty_statements.count == 3);
@@ -8600,7 +10551,7 @@ test_expression_directives :: () {
 	assert(empty_insert.scope_redirection == null);
 	assert(empty_insert.expression.(*Extended.Parser_Ident).name == "code");
 	assert(empty_statements[2].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*empty_scope) == empty_scope_source);
+	assert(Extended.reconstruct_source(*empty_scope) == EMPTY_SCOPE_SOURCE);
 	assert(Extended.parse_expression("#insert,scope(code").status == .INCOMPLETE);
 	insert_options := Extended.parse_expression("#insert,scope(caller) (break=break outer, continue=continue outer, remove=remove outer) body");
 	assert(insert_options.status == .COMPLETE);
@@ -8610,8 +10561,8 @@ test_expression_directives :: () {
 	assert(insert_node.continue_replacement.(*Extended.Parser_Loop_Control).control_type == .CONTINUE);
 	assert(insert_node.remove_replacement.(*Extended.Parser_Loop_Control).control_type == .REMOVE);
 
-	replacements_source :: "{ #insert(break=break y, continue=continue y, remove=#assert(false)) body; after(); }";
-	replacements := Extended.parse_block(replacements_source);
+	REPLACEMENTS_SOURCE :: "{ #insert(break=break y, continue=continue y, remove=#assert(false)) body; after(); }";
+	replacements := Extended.parse_block(REPLACEMENTS_SOURCE);
 	assert(replacements.status == .COMPLETE);
 	assert(replacements.root.(*Extended.Parser_Block).statements.count == 2);
 	replacement_insert := replacements.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Directive_Insert);
@@ -8621,7 +10572,7 @@ test_expression_directives :: () {
 	assert((replacement_insert.remove_replacement.(*Extended.Parser_Directive_Run).flags & .ASSERTION) != 0);
 	assert(replacement_insert.expression.(*Extended.Parser_Ident).name == "body");
 	assert(replacement_insert.expansion == null);
-	assert(Extended.reconstruct_source(*replacements) == replacements_source);
+	assert(Extended.reconstruct_source(*replacements) == REPLACEMENTS_SOURCE);
 
 	insert_procedure := Extended.parse_expression("#insert -> string { return \"generated\"; }");
 	implicit_run := insert_procedure.root.(*Extended.Parser_Directive_Insert).expression.(*Extended.Parser_Directive_Run);
@@ -8629,15 +10580,15 @@ test_expression_directives :: () {
 	assert(implicit_run.procedure.returns.count == 1);
 	assert(implicit_run.expression.(*Extended.Parser_Block).statements.count == 1);
 
-	short_insert_source :: "{ #insert -> string { return \"x *= x;\"; } #insert -> Code { return #code x = x + 1; } after(); }";
-	short_inserts := Extended.parse_block(short_insert_source);
+	SHORT_INSERT_SOURCE :: "{ #insert -> string { return \"x *= x;\"; } #insert -> Code { return #code x = x + 1; } after(); }";
+	short_inserts := Extended.parse_block(SHORT_INSERT_SOURCE);
 	assert(short_inserts.status == .COMPLETE);
 	short_statements := short_inserts.root.(*Extended.Parser_Block).statements;
 	assert(short_statements.count == 3);
 	assert(short_statements[0].kind == .DIRECTIVE_INSERT);
 	assert(short_statements[1].(*Extended.Parser_Directive_Insert).expression.(*Extended.Parser_Directive_Run).procedure.returns.count == 1);
 	assert(short_statements[2].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*short_inserts) == short_insert_source);
+	assert(Extended.reconstruct_source(*short_inserts) == SHORT_INSERT_SOURCE);
 
 	bake := Extended.parse_expression("#bake specialize(value)");
 	assert(bake.root.(*Extended.Parser_Directive_Bake).procedure_call.arguments_unsorted.count == 1);
@@ -8664,8 +10615,8 @@ test_expression_directives :: () {
 	procedure_name := Extended.parse_expression("#procedure_name(target)");
 	assert(procedure_name.root.(*Extended.Parser_Directive_Procedure_Name).argument.kind == .IDENT);
 
-	procedure_source :: "{ selected := #procedure_of_call very_optional(\"Sailor?\", 2, 3, 4, **float); after(); }";
-	procedure_of_call := Extended.parse_block(procedure_source);
+	PROCEDURE_SOURCE :: "{ selected := #procedure_of_call very_optional(\"Sailor?\", 2, 3, 4, **float); after(); }";
+	procedure_of_call := Extended.parse_block(PROCEDURE_SOURCE);
 	assert(procedure_of_call.status == .COMPLETE);
 	selected_statements := procedure_of_call.root.(*Extended.Parser_Block).statements;
 	assert(selected_statements.count == 2);
@@ -8675,7 +10626,7 @@ test_expression_directives :: () {
 	assert(selected_call.arguments_unsorted.count == 5);
 	assert(selected_call.arguments_unsorted[4].expression.kind == .UNARY_OPERATOR);
 	assert(selected_statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*procedure_of_call) == procedure_source);
+	assert(Extended.reconstruct_source(*procedure_of_call) == PROCEDURE_SOURCE);
 	assert(Extended.parse_expression("#procedure_of_call foo(1)").status == .COMPLETE);
 	malformed_procedure := Extended.parse_block("{ #procedure_of_call foo; after(); }");
 	assert(malformed_procedure.status == .RECOVERED);
@@ -8696,8 +10647,8 @@ test_expression_directives :: () {
 	assert(directory_import.root.(*Extended.Parser_Directive_Import).import_type == .PATH_TO_DIRECTORY);
 
 	// String imports require a semicolon after the here-string terminator.
-	here_import_source :: "#import,string #string END\nVALUE :: 1;\nEND\n;\nafter :: 2;";
-	here_import := Extended.parse_file(here_import_source);
+	HERE_IMPORT_SOURCE :: "#import,string #string END\nVALUE :: 1;\nEND\n;\nafter :: 2;";
+	here_import := Extended.parse_file(HERE_IMPORT_SOURCE);
 	assert(here_import.status == .COMPLETE);
 	assert(here_import.root.(*Extended.Parser_Block).statements.count == 2);
 	here_import_node := here_import.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Directive_Import);
@@ -8705,7 +10656,7 @@ test_expression_directives :: () {
 	assert((here_import_node.flags & .UNSHARED) != 0);
 	assert(here_import_node.name == "VALUE :: 1;\n");
 	assert(here_import.root.(*Extended.Parser_Block).statements[1].kind == .DECLARATION);
-	assert(Extended.reconstruct_source(*here_import) == here_import_source);
+	assert(Extended.reconstruct_source(*here_import) == HERE_IMPORT_SOURCE);
 	missing_import_semicolon := Extended.parse_file("#import,string #string END\nVALUE :: 1;\nEND\nafter :: 2;");
 	assert(missing_import_semicolon.status == .RECOVERED);
 	assert(missing_import_semicolon.diagnostics[0].expected_token == #char ";");
@@ -8735,14 +10686,14 @@ test_expression_directives :: () {
 	assert(more_parameters.program_parameters.arguments.count == 1);
 	assert(more_parameters.common_code.statements.count == 1);
 
-	module_scope_source :: "#scope_module\n#import \"Math\";\nvalue :: 1;";
-	module_scope := Extended.parse_file(module_scope_source);
+	MODULE_SCOPE_SOURCE :: "#scope_module\n#import \"Math\";\nvalue :: 1;";
+	module_scope := Extended.parse_file(MODULE_SCOPE_SOURCE);
 	assert(module_scope.status == .COMPLETE);
 	assert(module_scope.root.(*Extended.Parser_Block).statements.count == 3);
 	assert(module_scope.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Directive_Scope).scope_type == .INTERNAL);
 	assert(module_scope.root.(*Extended.Parser_Block).statements[1].kind == .DIRECTIVE_IMPORT);
 	assert(module_scope.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).name == "value");
-	assert(Extended.reconstruct_source(*module_scope) == module_scope_source);
+	assert(Extended.reconstruct_source(*module_scope) == MODULE_SCOPE_SOURCE);
 
 	modified := Extended.parse_declaration("choose :: (value: $T) -> T #modify { return true; } { return value; }");
 	assert(modified.status == .COMPLETE);
@@ -8797,8 +10748,8 @@ test_basic_declarations :: () {
 }
 
 test_compound_declarations :: () {
-	reassigned_source :: "{ out1, out2 = hello(1); out1 = 2; after(); }";
-	reassigned := Extended.parse_block(reassigned_source);
+	REASSIGNED_SOURCE :: "{ out1, out2 = hello(1); out1 = 2; after(); }";
+	reassigned := Extended.parse_block(REASSIGNED_SOURCE);
 	assert(reassigned.status == .COMPLETE);
 	reassigned_statements := reassigned.root.(*Extended.Parser_Block).statements;
 	assert(reassigned_statements.count == 3);
@@ -8809,7 +10760,7 @@ test_compound_declarations :: () {
 	assert(compound.declaration_properties.expression.kind == .PROCEDURE_CALL);
 	assert(reassigned_statements[1].kind == .BINARY_OPERATOR);
 	assert(reassigned_statements[2].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*reassigned) == reassigned_source);
+	assert(Extended.reconstruct_source(*reassigned) == REASSIGNED_SOURCE);
 
 	broken_reassignment := Extended.parse_block("{ out1, out2 =; after(); }");
 	assert(broken_reassignment.status == .RECOVERED);
@@ -8821,8 +10772,8 @@ test_compound_declarations :: () {
 	assert(multiple_values.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Compound_Declaration).declaration_properties.expression.(*Extended.Parser_Comma_Separated_Arguments).arguments.count == 2);
 
 	// Indexed and member targets must retain their syntax under compound assignment lowering.
-	indexed_source :: "{ array[it], array[it+1] += get_u8s(); after(); }";
-	indexed := Extended.parse_block(indexed_source);
+	INDEXED_SOURCE :: "{ array[it], array[it+1] += get_u8s(); after(); }";
+	indexed := Extended.parse_block(INDEXED_SOURCE);
 	assert(indexed.status == .COMPLETE);
 	indexed_statements := indexed.root.(*Extended.Parser_Block).statements;
 	assert(indexed_statements.count == 2);
@@ -8833,15 +10784,15 @@ test_compound_declarations :: () {
 	assert(indexed_targets.arguments[1].node.(*Extended.Parser_Binary_Operator).operator_type == .ARRAY_SUBSCRIPT);
 	assert(indexed_assignment.declaration_properties.expression.kind == .PROCEDURE_CALL);
 	assert(indexed_statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*indexed) == indexed_source);
+	assert(Extended.reconstruct_source(*indexed) == INDEXED_SOURCE);
 
-	member_source :: "{ v.x, v.y, v.z = 1, 4, 9; after(); }";
-	members := Extended.parse_block(member_source);
+	MEMBER_SOURCE :: "{ v.x, v.y, v.z = 1, 4, 9; after(); }";
+	members := Extended.parse_block(MEMBER_SOURCE);
 	assert(members.status == .COMPLETE);
 	member_assignment := members.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Compound_Declaration);
 	assert(member_assignment.comma_separated_assignment.arguments.count == 3);
 	assert(member_assignment.declaration_properties.expression.(*Extended.Parser_Comma_Separated_Arguments).arguments.count == 3);
-	assert(Extended.reconstruct_source(*members) == member_source);
+	assert(Extended.reconstruct_source(*members) == MEMBER_SOURCE);
 	missing_value := Extended.parse_block("{ array[0], array[1] +=; after(); }");
 	assert(missing_value.status == .RECOVERED);
 	assert(missing_value.root.(*Extended.Parser_Block).statements[1].kind == .PROCEDURE_CALL);
@@ -8870,8 +10821,8 @@ test_compound_declarations :: () {
 	assert(shared_node.declaration_properties.expression.kind == .LITERAL);
 	assert(shared_node.declaration_properties.expression.(*Extended.Parser_Literal)._u64 == 0xFFFFFFFF);
 
-	partial_reassignment_source :: "{ a: int; a=, b := proc(); after(); }";
-	partial_reassignment := Extended.parse_block(partial_reassignment_source);
+	PARTIAL_REASSIGNMENT_SOURCE :: "{ a: int; a=, b := proc(); after(); }";
+	partial_reassignment := Extended.parse_block(PARTIAL_REASSIGNMENT_SOURCE);
 	assert(partial_reassignment.status == .COMPLETE, "Partial reassignment: status %, diagnostics %.", partial_reassignment.status, partial_reassignment.diagnostics.count);
 	partial_reassignment_statements := partial_reassignment.root.(*Extended.Parser_Block).statements;
 	assert(partial_reassignment_statements.count == 3 && partial_reassignment_statements[2].kind == .PROCEDURE_CALL);
@@ -8881,10 +10832,10 @@ test_compound_declarations :: () {
 	assert(partial_reassignment_node.operator_type == 0);
 	assert(partial_reassignment.root_scope.children[0].bindings.count == 2);
 	assert(partial_reassignment.root_scope.children[0].bindings[1].name == "b");
-	assert(Extended.reconstruct_source(*partial_reassignment) == partial_reassignment_source);
+	assert(Extended.reconstruct_source(*partial_reassignment) == PARTIAL_REASSIGNMENT_SOURCE);
 
-	partial_declaration_source :: "{ b: int; a:, b = proc(); after(); }";
-	partial_declaration := Extended.parse_block(partial_declaration_source);
+	PARTIAL_DECLARATION_SOURCE :: "{ b: int; a:, b = proc(); after(); }";
+	partial_declaration := Extended.parse_block(PARTIAL_DECLARATION_SOURCE);
 	assert(partial_declaration.status == .COMPLETE, "Partial declaration: status %, diagnostics %.", partial_declaration.status, partial_declaration.diagnostics.count);
 	partial_declaration_statements := partial_declaration.root.(*Extended.Parser_Block).statements;
 	assert(partial_declaration_statements.count == 3 && partial_declaration_statements[2].kind == .PROCEDURE_CALL);
@@ -8894,7 +10845,7 @@ test_compound_declarations :: () {
 	assert(partial_declaration_node.operator_type == #char "=");
 	assert(partial_declaration.root_scope.children[0].bindings.count == 2);
 	assert(partial_declaration.root_scope.children[0].bindings[1].name == "a");
-	assert(Extended.reconstruct_source(*partial_declaration) == partial_declaration_source);
+	assert(Extended.reconstruct_source(*partial_declaration) == PARTIAL_DECLARATION_SOURCE);
 
 	for source: string.[
 		"{ a: int; a=, b :=; after(); }",
@@ -8950,8 +10901,8 @@ test_procedure_types :: () {
 	assert(full_header.name == "map");
 
 	// The conventional expansion name is an ordinary declaration until semantic lookup.
-	value_expansion_source :: "for_expansion :: (holder: Holder, body: Code, flags: For_Flags) #expand {}";
-	value_expansion := Extended.parse_declaration(value_expansion_source);
+	VALUE_EXPANSION_SOURCE :: "for_expansion :: (holder: Holder, body: Code, flags: For_Flags) #expand {}";
+	value_expansion := Extended.parse_declaration(VALUE_EXPANSION_SOURCE);
 	assert(value_expansion.status == .COMPLETE);
 	value_expansion_declaration := value_expansion.root.(*Extended.Parser_Declaration);
 	assert(value_expansion_declaration.name == "for_expansion");
@@ -8963,10 +10914,10 @@ test_procedure_types :: () {
 	assert(value_expansion_header.arguments[0].type_inst.type_valued_expression.(*Extended.Parser_Ident).name == "Holder");
 	assert(value_expansion_header.arguments[1].type_inst.type_valued_expression.(*Extended.Parser_Ident).name == "Code");
 	assert(value_expansion_header.arguments[2].type_inst.type_valued_expression.(*Extended.Parser_Ident).name == "For_Flags");
-	assert(Extended.reconstruct_source(*value_expansion) == value_expansion_source);
+	assert(Extended.reconstruct_source(*value_expansion) == VALUE_EXPANSION_SOURCE);
 
-	pointer_expansion_source :: "for_expansion :: (holder: *Holder, body: Code, flags: For_Flags) #expand {}";
-	pointer_expansion := Extended.parse_declaration(pointer_expansion_source);
+	POINTER_EXPANSION_SOURCE :: "for_expansion :: (holder: *Holder, body: Code, flags: For_Flags) #expand {}";
+	pointer_expansion := Extended.parse_declaration(POINTER_EXPANSION_SOURCE);
 	assert(pointer_expansion.status == .COMPLETE);
 	pointer_expansion_declaration := pointer_expansion.root.(*Extended.Parser_Declaration);
 	assert(pointer_expansion_declaration.name == "for_expansion");
@@ -8974,14 +10925,14 @@ test_procedure_types :: () {
 	assert((pointer_expansion_header.procedure_flags & .MACRO) != 0);
 	assert(pointer_expansion_header.arguments.count == 3);
 	assert(pointer_expansion_header.arguments[0].type_inst.pointer_to.type_valued_expression.(*Extended.Parser_Ident).name == "Holder");
-	assert(Extended.reconstruct_source(*pointer_expansion) == pointer_expansion_source);
+	assert(Extended.reconstruct_source(*pointer_expansion) == POINTER_EXPANSION_SOURCE);
 
 	inlined := Extended.parse_declaration("fast :: inline () {}");
 	assert(inlined.status == .COMPLETE);
 	assert((inlined.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).procedure_flags & .SYNTACTICALLY_MARKED_AS_INLINE_YES) != 0);
 
-	inline_source :: "{ #if true { inline memcpy_v3(dest, source, bytes); } after(); }";
-	inline_block := Extended.parse_block(inline_source);
+	INLINE_SOURCE :: "{ #if true { inline memcpy_v3(dest, source, bytes); } after(); }";
+	inline_block := Extended.parse_block(INLINE_SOURCE);
 	assert(inline_block.status == .COMPLETE);
 	inline_statements := inline_block.root.(*Extended.Parser_Block).statements;
 	assert(inline_statements.count == 2);
@@ -8989,14 +10940,14 @@ test_procedure_types :: () {
 	assert((inline_call.flags & .INLINE_YES) != 0);
 	assert(inline_call.arguments_unsorted.count == 3);
 	assert(inline_statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*inline_block) == inline_source);
+	assert(Extended.reconstruct_source(*inline_block) == INLINE_SOURCE);
 
 	malformed_inline := Extended.parse_block("{ inline missing(; after(); }");
 	assert(malformed_inline.status == .RECOVERED);
 	assert(malformed_inline.root.(*Extended.Parser_Block).statements[1].kind == .PROCEDURE_CALL);
 
-	dump_source :: "square_poly :: (value: $T) -> T #dump { return value; }\nafter :: 1;";
-	dumped := Extended.parse_file(dump_source);
+	DUMP_SOURCE :: "square_poly :: (value: $T) -> T #dump { return value; }\nafter :: 1;";
+	dumped := Extended.parse_file(DUMP_SOURCE);
 	assert(dumped.status == .COMPLETE);
 	dump_statements := dumped.root.(*Extended.Parser_Block).statements;
 	assert(dump_statements.count == 2);
@@ -9004,7 +10955,7 @@ test_procedure_types :: () {
 	assert((dump_header.procedure_flags & .DEBUG_DUMP) != 0);
 	assert((dump_header.procedure_flags & .POLYMORPHIC) != 0);
 	assert(dump_header.body_or_null.block.statements[0].kind == .RETURN);
-	assert(Extended.reconstruct_source(*dumped) == dump_source);
+	assert(Extended.reconstruct_source(*dumped) == DUMP_SOURCE);
 	assert(Extended.parse_declaration("square :: () #dump { return; ").status == .INCOMPLETE);
 
 	multiple_returns := Extended.parse_declaration("find :: (items: ..Any) -> value: s64, found: bool { return 0, false; }");
@@ -9066,8 +11017,8 @@ test_procedure_types :: () {
 	assert(quick_block_header.arguments.count == 2);
 	assert((quick_block_header.procedure_flags & .QUICK_IN_BLOCK_FORM) != 0);
 
-	call_with_source :: "{ call_with :: (arg: $T, f: (T)) { f(arg); } call_with(5, x => { if x > 0 then #this(x-1); }); after(); }";
-	call_with := Extended.parse_block(call_with_source);
+	CALL_WITH_SOURCE :: "{ call_with :: (arg: $T, f: (T)) { f(arg); } call_with(5, x => { if x > 0 then #this(x-1); }); after(); }";//
+	call_with := Extended.parse_block(CALL_WITH_SOURCE);
 	assert(call_with.status == .COMPLETE);
 	call_with_statements := call_with.root.(*Extended.Parser_Block).statements;
 	assert(call_with_statements.count == 3);
@@ -9080,7 +11031,7 @@ test_procedure_types :: () {
 	assert(recursive_call.procedure_expression.kind == .DIRECTIVE_THIS);
 	assert(recursive_call.arguments_unsorted.count == 1);
 	assert(call_with_statements[2].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*call_with) == call_with_source);
+	assert(Extended.reconstruct_source(*call_with) == CALL_WITH_SOURCE);
 	malformed_this_call := Extended.parse_block("{ #this(; after(); }");
 	assert(malformed_this_call.status == .RECOVERED);
 	assert(malformed_this_call.root.(*Extended.Parser_Block).statements[1].kind == .PROCEDURE_CALL);
@@ -9098,15 +11049,15 @@ test_procedure_types :: () {
 	assert(header.returns[1].name == "");
 	assert(header.returns[1].type_inst.type_valued_expression.(*Extended.Parser_Ident).name == "string");
 
-	unnamed_source :: "callback: (T) -> $R;";
-	unnamed := Extended.parse_declaration(unnamed_source);
+	UNNAMED_SOURCE :: "callback: (T) -> $R;";
+	unnamed := Extended.parse_declaration(UNNAMED_SOURCE);
 	assert(unnamed.status == .COMPLETE);
 	unnamed_header := unnamed.root.(*Extended.Parser_Declaration).type_inst.type_valued_expression.(*Extended.Parser_Procedure_Header);
 	assert(unnamed_header.arguments.count == 1);
 	assert(unnamed_header.arguments[0].name == "");
 	assert(unnamed_header.arguments[0].type_inst.type_valued_expression.(*Extended.Parser_Ident).name == "T");
 	assert(unnamed_header.returns[0].type_inst.type_valued_expression.(*Extended.Parser_Ident).name == "R");
-	assert(Extended.reconstruct_source(*unnamed) == unnamed_source);
+	assert(Extended.reconstruct_source(*unnamed) == UNNAMED_SOURCE);
 	assert(Extended.parse_declaration("callback: (T);").status == .COMPLETE);
 	assert(Extended.parse_declaration("SimpleProcedure :: #type () -> ();").status == .COMPLETE);
 	compound_type := Extended.parse_declaration("callback: *(**void, [3] [5] Code) -> ([..] #Context);");
@@ -9135,8 +11086,8 @@ test_procedure_types :: () {
 	assert(assignment.left.(*Extended.Parser_Ident).name == "w");
 	assert(assignment.left.(*Extended.Parser_Ident).resolved_declaration == field);
 
-	dotted_source :: "Defaulted :: struct { info: Info; info.flavor = \"chocolate\"; position: Vector3; position.z = 1.5; brightness: float; brightness = 101.2; after: s64; }";
-	dotted := Extended.parse_declaration(dotted_source);
+	DOTTED_SOURCE :: "Defaulted :: struct { info: Info; info.flavor = \"chocolate\"; position: Vector3; position.z = 1.5; brightness: float; brightness = 101.2; after: s64; }";//
+	dotted := Extended.parse_declaration(DOTTED_SOURCE);
 	assert(dotted.status == .COMPLETE);
 	dotted_members := dotted.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements;
 	assert(dotted_members.count == 7);
@@ -9148,7 +11099,7 @@ test_procedure_types :: () {
 	assert(flavor_access.left.(*Extended.Parser_Ident).resolved_declaration == dotted_members[0].(*Extended.Parser_Declaration));
 	assert(dotted_members[3].(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Binary_Operator).right.(*Extended.Parser_Ident).name == "z");
 	assert(dotted_members[6].(*Extended.Parser_Declaration).name == "after");
-	assert(Extended.reconstruct_source(*dotted) == dotted_source);
+	assert(Extended.reconstruct_source(*dotted) == DOTTED_SOURCE);
 	broken_dotted := Extended.parse_declaration("Defaulted :: struct { info: Info; info.flavor =; after: s64; }");
 	assert(broken_dotted.status == .RECOVERED);
 	broken_members := broken_dotted.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements;
@@ -9240,6 +11191,15 @@ check_declaration_metadata_edit :: (old_text: string, new_text: string, edit_sta
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
+	test_using_map_collision :: (using_node: *Extended.Parser_Using, names: [] string) -> bool {
+		for * names {
+			it.* = "same_name";
+		}
+
+		return true;
+	}
+
 	assert(declaration.notes[0].text == expected_note && declaration.program_export_name == expected_export_name && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -9249,7 +11209,7 @@ check_declaration_metadata_edit :: (old_text: string, new_text: string, edit_sta
 }
 
 check_flagged_declaration_fallback :: (source: string, expected_flag: type_of(Code_Declaration.flags), expected_export_name := "") {
-	old_source := copy_string(tprint("% main :: () { use := value; }", source));
+	old_source := copy_string(tprint(			  "% main :: () { use := value; }", source));
 	new_source := copy_string(tprint("added :: 0;\n% main :: () { use := value; }", source));
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
@@ -9291,11 +11251,14 @@ check_flagged_declaration_fallback :: (source: string, expected_flag: type_of(Co
 test_declaration_metadata :: () {
 	check_declaration_metadata_edit("value: s64 #align 16; @Tag(1) keep := value;", "value: s64 #align 32; @Tag(1) keep := value;", 18, 20, 32, "Tag(1)");
 	check_declaration_metadata_edit("value: s64 #align 16; @Tag(1) keep := value;", "value: s64 #align 16; @Tag(2) keep := value;", 27, 28, 16, "Tag(2)");
-	export_prefix :: "value: s64 #align 16 #program_export \"";
+	EXPORT_PREFIX :: "value: s64 #align 16 #program_export \"";
 	check_declaration_metadata_edit(
-		tprint("%published\"; @Tag(1) keep := value;", export_prefix),
-		tprint("%released\"; @Tag(1) keep := value;", export_prefix),
-		export_prefix.count, export_prefix.count + "published".count, 16, "Tag(1)", "released"
+		tprint("%published\"; @Tag(1) keep := value;", EXPORT_PREFIX),
+		tprint( "%released\"; @Tag(1) keep := value;", EXPORT_PREFIX),
+		EXPORT_PREFIX.count, EXPORT_PREFIX.count + "published".count,
+		16,
+		"Tag(1)",
+		"released"
 	);
 	check_flagged_declaration_fallback("#no_reset value: s64;", .NO_RESET);
 	check_flagged_declaration_fallback("value: s64 #program_export \"exported_value\";", .PROGRAM_EXPORT, "exported_value");
@@ -9354,7 +11317,7 @@ test_declaration_metadata :: () {
 	noted_node := noted.root.(*Extended.Parser_Declaration);
 	assert(noted_node.notes.count == 1);
 	assert(noted_node.notes[0].text == "JsonIgnore");
-	noted_old_source := copy_string("value: s64; @Tag(1) main :: () { use := value; }");
+	noted_old_source := copy_string(			 "value: s64; @Tag(1) main :: () { use := value; }");
 	noted_new_source := copy_string("added :: 0;\nvalue: s64; @Tag(1) main :: () { use := value; }");
 	noted_old := Extended.parse_file(noted_old_source);
 	noted_updated, noted_ok := Extended.parse_file_edit(*noted_old, 0, 0, noted_new_source);
@@ -9397,7 +11360,7 @@ test_declaration_metadata :: () {
 	scoped := Extended.parse_declaration("`value: s64;");
 	assert(scoped.status == .COMPLETE);
 	assert((scoped.root.(*Extended.Parser_Declaration).flags & .HAS_SCOPE_MODIFIER) != 0);
-	scoped_old_source := copy_string("`value := 1; use := value;");
+	scoped_old_source := copy_string(			  "`value := 1; use := value;");
 	scoped_new_source := copy_string("added :: 0;\n`value := 1; use := value;");
 	scoped_old := Extended.parse_file(scoped_old_source);
 	scoped_updated, scoped_ok := Extended.parse_file_edit(*scoped_old, 0, 0, scoped_new_source);
@@ -9431,8 +11394,8 @@ test_declaration_metadata :: () {
 	Extended.release_parser_names(*scoped_fresh);
 	free(scoped_new_source);
 
-	exported_source :: "{ `it := value; `it_index: Coordinates; `visited_index := 0; }";
-	exported := Extended.parse_block(exported_source);
+	EXPORTED_SOURCE :: "{ `it := value; `it_index: Coordinates; `visited_index := 0; }";
+	exported := Extended.parse_block(EXPORTED_SOURCE);
 	assert(exported.status == .COMPLETE);
 	assert(exported.root.(*Extended.Parser_Block).statements.count == 3);
 	for exported.root.(*Extended.Parser_Block).statements {
@@ -9441,7 +11404,7 @@ test_declaration_metadata :: () {
 		assert(Extended.token_at(*exported, declaration.first_token).original_text == tprint("`%", declaration.name));
 	}
 
-	assert(Extended.reconstruct_source(*exported) == exported_source);
+	assert(Extended.reconstruct_source(*exported) == EXPORTED_SOURCE);
 
 	uninitialized := Extended.parse_declaration("value: s64 = ---;");
 	assert(uninitialized.status == .COMPLETE);
@@ -9560,7 +11523,7 @@ test_basic_statements_and_blocks :: () {
 }
 
 test_loop_and_scoped_statements :: () {
-	parsed := Extended.parse_block("{ while ready { break; } for item, index: values { continue; } for 1..3 defer tick(); using state; using local: State; push_context new_context { return; } }");
+	parsed := Extended.parse_block("{ while ready { break; } for item, index: values { continue; } for 1..3 defer tick(); using state; using local: State; push_context new_context { return; } }");//
 	assert(parsed.status == .COMPLETE);
 	block := parsed.root.(*Extended.Parser_Block);
 	assert(block.statements.count == 6);
@@ -9585,8 +11548,8 @@ test_loop_and_scoped_statements :: () {
 	assert(defer_node.block.statements[0].kind == .PROCEDURE_CALL);
 
 	// Prefix flags and selectors must leave both range endpoints and the following statement intact.
-	prefixed_range_source :: "{ for < * :utf8_iter value: 1..3 { process(value); } next(); }";
-	prefixed_range := Extended.parse_block(prefixed_range_source);
+	PREFIXED_RANGE_SOURCE :: "{ for < * :utf8_iter value: 1..3 { process(value); } next(); }";
+	prefixed_range := Extended.parse_block(PREFIXED_RANGE_SOURCE);
 	assert(prefixed_range.status == .COMPLETE);
 	prefixed_range_block := prefixed_range.root.(*Extended.Parser_Block);
 	assert(prefixed_range_block.statements.count == 2);
@@ -9598,10 +11561,10 @@ test_loop_and_scoped_statements :: () {
 	assert(prefixed_range_loop.iteration_expression_right.(*Extended.Parser_Literal)._u64 == 3);
 	assert(prefixed_range_loop.block.statements[0].kind == .PROCEDURE_CALL);
 	assert(prefixed_range_block.statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*prefixed_range) == prefixed_range_source);
+	assert(Extended.reconstruct_source(*prefixed_range) == PREFIXED_RANGE_SOURCE);
 
-	plain_range_source :: "{ for value: first..last process(value); next(); }";
-	plain_range := Extended.parse_block(plain_range_source);
+	PLAIN_RANGE_SOURCE :: "{ for value: first..last process(value); next(); }";
+	plain_range := Extended.parse_block(PLAIN_RANGE_SOURCE);
 	assert(plain_range.status == .COMPLETE);
 	plain_range_block := plain_range.root.(*Extended.Parser_Block);
 	assert(plain_range_block.statements.count == 2);
@@ -9612,10 +11575,10 @@ test_loop_and_scoped_statements :: () {
 	assert(plain_range_loop.iteration_expression.(*Extended.Parser_Ident).name == "first");
 	assert(plain_range_loop.iteration_expression_right.(*Extended.Parser_Ident).name == "last");
 	assert(plain_range_loop.block.statements[0].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*plain_range) == plain_range_source);
+	assert(Extended.reconstruct_source(*plain_range) == PLAIN_RANGE_SOURCE);
 
-	controlled_range_source :: "{ for <=reverse :utf8_iter value: first..last { process(value); } next(); }";
-	controlled_range := Extended.parse_block(controlled_range_source);
+	CONTROLLED_RANGE_SOURCE :: "{ for <=reverse :utf8_iter value: first..last { process(value); } next(); }";
+	controlled_range := Extended.parse_block(CONTROLLED_RANGE_SOURCE);
 	assert(controlled_range.status == .COMPLETE);
 	controlled_range_block := controlled_range.root.(*Extended.Parser_Block);
 	assert(controlled_range_block.statements.count == 2);
@@ -9627,7 +11590,7 @@ test_loop_and_scoped_statements :: () {
 	assert(controlled_range_loop.iteration_expression_right.(*Extended.Parser_Ident).name == "last");
 	assert(controlled_range_loop.block.statements[0].kind == .PROCEDURE_CALL);
 	assert(controlled_range_block.statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*controlled_range) == controlled_range_source);
+	assert(Extended.reconstruct_source(*controlled_range) == CONTROLLED_RANGE_SOURCE);
 
 	reverse_for := Extended.parse_block("{ for < values process(it); }").root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert((reverse_for.for_flags & .REVERSE) != 0);
@@ -9654,27 +11617,27 @@ test_loop_and_scoped_statements :: () {
 	assert(compact_flags.ident_it_index == null);
 
 	// Implicit iterator names are supplied by expansion semantics, not syntax-owned identifiers.
-	implicit_source :: "{ for values process(it); }";
-	implicit := Extended.parse_block(implicit_source);
+	IMPLICIT_SOURCE :: "{ for values process(it); }";
+	implicit := Extended.parse_block(IMPLICIT_SOURCE);
 	assert(implicit.status == .COMPLETE);
 	implicit_loop := implicit.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(implicit_loop.ident_it == null);
 	assert(implicit_loop.ident_it_index == null);
 	assert(implicit_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
-	assert(Extended.reconstruct_source(*implicit) == implicit_source);
+	assert(Extended.reconstruct_source(*implicit) == IMPLICIT_SOURCE);
 
-	selected_implicit_source :: "{ for :utf8_iter text process(it_index); }";
-	selected_implicit := Extended.parse_block(selected_implicit_source);
+	SELECTED_IMPLICIT_SOURCE :: "{ for :utf8_iter text process(it_index); }";
+	selected_implicit := Extended.parse_block(SELECTED_IMPLICIT_SOURCE);
 	assert(selected_implicit.status == .COMPLETE);
 	selected_implicit_loop := selected_implicit.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(selected_implicit_loop.want_replacement_for_expansion.(*Extended.Parser_Ident).name == "utf8_iter");
 	assert(selected_implicit_loop.ident_it == null);
 	assert(selected_implicit_loop.ident_it_index == null);
 	assert(selected_implicit_loop.iteration_expression.(*Extended.Parser_Ident).name == "text");
-	assert(Extended.reconstruct_source(*selected_implicit) == selected_implicit_source);
+	assert(Extended.reconstruct_source(*selected_implicit) == SELECTED_IMPLICIT_SOURCE);
 
-	renamed_value_source :: "{ for < :utf8_iter value: text process(value); }";
-	renamed_value := Extended.parse_block(renamed_value_source);
+	RENAMED_VALUE_SOURCE :: "{ for < :utf8_iter value: text process(value); }";
+	renamed_value := Extended.parse_block(RENAMED_VALUE_SOURCE);
 	assert(renamed_value.status == .COMPLETE);
 	renamed_value_loop := renamed_value.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert((renamed_value_loop.for_flags & .REVERSE) != 0);
@@ -9682,10 +11645,10 @@ test_loop_and_scoped_statements :: () {
 	assert(renamed_value_loop.ident_it.name == "value");
 	assert(renamed_value_loop.ident_it_index == null);
 	assert(renamed_value_loop.iteration_expression.(*Extended.Parser_Ident).name == "text");
-	assert(Extended.reconstruct_source(*renamed_value) == renamed_value_source);
+	assert(Extended.reconstruct_source(*renamed_value) == RENAMED_VALUE_SOURCE);
 
-	controlled_bindings_source :: "{ for *=pointer_mode, <=reverse_mode :utf8_iter value, index: text process(value); }";
-	controlled_bindings := Extended.parse_block(controlled_bindings_source);
+	CONTROLLED_BINDINGS_SOURCE :: "{ for *=pointer_mode, <=reverse_mode :utf8_iter value, index: text process(value); }";
+	controlled_bindings := Extended.parse_block(CONTROLLED_BINDINGS_SOURCE);
 	assert(controlled_bindings.status == .COMPLETE);
 	controlled_bindings_loop := controlled_bindings.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(controlled_bindings_loop.want_pointer_expression.(*Extended.Parser_Ident).name == "pointer_mode");
@@ -9697,11 +11660,11 @@ test_loop_and_scoped_statements :: () {
 	assert(controlled_bindings_loop.ident_decl == null);
 	assert(controlled_bindings_loop.index_decl == null);
 	assert(controlled_bindings_loop.macro_expansion_procedure_call == null);
-	assert(Extended.reconstruct_source(*controlled_bindings) == controlled_bindings_source);
+	assert(Extended.reconstruct_source(*controlled_bindings) == CONTROLLED_BINDINGS_SOURCE);
 
 	// The synthetic single-statement block owns the semicolon; the call node does not.
-	single_body_source :: "{ for <=reverse :utf8_iter value: text process(value); next(); }";
-	single_body := Extended.parse_block(single_body_source);
+	SINGLE_BODY_SOURCE :: "{ for <=reverse :utf8_iter value: text process(value); next(); }";
+	single_body := Extended.parse_block(SINGLE_BODY_SOURCE);
 	assert(single_body.status == .COMPLETE);
 	single_body_parent := single_body.root.(*Extended.Parser_Block);
 	assert(single_body_parent.statements.count == 2);
@@ -9715,10 +11678,10 @@ test_loop_and_scoped_statements :: () {
 	assert(Extended.token_at(*single_body, single_body_loop.block.first_token).original_text == "process");
 	assert(Extended.token_at(*single_body, single_body_loop.one_past_last_token - 1).original_text == ";");
 	assert(Extended.token_at(*single_body, single_body_loop.one_past_last_token).original_text == "next");
-	assert(Extended.reconstruct_source(*single_body) == single_body_source);
+	assert(Extended.reconstruct_source(*single_body) == SINGLE_BODY_SOURCE);
 
-	backticked_bindings_source :: "{ for :utf8_iter `it, `it_index: text process(it); }";
-	backticked_bindings := Extended.parse_block(backticked_bindings_source);
+	BACKTICKED_BINDINGS_SOURCE :: "{ for :utf8_iter `it, `it_index: text process(it); }";
+	backticked_bindings := Extended.parse_block(BACKTICKED_BINDINGS_SOURCE);
 	assert(backticked_bindings.status == .COMPLETE);
 	backticked_loop := backticked_bindings.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(backticked_loop.ident_it.name == "it");
@@ -9727,7 +11690,7 @@ test_loop_and_scoped_statements :: () {
 	assert((backticked_loop.ident_it_index.flags & .HAS_SCOPE_MODIFIER) != 0);
 	assert(Extended.token_at(*backticked_bindings, backticked_loop.ident_it.first_token).original_text == "`it");
 	assert(Extended.token_at(*backticked_bindings, backticked_loop.ident_it_index.first_token).original_text == "`it_index");
-	assert(Extended.reconstruct_source(*backticked_bindings) == backticked_bindings_source);
+	assert(Extended.reconstruct_source(*backticked_bindings) == BACKTICKED_BINDINGS_SOURCE);
 
 	controlled_reverse := Extended.parse_block("{ for <=reversed NAMES print(it); }");
 	assert(controlled_reverse.status == .COMPLETE);
@@ -9751,39 +11714,39 @@ test_loop_and_scoped_statements :: () {
 	assert(pointer_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
 
 	// Parentheses keep comparison and assignment operators inside controlled flag values.
-	comparison_source :: "{ for *=(left == right), <=reverse values process(it); }";
-	comparison := Extended.parse_block(comparison_source);
+	COMPARISON_SOURCE :: "{ for *=(left == right), <=reverse values process(it); }";
+	comparison := Extended.parse_block(COMPARISON_SOURCE);
 	assert(comparison.status == .COMPLETE);
 	comparison_loop := comparison.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(comparison_loop.want_pointer_expression.(*Extended.Parser_Binary_Operator).operator_type == .IS_EQUAL);
 	assert(comparison_loop.want_reverse_expression.(*Extended.Parser_Ident).name == "reverse");
 	assert(comparison_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
-	assert(Extended.reconstruct_source(*comparison) == comparison_source);
+	assert(Extended.reconstruct_source(*comparison) == COMPARISON_SOURCE);
 
-	assignment_source :: "{ for <=(flag = enabled) values process(it); }";
-	assignment := Extended.parse_block(assignment_source);
+	ASSIGNMENT_SOURCE :: "{ for <=(flag = enabled) values process(it); }";
+	assignment := Extended.parse_block(ASSIGNMENT_SOURCE);
 	assert(assignment.status == .COMPLETE);
 	assignment_loop := assignment.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(assignment_loop.want_reverse_expression.(*Extended.Parser_Binary_Operator).operator_type == #char "=");
 	assert(assignment_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
-	assert(Extended.reconstruct_source(*assignment) == assignment_source);
+	assert(Extended.reconstruct_source(*assignment) == ASSIGNMENT_SOURCE);
 
 	// Unparenthesized operators instead belong to the collection expression.
-	comparison_collection_source :: "{ for <=reverse left == right process(it); }";
-	comparison_collection := Extended.parse_block(comparison_collection_source);
+	COMPARISON_COLLECTION_SOURCE :: "{ for <=reverse left == right process(it); }";
+	comparison_collection := Extended.parse_block(COMPARISON_COLLECTION_SOURCE);
 	assert(comparison_collection.status == .COMPLETE);
 	comparison_collection_loop := comparison_collection.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(comparison_collection_loop.want_reverse_expression.(*Extended.Parser_Ident).name == "reverse");
 	assert(comparison_collection_loop.iteration_expression.(*Extended.Parser_Binary_Operator).operator_type == .IS_EQUAL);
-	assert(Extended.reconstruct_source(*comparison_collection) == comparison_collection_source);
+	assert(Extended.reconstruct_source(*comparison_collection) == COMPARISON_COLLECTION_SOURCE);
 
-	assignment_collection_source :: "{ for <=reverse target = source process(it); }";
-	assignment_collection := Extended.parse_block(assignment_collection_source);
+	ASSIGNMENT_COLLECTION_SOURCE :: "{ for <=reverse target = source process(it); }";
+	assignment_collection := Extended.parse_block(ASSIGNMENT_COLLECTION_SOURCE);
 	assert(assignment_collection.status == .COMPLETE);
 	assignment_collection_loop := assignment_collection.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(assignment_collection_loop.want_reverse_expression.(*Extended.Parser_Ident).name == "reverse");
 	assert(assignment_collection_loop.iteration_expression.(*Extended.Parser_Binary_Operator).operator_type == #char "=");
-	assert(Extended.reconstruct_source(*assignment_collection) == assignment_collection_source);
+	assert(Extended.reconstruct_source(*assignment_collection) == ASSIGNMENT_COLLECTION_SOURCE);
 	bare_comparison := Extended.parse_block("{ for <=left == right values process(it); }");
 	assert(bare_comparison.status != .COMPLETE);
 	bare_assignment := Extended.parse_block("{ for <=flag = enabled values process(it); }");
@@ -9804,32 +11767,32 @@ test_loop_and_scoped_statements :: () {
 	assert(missing_comma_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
 	assert(Extended.reconstruct_source(*missing_flag_comma) == "{ for *=pointer_mode <=reversed values process(it); }");
 
-	missing_selector_source :: "{ for : { tick(); } after(); }";
-	missing_selector := Extended.parse_block(missing_selector_source);
+	MISSING_SELECTOR_SOURCE :: "{ for : { tick(); } after(); }";
+	missing_selector := Extended.parse_block(MISSING_SELECTOR_SOURCE);
 	assert(missing_selector.status == .RECOVERED);
 	selector_block := missing_selector.root.(*Extended.Parser_Block);
 	assert(selector_block.statements[0].kind == .FOR);
 	assert(selector_block.statements[0].(*Extended.Parser_For).want_replacement_for_expansion == null);
-	assert(Extended.reconstruct_source(*missing_selector) == missing_selector_source);
+	assert(Extended.reconstruct_source(*missing_selector) == MISSING_SELECTOR_SOURCE);
 
-	missing_index_source :: "{ for value,: values { tick(); } after(); }";
-	missing_index := Extended.parse_block(missing_index_source);
+	MISSING_INDEX_SOURCE :: "{ for value,: values { tick(); } after(); }";
+	missing_index := Extended.parse_block(MISSING_INDEX_SOURCE);
 	assert(missing_index.status == .RECOVERED);
 	index_loop := missing_index.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(index_loop.ident_it.name == "value");
 	assert(index_loop.ident_it_index == null);
 	assert(index_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
-	assert(Extended.reconstruct_source(*missing_index) == missing_index_source);
+	assert(Extended.reconstruct_source(*missing_index) == MISSING_INDEX_SOURCE);
 
-	missing_binding_colon_source :: "{ for value, index values { tick(); } after(); }";
-	missing_binding_colon := Extended.parse_block(missing_binding_colon_source);
+	MISSING_BINDING_COLON_SOURCE :: "{ for value, index values { tick(); } after(); }";
+	missing_binding_colon := Extended.parse_block(MISSING_BINDING_COLON_SOURCE);
 	assert(missing_binding_colon.status == .RECOVERED);
 	assert(missing_binding_colon.diagnostics[0].expected_token == #char ":");
 	colon_loop := missing_binding_colon.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(colon_loop.ident_it.name == "value");
 	assert(colon_loop.ident_it_index.name == "index");
 	assert(colon_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
-	assert(Extended.reconstruct_source(*missing_binding_colon) == missing_binding_colon_source);
+	assert(Extended.reconstruct_source(*missing_binding_colon) == MISSING_BINDING_COLON_SOURCE);
 
 	malformed_prefixes := string.[
 		"for : ",
@@ -9857,8 +11820,8 @@ test_loop_and_scoped_statements :: () {
 		assert(Extended.reconstruct_source(*parsed_file) == source);
 	}
 
-	malformed_single_body_source :: "outer :: () { for value,: values tick(); after := 2; }\nfinal :: 3;";
-	single_body_file := Extended.parse_file(malformed_single_body_source);
+	MALFORMED_SINGLE_BODY_SOURCE :: "outer :: () { for value,: values tick(); after := 2; }\nfinal :: 3;";
+	single_body_file := Extended.parse_file(MALFORMED_SINGLE_BODY_SOURCE);
 	assert(single_body_file.status == .RECOVERED);
 	single_file_statements := single_body_file.root.(*Extended.Parser_Block).statements;
 	assert(single_file_statements.count == 2);
@@ -9870,7 +11833,7 @@ test_loop_and_scoped_statements :: () {
 	assert(single_for.block.statements.count == 1 && single_for.block.statements[0].kind == .PROCEDURE_CALL);
 	assert(single_procedure_body.statements[1].(*Extended.Parser_Declaration).name == "after");
 	assert(single_file_statements[1].(*Extended.Parser_Declaration).name == "final");
-	assert(Extended.reconstruct_source(*single_body_file) == malformed_single_body_source);
+	assert(Extended.reconstruct_source(*single_body_file) == MALFORMED_SINGLE_BODY_SOURCE);
 
 	using_expression := block.statements[3].(*Extended.Parser_Using);
 	assert(using_expression.expression.(*Extended.Parser_Ident).name == "state");
@@ -9950,8 +11913,8 @@ test_for_body_forms :: () {
 }
 
 test_duplicate_for_flags :: () {
-	literal_reverse_source :: "{ for < < values process(it); }";
-	literal_reverse := Extended.parse_block(literal_reverse_source);
+	LITERAL_REVERSE_SOURCE :: "{ for < < values process(it); }";
+	literal_reverse := Extended.parse_block(LITERAL_REVERSE_SOURCE);
 	assert(literal_reverse.status == .RECOVERED);
 	assert(literal_reverse.diagnostics.count == 1);
 	assert(literal_reverse.recovery_records.count == 1);
@@ -9961,80 +11924,80 @@ test_duplicate_for_flags :: () {
 	literal_reverse_loop := literal_reverse.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert((literal_reverse_loop.for_flags & .REVERSE) != 0);
 	assert(literal_reverse_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
-	assert(Extended.reconstruct_source(*literal_reverse) == literal_reverse_source);
+	assert(Extended.reconstruct_source(*literal_reverse) == LITERAL_REVERSE_SOURCE);
 
-	literal_pointer_source :: "{ for * * values process(it); }";
-	literal_pointer := Extended.parse_block(literal_pointer_source);
+	LITERAL_POINTER_SOURCE :: "{ for * * values process(it); }";
+	literal_pointer := Extended.parse_block(LITERAL_POINTER_SOURCE);
 	assert(literal_pointer.status == .RECOVERED);
 	assert(literal_pointer.diagnostics.count == 1);
 	assert(Extended.token_at(*literal_pointer, literal_pointer.diagnostics[0].span.first).original_text == "*");
 	literal_pointer_loop := literal_pointer.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert((literal_pointer_loop.for_flags & .POINTER) != 0);
 	assert(literal_pointer_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
-	assert(Extended.reconstruct_source(*literal_pointer) == literal_pointer_source);
+	assert(Extended.reconstruct_source(*literal_pointer) == LITERAL_POINTER_SOURCE);
 
-	controlled_reverse_source :: "{ for <=first, <=second values process(it); }";
-	controlled_reverse := Extended.parse_block(controlled_reverse_source);
+	CONTROLLED_REVERSE_SOURCE :: "{ for <=first, <=second values process(it); }";
+	controlled_reverse := Extended.parse_block(CONTROLLED_REVERSE_SOURCE);
 	assert(controlled_reverse.status == .RECOVERED);
 	assert(controlled_reverse.diagnostics.count == 1);
 	assert(Extended.token_at(*controlled_reverse, controlled_reverse.diagnostics[0].span.first).original_text == "<=");
 	controlled_reverse_loop := controlled_reverse.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(controlled_reverse_loop.want_reverse_expression.(*Extended.Parser_Ident).name == "first");
 	assert(controlled_reverse_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
-	assert(Extended.reconstruct_source(*controlled_reverse) == controlled_reverse_source);
+	assert(Extended.reconstruct_source(*controlled_reverse) == CONTROLLED_REVERSE_SOURCE);
 
-	controlled_pointer_source :: "{ for *=first, *=second values process(it); }";
-	controlled_pointer := Extended.parse_block(controlled_pointer_source);
+	CONTROLLED_POINTER_SOURCE :: "{ for *=first, *=second values process(it); }";
+	controlled_pointer := Extended.parse_block(CONTROLLED_POINTER_SOURCE);
 	assert(controlled_pointer.status == .RECOVERED);
 	assert(controlled_pointer.diagnostics.count == 1);
 	controlled_pointer_loop := controlled_pointer.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(controlled_pointer_loop.want_pointer_expression.(*Extended.Parser_Ident).name == "first");
 	assert(controlled_pointer_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
-	assert(Extended.reconstruct_source(*controlled_pointer) == controlled_pointer_source);
+	assert(Extended.reconstruct_source(*controlled_pointer) == CONTROLLED_POINTER_SOURCE);
 
-	mixed_reverse_source :: "{ for < <=reverse values process(it); }";
-	mixed_reverse := Extended.parse_block(mixed_reverse_source);
+	MIXED_REVERSE_SOURCE :: "{ for < <=reverse values process(it); }";
+	mixed_reverse := Extended.parse_block(MIXED_REVERSE_SOURCE);
 	assert(mixed_reverse.status == .RECOVERED);
 	assert(mixed_reverse.diagnostics.count == 1);
 	mixed_reverse_loop := mixed_reverse.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert((mixed_reverse_loop.for_flags & .REVERSE) != 0);
 	assert(mixed_reverse_loop.want_reverse_expression == null);
 	assert(mixed_reverse_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
-	assert(Extended.reconstruct_source(*mixed_reverse) == mixed_reverse_source);
+	assert(Extended.reconstruct_source(*mixed_reverse) == MIXED_REVERSE_SOURCE);
 
-	mixed_pointer_source :: "{ for * *=pointer_mode values process(it); }";
-	mixed_pointer := Extended.parse_block(mixed_pointer_source);
+	MIXED_POINTER_SOURCE :: "{ for * *=pointer_mode values process(it); }";
+	mixed_pointer := Extended.parse_block(MIXED_POINTER_SOURCE);
 	assert(mixed_pointer.status == .RECOVERED);
 	assert(mixed_pointer.diagnostics.count == 1);
 	mixed_pointer_loop := mixed_pointer.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert((mixed_pointer_loop.for_flags & .POINTER) != 0);
 	assert(mixed_pointer_loop.want_pointer_expression == null);
 	assert(mixed_pointer_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
-	assert(Extended.reconstruct_source(*mixed_pointer) == mixed_pointer_source);
+	assert(Extended.reconstruct_source(*mixed_pointer) == MIXED_POINTER_SOURCE);
 
-	controlled_then_literal_reverse_source :: "{ for <=reverse < values process(it); }";
-	controlled_then_literal_reverse := Extended.parse_block(controlled_then_literal_reverse_source);
+	CONTROLLED_THEN_LITERAL_REVERSE_SOURCE :: "{ for <=reverse < values process(it); }";
+	controlled_then_literal_reverse := Extended.parse_block(CONTROLLED_THEN_LITERAL_REVERSE_SOURCE);
 	assert(controlled_then_literal_reverse.status == .RECOVERED);
 	assert(controlled_then_literal_reverse.diagnostics.count == 1);
 	controlled_then_literal_reverse_loop := controlled_then_literal_reverse.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(controlled_then_literal_reverse_loop.want_reverse_expression.(*Extended.Parser_Ident).name == "reverse");
 	assert((controlled_then_literal_reverse_loop.for_flags & .REVERSE) == 0);
 	assert(controlled_then_literal_reverse_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
-	assert(Extended.reconstruct_source(*controlled_then_literal_reverse) == controlled_then_literal_reverse_source);
+	assert(Extended.reconstruct_source(*controlled_then_literal_reverse) == CONTROLLED_THEN_LITERAL_REVERSE_SOURCE);
 
-	controlled_then_literal_pointer_source :: "{ for *=pointer_mode * values process(it); }";
-	controlled_then_literal_pointer := Extended.parse_block(controlled_then_literal_pointer_source);
+	CONTROLLED_THEN_LITERAL_POINTER_SOURCE :: "{ for *=pointer_mode * values process(it); }";
+	controlled_then_literal_pointer := Extended.parse_block(CONTROLLED_THEN_LITERAL_POINTER_SOURCE);
 	assert(controlled_then_literal_pointer.status == .RECOVERED);
 	assert(controlled_then_literal_pointer.diagnostics.count == 1);
 	controlled_then_literal_pointer_loop := controlled_then_literal_pointer.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(controlled_then_literal_pointer_loop.want_pointer_expression.(*Extended.Parser_Ident).name == "pointer_mode");
 	assert((controlled_then_literal_pointer_loop.for_flags & .POINTER) == 0);
 	assert(controlled_then_literal_pointer_loop.iteration_expression.(*Extended.Parser_Ident).name == "values");
-	assert(Extended.reconstruct_source(*controlled_then_literal_pointer) == controlled_then_literal_pointer_source);
+	assert(Extended.reconstruct_source(*controlled_then_literal_pointer) == CONTROLLED_THEN_LITERAL_POINTER_SOURCE);
 }
 
 test_conditional_statements :: () {
-	parsed := Extended.parse_block("{ if ready then run(); else stop(); if outer then if inner accept(); else reject(); }");
+	parsed := Extended.parse_block("{ if ready then run(); else stop(); if outer then if inner accept(); else reject(); }");//
 	assert(parsed.status == .COMPLETE);
 	block := parsed.root.(*Extended.Parser_Block);
 	assert(block.statements.count == 2);
@@ -10044,8 +12007,8 @@ test_conditional_statements :: () {
 	nested_if := block.statements[1].(*Extended.Parser_If).then_block.statements[0].(*Extended.Parser_If);
 	assert(nested_if.else_block != null);
 
-	condition_source :: "{ if (mode == .ALLOCATE) && (size == 42) { run(); } if (count % 2) { run(); } if (pointer) { run(); } while (pointer) { break; } }";
-	conditions := Extended.parse_block(condition_source);
+	CONDITION_SOURCE :: "{ if (mode == .ALLOCATE) && (size == 42) { run(); } if (count % 2) { run(); } if (pointer) { run(); } while (pointer) { break; } }";//
+	conditions := Extended.parse_block(CONDITION_SOURCE);
 	assert(conditions.status == .COMPLETE);
 	condition_statements := conditions.root.(*Extended.Parser_Block).statements;
 	assert(condition_statements.count == 4);
@@ -10054,7 +12017,7 @@ test_conditional_statements :: () {
 	assert(condition_statements[2].(*Extended.Parser_If).condition.kind == .IDENT);
 	assert((condition_statements[2].(*Extended.Parser_If).condition.node_flags & .IS_PARENTHESIZED) != 0);
 	assert(condition_statements[3].(*Extended.Parser_While).condition.kind == .IDENT);
-	assert(Extended.reconstruct_source(*conditions) == condition_source);
+	assert(Extended.reconstruct_source(*conditions) == CONDITION_SOURCE);
 	assert(Extended.parse_expression("(value: s64) { return; }").status == .COMPLETE);
 	malformed_condition := Extended.parse_block("{ if (count ==) { run(); } after(); }");
 	assert(malformed_condition.status == .RECOVERED);
@@ -10072,17 +12035,17 @@ test_conditional_statements :: () {
 	assert(default_ifx.root.(*Extended.Parser_If).then_block.statements[0].(*Extended.Parser_Literal)._u64 == 1);
 
 	// Missing branches in value-form ifx are legal; the next statement stays in the outer block.
-	default_source :: "{ name := ifx thing then thing.name; next(); }";
-	default_block := Extended.parse_block(default_source);
+	DEFAULT_SOURCE :: "{ name := ifx thing then thing.name; next(); }";
+	default_block := Extended.parse_block(DEFAULT_SOURCE);
 	assert(default_block.status == .COMPLETE);
 	default_statements := default_block.root.(*Extended.Parser_Block).statements;
 	assert(default_statements.count == 2);
 	assert(default_statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_If).else_block == null);
 	assert(default_statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*default_block) == default_source);
+	assert(Extended.reconstruct_source(*default_block) == DEFAULT_SOURCE);
 
-	omitted_then_source :: "{ y2 := ifx x else 1; next(); }";
-	omitted_then := Extended.parse_block(omitted_then_source);
+	OMITTED_THEN_SOURCE :: "{ y2 := ifx x else 1; next(); }";
+	omitted_then := Extended.parse_block(OMITTED_THEN_SOURCE);
 	assert(omitted_then.status == .COMPLETE);
 	omitted_then_statements := omitted_then.root.(*Extended.Parser_Block).statements;
 	assert(omitted_then_statements.count == 2);
@@ -10090,35 +12053,35 @@ test_conditional_statements :: () {
 	assert(omitted_then_ifx.then_block == null);
 	assert(omitted_then_ifx.else_block.statements[0].(*Extended.Parser_Literal)._u64 == 1);
 	assert(omitted_then_statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*omitted_then) == omitted_then_source);
+	assert(Extended.reconstruct_source(*omitted_then) == OMITTED_THEN_SOURCE);
 	assert(Extended.parse_block("{ y2 := ifx x then else 1; next(); }").status == .RECOVERED);
 	branchless_expression := Extended.parse_expression("ifx is_odd(x)");
 	assert(branchless_expression.status == .COMPLETE);
 	assert(branchless_expression.root.(*Extended.Parser_If).then_block == null);
 	assert(branchless_expression.root.(*Extended.Parser_If).else_block == null);
 
-	branchless_source :: "{ y4 := ifx is_odd(x); next(); }";
-	branchless := Extended.parse_block(branchless_source);
+	BRANCHLESS_SOURCE :: "{ y4 := ifx is_odd(x); next(); }";
+	branchless := Extended.parse_block(BRANCHLESS_SOURCE);
 	assert(branchless.status == .COMPLETE);
 	branchless_statements := branchless.root.(*Extended.Parser_Block).statements;
 	assert(branchless_statements.count == 2);
 	assert(branchless_statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_If).then_block == null);
 	assert(branchless_statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*branchless) == branchless_source);
+	assert(Extended.reconstruct_source(*branchless) == BRANCHLESS_SOURCE);
 	assert(Extended.parse_block("{ y4 := ifx is_odd(x) then; next(); }").status == .RECOVERED);
 
 	block_ifx := Extended.parse_expression("ifx ready { prepare(); 1; } else { 2; }");
 	assert(block_ifx.status == .COMPLETE);
 	assert(block_ifx.root.(*Extended.Parser_If).then_block.statements.count == 2);
 
-	braced_source :: "{ value := ifx ready { prepare(); 1; } else { 2; } next(); }";
-	braced := Extended.parse_block(braced_source);
+	BRACED_SOURCE :: "{ value := ifx ready { prepare(); 1; } else { 2; } next(); }";
+	braced := Extended.parse_block(BRACED_SOURCE);
 	assert(braced.status == .COMPLETE);
 	braced_statements := braced.root.(*Extended.Parser_Block).statements;
 	assert(braced_statements.count == 2);
 	assert(braced_statements[0].(*Extended.Parser_Declaration).expression.kind == .IF);
 	assert(braced_statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*braced) == braced_source);
+	assert(Extended.reconstruct_source(*braced) == BRACED_SOURCE);
 	braced_semicolon := Extended.parse_block("{ value := ifx ready { 1; } else { 2; }; next(); }");
 	assert(braced_semicolon.status == .COMPLETE);
 	assert(braced_semicolon.root.(*Extended.Parser_Block).statements.count == 2);
@@ -10154,8 +12117,8 @@ test_conditional_statements :: () {
 	assert(declaration_semicolon.diagnostics[0].kind == .UNNECESSARY_SEMICOLON);
 	assert(Extended.parse_block("{ value := ifx ready then 1 else 2 next(); }").status == .RECOVERED);
 
-	switch_source :: "{ if #complete value == { case 1; return 1; case 2; #through; case 3; return 3; case; return 0; } }";
-	switch_parsed := Extended.parse_block(switch_source);
+	SWITCH_SOURCE :: "{ if #complete value == { case 1; return 1; case 2; #through; case 3; return 3; case; return 0; } }";//
+	switch_parsed := Extended.parse_block(SWITCH_SOURCE);
 	assert(switch_parsed.status == .COMPLETE);
 	switch_node := switch_parsed.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
 	assert((switch_node.if_flags & .IS_SWITCH_STATEMENT) != 0);
@@ -10166,7 +12129,7 @@ test_conditional_statements :: () {
 	second_case := switch_node.then_block.statements[1].(*Extended.Parser_Case);
 	assert(second_case.condition.(*Extended.Parser_Literal)._u64 == 2);
 	assert(second_case.marked_as_fallthrough);
-	warned_through := Extended.parse_block(switch_source, warn_unnecessary_semicolons=true);
+	warned_through := Extended.parse_block(SWITCH_SOURCE, warn_unnecessary_semicolons=true);
 	assert(warned_through.status == .COMPLETE && warned_through.diagnostics.count == 1);
 	assert(warned_through.diagnostics[0].kind == .UNNECESSARY_SEMICOLON);
 	default_case := switch_node.then_block.statements[3].(*Extended.Parser_Case);
@@ -10198,17 +12161,17 @@ test_static_if_directives :: () {
 	assert(static_ifx.then_block.statements[0].(*Extended.Parser_Literal)._u64 == 1);
 	assert(static_ifx.else_block.statements[0].(*Extended.Parser_Literal)._u64 == 2);
 
-	static_ifx_source :: "{ value := #ifx ready { prepare(); 1; } else { 2; } next(); }";
-	static_ifx_block := Extended.parse_block(static_ifx_source);
+	STATIC_IFX_SOURCE :: "{ value := #ifx ready { prepare(); 1; } else { 2; } next(); }";//
+	static_ifx_block := Extended.parse_block(STATIC_IFX_SOURCE);
 	assert(static_ifx_block.status == .COMPLETE);
 	static_ifx_statements := static_ifx_block.root.(*Extended.Parser_Block).statements;
 	assert(static_ifx_statements.count == 2);
 	assert((static_ifx_statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_If).if_flags & .IS_STATIC) != 0);
 	assert(static_ifx_statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*static_ifx_block) == static_ifx_source);
+	assert(Extended.reconstruct_source(*static_ifx_block) == STATIC_IFX_SOURCE);
 	assert(Extended.parse_block("{ value := #ifx ready then else 2; next(); }").status == .RECOVERED);
 
-	static_statement := Extended.parse_block("{ #if true { enabled := 1; } else #if false disabled := 2; else fallback := 3; }");
+	static_statement := Extended.parse_block("{ #if true { enabled := 1; } else #if false disabled := 2; else fallback := 3; }");//
 	assert(static_statement.status == .COMPLETE);
 	static_if := static_statement.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
 	assert((static_if.if_flags & .IS_STATIC) != 0);
@@ -10217,7 +12180,7 @@ test_static_if_directives :: () {
 	assert((nested_static_if.if_flags & .IS_STATIC) != 0);
 	assert(nested_static_if.else_block.statements[0].kind == .DECLARATION);
 
-	static_file := Extended.parse_file("#if true { first :: 1; } else second :: 2;\nafter :: 3;");
+	static_file := Extended.parse_file("#if true { first :: 1; } else second :: 2;\nafter :: 3;");//
 	assert(static_file.status == .COMPLETE);
 	file_if := static_file.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If);
 	assert((file_if.if_flags & .IS_STATIC) != 0);
@@ -10225,14 +12188,14 @@ test_static_if_directives :: () {
 	assert(file_if.else_block.statements[0].kind == .DECLARATION);
 	assert(static_file.root.(*Extended.Parser_Block).statements.count == 2);
 
-	static_member := Extended.parse_declaration("Conditional :: struct { #if true { enabled: s64; } else disabled: s64; }");
+	static_member := Extended.parse_declaration("Conditional :: struct { #if true { enabled: s64; } else disabled: s64; }");//
 	assert(static_member.status == .COMPLETE);
 	member_if := static_member.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements[0].(*Extended.Parser_If);
 	assert((member_if.if_flags & .IS_STATIC) != 0);
 	assert(member_if.then_block.block_type == .DATA_DECLARATIONS);
 
-	enum_source :: "Spells :: enum { BASE; #if true { BLORPLE; #if false { HIDDEN; } else VISIBLE; } else FALLBACK; AFTER; }";
-	static_enum := Extended.parse_declaration(enum_source);
+	ENUM_SOURCE :: "Spells :: enum { BASE; #if true { BLORPLE; #if false { HIDDEN; } else VISIBLE; } else FALLBACK; AFTER; }";//
+	static_enum := Extended.parse_declaration(ENUM_SOURCE);
 	assert(static_enum.status == .COMPLETE);
 	enum_statements := static_enum.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Enum).block.statements;
 	assert(enum_statements.count == 3);
@@ -10243,10 +12206,10 @@ test_static_if_directives :: () {
 	assert(enum_if.then_block.statements[1].(*Extended.Parser_If).else_block.statements[0].(*Extended.Parser_Ident).name == "VISIBLE");
 	assert(enum_if.else_block.statements[0].(*Extended.Parser_Ident).name == "FALLBACK");
 	assert(enum_statements[2].(*Extended.Parser_Ident).name == "AFTER");
-	assert(Extended.reconstruct_source(*static_enum) == enum_source);
+	assert(Extended.reconstruct_source(*static_enum) == ENUM_SOURCE);
 	assert(Extended.parse_declaration("Broken :: enum { #if true { NAME; ").status == .INCOMPLETE);
 
-	static_empty_default := Extended.parse_block("{ #if OS == { case .WINDOWS; return; case; } }");
+	static_empty_default := Extended.parse_block("{ #if OS == { case .WINDOWS; return; case; } }");//
 	assert(static_empty_default.status == .COMPLETE);
 	assert(static_empty_default.synthetic_tokens.count == 0);
 	static_cases := static_empty_default.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block.statements;
@@ -10255,12 +12218,12 @@ test_static_if_directives :: () {
 }
 
 test_preserved_directive_forms :: () {
-	placeholder_source :: "#placeholder Apple;\nafter :: 1;";
-	placeholder := Extended.parse_file(placeholder_source);
+	PLACEHOLDER_SOURCE :: "#placeholder Apple;\nafter :: 1;";
+	placeholder := Extended.parse_file(PLACEHOLDER_SOURCE);
 	assert(placeholder.status == .COMPLETE);
 	placeholder_node := placeholder.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Placeholder);
 	assert(placeholder_node.name == "Apple");
-	assert(Extended.reconstruct_source(*placeholder) == placeholder_source);
+	assert(Extended.reconstruct_source(*placeholder) == PLACEHOLDER_SOURCE);
 
 	as_fields := Extended.parse_declaration("Container :: struct { #as using base: Base; }");
 	assert(as_fields.status == .COMPLETE);
@@ -10271,7 +12234,7 @@ test_preserved_directive_forms :: () {
 		assert((using_node.expression.(*Extended.Parser_Declaration).flags & .IS_MARKED_AS_AS) != 0);
 	}
 
-	using_declarations := Extended.parse_file("using Global: State;\nContainer :: struct { using local: State; using #as base: Base; }");
+	using_declarations := Extended.parse_file("using Global: State;\nContainer :: struct { using local: State; using #as base: Base; }");//
 	assert(using_declarations.status == .COMPLETE);
 	file_statements := using_declarations.root.(*Extended.Parser_Block).statements;
 	assert(file_statements[0].(*Extended.Parser_Using).expression.(*Extended.Parser_Declaration).name == "Global");
@@ -10282,22 +12245,22 @@ test_preserved_directive_forms :: () {
 	assert(suffix_as.name == "base");
 	assert((suffix_as.flags & .IS_MARKED_AS_AS) != 0);
 
-	using_enum_source :: "{ using enum u16 { CHOCOLATE :: 0; VANILLA; } after(); }";
-	using_enum := Extended.parse_block(using_enum_source);
+	USING_ENUM_SOURCE :: "{ using enum u16 { CHOCOLATE :: 0; VANILLA; } after(); }";//
+	using_enum := Extended.parse_block(USING_ENUM_SOURCE);
 	assert(using_enum.status == .COMPLETE);
 	using_enum_statements := using_enum.root.(*Extended.Parser_Block).statements;
 	assert(using_enum_statements.count == 2);
 	assert(using_enum_statements[0].(*Extended.Parser_Using).expression.kind == .ENUM);
 	assert(using_enum_statements[0].(*Extended.Parser_Using).expression.(*Extended.Parser_Enum).block.statements.count == 2);
 	assert(using_enum_statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*using_enum) == using_enum_source);
+	assert(Extended.reconstruct_source(*using_enum) == USING_ENUM_SOURCE);
 	assert(Extended.parse_block("{ using enum u16 { VANILLA; }; after(); }").status == .COMPLETE);
 	ordinary_using := Extended.parse_block("{ using state after(); }");
 	assert(ordinary_using.status == .RECOVERED);
 	assert(ordinary_using.diagnostics[0].expected_token == #char ";");
 
-	asm_source :: "{ #asm AVX, AVX2 { mov apple:, 10; nested { ignored; }; } after(); }";
-	assembly := Extended.parse_block(asm_source);
+	ASM_SOURCE :: "{ #asm AVX, AVX2 { mov apple:, 10; nested { ignored; }; } after(); }";//
+	assembly := Extended.parse_block(ASM_SOURCE);
 	assert(assembly.status == .COMPLETE);
 	assembly_block := assembly.root.(*Extended.Parser_Block);
 	assert(assembly_block.statements.count == 2);
@@ -10324,10 +12287,10 @@ test_preserved_directive_forms :: () {
 	assert(Extended.token_at(*assembly, asm_node.statements[0].span.first).original_text == "mov");
 	assert(Extended.token_at(*assembly, asm_node.statements[1].span.first).original_text == "nested");
 	assert(asm_node.body_span.one_past_last > asm_node.body_span.first);
-	assert(Extended.reconstruct_source(*assembly) == asm_source);
+	assert(Extended.reconstruct_source(*assembly) == ASM_SOURCE);
 
-	register_source :: "{ #asm { apple:; banana: gpr; mov cherry:, 10; mov w: gpr === 15, 10; t: gpr === a; v: vec === 9; x === a; mov y === a, z: gpr === 9; } }";
-	registers := Extended.parse_block(register_source);
+	REGISTER_SOURCE :: "{ #asm { apple:; banana: gpr; mov cherry:, 10; mov w: gpr === 15, 10; t: gpr === a; v: vec === 9; x === a; mov y === a, z: gpr === 9; } }";//
+	registers := Extended.parse_block(REGISTER_SOURCE);
 	assert(registers.status == .COMPLETE);
 	register_statements := registers.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements;
 	assert(register_statements.count == 8);
@@ -10375,10 +12338,10 @@ test_preserved_directive_forms :: () {
 	assert(Extended.token_at(*registers, register_statements[7].instruction.operands[0].register_pinning.target.span.first).original_text == "a");
 	assert(register_statements[7].instruction.operands[1].kind == .REGISTER_DECLARATION);
 	assert(Extended.token_at(*registers, register_statements[7].instruction.operands[1].register_declaration.pinning.target.span.first).original_text == "9");
-	assert(Extended.reconstruct_source(*registers) == register_source);
+	assert(Extended.reconstruct_source(*registers) == REGISTER_SOURCE);
 
-	asm_numeric_source :: "{ #asm { mov dst, -10; mov dst, +0x2A; mov dst, -10.5; mov dst, +1.25; mov dst, 4294967296; mov dst, [base - 10]; } }";
-	asm_numeric := Extended.parse_block(asm_numeric_source);
+	ASM_NUMERIC_SOURCE :: "{ #asm { mov dst, -10; mov dst, +0x2A; mov dst, -10.5; mov dst, +1.25; mov dst, 4294967296; mov dst, [base - 10]; } }";//
+	asm_numeric := Extended.parse_block(ASM_NUMERIC_SOURCE);
 	assert(asm_numeric.status == .COMPLETE);
 	asm_numeric_statements := asm_numeric.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements;
 	assert(asm_numeric_statements.count == 6);
@@ -10405,10 +12368,10 @@ test_preserved_directive_forms :: () {
 	assert(asm_numeric_statements[5].instruction.operands[1].kind == .MEMORY);
 	assert(asm_numeric_statements[5].instruction.operands[1].memory.base.expression.(*Extended.Parser_Ident).name == "base");
 	assert((asm_numeric_statements[5].instruction.operands[1].memory.displacement.expression.(*Extended.Parser_Literal).value_flags & .MINUS_SIGN) != 0);
-	assert(Extended.reconstruct_source(*asm_numeric) == asm_numeric_source);
+	assert(Extended.reconstruct_source(*asm_numeric) == ASM_NUMERIC_SOURCE);
 
-	asm_memory_source :: "{ #asm { mov dst, [b]; mov dst, [base + index]; mov dst, [base + index*8 - 10]; mov dst, [base + vector_index*4 + (OFFSET * 2)]; mov dst, [base + (OFFSET + 1)]; mov dst, [base - (-10.5)]; mov dst, [base + index*(SCALE + 1)]; mov dst, []; mov dst, [base +]; mov dst, [base + index*]; } }";
-	asm_memory := Extended.parse_block(asm_memory_source);
+	ASM_MEMORY_SOURCE :: "{ #asm { mov dst, [b]; mov dst, [base + index]; mov dst, [base + index*8 - 10]; mov dst, [base + vector_index*4 + (OFFSET * 2)]; mov dst, [base + (OFFSET + 1)]; mov dst, [base - (-10.5)]; mov dst, [base + index*(SCALE + 1)]; mov dst, []; mov dst, [base +]; mov dst, [base + index*]; } }";//
+	asm_memory := Extended.parse_block(ASM_MEMORY_SOURCE);
 	assert(asm_memory.status == .RECOVERED);
 	assert(asm_memory.diagnostics.count == 3);
 	memory_statements := asm_memory.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements;
@@ -10440,11 +12403,11 @@ test_preserved_directive_forms :: () {
 		assert(memory_statements[it].instruction.operands[1].kind == .UNPARSED);
 	}
 
-	assert(Extended.reconstruct_source(*asm_memory) == asm_memory_source);
+	assert(Extended.reconstruct_source(*asm_memory) == ASM_MEMORY_SOURCE);
 
 	// Tutorial addresses exercise symbolic scales and high-level constant subexpressions.
-	tutorial_memory_source :: "{ #asm { mov t, [dummy_array_pointer + dummy_array_index*DUMMY_SCALE + DUMMY_DISP]; mov t, [dummy_array_pointer + dummy_array_index*(size_of(u64)) + (-10 * 2 + 13)]; } }";
-	tutorial_memory := Extended.parse_block(tutorial_memory_source);
+	TUTORIAL_MEMORY_SOURCE :: "{ #asm { mov t, [dummy_array_pointer + dummy_array_index*DUMMY_SCALE + DUMMY_DISP]; mov t, [dummy_array_pointer + dummy_array_index*(size_of(u64)) + (-10 * 2 + 13)]; } }";//
+	tutorial_memory := Extended.parse_block(TUTORIAL_MEMORY_SOURCE);
 	assert(tutorial_memory.status == .COMPLETE);
 	tutorial_address := tutorial_memory.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements[0].instruction.operands[1];
 	assert(tutorial_address.kind == .MEMORY);
@@ -10454,10 +12417,10 @@ test_preserved_directive_forms :: () {
 	assert(inline_address.kind == .MEMORY);
 	assert(inline_address.memory.scale.expression.(*Extended.Parser_Type_Query).query_kind == .SIZE_OF);
 	assert(inline_address.memory.displacement.expression.(*Extended.Parser_Unary_Operator).subexpression.kind == .BINARY_OPERATOR);
-	assert(Extended.reconstruct_source(*tutorial_memory) == tutorial_memory_source);
+	assert(Extended.reconstruct_source(*tutorial_memory) == TUTORIAL_MEMORY_SOURCE);
 
-	asm_modifier_source :: "{ #asm { vload dst, [base]!; vop a!, b!n, c!d, d!u, e!z; vadd dst & mask, src &* mask; vop [base + vector_index*4 - 10]!z &* mask, -10!, bad!x, bad &*; vop [base + (OFFSET & FLAG)]!z; } }";
-	asm_modifiers := Extended.parse_block(asm_modifier_source);
+	ASM_MODIFIER_SOURCE :: "{ #asm { vload dst, [base]!; vop a!, b!n, c!d, d!u, e!z; vadd dst & mask, src &* mask; vop [base + vector_index*4 - 10]!z &* mask, -10!, bad!x, bad &*; vop [base + (OFFSET & FLAG)]!z; } }";//
+	asm_modifiers := Extended.parse_block(ASM_MODIFIER_SOURCE);
 	assert(asm_modifiers.status == .RECOVERED);
 	assert(asm_modifiers.diagnostics.count == 2);
 	modifier_statements := asm_modifiers.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements;
@@ -10499,10 +12462,10 @@ test_preserved_directive_forms :: () {
 	assert(nested_ampersand.memory.displacement.expression.kind == .UNARY_OPERATOR);
 	assert(nested_ampersand.memory.displacement.expression.(*Extended.Parser_Unary_Operator).subexpression.kind == .BINARY_OPERATOR);
 	assert(nested_ampersand.modifiers.count == 1 && nested_ampersand.modifiers[0].kind == .BANG_Z);
-	assert(Extended.reconstruct_source(*asm_modifiers) == asm_modifier_source);
+	assert(Extended.reconstruct_source(*asm_modifiers) == ASM_MODIFIER_SOURCE);
 
-	asm_value_source :: "{ #asm { mov dst, source_value; mov dst, MY_CONSTANT; mov dst, s64; mov dst, register_param; mov dst, (MY_CONSTANT + 1); mov dst, (register_param); mov dst, (MY_CONSTANT * (2 + 3)) &* mask; mov dst, [base + (MY_CONSTANT * 2)]; mov dst, some_call(1); } }";
-	asm_values := Extended.parse_block(asm_value_source);
+	ASM_VALUE_SOURCE :: "{ #asm { mov dst, source_value; mov dst, MY_CONSTANT; mov dst, s64; mov dst, register_param; mov dst, (MY_CONSTANT + 1); mov dst, (register_param); mov dst, (MY_CONSTANT * (2 + 3)) &* mask; mov dst, [base + (MY_CONSTANT * 2)]; mov dst, some_call(1); } }";//
+	asm_values := Extended.parse_block(ASM_VALUE_SOURCE);
 	assert(asm_values.status == .COMPLETE);
 	value_statements := asm_values.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements;
 	assert(value_statements.count == 9);
@@ -10531,10 +12494,10 @@ test_preserved_directive_forms :: () {
 	assert(value_statements[7].instruction.operands[1].kind == .MEMORY);
 	assert(value_statements[7].instruction.operands[1].memory.displacement.expression.kind == .UNARY_OPERATOR);
 	assert(value_statements[8].instruction.operands[1].kind == .UNPARSED);
-	assert(Extended.reconstruct_source(*asm_values) == asm_value_source);
+	assert(Extended.reconstruct_source(*asm_values) == ASM_VALUE_SOURCE);
 
-	asm_macro_source :: "fixture_macro :: (register_param: __reg, type_param: Type) #expand { #asm { mov register_param, (type_param); } }";
-	asm_macro := Extended.parse_file(asm_macro_source);
+	ASM_MACRO_SOURCE :: "fixture_macro :: (register_param: __reg, type_param: Type) #expand { #asm { mov register_param, (type_param); } }";//
+	asm_macro := Extended.parse_file(ASM_MACRO_SOURCE);
 	assert(asm_macro.status == .COMPLETE);
 	macro_header := asm_macro.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
 	assert(macro_header.arguments[0].type_inst.type_valued_expression.(*Extended.Parser_Ident).name == "__reg");
@@ -10543,7 +12506,7 @@ test_preserved_directive_forms :: () {
 	assert(macro_instruction.operands[0].kind == .VALUE);
 	assert(macro_instruction.operands[0].value.expression.(*Extended.Parser_Ident).name == "register_param");
 	assert(macro_instruction.operands[1].value.expression.(*Extended.Parser_Ident).name == "type_param");
-	assert(Extended.reconstruct_source(*asm_macro) == asm_macro_source);
+	assert(Extended.reconstruct_source(*asm_macro) == ASM_MACRO_SOURCE);
 
 	bare_asm := Extended.parse_block("{ #asm {} }");
 	assert(bare_asm.status == .COMPLETE);
@@ -10552,7 +12515,7 @@ test_preserved_directive_forms :: () {
 	assert(bare_asm_node.statements.count == 0);
 	assert(bare_asm_node.body_span.first == bare_asm_node.body_span.one_past_last);
 
-	shared_scope := Extended.parse_block("{ #asm { first: gpr; } #asm { mov first, 1; } { #asm { nested: gpr; } } }");
+	shared_scope := Extended.parse_block("{ #asm { first: gpr; } #asm { mov first, 1; } { #asm { nested: gpr; } } }");//
 	assert(shared_scope.status == .COMPLETE);
 	shared_scope_block := shared_scope.root.(*Extended.Parser_Block);
 	first_asm := shared_scope_block.statements[0].(*Extended.Parser_Asm);
@@ -10572,7 +12535,7 @@ test_preserved_directive_forms :: () {
 	assert(nested_asm.enclosing_scope == nested_block);
 	assert(nested_asm.enclosing_scope != first_asm.enclosing_scope);
 
-	conditional_asm := Extended.parse_block("{ #if BITS == 8 #asm { mov.8 result:, value; } else #asm { mov.64 result:, value; } }");
+	conditional_asm := Extended.parse_block("{ #if BITS == 8 #asm { mov.8 result:, value; } else #asm { mov.64 result:, value; } }");//
 	assert(conditional_asm.status == .COMPLETE);
 	conditional_scope := conditional_asm.root.(*Extended.Parser_Block);
 	conditional := conditional_scope.statements[0].(*Extended.Parser_If);
@@ -10590,7 +12553,7 @@ test_preserved_directive_forms :: () {
 	assert(else_asm.statements[0].instruction.size.kind == .FIXED);
 	assert(Extended.token_at(*conditional_asm, else_asm.statements[0].instruction.size.span.first).original_text == ".64");
 
-	polymorphic_asm := Extended.parse_block("{ #asm { popcnt?BITS result, value; popcnt?T other, value; } }");
+	polymorphic_asm := Extended.parse_block("{ #asm { popcnt?BITS result, value; popcnt?T other, value; } }");//
 	assert(polymorphic_asm.status == .COMPLETE);
 	polymorphic_statements := polymorphic_asm.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm).statements;
 	assert(polymorphic_statements.count == 2);
@@ -10600,7 +12563,7 @@ test_preserved_directive_forms :: () {
 	assert(polymorphic_statements[0].instruction.operands.count == 2);
 	assert(polymorphic_statements[1].instruction.operands.count == 2);
 
-	missing_asm_semicolon := Extended.parse_block("{ #asm { mov result:, value } after(); }");
+	missing_asm_semicolon := Extended.parse_block("{ #asm { mov result:, value } after(); }");//
 	assert(missing_asm_semicolon.status == .RECOVERED);
 	assert(missing_asm_semicolon.diagnostics.count == 1);
 	assert(missing_asm_semicolon.diagnostics[0].kind == .EXPECTED_TOKEN);
@@ -10610,7 +12573,7 @@ test_preserved_directive_forms :: () {
 	assert(missing_semicolon_asm.statements[0].kind == .INSTRUCTION);
 	assert(missing_semicolon_asm.statements[0].instruction.operands.count == 2);
 
-	truncated_asm := Extended.parse_block("{ #asm { mov value:, 1;");
+	truncated_asm := Extended.parse_block("{ #asm { mov value:, 1;");//
 	assert(truncated_asm.status == .INCOMPLETE);
 	truncated_asm_node := truncated_asm.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Asm);
 	assert(truncated_asm_node.statements.count == 1);
@@ -10618,8 +12581,8 @@ test_preserved_directive_forms :: () {
 }
 
 test_assembly_recovery :: () {
-	source :: "{ #asm { mov destination source; add destination, 1; } after(); }";
-	parsed := Extended.parse_block(source);
+	SOURCE :: "{ #asm { mov destination source; add destination, 1; } after(); }";//
+	parsed := Extended.parse_block(SOURCE);
 	assert(parsed.status == .RECOVERED);
 	assert(parsed.diagnostics.count == 1);
 	assert(parsed.diagnostics[0].expected_token == #char ",");
@@ -10633,10 +12596,10 @@ test_assembly_recovery :: () {
 	assert(asm_block.statements[0].instruction.operands[1].value.expression.(*Extended.Parser_Ident).name == "source");
 	assert(asm_block.statements[1].instruction.mnemonic.name == "add");
 	assert(block.statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*parsed) == source);
+	assert(Extended.reconstruct_source(*parsed) == SOURCE);
 
-	numeric_source :: "{ #asm { mov destination 10; add destination, 1; } after(); }";
-	numeric := Extended.parse_block(numeric_source);
+	NUMERIC_SOURCE :: "{ #asm { mov destination 10; add destination, 1; } after(); }";//
+	numeric := Extended.parse_block(NUMERIC_SOURCE);
 	assert(numeric.status == .RECOVERED);
 	assert(numeric.diagnostics.count == 1 && numeric.diagnostics[0].expected_token == #char ",");
 	numeric_block := numeric.root.(*Extended.Parser_Block);
@@ -10646,10 +12609,10 @@ test_assembly_recovery :: () {
 	assert(numeric_asm.statements[0].instruction.operands.count == 2);
 	assert(numeric_asm.statements[1].instruction.mnemonic.name == "add");
 	assert(numeric_block.statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*numeric) == numeric_source);
+	assert(Extended.reconstruct_source(*numeric) == NUMERIC_SOURCE);
 
-	bad_memory_source :: "{ #asm { mov dst, [base +]; add dst, 1; } after(); }";
-	bad_memory := Extended.parse_block(bad_memory_source);
+	BAD_MEMORY_SOURCE :: "{ #asm { mov dst, [base +]; add dst, 1; } after(); }";//
+	bad_memory := Extended.parse_block(BAD_MEMORY_SOURCE);
 	assert(bad_memory.status == .RECOVERED);
 	assert(bad_memory.diagnostics.count == 1);
 	assert(bad_memory.diagnostics[0].message == "Malformed assembly memory operand.");
@@ -10661,10 +12624,10 @@ test_assembly_recovery :: () {
 	assert(bad_memory_asm.statements[0].instruction.operands[1].kind == .UNPARSED);
 	assert(bad_memory_asm.statements[1].instruction.mnemonic.name == "add");
 	assert(bad_memory_block.statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*bad_memory) == bad_memory_source);
+	assert(Extended.reconstruct_source(*bad_memory) == BAD_MEMORY_SOURCE);
 
-	unclosed_memory_source :: "{ #asm { mov dst, [base +; add dst, 1; } after(); }";
-	unclosed_memory := Extended.parse_block(unclosed_memory_source);
+	UNCLOSED_MEMORY_SOURCE :: "{ #asm { mov dst, [base +; add dst, 1; } after(); }";//
+	unclosed_memory := Extended.parse_block(UNCLOSED_MEMORY_SOURCE);
 	assert(unclosed_memory.status == .RECOVERED && unclosed_memory.diagnostics.count == 1);
 	unclosed_block := unclosed_memory.root.(*Extended.Parser_Block);
 	assert(unclosed_block.statements.count == 2);
@@ -10673,10 +12636,10 @@ test_assembly_recovery :: () {
 	assert(unclosed_asm.statements[0].instruction.operands[1].kind == .UNPARSED);
 	assert(unclosed_asm.statements[1].instruction.mnemonic.name == "add");
 	assert(unclosed_block.statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*unclosed_memory) == unclosed_memory_source);
+	assert(Extended.reconstruct_source(*unclosed_memory) == UNCLOSED_MEMORY_SOURCE);
 
-	bad_modifier_source :: "{ #asm { vop bad!x, bad &*; add dst, 1; } after(); }";
-	bad_modifier := Extended.parse_block(bad_modifier_source);
+	BAD_MODIFIER_SOURCE :: "{ #asm { vop bad!x, bad &*; add dst, 1; } after(); }";//
+	bad_modifier := Extended.parse_block(BAD_MODIFIER_SOURCE);
 	assert(bad_modifier.status == .RECOVERED);
 	assert(bad_modifier.diagnostics.count == 2);
 	assert(Extended.token_at(*bad_modifier, bad_modifier.diagnostics[0].span.first).original_text == "!");
@@ -10689,10 +12652,10 @@ test_assembly_recovery :: () {
 	assert(bad_modifier_asm.statements[0].instruction.operands[1].kind == .UNPARSED);
 	assert(bad_modifier_asm.statements[1].instruction.mnemonic.name == "add");
 	assert(bad_modifier_block.statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*bad_modifier) == bad_modifier_source);
+	assert(Extended.reconstruct_source(*bad_modifier) == BAD_MODIFIER_SOURCE);
 
-	missing_semicolon_source :: "{ #asm { mov dst, 1 } after(); }";
-	missing_semicolon := Extended.parse_block(missing_semicolon_source);
+	MISSING_SEMICOLON_SOURCE :: "{ #asm { mov dst, 1 } after(); }";
+	missing_semicolon := Extended.parse_block(MISSING_SEMICOLON_SOURCE);
 	assert(missing_semicolon.status == .RECOVERED && missing_semicolon.diagnostics.count == 1);
 	assert(missing_semicolon.diagnostics[0].expected_token == #char ";");
 	assert(missing_semicolon.diagnostics[0].actual_token == #char "}");
@@ -10703,10 +12666,10 @@ test_assembly_recovery :: () {
 	assert(missing_asm.statements.count == 1);
 	assert(missing_asm.statements[0].instruction.operands.count == 2);
 	assert(missing_block.statements[1].kind == .PROCEDURE_CALL);
-	assert(Extended.reconstruct_source(*missing_semicolon) == missing_semicolon_source);
+	assert(Extended.reconstruct_source(*missing_semicolon) == MISSING_SEMICOLON_SOURCE);
 
-	truncated_source :: "{ #asm { mov dst, 1";
-	truncated := Extended.parse_block(truncated_source);
+	TRUNCATED_SOURCE :: "{ #asm { mov dst, 1";
+	truncated := Extended.parse_block(TRUNCATED_SOURCE);
 	assert(truncated.status == .INCOMPLETE);
 	assert(truncated.diagnostics.count >= 2);
 	truncated_block := truncated.root.(*Extended.Parser_Block);
@@ -10716,7 +12679,7 @@ test_assembly_recovery :: () {
 	assert(truncated_asm.statements[0].instruction.operands.count == 2);
 	assert(truncated_asm.statements[0].instruction.operands[1].kind == .VALUE);
 	assert(truncated_asm.statements[0].span.one_past_last == truncated_asm.body_span.one_past_last);
-	assert(Extended.reconstruct_source(*truncated) == truncated_source);
+	assert(Extended.reconstruct_source(*truncated) == TRUNCATED_SOURCE);
 }
 
 test_statement_recovery :: () {
@@ -10741,7 +12704,7 @@ test_statement_recovery :: () {
 	assert(bad_expression.root.(*Extended.Parser_Block).statements.count == 2);
 	assert(bad_expression.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).name == "next");
 
-	nested_recovery := Extended.parse_file("outer :: () { #unknown { leaked := 1; } after := 2; }\nfinal :: 3;");
+	nested_recovery := Extended.parse_file("outer :: () { #unknown { leaked := 1; } after := 2; }\nfinal :: 3;");//
 	assert(nested_recovery.status == .RECOVERED);
 	nested_root := nested_recovery.root.(*Extended.Parser_Block);
 	assert(nested_root.statements.count == 2);
@@ -10751,7 +12714,7 @@ test_statement_recovery :: () {
 	assert(outer_body.statements.count == 1);
 	assert(outer_body.statements[0].(*Extended.Parser_Declaration).name == "after");
 
-	declaration_recovery := Extended.parse_file("broken :: () #unknown { leaked := 1; }\nafter :: 2;");
+	declaration_recovery := Extended.parse_file("broken :: () #unknown { leaked := 1; }\nafter :: 2;");//
 	assert(declaration_recovery.status == .RECOVERED);
 	declaration_root := declaration_recovery.root.(*Extended.Parser_Block);
 	assert(declaration_root.statements.count == 2);
@@ -10847,8 +12810,8 @@ test_section_13_recovery :: () {
 	assert(truncated_insert.status == .INCOMPLETE);
 	assert(truncated_insert.root.kind == .DIRECTIVE_INSERT);
 
-	truncated_for_source :: "{ for <* :utf8_iter text {";
-	truncated_for := Extended.parse_block(truncated_for_source);
+	TRUNCATED_FOR_SOURCE :: "{ for <* :utf8_iter text {";
+	truncated_for := Extended.parse_block(TRUNCATED_FOR_SOURCE);
 	assert(truncated_for.status == .INCOMPLETE);
 	assert(truncated_for.diagnostics.count > 0);
 	for_node := truncated_for.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
@@ -10856,21 +12819,21 @@ test_section_13_recovery :: () {
 	assert(for_node.want_replacement_for_expansion.(*Extended.Parser_Ident).name == "utf8_iter");
 	assert(for_node.iteration_expression.(*Extended.Parser_Ident).name == "text");
 	assert(for_node.block != null);
-	assert(Extended.reconstruct_source(*truncated_for) == truncated_for_source);
+	assert(Extended.reconstruct_source(*truncated_for) == TRUNCATED_FOR_SOURCE);
 	missing_controlled_value := Extended.parse_block("{ for <= { tick(); } }");
 	assert(missing_controlled_value.status == .RECOVERED);
 	missing_controlled_for := missing_controlled_value.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(missing_controlled_for.want_reverse_expression == null);
 	assert(missing_controlled_for.block != null);
 
-	missing_pointer_value_source :: "{ for *= { tick(); } }";
-	missing_pointer_value := Extended.parse_block(missing_pointer_value_source);
+	MISSING_POINTER_VALUE_SOURCE :: "{ for *= { tick(); } }";
+	missing_pointer_value := Extended.parse_block(MISSING_POINTER_VALUE_SOURCE);
 	assert(missing_pointer_value.status == .RECOVERED);
 	assert(missing_pointer_value.diagnostics.count > 0);
 	missing_pointer_for := missing_pointer_value.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_For);
 	assert(missing_pointer_for.want_pointer_expression == null);
 	assert(missing_pointer_for.block != null);
-	assert(Extended.reconstruct_source(*missing_pointer_value) == missing_pointer_value_source);
+	assert(Extended.reconstruct_source(*missing_pointer_value) == MISSING_POINTER_VALUE_SOURCE);
 
 	truncated_default_case := Extended.parse_block("{ if value == { case 1; return; case; value :=");
 	assert(truncated_default_case.status == .INCOMPLETE);

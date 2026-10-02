@@ -174,9 +174,12 @@ Parser_Binding :: struct {
 Parser_Lexical_Scope :: struct {
 	parent: *Parser_Lexical_Scope;
 	owner: *Parser_Node;
+	inference_pool: *Pool;
 	children: [..]*Parser_Lexical_Scope;
 	bindings: [..]Parser_Binding;
 	references: [..]*Parser_Ident;
+	member_accesses: [..]*Parser_Binary_Operator;
+	usings: [..]*Parser_Using;
 }
 
 Parse_Diagnostic_Info :: struct {
@@ -520,6 +523,8 @@ push_lexical_scope :: (parser: *Parser) -> *Parser_Lexical_Scope {
 	scope.children.allocator = parser_node_allocator(parser.parsed);
 	scope.bindings.allocator = parser_node_allocator(parser.parsed);
 	scope.references.allocator = parser_node_allocator(parser.parsed);
+	scope.member_accesses.allocator = parser_node_allocator(parser.parsed);
+	scope.usings.allocator = parser_node_allocator(parser.parsed);
 	if scope.parent {
 		array_add(*scope.parent.children, scope);
 	}
@@ -624,7 +629,8 @@ parseInit :: (
 	materialised: *Parsed_Source = null,
 	edit_source: *Parsed_Source = null,
 	edit_start: s64 = 0,
-	edit_end: s64 = 0
+	edit_end: s64 = 0,
+	resolve_identifiers: bool = true
 ) -> *Parsed_Source, Parser #expand {
 	parser: Parser;
 	parser.edit_source = edit_source;
@@ -639,7 +645,10 @@ parseInit :: (
 	set_allocators(*parser.parsed.node_pool);
 	parser.parsed.root_scope = push_lexical_scope(*parser);
 	parser.parsed.root = rootParser(*parser);
-	resolve_lexical_references(parser.parsed.root_scope);
+	if resolve_identifiers {
+		resolve_lexical_references(parser.parsed.root_scope);
+	}
+
 	return parser.parsed, parser;
 }
 
@@ -648,8 +657,8 @@ parseInit :: (
 // Parse one value expression, such as `call(x + 1)`, rather than a statement or file.
 // Empty input and trailing tokens are diagnosed.  The result retains tokens, diagnostics, a root expression, and lexical bindings; source and filename are borrowed until release.
 // Warning mode reports optional semicolons where applicable without changing parse status.
-parse_expression :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false) -> Parsed_Source {
-	result, parser := parseInit(source, p => parse_value_expression(p), fully_pathed_filename, warn_unnecessary_semicolons);
+parse_expression :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false, resolve_identifiers: bool = true) -> Parsed_Source {
+	result, parser := parseInit(source, p => parse_value_expression(p), fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers=resolve_identifiers);
 
 	if !result.root && !result.diagnostics.count {
 		add_expected_expression(*parser);
@@ -663,8 +672,8 @@ parse_expression :: (source: string, fully_pathed_filename: string = "", warn_un
 // Parse a single declaration, such as `answer: s64 = 42;`, including trailing notes.
 // An optional final semicolon is consumed; further input is diagnosed rather than silently becoming another declaration.
 // The returned tree, tokens, and diagnostics follow the same borrowed-source and independent tree/name release rules as parse_file.
-parse_declaration :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false) -> Parsed_Source {
-	result, parser := parseInit(source, p => parse_declaration_node(p), fully_pathed_filename, warn_unnecessary_semicolons);
+parse_declaration :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false, resolve_identifiers: bool = true) -> Parsed_Source {
+	result, parser := parseInit(source, p => parse_declaration_node(p), fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers=resolve_identifiers);
 
 	if !result.root && !result.diagnostics.count {
 		add_expected_expression(*parser);
@@ -691,8 +700,8 @@ parse_declaration :: (source: string, fully_pathed_filename: string = "", warn_u
 
 // Parse one braced imperative block, such as `{ value := 1; return value; }`.
 // The root is a Parser_Block; missing braces and unexpected input after the block produce diagnostics while retaining the partial tree for editor use.  Input is borrowed.
-parse_block :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false) -> Parsed_Source {
-	result, parser := parseInit(source, p => parse_block_node(p).(*Parser_Node), fully_pathed_filename, warn_unnecessary_semicolons);
+parse_block :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false, resolve_identifiers: bool = true) -> Parsed_Source {
+	result, parser := parseInit(source, p => parse_block_node(p).(*Parser_Node), fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers=resolve_identifiers);
 
 	if !result.root && !result.diagnostics.count {
 		add_expected_expression(*parser);
@@ -706,11 +715,11 @@ parse_block :: (source: string, fully_pathed_filename: string = "", warn_unneces
 // Parse one braced DATA_DECLARATIONS block, such as a struct member body.
 // Unlike parse_block, its contents use declaration grammar.  A missing delimiter or trailing input is diagnosed, and the partial tree remains available for recovery.
 // The returned source and filename are borrowed, as with the other parse entrypoints.
-parse_declaration_block :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false) -> Parsed_Source {
+parse_declaration_block :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false, resolve_identifiers: bool = true) -> Parsed_Source {
 	result, parser := parseInit(
 		source,
 		(parser) => parse_block_node(parser, block_type=.DATA_DECLARATIONS).(*Parser_Node),
-		fully_pathed_filename, warn_unnecessary_semicolons
+		fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers=resolve_identifiers
 	);
 
 	if !result.root && !result.diagnostics.count {
@@ -726,8 +735,8 @@ parse_declaration_block :: (source: string, fully_pathed_filename: string = "", 
 // Empty files still have a root; malformed regions retain partial declarations and diagnostics while parsing continues.
 // The returned snapshot borrows source and filename; retain both while inspecting tokens, source spans, or the tree.
 // Release the tree separately from retained tokens and optional interned identifier names.
-parse_file :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false) -> Parsed_Source {
-	result, parser := parseInit(source, parse_file_node, fully_pathed_filename, warn_unnecessary_semicolons);
+parse_file :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false, resolve_identifiers: bool = true) -> Parsed_Source {
+	result, parser := parseInit(source, parse_file_node, fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers=resolve_identifiers);
 	return result;
 }
 
@@ -736,7 +745,7 @@ parse_file :: (source: string, fully_pathed_filename: string = "", warn_unnecess
 // On success, retain the old filename and return a new, independently owned tree and token snapshot.
 // Unchanged syntax may be copied only when eligible; other regions are reparsed.
 // Keep both source buffers alive while their snapshots are in use, and pass warning mode again if it was enabled.
-parse_file_edit :: (old: *Parsed_Source, start: s64, end: s64, new_source: string, warn_unnecessary_semicolons: bool = false) -> Parsed_Source, bool {
+parse_file_edit :: (old: *Parsed_Source, start: s64, end: s64, new_source: string, warn_unnecessary_semicolons: bool = false, resolve_identifiers: bool = true) -> Parsed_Source, bool {
 	old_source := old.source;
 	if start >= 0 && end >= start && end <= old_source.count {
 		inserted_count := new_source.count - (old_source.count - (end - start));
@@ -746,7 +755,7 @@ parse_file_edit :: (old: *Parsed_Source, start: s64, end: s64, new_source: strin
 				&& slice(new_source, start + inserted_count, old_source.count - end) == slice(old_source, end, old_source.count - end)
 			) {
 				materialised := materialise_tokens(new_source, old, start, end);
-				result, parser := parseInit(new_source, parse_file_node, old.fully_pathed_filename, warn_unnecessary_semicolons, *materialised, old, start, end);
+				result, parser := parseInit(new_source, parse_file_node, old.fully_pathed_filename, warn_unnecessary_semicolons, *materialised, old, start, end, resolve_identifiers);
 				return result, true;
 			}
 		}
@@ -3006,6 +3015,7 @@ parse_using_statement_after_keyword :: (parser: *Parser, first: s64) -> *Parser_
 	}
 
 	finish_node(parser, result, first);
+	array_add(*parser.current_scope.usings, result);
 	return result;
 }
 
@@ -5340,6 +5350,10 @@ parse_postfix_suffixes :: (parser: *Parser, result: *Parser_Node, first: s64) ->
 				access.operator_type = #char ".";
 				access.left = result;
 				access.right = member;
+				if parser.current_scope {
+					array_add(*parser.current_scope.member_accesses, access);
+				}
+
 				result = finish_node(parser, access, first);
 
 			// Typed array literal prefix, e.g. `T.[1, 2]`.

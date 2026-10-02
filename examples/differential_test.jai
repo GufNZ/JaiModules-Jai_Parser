@@ -85,14 +85,24 @@ main :: () {
 	);
 	test_compiler_related_diagnostics();
 	test_asm_semantic_diagnostics();
-	assert_trivia_round_trip("value /* comment */ + 42;\n");
-	assert_trivia_round_trip("text :: #string END\nbody\nEND; // tail");
+	assert_trivia_round_trip(#string JAI
+value /* comment */ + 42;
+JAI
+	);
+	assert_trivia_round_trip(#string JAI
+text :: #string END
+body
+END; // tail
+JAI
+	);
 }
 
 capture_compiler_error :: (code: string, log_output := false) -> Compiler_Diagnostic_Result {
 	fixture_path :: "jai_parser_compiler_diagnostic_fixture.jai";
-	assert(find_index_from_left(code, #char "\t") < 0, "Compiler diagnostic fixtures must use spaces instead of tabs.");
-	written := write_entire_file(fixture_path, code);
+	normalized_code, tab_count := replace(code, "\t", "    ");
+	defer free(normalized_code);
+
+	written := write_entire_file(fixture_path, normalized_code);
 	assert(written, "Unable to write compiler diagnostic fixture '%'.", fixture_path);
 	defer file_delete(fixture_path);
 
@@ -104,7 +114,7 @@ capture_compiler_error :: (code: string, log_output := false) -> Compiler_Diagno
 	);
 
 	assert(result.process_result.type == .EXITED, "Compiler diagnostic fixture failed to run.");
-	assert(result.process_result.exit_code != 0, "Compiler accepted invalid fixture:\n%", code);
+	assert(result.process_result.exit_code != 0, "Compiler accepted invalid fixture:\n%", normalized_code);
 
 	append_compiler_diagnostics(result.standard_error, *result.diagnostics);
 	append_compiler_diagnostics(result.standard_output, *result.diagnostics);
@@ -205,13 +215,22 @@ assert_invalid_expression_compiler_message :: (source: string, expected_message:
 	assert(parsed.diagnostics.count > 0, "Parser rejected '%' without a diagnostic.", source);
 	assert(parsed.diagnostics[0].message == expected_message, "Parser diagnostic differed.\nExpected: %\nActual:   %\n", expected_message, parsed.diagnostics[0].message);
 
-	code := tprint("main :: () {\n    value := %;\n}\n", source);
+	code := tprint(#string JAI
+main :: () {
+    value := %;
+}
+JAI
+	, source);
 	assert_compiler_error_message(code, expected_message);
 }
 
 test_compiler_related_diagnostics :: () {
 	result := capture_compiler_error(
-		"takes_integer :: (value: s64) {}\nmain :: () { takes_integer(\"text\"); }\n",
+		#string JAI
+takes_integer :: (value: s64) {}
+main :: () { takes_integer("text"); }
+JAI
+		,
 		log_output=true
 	);
 	assert(result.diagnostics.count == 1);
@@ -229,7 +248,12 @@ test_compiler_related_diagnostics :: () {
 }
 
 assert_asm_semantic_error :: (instruction: string, expected_message: string) {
-	source := tprint("main :: () {\n    #asm { % }\n}\n", instruction);
+	source := tprint(#string JAI
+main :: () {
+    #asm { % }
+}
+JAI
+	, instruction);
 	parsed := Parser.parse_file(source);
 	defer Parser.release_parser_tree(*parsed);
 
@@ -1376,18 +1400,922 @@ assert_file_workspace_fixture :: (source: string, expected_declaration: string) 
 }
 
 test_file_workspace_fixtures :: () {
-	assert_file_workspace_fixture("#scope_file\nfixture_file_scope :: 1;", "fixture_file_scope");
+	assert_file_workspace_fixture(
+		#string JAI
+#scope_file
+fixture_file_scope :: 1;
+JAI
+		,
+		"fixture_file_scope"
+	);
 	assert_file_workspace_fixture("#no_reset fixture_no_reset: s64;", "fixture_no_reset");
-	assert_file_workspace_fixture("#scope_export\nfixture_export_scope :: 1;", "fixture_export_scope");
-	assert_file_workspace_fixture("#scope_module\nfixture_module_scope :: 1;", "fixture_module_scope");
+	assert_file_workspace_fixture(
+		#string JAI
+#scope_export
+fixture_export_scope :: 1;
+JAI
+		,
+		"fixture_export_scope"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+#scope_module
+fixture_module_scope :: 1;
+JAI
+		,
+		"fixture_module_scope"
+	);
+	//FIXME: long?
 	assert_file_workspace_fixture("fixture_asm_registers :: () { #asm { mov apple:, 10; mov signed:, -10; banana: gpr; mov w: gpr === 15, 10; } }", "fixture_asm_registers");
 	assert_file_workspace_fixture("fixture_asm_pinning :: () { #asm { a: gpr === 9; t: gpr === a; x: gpr; x === a; } }", "fixture_asm_pinning");
 	assert_file_workspace_fixture("fixture_asm_memory :: () { #asm { mov base:, 10; mov loaded:, [base]; } }", "fixture_asm_memory");
 	assert_file_workspace_fixture("fixture_asm_value :: () { CONSTANT :: 10; #asm { mov destination:, CONSTANT; } }", "fixture_asm_value");
 	assert_file_workspace_fixture("fixture_asm_macro :: (register_param: __reg) #expand { #asm { mov register_param, 10; } }", "fixture_asm_macro");
 	assert_file_workspace_fixture("fixture_asm_immediates :: () { #asm { mov.8 byte_max:, 255; mov.8 byte_negative:, -127; } }", "fixture_asm_immediates");
-	assert_file_workspace_fixture("#add_context fixture_context_value: s64;\nfixture_add_context :: 1;", "fixture_add_context");
-	assert_file_workspace_fixture("#assert true;\nfixture_assert_scope :: 1;", "fixture_assert_scope");
+	assert_file_workspace_fixture(
+		#string JAI
+#add_context fixture_context_value: s64;
+fixture_add_context :: 1;
+JAI
+		,
+		"fixture_add_context"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+#assert true;
+fixture_assert_scope :: 1;
+JAI
+		,
+		"fixture_assert_scope"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Procs :: struct { Clear: s64; }
+fixture_make :: () -> Fixture_Procs { return .{Clear=1}; }
+fixture_alias_field :: () -> s64 {
+	make_alias :: fixture_make;
+	value := make_alias();
+	return value.Clear;
+}
+JAI
+		,
+		"fixture_alias_field"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Procs :: struct { Clear: s64; }
+fixture_query_field :: () -> s64 {
+	original := Fixture_Procs.{Clear=1};
+	value: type_of(original) = original;
+	return value.Clear;
+}
+JAI
+		,
+		"fixture_query_field"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Container :: struct { Nested: Fixture_Child; }
+fixture_member_type :: () -> s64 {
+	return Fixture_Container.{Nested=Fixture_Child.{Clear=1}}.Nested.Clear;
+}
+JAI
+		,
+		"fixture_member_type"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Container :: struct { Nested: Fixture_Child; }
+fixture_typed_member :: () -> s64 {
+	container: Fixture_Container = .{Nested=Fixture_Child.{Clear=1}};
+	return container.Nested.Clear;
+}
+JAI
+		,
+		"fixture_typed_member"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Container :: struct { Nested: Fixture_Child; }
+fixture_inferred_member :: () -> s64 {
+	container := Fixture_Container.{Nested=Fixture_Child.{Clear=1}};
+	return container.Nested.Clear;
+}
+JAI
+		,
+		"fixture_inferred_member"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Container :: struct { Nested: Fixture_Child; }
+fixture_aliased_member :: () -> s64 {
+	original := Fixture_Container.{Nested=Fixture_Child.{Clear=1}};
+	container := original;
+	return container.Nested.Clear;
+}
+JAI
+		,
+		"fixture_aliased_member"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Container :: struct { Nested: Fixture_Child; }
+fixture_make_container :: () -> Fixture_Container { return .{Nested=Fixture_Child.{Clear=1}}; }
+fixture_called_member :: () -> s64 { return fixture_make_container().Nested.Clear; }
+JAI
+		,
+		"fixture_called_member"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Input :: struct { Value: s64; }
+Fixture_Alternate :: struct { Value: s64; }
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+fixture_make :: (input: Fixture_Input) -> Fixture_Child { return .{Clear=1}; }
+fixture_make :: (input: Fixture_Alternate) -> Fixture_Other { return .{PushMatrix=1}; }
+fixture_overloaded_member :: () -> s64 { return fixture_make(Fixture_Input.{Value=1}).Clear; }
+JAI
+		,
+		"fixture_overloaded_member"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Input :: struct { Value: s64; }
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+fixture_make :: (input: Fixture_Input, enabled: bool = true) -> Fixture_Child { return .{Clear=1}; }
+fixture_make :: (input: Fixture_Input, required: string) -> Fixture_Other { return .{PushMatrix=1}; }
+fixture_defaulted_overload :: () -> s64 { return fixture_make(input=Fixture_Input.{Value=1}).Clear; }
+JAI
+		,
+		"fixture_defaulted_overload"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Input :: struct { Value: s64; }
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+fixture_make :: (input: Fixture_Input, enabled: bool = true) -> Fixture_Child { return .{Clear=1}; }
+fixture_make :: (input: Fixture_Input, required: string) -> Fixture_Other { return .{PushMatrix=1}; }
+fixture_positional_default :: () -> s64 { return fixture_make(Fixture_Input.{Value=1}).Clear; }
+JAI
+		,
+		"fixture_positional_default"
+	);
+	missing_overload_argument := capture_compiler_error(
+		#string JAI
+Child :: struct { Clear: s64; }
+make :: (input: s64, required: string) -> Child { return .{Clear=1}; }
+main :: () { return make(input=1).Clear; }
+JAI
+	);
+	assert(missing_overload_argument.diagnostics.count > 0);
+	unresolved_default := capture_compiler_error(
+		#string JAI
+Child :: struct { Clear: s64; }
+make :: (input: s64, enabled: bool = Missing) -> Child { return .{Clear=1}; }
+main :: () { return make(1).Clear; }
+JAI
+	);
+	assert(unresolved_default.diagnostics.count > 0);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+fixture_primitive_make :: (value: s64) -> Fixture_Child { return .{Clear=1}; }
+fixture_primitive_make :: (value: string) -> Fixture_Other { return .{PushMatrix=1}; }
+fixture_primitive_overload :: () -> s64 { return fixture_primitive_make(1).Clear; }
+JAI
+		,
+		"fixture_primitive_overload"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+fixture_rank :: (value: float64) -> Fixture_Other { return .{PushMatrix=1}; }
+fixture_rank :: (value: s64) -> Fixture_Child { return .{Clear=1}; }
+fixture_exact_rank :: () -> s64 { return fixture_rank(1).Clear; }
+JAI
+		,
+		"fixture_exact_rank"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+fixture_rank :: (value: float64) -> Fixture_Child { return .{Clear=1}; }
+fixture_rank :: (value: string) -> Fixture_Other { return .{PushMatrix=1}; }
+fixture_converted_rank :: () -> s64 { return fixture_rank(1).Clear; }
+JAI
+		,
+		"fixture_converted_rank"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+fixture_rank :: (value: float64) -> Fixture_Child { return .{Clear=1}; }
+fixture_rank :: (value: string) -> Fixture_Other { return .{PushMatrix=1}; }
+fixture_float_rank :: () -> s64 { return fixture_rank(1.5).Clear; }
+JAI
+		,
+		"fixture_float_rank"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Base :: struct { Value: s64; }
+Wrapper :: struct { #as using base: Base; }
+Child :: struct { Clear: s64; }
+Other :: struct { PushMatrix: s64; }
+make :: (value: Base) -> Child { return .{Clear=1}; }
+make :: (value: string) -> Other { return .{PushMatrix=1}; }
+fixture_aggregate_conversion :: () -> s64 { return make(Wrapper.{base=Base.{Value=1}}).Clear; }
+JAI
+		,
+		"fixture_aggregate_conversion"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Base :: struct { Value: s64; }
+Wrapper :: struct { #as using base: Base; }
+Child :: struct { Clear: s64; }
+Other :: struct { PushMatrix: s64; }
+make :: (value: Base) -> Other { return .{PushMatrix=1}; }
+make :: (value: Wrapper) -> Child { return .{Clear=1}; }
+fixture_exact_aggregate :: () -> s64 { return make(Wrapper.{base=Base.{Value=1}}).Clear; }
+JAI
+		,
+		"fixture_exact_aggregate"
+	);
+	ambiguous_aggregate_conversion := capture_compiler_error(
+		#string JAI
+First :: struct { Value: s64; }
+Second :: struct { Value: s64; }
+Wrapper :: struct { #as using first: First; #as using second: Second; }
+Child :: struct { Clear: s64; }
+Other :: struct { PushMatrix: s64; }
+make :: (value: First) -> Child { return .{Clear=1}; }
+make :: (value: Second) -> Other { return .{PushMatrix=1}; }
+main :: () { return make(Wrapper.{first=First.{Value=1}, second=Second.{Value=2}}).Clear; }
+JAI
+	);
+	assert(ambiguous_aggregate_conversion.diagnostics.count > 0);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Input :: struct { Value: s64; }
+Fixture_Alternate :: struct { Value: s64; }
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+fixture_make :: (number: float64, input: Fixture_Input) -> Fixture_Other { return .{PushMatrix=1}; }
+fixture_make :: (number: s64, input: Fixture_Alternate) -> Fixture_Child { return .{Clear=1}; }
+fixture_later_mismatch :: () -> s64 { return fixture_make(1, Fixture_Alternate.{Value=1}).Clear; }
+JAI
+		,
+		"fixture_later_mismatch"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Container :: struct { Nested: Fixture_Child; }
+Fixture_Other :: struct { PushMatrix: s64; }
+fixture_make :: (ready: bool) -> Fixture_Container { return .{Nested=Fixture_Child.{Clear=1}}; }
+fixture_make :: (ready: string) -> Fixture_Other { return .{PushMatrix=1}; }
+fixture_called_alias :: () -> s64 { original := fixture_make(true); value := original; return value.Nested.Clear; }
+JAI
+		,
+		"fixture_called_alias"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+fixture_make :: (ready: bool) -> Fixture_Other { return .{PushMatrix=1}; }
+fixture_shadowed_overloads :: () -> s64 {
+	fixture_make :: (ready: bool) -> Fixture_Child { return .{Clear=1}; }
+	fixture_make :: (ready: string) -> Fixture_Other { return .{PushMatrix=2}; }
+	return fixture_make(true).Clear;
+}
+JAI
+		,
+		"fixture_shadowed_overloads"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+fixture_identity :: (value: $T) -> T { return value; }
+fixture_polymorphic_member :: () -> s64 {
+	return fixture_identity(Fixture_Child.{Clear=1}).Clear;
+}
+JAI
+		,
+		"fixture_polymorphic_member"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+fixture_poly_make :: (value: $T) -> Fixture_Child { return .{Clear=1}; }
+fixture_polymorphic_explicit_return :: () -> s64 {
+	return fixture_poly_make(1).Clear;
+}
+JAI
+		,
+		"fixture_polymorphic_explicit_return"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+Fixture_Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; }
+fixture_multi_parameter :: () -> s64 { pair: Fixture_Pair(Fixture_Other, Fixture_Child); return pair.Right.Clear; }
+JAI
+		,
+		"fixture_multi_parameter"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+Fixture_Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; }
+fixture_named_parameter :: () -> s64 {
+	pair: Fixture_Pair(Second=Fixture_Child, First=Fixture_Other);
+	return pair.Right.Clear;
+}
+JAI
+		,
+		"fixture_named_parameter"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+Fixture_Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; }
+Fixture_Alias :: Fixture_Pair;
+Fixture_AliasAgain :: Fixture_Alias;
+fixture_aliased_parameter :: () -> s64 {
+	pair: Fixture_AliasAgain(Second=Fixture_Child, First=Fixture_Other);
+	return pair.Right.Clear;
+}
+JAI
+		,
+		"fixture_aliased_parameter"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+Fixture_Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; }
+Fixture_Instance :: Fixture_Pair(Second=Fixture_Child, First=Fixture_Other);
+fixture_aliased_instance :: () -> s64 { pair: Fixture_Instance; return pair.Right.Clear; }
+JAI
+		,
+		"fixture_aliased_instance"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+Fixture_Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; }
+Fixture_Instance :: Fixture_Pair(Second=Fixture_Child, First=Fixture_Other);
+fixture_equivalent_instance :: (choose: bool) -> s64 {
+	return (ifx choose
+		then Fixture_Instance.{Right=Fixture_Child.{Clear=1}}
+		else Fixture_Pair(Fixture_Other, Fixture_Child).{Right=Fixture_Child.{Clear=2}}
+	).Right.Clear;
+}
+JAI
+		,
+		"fixture_equivalent_instance"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+fixture_choose :: (left: $T, right: $U) -> T { return left; }
+fixture_multi_polymorph :: () -> s64 {
+	return fixture_choose(Fixture_Child.{Clear=1}, Fixture_Other.{PushMatrix=2}).Clear;
+}
+JAI
+		,
+		"fixture_multi_polymorph"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+fixture_choose :: (left: $T, right: $U) -> T { return left; }
+fixture_named_polymorph :: () -> s64 {
+	return fixture_choose(right=Fixture_Other.{PushMatrix=2}, left=Fixture_Child.{Clear=1}).Clear;
+}
+JAI
+		,
+		"fixture_named_polymorph"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Box :: struct (T: Type) { Nested: T; }
+fixture_wrap :: (value: $T) -> Fixture_Box(T) { return .{Nested=value}; }
+fixture_polymorphic_box :: () -> s64 { return fixture_wrap(Fixture_Child.{Clear=1}).Nested.Clear; }
+JAI
+		,
+		"fixture_polymorphic_box"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+Fixture_Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; }
+fixture_wrap_pair :: (left: $T, right: $U) -> Fixture_Pair(T, U) { return .{Left=left, Right=right}; }
+fixture_polymorphic_pair :: () -> s64 {
+	return fixture_wrap_pair(Fixture_Other.{PushMatrix=1}, Fixture_Child.{Clear=2}).Right.Clear;
+}
+JAI
+		,
+		"fixture_polymorphic_pair"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+Fixture_Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; }
+fixture_wrap_pair :: (left: $T, right: $U) -> Fixture_Pair(U, T) { return .{Left=right, Right=left}; }
+fixture_reordered_pair :: () -> s64 {
+	return fixture_wrap_pair(right=Fixture_Other.{PushMatrix=1}, left=Fixture_Child.{Clear=2}).Right.Clear;
+}
+JAI
+		,
+		"fixture_reordered_pair"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+Fixture_Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; }
+fixture_wrap_named_pair :: (left: $T, right: $U) -> Fixture_Pair(Second=T, First=U) {
+	return .{Left=right, Right=left};
+}
+fixture_named_return_pair :: () -> s64 {
+	return fixture_wrap_named_pair(right=Fixture_Other.{PushMatrix=1}, left=Fixture_Child.{Clear=2}).Right.Clear;
+}
+JAI
+		,
+		"fixture_named_return_pair"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+Fixture_Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; }
+Fixture_Alias :: Fixture_Pair;
+fixture_wrap_aliased_pair :: (left: $T, right: $U) -> Fixture_Alias(Second=T, First=U) {
+	return .{Left=right, Right=left};
+}
+fixture_aliased_return_pair :: () -> s64 {
+	return fixture_wrap_aliased_pair(right=Fixture_Other.{PushMatrix=1}, left=Fixture_Child.{Clear=2}).Right.Clear;
+}
+JAI
+		,
+		"fixture_aliased_return_pair"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Box :: struct (T: Type) { Nested: T; }
+fixture_wrap :: (value: $T) -> Fixture_Box(T) { return .{Nested=value}; }
+fixture_same_box :: (choose: bool) -> s64 {
+	return (ifx choose
+		then fixture_wrap(Fixture_Child.{Clear=1})
+		else Fixture_Box(Fixture_Child).{Nested=Fixture_Child.{Clear=2}}
+	).Nested.Clear;
+}
+JAI
+		,
+		"fixture_same_box"
+	);
+	invalid_instantiation := capture_compiler_error(
+		#string JAI
+Child :: struct { Clear: s64; }
+Other :: struct { PushMatrix: s64; }
+Box :: struct (T: Type) { Nested: T; }
+wrap :: (value: $T) -> Box(T) { return .{Nested=value}; }
+main :: (choose: bool) {
+	value := ifx choose
+		then wrap(Child.{Clear=1})
+		else Box(Other).{Nested=Other.{PushMatrix=2}};
+	return value.Nested.Clear;
+}
+JAI
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Child :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+fixture_direct_receiver :: () -> s64 {
+	return Box(Child).{Nested=Child.{Clear=1}}.Nested.Clear;
+}
+JAI
+		,
+		"fixture_direct_receiver"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Child :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+fixture_pointer_receiver :: () -> s64 {
+	box := Box(Child).{Nested=Child.{Clear=1}};
+	pointer := *box;
+	return pointer.*.Nested.Clear;
+}
+JAI
+		,
+		"fixture_pointer_receiver"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Child :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+fixture_subscript_receiver :: () -> s64 {
+	boxes: [1] Box(Child) = .[Box(Child).{Nested=Child.{Clear=1}}];
+	return boxes[0].Nested.Clear;
+}
+JAI
+		,
+		"fixture_subscript_receiver"
+	);
+	scalar_member := capture_compiler_error(
+		#string JAI
+main :: () {
+	scalar := 1;
+	return scalar.Nested;
+}
+JAI
+	);
+	assert(scalar_member.diagnostics.count > 0);
+	assert(invalid_instantiation.diagnostics.count > 0);
+	missing_instantiation := capture_compiler_error(
+		#string JAI
+Child :: struct { Clear: s64; }
+Pair :: struct (First: Type, Second: Type) { Right: Second; }
+main :: () {
+	pair: Pair(Child);
+	return pair.Right.Clear;
+}
+JAI
+	);
+	assert(missing_instantiation.diagnostics.count > 0);
+	unknown_instantiation := capture_compiler_error(
+		#string JAI
+Child :: struct { Clear: s64; }
+Pair :: struct (First: Type, Second: Type) { Right: Second; }
+Alias :: Pair;
+main :: () {
+	pair: Alias(Unknown=Child, Second=Child);
+	return pair.Right.Clear;
+}
+JAI
+	);
+	assert(unknown_instantiation.diagnostics.count > 0);
+	duplicate_instantiation := capture_compiler_error(
+		#string JAI
+Child :: struct { Clear: s64; }
+Pair :: struct (First: Type, Second: Type) { Right: Second; }
+main :: () {
+	pair: Pair(First=Child, First=Child);
+	return pair.Right.Clear;
+}
+JAI
+	);
+	assert(duplicate_instantiation.diagnostics.count > 0);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+Fixture_Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; }
+fixture_nested_parameter :: () -> s64 {
+	pair: Fixture_Pair(Fixture_Pair(Fixture_Child, Fixture_Other), Fixture_Other);
+	return pair.Left.Left.Clear;
+}
+JAI
+		,
+		"fixture_nested_parameter"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+Fixture_Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; }
+Fixture_Inner :: Fixture_Pair(Fixture_Child, Fixture_Other);
+fixture_nested_alias :: () -> s64 { pair: Fixture_Pair(Fixture_Inner, Fixture_Other); return pair.Left.Left.Clear; }
+JAI
+		,
+		"fixture_nested_alias"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Box :: struct (T: Type) { Nested: T; }
+Fixture_Instance :: Fixture_Box(Fixture_Child);
+Fixture_Alias :: Fixture_Instance;
+fixture_typed_alias :: () -> s64 { typed: Fixture_Alias; value := typed; return value.Nested.Clear; }
+JAI
+		,
+		"fixture_typed_alias"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Box :: struct (T: Type) { Nested: T; }
+Fixture_Instance :: Fixture_Box(Fixture_Child);
+Fixture_Alias :: Fixture_Instance;
+fixture_inferred_alias :: () -> s64 {
+	original := Fixture_Alias.{Nested=Fixture_Child.{Clear=1}};
+	first := original;
+	second := first;
+	return second.Nested.Clear;
+}
+JAI
+		,
+		"fixture_inferred_alias"
+	);
+	ambiguous_alias := capture_compiler_error(
+		#string JAI
+Child :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+Alias :: Box(Child);
+Alias :: Box(Child);
+main :: () {
+	typed: Alias;
+	return typed.Nested.Clear;
+}
+JAI
+	);
+	assert(ambiguous_alias.diagnostics.count > 0);
+	incomplete_alias := capture_compiler_error(
+		#string JAI
+Child :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+Alias :: Box;
+main :: () {
+	typed: Alias;
+	return typed.Nested.Clear;
+}
+JAI
+	);
+	assert(incomplete_alias.diagnostics.count > 0);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Box :: struct (T: Type) { Nested: T; }
+Fixture_Container :: struct { Item: Fixture_Box(Fixture_Child); }
+fixture_instantiated_field :: () -> s64 { container: Fixture_Container; return container.Item.Nested.Clear; }
+JAI
+		,
+		"fixture_instantiated_field"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Box :: struct (T: Type) { Nested: T; }
+Fixture_Container :: struct (T: Type) { Item: Fixture_Box(T); }
+fixture_parameterized_field :: () -> s64 {
+	container: Fixture_Container(Fixture_Child);
+	return container.Item.Nested.Clear;
+}
+JAI
+		,
+		"fixture_parameterized_field"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Box :: struct (T: Type) { Nested: T; }
+Fixture_Container :: struct (T: Type) { Item: Fixture_Box(Fixture_Box(T)); }
+fixture_nested_field :: () -> s64 {
+	container: Fixture_Container(Fixture_Child);
+	return container.Item.Nested.Nested.Clear;
+}
+JAI
+		,
+		"fixture_nested_field"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+C :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+make :: (value: C) -> Box(C) { return .{Nested=value}; }
+fixture_instance_alias_call :: () -> s64 { alias :: make; return alias(C.{Clear=1}).Nested.Clear; }
+JAI
+		,
+		"fixture_instance_alias_call"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+C :: struct { Clear: s64; }
+O :: struct { PushMatrix: s64; }
+Box :: struct (T: Type) { Nested: T; }
+make :: (value: string) -> Box(C) { return .{Nested=C.{Clear=1}}; }
+make :: (value: bool) -> Box(O) { return .{Nested=O.{PushMatrix=1}}; }
+fixture_instance_overload :: () -> s64 { return make("a").Nested.Clear; }
+JAI
+		,
+		"fixture_instance_overload"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+C :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+fixture_instance_cast :: () -> s64 {
+	original := Box(C).{Nested=C.{Clear=1}};
+	return (cast(Box(C)) original).Nested.Clear;
+}
+JAI
+		,
+		"fixture_instance_cast"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+C :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+make :: () -> Box(C) { return .{Nested=C.{Clear=1}}; }
+fixture_instance_query :: () -> s64 { value: type_of(make()); return value.Nested.Clear; }
+JAI
+		,
+		"fixture_instance_query"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+C :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+fixture_instance_run :: () -> s64 { return (#run Box(C).{Nested=C.{Clear=1}}).Nested.Clear; }
+JAI
+		,
+		"fixture_instance_run"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+C :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+fixture_instance_block_run :: () -> s64 { return (#run -> Box(C) { return .{Nested=C.{Clear=1}}; }).Nested.Clear; }
+JAI
+		,
+		"fixture_instance_block_run"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+C :: struct { Clear: s64; }
+O :: struct { PushMatrix: s64; }
+Box :: struct (T: Type) { Nested: T; }
+fixture_instance_static :: () -> s64 {
+	return (#ifx true
+		then Box(C).{Nested=C.{Clear=1}}
+		else Box(O).{Nested=O.{PushMatrix=2}}
+	).Nested.Clear;
+}
+JAI
+		,
+		"fixture_instance_static"
+	);
+	unknown_query := capture_compiler_error(
+		#string JAI
+C :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+main :: () { value: type_of(missing()); return value.Nested.Clear; }
+JAI
+	);
+	assert(unknown_query.diagnostics.count > 0);
+	unknown_cast := capture_compiler_error(
+		#string JAI
+C :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+main :: () { original := Box(C).{Nested=C.{Clear=1}}; return (cast(Box(Missing)) original).Nested.Clear; }
+JAI
+	);
+	assert(unknown_cast.diagnostics.count > 0);
+	unknown_static := capture_compiler_error(
+		#string JAI
+C :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+main :: () { return (#ifx Unknown then Box(C).{Nested=C.{Clear=1}} else Box(C).{Nested=C.{Clear=2}}).Nested.Clear; }
+JAI
+	);
+	assert(unknown_static.diagnostics.count > 0);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Other :: struct { PushMatrix: s64; }
+Fixture_Pair :: struct (First: Type, Second: Type) { Left: First; Right: Second; }
+Fixture_Container :: struct (T: Type, U: Type) { Item: Fixture_Pair(Second=T, First=U); }
+fixture_named_field :: () -> s64 {
+	container: Fixture_Container(U=Fixture_Other, T=Fixture_Child);
+	return container.Item.Right.Clear;
+}
+JAI
+		,
+		"fixture_named_field"
+	);
+	incomplete_nested_field := capture_compiler_error(
+		#string JAI
+Child :: struct { Clear: s64; }
+Box :: struct (T: Type) { Nested: T; }
+Container :: struct (T: Type) { Item: Box(T); }
+main :: () {
+	container: Container;
+	return container.Item.Nested.Clear;
+}
+JAI
+	);
+	assert(incomplete_nested_field.diagnostics.count > 0);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Box :: struct (T: Type) { Clear: s64; Nested: T; }
+fixture_primitive_parameter :: () -> s64 {
+	box: Fixture_Box(s64);
+	return box.Clear;
+}
+JAI
+		,
+		"fixture_primitive_parameter"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Box :: struct (T: Type) { Nested: T; }
+fixture_instantiated_member :: () -> s64 {
+	box: Fixture_Box(Fixture_Child) = .{Nested=Fixture_Child.{Clear=1}};
+	return box.Nested.Clear;
+}
+JAI
+		,
+		"fixture_instantiated_member"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Container :: struct { Nested: Fixture_Child; }
+fixture_cast_member :: () -> s64 {
+	original := Fixture_Container.{Nested=Fixture_Child.{Clear=1}};
+	return (cast(Fixture_Container) original).Nested.Clear;
+}
+JAI
+		,
+		"fixture_cast_member"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Container :: struct { Nested: Fixture_Child; }
+fixture_run_member :: () -> s64 {
+	return (#run Fixture_Container.{Nested=Fixture_Child.{Clear=1}}).Nested.Clear;
+}
+JAI
+		,
+		"fixture_run_member"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Child :: struct { Clear: s64; }
+Fixture_Container :: struct { Nested: Fixture_Child; }
+fixture_ifx_member :: (ready: bool) -> s64 {
+	return (ifx ready
+		then Fixture_Container.{Nested=Fixture_Child.{Clear=1}}
+		else Fixture_Container.{Nested=Fixture_Child.{Clear=2}}
+	).Nested.Clear;
+}
+JAI
+		,
+		"fixture_ifx_member"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Run_Struct :: struct { Clear: s64; }
+fixture_run_field :: () -> s64 {
+	value := #run Fixture_Run_Struct.{Clear=1};
+	return value.Clear;
+}
+JAI
+		,
+		"fixture_run_field"
+	);
+	assert_file_workspace_fixture(
+		#string JAI
+Fixture_Run_Struct :: struct { Clear: s64; }
+fixture_typed_run_field :: () -> s64 {
+	value := #run -> Fixture_Run_Struct {
+		return .{Clear=1};
+	};
+	return value.Clear;
+}
+JAI
+		,
+		"fixture_typed_run_field"
+	);
 }
 
 assert_declaration_workspace_fixture :: (source: string) {
@@ -1404,7 +2332,13 @@ assert_declaration_workspace_fixture :: (source: string) {
 	options.write_added_strings = false;
 	set_build_options(options, workspace);
 	compiler_begin_intercept(workspace);
-	add_build_string(tprint("Fixture_Constraint :: struct { value: s64; }\nfixture_procedure :: () {\n%\n}\n", source), workspace);
+	add_build_string(tprint(#string JAI
+Fixture_Constraint :: struct { value: s64; }
+fixture_procedure :: () {
+	%
+}
+JAI
+	, source), workspace);
 
 	found := false;
 	while true {
@@ -1467,7 +2401,14 @@ assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude
 	options.write_added_strings = false;
 	set_build_options(options, workspace);
 	compiler_begin_intercept(workspace);
-	add_build_string(tprint("fixture_pair :: () -> (s64, s64) { return 1, 2; }\nfixture_procedure :: () {\n%\n%\n}\n", prelude, source), workspace);
+	add_build_string(tprint(#string JAI
+fixture_pair :: () -> (s64, s64) { return 1, 2; }
+fixture_procedure :: () {
+	%
+	%
+}
+JAI
+	, prelude, source), workspace);
 
 	found := false;
 	while true {
@@ -1601,7 +2542,12 @@ test_directive_workspace_fixtures :: () {
 	assert_statement_fixture("#asm { nop; }");
 	assert_asm_compiler_shape("{ #asm { nop; } }", #code { #asm { nop; } });
 	assert_asm_compiler_shape("{ #asm AVX, AVX2 {} }", #code { #asm AVX, AVX2 {} });
-	assert_asm_compiler_shape("{\n    #asm { nop; }\n}", #code {
+	assert_asm_compiler_shape(#string JAI
+{
+    #asm { nop; }
+}
+JAI
+	, #code {
     #asm { nop; }
 });
 	assert_nested_asm_compiler_shape("{ if true { #asm { nop; } } else { #asm { nop; } } }", #code { if true { #asm { nop; } } else { #asm { nop; } } });
@@ -1631,12 +2577,28 @@ test_directive_workspace_fixtures :: () {
 	assert_statement_fixture("return {};");
 	assert_statement_fixture("if value == {} { return {}; }");
 	assert_statement_fixture("if values[{1, 2}] { return {}; }");
-	assert_statement_matches_code("if fruit == {\n    // no cases\n}", #code { if fruit == {
+	assert_statement_matches_code(#string JAI
+if fruit == {
+    // no cases
+}
+JAI
+	, #code { if fruit == {
     // no cases
 } });
-	assert_statement_matches_code("if fruit == { /* case other; */ } if fruit == { /* case 1; */ } if fruit == { /* case 2; */ } trailing();", #code { if fruit == { /* case other; */ } if fruit == { /* case 1; */ } if fruit == { /* case 2; */ } trailing(); });
+	assert_statement_matches_code(
+		#string JAI
+if fruit == { /* case other; */ } if fruit == { /* case 1; */ } if fruit == { /* case 2; */ } trailing();
+JAI
+		,
+		#code { if fruit == { /* case other; */ } if fruit == { /* case 1; */ } if fruit == { /* case 2; */ } trailing(); }
+	);
 	assert_expression_fixture(".member");
-	assert_expression_fixture("#string END\nbody\nEND");
+	assert_expression_fixture(#string JAI
+#string END
+body
+END
+JAI
+	);
 	assert_expression_fixture("#char \"A\"");
 	assert_expression_fixture("#this");
 	assert_expression_matches_code("#filepath", #code #filepath, fully_pathed_filename=tprint("%fixture.jai", #filepath));
@@ -1713,7 +2675,13 @@ test_directive_workspace_fixtures :: () {
 	assert_expression_fixture("#import,file \"../module.jai\"");
 	assert_expression_fixture("#import,dir \"../module\"");
 	assert_expression_fixture("#import,string \"fixture_value :: 1;\"");
-	assert_statement_fixture("#import,string #string END\nVALUE :: 1;\nEND\n;");
+	assert_statement_fixture(#string JAI
+#import,string #string END
+VALUE :: 1;
+END
+;
+JAI
+	);
 	assert_expression_fixture("#import,file \"../module.jai\"(DEBUG=true)(PROGRAM_DEBUG=false)");
 	assert_expression_fixture("#library,system \"Example\"");
 	assert_expression_fixture("#library,no_static_library \"Example\"");
@@ -1880,7 +2848,12 @@ test_directive_workspace_fixtures :: () {
 	assert_statement_fixture("using state;");
 	assert_statement_fixture("using enum u16 { CHOCOLATE :: 0; VANILLA; }");
 	assert_statement_fixture("using enum u16 { VANILLA; };");
-	assert_statement_fixture("text :: #string END\nbody\nEND");
+	assert_statement_fixture(#string JAI
+text :: #string END
+body
+END
+JAI
+	);
 	assert_statement_fixture("using local: State;");
 	assert_statement_fixture("using,except(x, y, z) orientation: Quaternion;");
 	assert_statement_fixture("using,except .[\"x\", \"y\", \"z\"] orientation: Quaternion;");
