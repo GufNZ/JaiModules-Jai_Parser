@@ -1132,7 +1132,7 @@ infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Par
 		else infer_primitive_expression_type(declaration.expression, visited, root_scope);
 }
 
-match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser_Procedure_Header, root_scope: *Parser_Lexical_Scope) -> Aggregate_Call_Match {
+match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser_Procedure_Header, root_scope: *Parser_Lexical_Scope, ranks: *[..]Aggregate_Call_Match = null) -> Aggregate_Call_Match {
 	for parameter: header.arguments {
 		if parameter.type_inst && parameter.type_inst.inst_flags & .VARARGS != 0 {
 			return .UNKNOWN;
@@ -1207,6 +1207,10 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 				&& argument.expression && argument.expression.kind == .LITERAL
 				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
 			) {
+				if ranks {
+					array_add(ranks, .MATCH);
+				}
+
 				continue;
 			}
 
@@ -1221,6 +1225,51 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
 			) {
 				converted = true;
+				if ranks {
+					array_add(ranks, .CONVERSION);
+				}
+
+				continue;
+			}
+
+
+			if (primitive == "s64"
+				&& argument.expression && argument.expression.kind == .LITERAL
+				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
+				&& (parameter_primitive == "u8" && argument.expression.(*Parser_Literal)._u64 <= 255
+					|| parameter_primitive == "s8" && (
+						argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN == 0 && argument.expression.(*Parser_Literal)._u64 <= 127
+						|| argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN != 0 && 0 - argument.expression.(*Parser_Literal)._u64 <= 128
+					)
+					|| parameter_primitive == "u16" && argument.expression.(*Parser_Literal)._u64 <= 65535
+					|| parameter_primitive == "s16" && (
+						argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN == 0 && argument.expression.(*Parser_Literal)._u64 <= 32767
+						|| argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN != 0 && 0 - argument.expression.(*Parser_Literal)._u64 <= 32768
+					)
+					|| parameter_primitive == "s32" && (
+						argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN == 0 && argument.expression.(*Parser_Literal)._u64 <= 2147483647
+						|| argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN != 0 && 0 - argument.expression.(*Parser_Literal)._u64 <= 2147483648
+					)
+				)
+			) {
+				converted = true;
+				if ranks {
+					array_add(ranks, .CONVERSION);
+				}
+
+				continue;
+			}
+
+
+			if (primitive == "s64" && parameter_primitive == "u64"
+				&& argument.expression && argument.expression.kind == .LITERAL
+				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
+			) {
+				converted = true;
+				if ranks {
+					array_add(ranks, .CONVERSION);
+				}
+
 				continue;
 			}
 
@@ -1253,6 +1302,10 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 			unknown = true;
 		} else if match == .CONVERSION {
 			converted = true;
+		}
+
+		if ranks {
+			array_add(ranks, match);
 		}
 	}
 
@@ -1309,6 +1362,10 @@ resolve_overloaded_aggregate_call :: (call: *Parser_Procedure_Call, root_scope: 
 
 	selected: *Parser_Procedure_Header;
 	best_match := Aggregate_Call_Match.MISMATCH;
+
+	best_ranks: [..]Aggregate_Call_Match;
+	defer array_free(best_ranks);
+
 	tied := false;
 	for binding: scope.bindings {
 		if binding.name != declaration.name {
@@ -1328,23 +1385,44 @@ resolve_overloaded_aggregate_call :: (call: *Parser_Procedure_Call, root_scope: 
 		}
 
 
-		match := match_aggregate_call_arguments(call, header, root_scope);
+		ranks: [..]Aggregate_Call_Match;
+		defer array_free(ranks);
+
+		match := match_aggregate_call_arguments(call, header, root_scope, *ranks);
 		if match == .UNKNOWN {
 			return null;
 		}
 
 
 		if match == .MATCH || match == .CONVERSION {
-			if selected && best_match == match {
-				tied = true;
-				continue;
+			better := !selected || match == .MATCH && best_match == .CONVERSION;
+			worse := selected && match == .CONVERSION && best_match == .MATCH;
+			if selected && match == .CONVERSION && best_match == .CONVERSION {
+				for ranks {
+					if it == .MATCH && best_ranks[it_index] == .CONVERSION {
+						better = true;
+					} else if it == .CONVERSION && best_ranks[it_index] == .MATCH {
+						worse = true;
+					}
+				}
+
+				if better && worse {
+					return null;
+				}
 			}
 
 
-			if !selected || match == .MATCH && best_match == .CONVERSION {
+			if better && !worse {
 				selected = header;
 				best_match = match;
+				best_ranks.count = 0;
+				for ranks {
+					array_add(*best_ranks, it);
+				}
+
 				tied = false;
+			} else if !better && !worse {
+				tied = true;
 			}
 		}
 	}

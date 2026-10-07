@@ -2,6 +2,8 @@
 #import "Basic";
 #import "String";
 
+#load "test_fixtures.jai";
+
 Original :: #import "Jai_Lexer";
 
 Default		:: #import "Jai_Parser";
@@ -96,7 +98,9 @@ test_keyword_table_completeness :: () {
 
 	for name, index: names {
 		KEYWORD_PREFIX :: "KEYWORD_";
-		if !starts_with(name, KEYWORD_PREFIX)	continue;
+		if !starts_with(name, KEYWORD_PREFIX) {
+			continue;
+		}
 
 		expected := values[index];
 		spelling := ifx expected == .KEYWORD_AUTO_CAST
@@ -141,12 +145,8 @@ test_long_identifier :: () {
 	LONG_IDENTIFIER_LENGTH :: Extended.MAX_IDENTIFIER_LENGTH + 8;
 	SUFFIX :: "\\  tail next";
 
-	input := alloc_string(LONG_IDENTIFIER_LENGTH + SUFFIX.count);
+	input := make_long_identifier_source(LONG_IDENTIFIER_LENGTH, SUFFIX);
 	defer free(input);
-	for index: 0..LONG_IDENTIFIER_LENGTH-1 {
-		input.data[index] = #char "a";
-	}
-	memcpy(input.data + LONG_IDENTIFIER_LENGTH, SUFFIX.data, SUFFIX.count);
 
 	lexer: Extended.Lexer;
 	Extended.set_input_from_string(*lexer, input);
@@ -164,77 +164,71 @@ test_long_identifier :: () {
 
 test_here_string_bounds :: () {
 	lexer: Extended.Lexer;
-	input :: "#string END\nvalue\n   END";
-	Extended.set_input_from_string(*lexer, input);
 
-	eat_expected_token(*lexer, #char "#");
-	eat_expected_token(*lexer, .IDENT);
-	delimiter := eat_expected_token(*lexer, .IDENT);
-	token := Extended.parse_here_string_body(*lexer, delimiter.ident_value.name);
-	assert(token.type == .STRING);
-	assert(token.string_value == "value\n");
-	assert(token.preceding_trivia == "\n");
-	assert(token.original_text == "value\n");
-	terminator := eat_expected_token(*lexer, .IDENT);
-	assert(terminator.ident_value.name == "END");
-	assert(terminator.preceding_trivia == "   ");
-	assert(terminator.original_text == "END");
+	Here_String_Bounds_Case :: struct {
+		input: string;
+		body: string;
+		terminator_trivia: string;
+	}
 
-	empty_input :: "#string END\nEND";
-	Extended.set_input_from_string(*lexer, empty_input);
-	eat_expected_token(*lexer, #char "#");
-	eat_expected_token(*lexer, .IDENT);
-	delimiter = eat_expected_token(*lexer, .IDENT);
-	token = Extended.parse_here_string_body(*lexer, delimiter.ident_value.name);
-	assert(token.type == .STRING);
-	assert(token.string_value == "");
-	assert(token.preceding_trivia == "\n");
-	assert(token.original_text == "");
-	terminator = eat_expected_token(*lexer, .IDENT);
-	assert(terminator.ident_value.name == "END");
-	assert(terminator.preceding_trivia == "");
-	assert(terminator.original_text == "END");
+	for fixture: Here_String_Bounds_Case.[
+		.{"#string END\nvalue\n   END", "value\n", "   "},
+		.{"#string END\nEND", "", ""},
+	] {
+		Extended.set_input_from_string(*lexer, fixture.input);
+		eat_expected_token(*lexer, #char "#");
+		eat_expected_token(*lexer, .IDENT);
+		delimiter := eat_expected_token(*lexer, .IDENT);
+		token := Extended.parse_here_string_body(*lexer, delimiter.ident_value.name);
+		assert(token.type == .STRING);
+		assert(token.string_value == fixture.body);
+		assert(token.preceding_trivia == "\n");
+		assert(token.original_text == fixture.body);
+		terminator := eat_expected_token(*lexer, .IDENT);
+		assert(terminator.ident_value.name == "END");
+		assert(terminator.preceding_trivia == fixture.terminator_trivia);
+		assert(terminator.original_text == "END");
+	}
 
 	unterminated_input :: "\n    X";
 	Extended.set_input_from_string(*lexer, unterminated_input);
 
 	// Exercise the logical EOF before the end of the backing allocation.
 	lexer.input.count -= 2;
-	token = Extended.parse_here_string_body(*lexer, "END");
+	token := Extended.parse_here_string_body(*lexer, "END");
 	assert(token == null);
 	assert(lexer.reported_error);
 }
 
 test_here_string_percent_modifier :: () {
 	lexer: Extended.Lexer;
-	input :: "#string,\\% END\nvalue % \\% unchanged\nEND";
-	Extended.set_input_from_string(*lexer, input);
 
-	eat_expected_token(*lexer, #char "#");
-	eat_expected_token(*lexer, .IDENT);
-	eat_expected_token(*lexer, #char ",");
-	modifier := eat_expected_token(*lexer, .IDENT);
-	assert(modifier.ident_value.name == "\\%");
-	delimiter := eat_expected_token(*lexer, .IDENT);
-	token := Extended.parse_here_string_body(*lexer, delimiter.ident_value.name, want_percent=true);
-	assert(token.type == .STRING);
-	assert(token.string_value == "value % \x1f unchanged\n");
-	assert(!lexer.reported_error);
+	for want_cr: bool.[false, true] {
+		input := ifx want_cr
+			then "#string,cr,\\% END\nvalue % \\%\nEND"
+			else "#string,\\% END\nvalue % \\% unchanged\nEND";
+		expected := ifx want_cr
+			then "value % \x1f\r\n"
+			else "value % \x1f unchanged\n";
 
-	combined_input :: "#string,cr,\\% END\nvalue % \\%\nEND";
-	Extended.set_input_from_string(*lexer, combined_input);
-	eat_expected_token(*lexer, #char "#");
-	eat_expected_token(*lexer, .IDENT);
-	eat_expected_token(*lexer, #char ",");
-	eat_expected_token(*lexer, .IDENT);
-	eat_expected_token(*lexer, #char ",");
-	modifier = eat_expected_token(*lexer, .IDENT);
-	assert(modifier.ident_value.name == "\\%");
-	delimiter = eat_expected_token(*lexer, .IDENT);
-	token = Extended.parse_here_string_body(*lexer, delimiter.ident_value.name, want_cr=true, want_percent=true);
-	assert(token.type == .STRING);
-	assert(token.string_value == "value % \x1f\r\n");
-	assert(!lexer.reported_error);
+		Extended.set_input_from_string(*lexer, input);
+		eat_expected_token(*lexer, #char "#");
+		eat_expected_token(*lexer, .IDENT);
+		eat_expected_token(*lexer, #char ",");
+		if want_cr {
+			cr_modifier := eat_expected_token(*lexer, .IDENT);
+			assert(cr_modifier.ident_value.name == "cr");
+			eat_expected_token(*lexer, #char ",");
+		}
+
+		modifier := eat_expected_token(*lexer, .IDENT);
+		assert(modifier.ident_value.name == "\\%");
+		delimiter := eat_expected_token(*lexer, .IDENT);
+		token := Extended.parse_here_string_body(*lexer, delimiter.ident_value.name, want_cr=want_cr, want_percent=true);
+		assert(token.type == .STRING);
+		assert(token.string_value == expected);
+		assert(!lexer.reported_error);
+	}
 }
 
 test_directive_trivia_round_trip :: () {
@@ -306,6 +300,7 @@ assert_source_span :: (source: string, cursor: *s64, span: string) {
 	if span.count {
 		assert(span.data == source.data + cursor.*);
 	}
+
 	cursor.* += span.count;
 }
 
@@ -361,5 +356,6 @@ test_structured_trivia :: (lexer: *Extended.Lexer) {
 		assert(trivia.text == "\xC2\xA0");
 		count += 1;
 	}
+
 	assert(count == 1);
 }

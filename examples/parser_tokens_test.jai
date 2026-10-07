@@ -9,6 +9,8 @@
 #import "Pool";
 #import "String";
 
+#load "test_fixtures.jai";
+
 Default  :: #import "Jai_Parser";
 Extended :: #import "Jai_Parser"(ENABLE_TRIVIA=true, INTERN_IDENTIFIERS=true);
 
@@ -414,14 +416,8 @@ test_lexer_only_recovery :: () {
 	IDENTIFIER_LENGTH :: Extended.MAX_IDENTIFIER_LENGTH + 8;
 	SUFFIX :: " :: 1;";
 
-	source := alloc_string(IDENTIFIER_LENGTH + SUFFIX.count);
+	source := make_long_identifier_source(IDENTIFIER_LENGTH, SUFFIX);
 	defer free(source);
-
-	for index: 0..IDENTIFIER_LENGTH-1 {
-		source.data[index] = #char "a";
-	}
-
-	memcpy(source.data + IDENTIFIER_LENGTH, SUFFIX.data, SUFFIX.count);
 
 	parsed := Extended.parse_file(source);
 	defer Extended.release_parser_tree(*parsed);
@@ -552,6 +548,7 @@ JAI;
 
 	assert(parsed.tokens.count == expected_types.count);
 	assert(parsed.tokens.count == expected_spellings.count);
+
 	for token: parsed.tokens {
 		assert(token.type == expected_types[it_index], "Assembly token % ('%') has type %, expected %.", it_index, token.original_text, token.type, expected_types[it_index]);
 		assert(token.original_text == expected_spellings[it_index], "Assembly token % has spelling '%', expected '%'.", it_index, token.original_text, expected_spellings[it_index]);
@@ -570,6 +567,7 @@ JAI;
 		"-", "10", "+", "20", "-", "10.5", "+", "20.5", "",
 	];
 	assert(modifiers.tokens.count == expected_modifier_spellings.count);
+
 	for token: modifiers.tokens {
 		assert(token.original_text == expected_modifier_spellings[it_index]);
 		assert(slice(MODIFIER_SOURCE, token.byte_start, token.byte_end - token.byte_start) == token.original_text);
@@ -603,6 +601,7 @@ JAI;
 	];
 
 	assert(suffixes.tokens.count == expected_suffix_types.count);
+
 	for token: suffixes.tokens {
 		assert(token.type == expected_suffix_types[it_index]);
 		assert(token.original_text == expected_suffix_spellings[it_index]);
@@ -618,6 +617,7 @@ JAI;
 		.END_OF_INPUT,
 	];
 	assert(ordinary.tokens.count == expected_ordinary_types.count);
+
 	for token: ordinary.tokens {
 		assert(token.type == expected_ordinary_types[it_index]);
 	}
@@ -1125,6 +1125,7 @@ test_numeric_ast_reuse :: () {
 	assert(updated_statements.count == fresh_statements.count);
 	assert(updated.diagnostics.count == fresh.diagnostics.count);
 	assert(updated.restart_points.count == fresh.restart_points.count);
+
 	for updated_statements {
 		other := fresh_statements[it_index];
 		assert(it.kind == other.kind && it.first_token == other.first_token && it.one_past_last_token == other.one_past_last_token);
@@ -1238,6 +1239,7 @@ test_repeated_convergence_edit :: () {
 	assert(repeated_tokens.root && repeated_tokens.root.(*Extended.Parser_Declaration).name == "middle");
 	Extended.release_parser_tree(*repeated_tokens);
 	Extended.release_parser_names(*repeated_tokens);
+
 	for repeated_statements {
 		other := repeated_fresh_statements[it_index];
 		assert(it.kind == other.kind && it.first_token == other.first_token && it.one_past_last_token == other.one_past_last_token);
@@ -1274,6 +1276,7 @@ test_new_recovered_edit_fallback :: () {
 	Extended.release_parser_names(*probe_tokens);
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.diagnostics.count > 0);
 	assert(updated.recovery_records.count == fresh.recovery_records.count && updated.restart_points.count == fresh.restart_points.count);
+
 	for updated.diagnostics {
 		other := fresh.diagnostics[it_index];
 		assert(it.kind == other.kind && it.message == other.message);
@@ -1522,6 +1525,7 @@ check_semicolon_candidate_edit :: (before: string, after: string, edit_start: s6
 	Extended.release_parser_names(*probe_tokens);
 	statements := updated.root.(*Extended.Parser_Block).statements;
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
+
 	assert(statements.count == fresh_statements.count);
 	for statements {
 		other := fresh_statements[it_index];
@@ -1566,6 +1570,7 @@ check_nested_candidate_syntax_edit :: () {
 	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).name == "keep");
 	Extended.release_parser_tree(*probe_tokens);
 	Extended.release_parser_names(*probe_tokens);
+
 	for block.statements {
 		other := fresh_block.statements[it_index];
 		assert(it.kind == other.kind && it.first_token == other.first_token && it.one_past_last_token == other.one_past_last_token);
@@ -1606,6 +1611,7 @@ check_simple_candidate_edit :: (before: string, after: string, edit_start: s64, 
 	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).name == "keep");
 	Extended.release_parser_tree(*probe_tokens);
 	Extended.release_parser_names(*probe_tokens);
+
 	for statements {
 		other := fresh_statements[it_index];
 		assert(it.kind == other.kind && it.first_token == other.first_token && it.one_past_last_token == other.one_past_last_token);
@@ -1899,6 +1905,7 @@ test_nested_type_instantiation_reuse :: () {
 	assert(name.resolved_declaration == statements[4].(*Extended.Parser_Declaration));
 	assert(fresh_view.array_element_type.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[4].(*Extended.Parser_Declaration));
 	assert(statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == statements[1].(*Extended.Parser_Declaration));
+
 	assert(updated.tokens.count == fresh.tokens.count);
 	for updated.tokens {
 		other := fresh.tokens[it_index];
@@ -1950,6 +1957,7 @@ test_nested_type_instantiation_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	for updated.tokens {
 		other := fresh.tokens[it_index];
 		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
@@ -2009,9 +2017,11 @@ check_excluded_type_instantiation :: (type_source: string) {
 	assert((type_inst.array_element_type == null) == (fresh_type.array_element_type == null));
 	assert((type_inst.type_valued_expression == null) == (fresh_type.type_valued_expression == null));
 	assert((type_inst.type_directive_target == null) == (fresh_type.type_directive_target == null));
+
 	if type_inst.type_valued_expression {
 		assert(type_inst.type_valued_expression.kind == fresh_type.type_valued_expression.kind);
 		assert(type_inst.type_valued_expression.first_token == fresh_type.type_valued_expression.first_token);
+
 		if starts_with(type_source, "Target.") {
 			member := type_inst.type_valued_expression.(*Extended.Parser_Binary_Operator);
 			fresh_member := fresh_type.type_valued_expression.(*Extended.Parser_Binary_Operator);
@@ -2057,6 +2067,7 @@ check_excluded_type_instantiation :: (type_source: string) {
 
 	assert(statements[4].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == statements[3].(*Extended.Parser_Declaration));
 	assert(fresh_statements[4].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[3].(*Extended.Parser_Declaration));
+
 	assert(updated.tokens.count == fresh.tokens.count);
 	for updated.tokens {
 		other := fresh.tokens[it_index];
@@ -2068,6 +2079,7 @@ check_excluded_type_instantiation :: (type_source: string) {
 
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.recovery_records.count == fresh.recovery_records.count);
 	assert(updated.restart_points.count == fresh.restart_points.count);
+
 	for updated.diagnostics {
 		other := fresh.diagnostics[it_index];
 		assert(it.kind == other.kind && it.message == other.message);
@@ -2776,6 +2788,7 @@ test_typed_compound_ast_reuse :: () {
 	assert(fixed_value_fresh_expression.resolved_declaration == fixed_value_fresh_statements[2].(*Extended.Parser_Declaration));
 	fixed_value_body := fixed_value_statements[4].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
 	fixed_value_fresh_body := fixed_value_fresh_statements[4].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+
 	for 0..1 {
 		assert(fixed_value_body.statements[it].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fixed_value_compound.declaration_properties);
 		assert(fixed_value_fresh_body.statements[it].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fixed_value_fresh_compound.declaration_properties);
@@ -2821,6 +2834,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	assert(compound.comma_separated_assignment.one_past_last_token == fresh_compound.comma_separated_assignment.one_past_last_token);
 	assert(compound.declaration_properties.type_inst.first_token == fresh_compound.declaration_properties.type_inst.first_token);
 	assert(compound.declaration_properties.type_inst.one_past_last_token == fresh_compound.declaration_properties.type_inst.one_past_last_token);
+
 	for compound.comma_separated_assignment.arguments {
 		other := fresh_compound.comma_separated_assignment.arguments[it_index];
 		assert(it.node.first_token == other.node.first_token && it.node.one_past_last_token == other.node.one_past_last_token);
@@ -3019,6 +3033,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	assert(dimension_fresh_type.array_element_type.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == dimension_fresh_statements[2].(*Extended.Parser_Declaration));
 	dimension_body := dimension_statements[4].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
 	dimension_fresh_body := dimension_fresh_statements[4].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+
 	for 0..1 {
 		assert(dimension_body.statements[it].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == dimension_compound.declaration_properties);
 		assert(dimension_fresh_body.statements[it].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == dimension_fresh_compound.declaration_properties);
@@ -3128,6 +3143,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	assert(view_fresh_type.array_element_type.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == view_fresh_statements[1].(*Extended.Parser_Declaration));
 	view_body := view_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
 	view_fresh_body := view_fresh_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+
 	for 0..1 {
 		assert(view_body.statements[it].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == view_compound.declaration_properties);
 		assert(view_fresh_body.statements[it].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == view_fresh_compound.declaration_properties);
@@ -3195,6 +3211,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	assert(view_pointer_fresh_view.array_element_type.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == view_pointer_fresh_statements[1].(*Extended.Parser_Declaration));
 	view_pointer_body := view_pointer_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
 	view_pointer_fresh_body := view_pointer_fresh_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
+
 	for 0..1 {
 		assert(view_pointer_body.statements[it].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == view_pointer_compound.declaration_properties);
 		assert(view_pointer_fresh_body.statements[it].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == view_pointer_fresh_compound.declaration_properties);
@@ -3240,6 +3257,7 @@ test_compound_ast_reuse :: () {
 	compound := statements[1].(*Extended.Parser_Compound_Declaration);
 	fresh_compound := fresh_statements[1].(*Extended.Parser_Compound_Declaration);
 	assert(compound.first_token == fresh_compound.first_token && compound.one_past_last_token == fresh_compound.one_past_last_token);
+
 	assert(compound.comma_separated_assignment.arguments.count == 2);
 	for compound.comma_separated_assignment.arguments {
 		other := fresh_compound.comma_separated_assignment.arguments[it_index];
@@ -3297,6 +3315,7 @@ test_compound_reassignment_ast_reuse :: () {
 	assert(compound.operator_type == #char "=" && fresh_compound.operator_type == #char "=");
 	assert(compound.first_token == fresh_compound.first_token && compound.one_past_last_token == fresh_compound.one_past_last_token);
 	assert(compound.comma_separated_assignment.one_past_last_token == fresh_compound.comma_separated_assignment.one_past_last_token);
+
 	for compound.comma_separated_assignment.arguments {
 		other := fresh_compound.comma_separated_assignment.arguments[it_index];
 		assert(it.node.first_token == other.node.first_token && it.node.one_past_last_token == other.node.one_past_last_token);
@@ -3339,6 +3358,7 @@ test_compound_reassignment_ast_reuse :: () {
 	three_fresh_compound := three_fresh_statements[4].(*Extended.Parser_Compound_Declaration);
 	assert(three_compound.comma_separated_assignment.arguments.count == 3);
 	assert(three_compound.comma_separated_assignment.one_past_last_token == three_fresh_compound.comma_separated_assignment.one_past_last_token);
+
 	for three_compound.comma_separated_assignment.arguments {
 		other := three_fresh_compound.comma_separated_assignment.arguments[it_index];
 		assert(it.node.first_token == other.node.first_token && it.node.one_past_last_token == other.node.one_past_last_token);
@@ -3426,6 +3446,7 @@ test_compound_reassignment_ast_reuse :: () {
 	member_fresh_compound := member_fresh_body.statements[0].(*Extended.Parser_Compound_Declaration);
 	assert(member_compound.first_token == member_fresh_compound.first_token && member_compound.one_past_last_token == member_fresh_compound.one_past_last_token);
 	assert(member_compound.l0 == member_fresh_compound.l0 && member_compound.c0 == member_fresh_compound.c0);
+
 	assert(member_compound.comma_separated_assignment.arguments.count == 2);
 	for member_compound.comma_separated_assignment.arguments {
 		target := it.node.(*Extended.Parser_Binary_Operator);
@@ -3440,6 +3461,7 @@ test_compound_reassignment_ast_reuse :: () {
 	indexed_fresh_compound := member_fresh_body.statements[3].(*Extended.Parser_Compound_Declaration);
 	assert(indexed_compound.first_token == indexed_fresh_compound.first_token && indexed_compound.one_past_last_token == indexed_fresh_compound.one_past_last_token);
 	assert(indexed_compound.l0 == indexed_fresh_compound.l0 && indexed_compound.c0 == indexed_fresh_compound.c0);
+
 	assert(indexed_compound.comma_separated_assignment.arguments.count == 2);
 	for indexed_compound.comma_separated_assignment.arguments {
 		target := it.node.(*Extended.Parser_Binary_Operator);
@@ -3509,6 +3531,7 @@ test_compound_reassignment_ast_reuse :: () {
 	deref_fresh_mixed := deref_fresh_body.statements[5].(*Extended.Parser_Compound_Declaration);
 	assert(deref_mixed.first_token == deref_fresh_mixed.first_token && deref_mixed.one_past_last_token == deref_fresh_mixed.one_past_last_token);
 	assert(deref_mixed.comma_separated_assignment.arguments[0].modifier == .ASSIGN && deref_mixed.comma_separated_assignment.arguments[1].modifier == .NONE);
+
 	for deref_mixed.comma_separated_assignment.arguments {
 		other := deref_fresh_mixed.comma_separated_assignment.arguments[it_index];
 		assert(it.modifier == other.modifier && it.node.first_token == other.node.first_token && it.node.one_past_last_token == other.node.one_past_last_token);
@@ -3554,6 +3577,7 @@ test_compound_candidate_edits :: () {
 	Extended.release_parser_names(*probe_tokens);
 	statements := updated.root.(*Extended.Parser_Block).statements;
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
+
 	assert(statements.count == fresh_statements.count);
 	for statements {
 		other := fresh_statements[it_index];
@@ -3598,6 +3622,7 @@ check_compound_candidate_edit :: (before: string, after: string, edit_start: s64
 	assert(compound.first_token == fresh_compound.first_token && compound.one_past_last_token == fresh_compound.one_past_last_token);
 	assert(compound.l0 == fresh_compound.l0 && compound.c0 == fresh_compound.c0 && compound.l1 == fresh_compound.l1 && compound.c1 == fresh_compound.c1);
 	assert(compound.operator_type == fresh_compound.operator_type && compound.declaration_properties.flags == fresh_compound.declaration_properties.flags);
+
 	assert(compound.comma_separated_assignment.arguments.count == fresh_compound.comma_separated_assignment.arguments.count);
 	for compound.comma_separated_assignment.arguments {
 		other := fresh_compound.comma_separated_assignment.arguments[it_index];
@@ -3654,6 +3679,7 @@ test_three_name_compound_ast_reuse :: () {
 	assert(compound.first_token == fresh_compound.first_token && compound.one_past_last_token == fresh_compound.one_past_last_token);
 	assert(compound.comma_separated_assignment.arguments.count == 3);
 	assert(compound.comma_separated_assignment.one_past_last_token == fresh_compound.comma_separated_assignment.one_past_last_token);
+
 	for compound.comma_separated_assignment.arguments {
 		other := fresh_compound.comma_separated_assignment.arguments[it_index];
 		assert(it.node.first_token == other.node.first_token && it.node.one_past_last_token == other.node.one_past_last_token);
@@ -3701,6 +3727,7 @@ test_four_name_compound_ast_reuse :: () {
 	fresh_compound := fresh_statements[1].(*Extended.Parser_Compound_Declaration);
 	assert(compound.comma_separated_assignment.arguments.count == 4);
 	assert(compound.comma_separated_assignment.one_past_last_token == fresh_compound.comma_separated_assignment.one_past_last_token);
+
 	for compound.comma_separated_assignment.arguments {
 		other := fresh_compound.comma_separated_assignment.arguments[it_index];
 		assert(it.node.first_token == other.node.first_token && it.node.one_past_last_token == other.node.one_past_last_token);
@@ -3751,6 +3778,7 @@ check_compound_reuse_fallback :: (
 	assert(compound.first_token == fresh_compound.first_token && compound.one_past_last_token == fresh_compound.one_past_last_token);
 	assert(compound.node_flags == fresh_compound.node_flags);
 	assert(compound.l0 == fresh_compound.l0 && compound.c0 == fresh_compound.c0);
+
 	assert(compound.comma_separated_assignment.arguments.count == fresh_compound.comma_separated_assignment.arguments.count);
 	for compound.comma_separated_assignment.arguments {
 		other := fresh_compound.comma_separated_assignment.arguments[it_index];
@@ -3902,6 +3930,7 @@ test_scalar_literal_ast_reuse :: () {
 		Extended.release_parser_tree(*old);
 		Extended.release_parser_names(*old);
 		free(old_source);
+
 		for updated.tokens {
 			other := fresh.tokens[it_index];
 			assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
@@ -3948,6 +3977,7 @@ check_source_position_edit :: (before: string, after: string, edit_start: s64, e
 	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).name == "use");
 	Extended.release_parser_tree(*probe_tokens);
 	Extended.release_parser_names(*probe_tokens);
+
 	assert(updated.tokens.count == fresh.tokens.count && statements.count == fresh_statements.count);
 	for updated.tokens {
 		other := fresh.tokens[it_index];
@@ -3976,6 +4006,7 @@ check_source_position_edit :: (before: string, after: string, edit_start: s64, e
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	for updated.tokens {
 		assert(it.original_text == slice(new_source, it.byte_start, it.original_text.count));
 		assert(it.preceding_trivia == slice(new_source, it.preceding_trivia_byte_start, it.preceding_trivia.count));
@@ -4012,6 +4043,7 @@ test_source_backed_ast_reuse :: () {
 	updated_statements := updated.root.(*Extended.Parser_Block).statements;
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	assert(updated_statements.count == fresh_statements.count);
+
 	assert(updated.diagnostics.count == fresh.diagnostics.count);
 	for updated_statements {
 		other := fresh_statements[it_index];
@@ -4112,6 +4144,7 @@ test_excluded_literal_ast_reuse_fallback :: () {
 		Extended.release_parser_tree(*old);
 		Extended.release_parser_names(*old);
 		free(old_source);
+
 		assert(Extended.reconstruct_source(*updated) == new_source);
 		Extended.release_parser_tree(*updated);
 		Extended.release_parser_names(*updated);
@@ -4169,6 +4202,7 @@ test_aggregate_payload_edits :: () {
 		Extended.release_parser_tree(*old);
 		Extended.release_parser_names(*old);
 		free(old_source);
+
 		if !array_case {
 			assert(literal.struct_literal_info.arguments[0].(*Extended.Parser_Literal)._string == "new");
 		}
@@ -4268,6 +4302,7 @@ check_changed_candidate_ast_reuse :: (new_text: string, edit_start: s64, edit_en
 	use := statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
 	assert(use.resolved_declaration == statements[0].(*Extended.Parser_Declaration));
 	assert(fresh_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[0].(*Extended.Parser_Declaration));
+
 	for statements {
 		other := fresh_statements[it_index];
 		assert(it.first_token == other.first_token && it.one_past_last_token == other.one_past_last_token);
@@ -4286,167 +4321,16 @@ check_changed_candidate_ast_reuse :: (new_text: string, edit_start: s64, edit_en
 }
 
 test_remainder_ast_reuse :: () {
-	old_source := copy_string(			   "left :: 7; right :: 3; remainder := left % right;");
-	new_source := copy_string("added :: 0;\nleft :: 7; right :: 3; remainder := left % right;");
-	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
-	fresh := Extended.parse_file(new_source);
-	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
-
-	statements := updated.root.(*Extended.Parser_Block).statements;
-	probe_tokens := Extended.materialise_tokens(new_source);
-	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, cursor=statements[3].first_token.(s64)};
-	set_allocators(*probe_tokens.node_pool, context.default_allocator);
-	probe.current_scope = Extended.push_lexical_scope(*probe);
-	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
-	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).expression.kind == .BINARY_OPERATOR);
-	assert(probe.current_scope.references.count == 2);
-	Extended.release_parser_tree(*probe_tokens);
-	Extended.release_parser_names(*probe_tokens);
-
-	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
-	assert(statements[3].first_token == fresh_statements[3].first_token && statements[3].one_past_last_token == fresh_statements[3].one_past_last_token);
-	binary := statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
-	fresh_binary := fresh_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
-	assert(binary.operator_type == #char "%" && binary.operator_type == fresh_binary.operator_type);
-	assert(binary.first_token == fresh_binary.first_token && binary.one_past_last_token == fresh_binary.one_past_last_token);
-	left := binary.left.(*Extended.Parser_Ident);
-	right := binary.right.(*Extended.Parser_Ident);
-	assert(left.first_token == fresh_binary.left.first_token && right.first_token == fresh_binary.right.first_token);
-	assert(left.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
-	assert(right.resolved_declaration == statements[2].(*Extended.Parser_Declaration));
-	assert(fresh_binary.left.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
-	assert(fresh_binary.right.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[2].(*Extended.Parser_Declaration));
-	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
-	assert_eligible_edit_matches_fresh(*updated, *fresh);
-	Extended.release_parser_tree(*old);
-	Extended.release_parser_names(*old);
-	free(old_source);
-	assert(left.name == "left" && right.name == "right" && Extended.reconstruct_source(*updated) == new_source);
-	Extended.release_parser_tree(*updated);
-	Extended.release_parser_names(*updated);
-	Extended.release_parser_tree(*fresh);
-	Extended.release_parser_names(*fresh);
-	free(new_source);
+	check_binary_ast_reuse("%", #char "%");
 }
 
 test_equality_ast_reuse :: () {
-	old_source := copy_string(			   "left :: 7; right :: 3; equal := left == right;");
-	new_source := copy_string("added :: 0;\nleft :: 7; right :: 3; equal := left == right;");
-	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
-	fresh := Extended.parse_file(new_source);
-	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
-
-	statements := updated.root.(*Extended.Parser_Block).statements;
-	probe_tokens := Extended.materialise_tokens(new_source);
-	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, cursor=statements[3].first_token.(s64)};
-	set_allocators(*probe_tokens.node_pool, context.default_allocator);
-	probe.current_scope = Extended.push_lexical_scope(*probe);
-	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
-	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).expression.kind == .BINARY_OPERATOR);
-	assert(probe.current_scope.references.count == 2);
-	Extended.release_parser_tree(*probe_tokens);
-	Extended.release_parser_names(*probe_tokens);
-
-	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
-	binary := statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
-	fresh_binary := fresh_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
-	assert(binary.operator_type == .IS_EQUAL && binary.operator_type == fresh_binary.operator_type);
-	assert(binary.first_token == fresh_binary.first_token && binary.one_past_last_token == fresh_binary.one_past_last_token);
-	assert(binary.l0 == fresh_binary.l0 && binary.c0 == fresh_binary.c0 && binary.l1 == fresh_binary.l1 && binary.c1 == fresh_binary.c1);
-	left := binary.left.(*Extended.Parser_Ident);
-	right := binary.right.(*Extended.Parser_Ident);
-	assert(left.first_token == fresh_binary.left.first_token && right.first_token == fresh_binary.right.first_token);
-	assert(left.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
-	assert(right.resolved_declaration == statements[2].(*Extended.Parser_Declaration));
-	assert(fresh_binary.left.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
-	assert(fresh_binary.right.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[2].(*Extended.Parser_Declaration));
-	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
-
-	changed_source := copy_string("left :: 7; right :: 3; equal := left != right;");
-	operator_start := "left :: 7; right :: 3; equal := left ".count;
-	changed, changed_ok := Extended.parse_file_edit(*old, operator_start, operator_start + 2, changed_source);
-	changed_fresh := Extended.parse_file(changed_source);
-	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
-	changed_tokens := Extended.materialise_tokens(changed_source);
-	changed_probe := Extended.Parser.{parsed=*changed_tokens, edit_source=*old, edit_start=operator_start, edit_end=operator_start + 2, cursor=changed.root.(*Extended.Parser_Block).statements[2].first_token.(s64)};
-	set_allocators(*changed_tokens.node_pool, context.default_allocator);
-	changed_probe.current_scope = Extended.push_lexical_scope(*changed_probe);
-	assert(Extended.reuse_simple_declaration(*changed_probe) == null);
-	Extended.release_parser_tree(*changed_tokens);
-	Extended.release_parser_names(*changed_tokens);
-	changed_statements := changed.root.(*Extended.Parser_Block).statements;
-	changed_fresh_statements := changed_fresh.root.(*Extended.Parser_Block).statements;
-	changed_binary := changed_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
-	changed_fresh_binary := changed_fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
-	assert(changed_binary.operator_type == .IS_NOT_EQUAL);
-	assert(changed_binary.first_token == changed_fresh_binary.first_token && changed_binary.one_past_last_token == changed_fresh_binary.one_past_last_token);
-	assert(changed_binary.left.(*Extended.Parser_Ident).resolved_declaration == changed_statements[0].(*Extended.Parser_Declaration));
-	assert(changed_binary.right.(*Extended.Parser_Ident).resolved_declaration == changed_statements[1].(*Extended.Parser_Declaration));
-	assert(changed_fresh_binary.left.(*Extended.Parser_Ident).resolved_declaration == changed_fresh_statements[0].(*Extended.Parser_Declaration));
-	assert(changed_fresh_binary.right.(*Extended.Parser_Ident).resolved_declaration == changed_fresh_statements[1].(*Extended.Parser_Declaration));
-	assert(changed.diagnostics.count == changed_fresh.diagnostics.count && changed.restart_points.count == changed_fresh.restart_points.count);
-	assert(Extended.reconstruct_source(*changed) == changed_source);
-	Extended.release_parser_tree(*changed);
-	Extended.release_parser_names(*changed);
-	Extended.release_parser_tree(*changed_fresh);
-	Extended.release_parser_names(*changed_fresh);
-	free(changed_source);
-
-	Extended.release_parser_tree(*old);
-	Extended.release_parser_names(*old);
-	free(old_source);
-	assert(left.name == "left" && right.name == "right" && Extended.reconstruct_source(*updated) == new_source);
-	Extended.release_parser_tree(*updated);
-	Extended.release_parser_names(*updated);
-	Extended.release_parser_tree(*fresh);
-	Extended.release_parser_names(*fresh);
-	free(new_source);
+	check_binary_ast_reuse("==", .IS_EQUAL);
+	check_binary_operator_edit("==", "!=", .IS_NOT_EQUAL);
 }
 
 test_inequality_ast_reuse :: () {
-	old_source := copy_string(			   "left :: 7; right :: 3; unequal := left != right;");
-	new_source := copy_string("added :: 0;\nleft :: 7; right :: 3; unequal := left != right;");
-	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
-	fresh := Extended.parse_file(new_source);
-	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
-
-	statements := updated.root.(*Extended.Parser_Block).statements;
-	probe_tokens := Extended.materialise_tokens(new_source);
-	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, cursor=statements[3].first_token.(s64)};
-	set_allocators(*probe_tokens.node_pool, context.default_allocator);
-	probe.current_scope = Extended.push_lexical_scope(*probe);
-	probe_tokens.root = Extended.reuse_simple_declaration(*probe);
-	assert(probe_tokens.root && probe_tokens.root.(*Extended.Parser_Declaration).expression.kind == .BINARY_OPERATOR);
-	assert(probe.current_scope.references.count == 2);
-	Extended.release_parser_tree(*probe_tokens);
-	Extended.release_parser_names(*probe_tokens);
-
-	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
-	binary := statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
-	fresh_binary := fresh_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
-	assert(binary.operator_type == .IS_NOT_EQUAL && binary.operator_type == fresh_binary.operator_type);
-	assert(binary.first_token == fresh_binary.first_token && binary.one_past_last_token == fresh_binary.one_past_last_token);
-	assert(binary.l0 == fresh_binary.l0 && binary.c0 == fresh_binary.c0 && binary.l1 == fresh_binary.l1 && binary.c1 == fresh_binary.c1);
-	left := binary.left.(*Extended.Parser_Ident);
-	right := binary.right.(*Extended.Parser_Ident);
-	assert(left.first_token == fresh_binary.left.first_token && right.first_token == fresh_binary.right.first_token);
-	assert(left.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
-	assert(right.resolved_declaration == statements[2].(*Extended.Parser_Declaration));
-	assert(fresh_binary.left.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
-	assert(fresh_binary.right.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[2].(*Extended.Parser_Declaration));
-	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
-	Extended.release_parser_tree(*old);
-	Extended.release_parser_names(*old);
-	free(old_source);
-	assert(left.name == "left" && right.name == "right" && Extended.reconstruct_source(*updated) == new_source);
-	Extended.release_parser_tree(*updated);
-	Extended.release_parser_names(*updated);
-	Extended.release_parser_tree(*fresh);
-	Extended.release_parser_names(*fresh);
-	free(new_source);
+	check_binary_ast_reuse("!=", .IS_NOT_EQUAL);
 }
 
 test_ordered_comparison_ast_reuse :: () {
@@ -4455,15 +4339,19 @@ test_ordered_comparison_ast_reuse :: () {
 	check_binary_ast_reuse(">", #char ">");
 	check_binary_ast_reuse(">=", .GREATER_OR_EQUAL);
 
-	old_source := copy_string("left :: 7; right :: 3; result := left < right;");
-	new_source := copy_string("left :: 7; right :: 3; result := left <= right;");
+	check_binary_operator_edit("<", "<=", .LESS_OR_EQUAL);
+}
+
+check_binary_operator_edit :: (old_spelling: string, new_spelling: string, expected_type: Operator_Type) {
+	old_source := copy_string(tprint("left :: 7; right :: 3; result := left % right;", old_spelling));
+	new_source := copy_string(tprint("left :: 7; right :: 3; result := left % right;", new_spelling));
 	operator_start := "left :: 7; right :: 3; result := left ".count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, operator_start, operator_start + 1, new_source);
+	updated, ok := Extended.parse_file_edit(*old, operator_start, operator_start + old_spelling.count, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	probe_tokens := Extended.materialise_tokens(new_source);
-	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=operator_start, edit_end=operator_start + 1, cursor=updated.root.(*Extended.Parser_Block).statements[2].first_token.(s64)};
+	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=operator_start, edit_end=operator_start + old_spelling.count, cursor=updated.root.(*Extended.Parser_Block).statements[2].first_token.(s64)};
 	set_allocators(*probe_tokens.node_pool, context.default_allocator);
 	probe.current_scope = Extended.push_lexical_scope(*probe);
 	assert(Extended.reuse_simple_declaration(*probe) == null);
@@ -4473,10 +4361,12 @@ test_ordered_comparison_ast_reuse :: () {
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	updated_binary := updated_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
 	fresh_binary := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
-	assert(updated_binary.operator_type == .LESS_OR_EQUAL && updated_binary.operator_type == fresh_binary.operator_type);
+	assert(updated_binary.operator_type == expected_type && updated_binary.operator_type == fresh_binary.operator_type);
 	assert(updated_binary.first_token == fresh_binary.first_token && updated_binary.one_past_last_token == fresh_binary.one_past_last_token);
 	assert(updated_binary.left.(*Extended.Parser_Ident).resolved_declaration == updated_statements[0].(*Extended.Parser_Declaration));
 	assert(updated_binary.right.(*Extended.Parser_Ident).resolved_declaration == updated_statements[1].(*Extended.Parser_Declaration));
+	assert(fresh_binary.left.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[0].(*Extended.Parser_Declaration));
+	assert(fresh_binary.right.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
 	assert(Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*old);
@@ -4509,6 +4399,7 @@ check_binary_ast_reuse :: (spelling: string, expected_type: Operator_Type) {
 	Extended.release_parser_names(*probe_tokens);
 
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
+	assert(statements[3].first_token == fresh_statements[3].first_token && statements[3].one_past_last_token == fresh_statements[3].one_past_last_token);
 	binary := statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
 	fresh_binary := fresh_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
 	assert(binary.kind == fresh_binary.kind && binary.node_flags == fresh_binary.node_flags && binary.flags == fresh_binary.flags);
@@ -4525,9 +4416,11 @@ check_binary_ast_reuse :: (spelling: string, expected_type: Operator_Type) {
 	assert(fresh_binary.left.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_binary.right.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[2].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
+	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(left.name == "left" && right.name == "right" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -4604,6 +4497,7 @@ test_logical_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(inner.left.(*Extended.Parser_Ident).name == "middle" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -4685,6 +4579,7 @@ test_bitwise_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(or_node.left.(*Extended.Parser_Ident).name == "left" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -4699,38 +4594,7 @@ test_shift_rotate_ast_reuse :: () {
 	check_binary_ast_reuse("<<<", .ROTATE_LEFT);
 	check_binary_ast_reuse(">>>", .ROTATE_RIGHT);
 
-	old_source := copy_string("left :: 7; right :: 3; result := left << right;");
-	new_source := copy_string("left :: 7; right :: 3; result := left <<< right;");
-	operator_start := "left :: 7; right :: 3; result := left ".count;
-	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, operator_start, operator_start + 2, new_source);
-	fresh := Extended.parse_file(new_source);
-	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
-	probe_tokens := Extended.materialise_tokens(new_source);
-	probe := Extended.Parser.{parsed=*probe_tokens, edit_source=*old, edit_start=operator_start, edit_end=operator_start + 2, cursor=updated.root.(*Extended.Parser_Block).statements[2].first_token.(s64)};
-	set_allocators(*probe_tokens.node_pool, context.default_allocator);
-	probe.current_scope = Extended.push_lexical_scope(*probe);
-	assert(Extended.reuse_simple_declaration(*probe) == null);
-	Extended.release_parser_tree(*probe_tokens);
-	Extended.release_parser_names(*probe_tokens);
-	statements := updated.root.(*Extended.Parser_Block).statements;
-	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
-	binary := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
-	fresh_binary := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Binary_Operator);
-	assert(binary.operator_type == .ROTATE_LEFT && binary.operator_type == fresh_binary.operator_type);
-	assert(binary.first_token == fresh_binary.first_token && binary.one_past_last_token == fresh_binary.one_past_last_token);
-	assert(binary.left.(*Extended.Parser_Ident).resolved_declaration == statements[0].(*Extended.Parser_Declaration));
-	assert(binary.right.(*Extended.Parser_Ident).resolved_declaration == statements[1].(*Extended.Parser_Declaration));
-	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
-	assert(Extended.reconstruct_source(*updated) == new_source);
-	Extended.release_parser_tree(*old);
-	Extended.release_parser_names(*old);
-	Extended.release_parser_tree(*updated);
-	Extended.release_parser_names(*updated);
-	Extended.release_parser_tree(*fresh);
-	Extended.release_parser_names(*fresh);
-	free(old_source);
-	free(new_source);
+	check_binary_operator_edit("<<", "<<<", .ROTATE_LEFT);
 }
 
 test_operator_grouping_edit :: () {
@@ -4772,6 +4636,7 @@ test_operator_grouping_edit :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(binary.left.(*Extended.Parser_Ident).name == "left" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -4837,6 +4702,7 @@ test_unary_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(updated_reference.name == "flag" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -4915,6 +4781,7 @@ check_excluded_operator_fallback :: (expression: string, expected_operator: Oper
 		assert(expression_node.(*Extended.Parser_Binary_Operator).left.first_token == fresh_expression.(*Extended.Parser_Binary_Operator).left.first_token);
 		assert(expression_node.(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Ident).resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 		assert(fresh_expression.(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
+
 		if unowned_child {
 			assert(expression_node.(*Extended.Parser_Binary_Operator).right.(*Extended.Parser_Literal).value_type == .POINTER);
 			assert(expression_node.(*Extended.Parser_Binary_Operator).right.first_token == fresh_expression.(*Extended.Parser_Binary_Operator).right.first_token);
@@ -4934,6 +4801,7 @@ check_excluded_operator_fallback :: (expression: string, expected_operator: Oper
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -4977,6 +4845,7 @@ test_query_fallback :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -5101,6 +4970,7 @@ check_excluded_file_node :: (directive: string, expected_kind: type_of(Extended.
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	if expected_kind == {
 		case .DIRECTIVE_ADD_CONTEXT;
 			assert(statements[2].(*Extended.Parser_Directive_Add_Context).expression.(*Extended.Parser_Declaration).name == "token");
@@ -5163,6 +5033,7 @@ test_imperative_body_fallback :: () {
 	assert(inner.statements[1].kind == .DEFER && loop.block.statements[0].kind == .RETURN);
 	assert(loop.condition.first_token == fresh_body.statements[1].(*Extended.Parser_If).then_block.statements[2].(*Extended.Parser_While).condition.first_token);
 	assert(updated.root_scope.children.count == fresh.root_scope.children.count);
+
 	for updated.restart_points {
 		other := fresh.restart_points[it_index];
 		assert(it.kind == other.kind && it.span.first == other.span.first && it.span.one_past_last == other.span.one_past_last);
@@ -5189,6 +5060,7 @@ test_imperative_body_fallback :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(loop.condition.(*Extended.Parser_Ident).resolved_declaration == inner_local);
 	assert(inner_if.then_block.statements[2].(*Extended.Parser_While).condition.(*Extended.Parser_Ident).name == "local");
 	assert(Extended.reconstruct_source(*updated) == new_source);
@@ -5198,6 +5070,7 @@ test_imperative_body_fallback :: () {
 	Extended.release_parser_tree(*inner_fresh);
 	Extended.release_parser_names(*inner_fresh);
 	free(inner_source);
+
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
 	Extended.release_parser_tree(*fresh);
@@ -5243,6 +5116,7 @@ test_aggregate_body_fallback :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(default_assignment.left.(*Extended.Parser_Ident).name == "field");
 	assert(inner_block.statements[2].(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Ident).name == "field");
 	assert(Extended.reconstruct_source(*inner_updated) == inner_source);
@@ -5252,6 +5126,7 @@ test_aggregate_body_fallback :: () {
 	Extended.release_parser_tree(*inner_fresh);
 	Extended.release_parser_names(*inner_fresh);
 	free(inner_source);
+
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
 	Extended.release_parser_tree(*fresh);
@@ -5296,6 +5171,7 @@ test_aggregate_parameter_block_fallback :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(structure.arguments_block.statements[1].(*Extended.Parser_Declaration).name == "N");
 	assert(inner_struct.arguments_block.statements[1].(*Extended.Parser_Declaration).name == "N");
 	assert(Extended.reconstruct_source(*updated) == new_source && Extended.reconstruct_source(*inner_updated) == inner_source);
@@ -5331,6 +5207,7 @@ test_single_declaration_branch_fallback :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(branch.statements[0].(*Extended.Parser_Declaration).name == "target");
 	assert(Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
@@ -5368,6 +5245,7 @@ test_synthetic_imperative_block_fallback :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(body.block.statements[0].(*Extended.Parser_Return).arguments_unsorted[0].expression.(*Extended.Parser_Ident).name == "x");
 	assert(Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
@@ -5418,6 +5296,7 @@ test_enum_body_fallback :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(branch.statements[0].(*Extended.Parser_Ident).name == "SECOND");
 	assert(inner_member.name == "FOURTH" && Extended.reconstruct_source(*inner_updated) == inner_source);
 	assert(Extended.reconstruct_source(*updated) == new_source);
@@ -5449,6 +5328,7 @@ test_case_arm_fallback :: () {
 	assert(switch_node != old_switch && switch_node.then_block != old_switch.then_block);
 	assert(switch_node.then_block.statements.count == 3 && fresh_switch.then_block.statements.count == 3);
 	assert(switch_node.condition.(*Extended.Parser_Ident).resolved_declaration == body.statements[0].(*Extended.Parser_Declaration));
+
 	for switch_node.then_block.statements {
 		arm := it.(*Extended.Parser_Case);
 		fresh_arm := fresh_switch.then_block.statements[it_index].(*Extended.Parser_Case);
@@ -5491,6 +5371,7 @@ test_case_arm_fallback :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(second_arm.then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).name == "local");
 	assert(inner_arm.then_block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).name == "local");
 	assert(Extended.reconstruct_source(*inner_updated) == inner_source);
@@ -5500,6 +5381,7 @@ test_case_arm_fallback :: () {
 	Extended.release_parser_tree(*inner_fresh);
 	Extended.release_parser_names(*inner_fresh);
 	free(inner_source);
+
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
 	Extended.release_parser_tree(*fresh);
@@ -5573,6 +5455,7 @@ check_excluded_statement_node :: (statement: string, expected_kind: type_of(Exte
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(body.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).name == "value");
 	assert(Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
@@ -5608,6 +5491,7 @@ check_excluded_expression_node :: (expression: string, expected_kind: type_of(Ex
 	assert(expression_node.kind == expected_kind && expression_node.kind == fresh_expression.kind && expression_node.node_flags == fresh_expression.node_flags);
 	assert(expression_node.first_token == fresh_expression.first_token && expression_node.one_past_last_token == fresh_expression.one_past_last_token);
 	assert(expression_node.l0 == fresh_expression.l0 && expression_node.c0 == fresh_expression.c0 && expression_node.l1 == fresh_expression.l1 && expression_node.c1 == fresh_expression.c1);
+
 	if expression == "value + ---" {
 		assert(old_expression.(*Extended.Parser_Binary_Operator).right.(*Extended.Parser_Literal).value_type == .UNINITIALIZED);
 		assert(expression_node.(*Extended.Parser_Binary_Operator).right.(*Extended.Parser_Literal).value_type == .UNINITIALIZED);
@@ -5711,6 +5595,7 @@ check_excluded_expression_node :: (expression: string, expected_kind: type_of(Ex
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	for updated.tokens {
 		other := fresh.tokens[it_index];
 		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
@@ -5791,6 +5676,7 @@ test_lowered_directive_ast_reuse :: () {
 		Extended.release_parser_tree(*old);
 		Extended.release_parser_names(*old);
 		free(old_source);
+
 		assert(Extended.reconstruct_source(*updated) == new_source);
 		Extended.release_parser_tree(*updated);
 		Extended.release_parser_names(*updated);
@@ -5833,6 +5719,7 @@ test_excluded_directive_payload_edit :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(code.expression.(*Extended.Parser_Ident).name == "Target" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -5906,6 +5793,7 @@ test_expression_query_ast_reuse :: () {
 	Extended.release_parser_tree(*other_old);
 	Extended.release_parser_names(*other_old);
 	free(other_source);
+
 	assert(other_name.name == "value" && Extended.reconstruct_source(*other_updated) == other_new_source);
 	Extended.release_parser_tree(*other_updated);
 	Extended.release_parser_names(*other_updated);
@@ -5945,6 +5833,7 @@ test_expression_query_ast_reuse :: () {
 	Extended.release_parser_tree(*code_old);
 	Extended.release_parser_names(*code_old);
 	free(code_old_source);
+
 	assert(code_name.name == "value" && Extended.reconstruct_source(*code_updated) == code_new_source);
 	Extended.release_parser_tree(*code_updated);
 	Extended.release_parser_names(*code_updated);
@@ -5982,6 +5871,7 @@ test_expression_query_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(name.name == "value" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -5990,9 +5880,9 @@ test_expression_query_ast_reuse :: () {
 	free(new_source);
 }
 
-test_type_query_ast_reuse :: () {
-	old_source := copy_string(			   "Target :: s64; result := size_of(Target);");
-	new_source := copy_string("added :: 2;\nTarget :: s64; result := size_of(Target);");
+check_type_query_ast_reuse :: (spelling: string, expected_kind: type_of(Extended.Parser_Type_Query.query_kind), target_definition: string = "s64") {
+	old_source := copy_string(tprint("Target :: %; result := %(Target);", target_definition, spelling));
+	new_source := copy_string(tprint("added :: 2;\n%", old_source));
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
@@ -6011,7 +5901,7 @@ test_type_query_ast_reuse :: () {
 	query := statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Type_Query);
 	fresh_query := fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Type_Query);
 	assert(query.node_flags == fresh_query.node_flags && query.type_to_query.node_flags == fresh_query.type_to_query.node_flags);
-	assert(query.query_kind == .SIZE_OF && query.query_kind == fresh_query.query_kind);
+	assert(query.query_kind == expected_kind && query.query_kind == fresh_query.query_kind);
 	assert(query.first_token == fresh_query.first_token && query.one_past_last_token == fresh_query.one_past_last_token);
 	assert(query.l0 == fresh_query.l0 && query.c0 == fresh_query.c0 && query.l1 == fresh_query.l1 && query.c1 == fresh_query.c1);
 	assert(query.type_to_query.first_token == fresh_query.type_to_query.first_token && query.type_to_query.one_past_last_token == fresh_query.type_to_query.one_past_last_token);
@@ -6027,99 +5917,19 @@ test_type_query_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(target.name == "Target" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
 	Extended.release_parser_tree(*fresh);
 	Extended.release_parser_names(*fresh);
 	free(new_source);
+}
 
-	info_old_source := copy_string(				"Target :: s64; result := type_info(Target);");
-	info_new_source := copy_string("added :: 2;\nTarget :: s64; result := type_info(Target);");
-	info_old := Extended.parse_file(info_old_source);
-	info_updated, info_ok := Extended.parse_file_edit(*info_old, 0, 0, info_new_source);
-	info_fresh := Extended.parse_file(info_new_source);
-	assert(info_ok && info_old.status == .COMPLETE && info_updated.status == .COMPLETE && info_fresh.status == .COMPLETE);
-	info_statements := info_updated.root.(*Extended.Parser_Block).statements;
-	info_fresh_statements := info_fresh.root.(*Extended.Parser_Block).statements;
-	info_probe_tokens := Extended.materialise_tokens(info_new_source);
-	info_probe := Extended.Parser.{parsed=*info_probe_tokens, edit_source=*info_old, cursor=info_statements[2].first_token.(s64)};
-	set_allocators(*info_probe_tokens.node_pool, context.default_allocator);
-	info_probe.current_scope = Extended.push_lexical_scope(*info_probe);
-	info_probe_tokens.root = Extended.reuse_simple_declaration(*info_probe);
-	assert(info_probe_tokens.root && info_probe_tokens.root.(*Extended.Parser_Declaration).expression.kind == .TYPE_QUERY);
-	assert(info_probe.current_scope.references.count == 1);
-	Extended.release_parser_tree(*info_probe_tokens);
-	Extended.release_parser_names(*info_probe_tokens);
-	info_query := info_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Type_Query);
-	info_fresh_query := info_fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Type_Query);
-	assert(info_query.query_kind == .TYPE_INFO && info_query.query_kind == info_fresh_query.query_kind);
-	assert(info_query.first_token == info_fresh_query.first_token && info_query.one_past_last_token == info_fresh_query.one_past_last_token);
-	assert(info_query.l0 == info_fresh_query.l0 && info_query.c0 == info_fresh_query.c0);
-	assert(info_query.l1 == info_fresh_query.l1 && info_query.c1 == info_fresh_query.c1);
-	assert(info_query.type_to_query.first_token == info_fresh_query.type_to_query.first_token && info_query.type_to_query.one_past_last_token == info_fresh_query.type_to_query.one_past_last_token);
-	assert(info_query.type_to_query.l0 == info_fresh_query.type_to_query.l0 && info_query.type_to_query.c0 == info_fresh_query.type_to_query.c0);
-	assert(info_query.type_to_query.l1 == info_fresh_query.type_to_query.l1 && info_query.type_to_query.c1 == info_fresh_query.type_to_query.c1);
-	info_target := info_query.type_to_query.type_valued_expression.(*Extended.Parser_Ident);
-	assert(info_target.resolved_declaration == info_statements[1].(*Extended.Parser_Declaration));
-	assert(info_fresh_query.type_to_query.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == info_fresh_statements[1].(*Extended.Parser_Declaration));
-	assert(info_updated.diagnostics.count == info_fresh.diagnostics.count && info_updated.restart_points.count == info_fresh.restart_points.count);
-	assert(info_query.node_flags == info_fresh_query.node_flags && info_query.type_to_query.node_flags == info_fresh_query.type_to_query.node_flags);
-	assert_eligible_edit_matches_fresh(*info_updated, *info_fresh);
-	Extended.release_parser_tree(*info_old);
-	Extended.release_parser_names(*info_old);
-	free(info_old_source);
-	assert(info_target.name == "Target" && Extended.reconstruct_source(*info_updated) == info_new_source);
-	Extended.release_parser_tree(*info_updated);
-	Extended.release_parser_names(*info_updated);
-	Extended.release_parser_tree(*info_fresh);
-	Extended.release_parser_names(*info_fresh);
-	free(info_new_source);
-
-	initializer_old_source := copy_string(			   "Target :: struct { value: s64 = 42; }; result := initializer_of(Target);");
-	initializer_new_source := copy_string("added :: 2;\nTarget :: struct { value: s64 = 42; }; result := initializer_of(Target);");
-	initializer_old := Extended.parse_file(initializer_old_source);
-	initializer_updated, initializer_ok := Extended.parse_file_edit(*initializer_old, 0, 0, initializer_new_source);
-	initializer_fresh := Extended.parse_file(initializer_new_source);
-	assert(initializer_ok && initializer_old.status == .COMPLETE && initializer_updated.status == .COMPLETE && initializer_fresh.status == .COMPLETE);
-	initializer_statements := initializer_updated.root.(*Extended.Parser_Block).statements;
-	initializer_fresh_statements := initializer_fresh.root.(*Extended.Parser_Block).statements;
-	initializer_probe_tokens := Extended.materialise_tokens(initializer_new_source);
-	initializer_probe := Extended.Parser.{parsed=*initializer_probe_tokens, edit_source=*initializer_old, cursor=initializer_statements[2].first_token.(s64)};
-	set_allocators(*initializer_probe_tokens.node_pool, context.default_allocator);
-	initializer_probe.current_scope = Extended.push_lexical_scope(*initializer_probe);
-	initializer_probe_tokens.root = Extended.reuse_simple_declaration(*initializer_probe);
-	assert(initializer_probe_tokens.root && initializer_probe_tokens.root.(*Extended.Parser_Declaration).expression.kind == .TYPE_QUERY);
-	assert(initializer_probe.current_scope.references.count == 1);
-	Extended.release_parser_tree(*initializer_probe_tokens);
-	Extended.release_parser_names(*initializer_probe_tokens);
-	initializer_query := initializer_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Type_Query);
-	initializer_fresh_query := initializer_fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Type_Query);
-	assert(initializer_query.query_kind == .INITIALIZER_OF && initializer_query.query_kind == initializer_fresh_query.query_kind);
-	assert(initializer_query.first_token == initializer_fresh_query.first_token && initializer_query.one_past_last_token == initializer_fresh_query.one_past_last_token);
-	assert(initializer_query.l0 == initializer_fresh_query.l0 && initializer_query.c0 == initializer_fresh_query.c0);
-	assert(initializer_query.l1 == initializer_fresh_query.l1 && initializer_query.c1 == initializer_fresh_query.c1);
-	assert(
-		initializer_query.type_to_query.first_token == initializer_fresh_query.type_to_query.first_token
-		&& initializer_query.type_to_query.one_past_last_token == initializer_fresh_query.type_to_query.one_past_last_token
-	);
-	assert(initializer_query.type_to_query.l0 == initializer_fresh_query.type_to_query.l0 && initializer_query.type_to_query.c0 == initializer_fresh_query.type_to_query.c0);
-	assert(initializer_query.type_to_query.l1 == initializer_fresh_query.type_to_query.l1 && initializer_query.type_to_query.c1 == initializer_fresh_query.type_to_query.c1);
-	initializer_target := initializer_query.type_to_query.type_valued_expression.(*Extended.Parser_Ident);
-	assert(initializer_target.resolved_declaration == initializer_statements[1].(*Extended.Parser_Declaration));
-	assert(initializer_fresh_query.type_to_query.type_valued_expression.(*Extended.Parser_Ident).resolved_declaration == initializer_fresh_statements[1].(*Extended.Parser_Declaration));
-	assert(initializer_updated.diagnostics.count == initializer_fresh.diagnostics.count && initializer_updated.restart_points.count == initializer_fresh.restart_points.count);
-	assert(initializer_query.node_flags == initializer_fresh_query.node_flags && initializer_query.type_to_query.node_flags == initializer_fresh_query.type_to_query.node_flags);
-	assert_eligible_edit_matches_fresh(*initializer_updated, *initializer_fresh);
-	Extended.release_parser_tree(*initializer_old);
-	Extended.release_parser_names(*initializer_old);
-	free(initializer_old_source);
-	assert(initializer_target.name == "Target" && Extended.reconstruct_source(*initializer_updated) == initializer_new_source);
-	Extended.release_parser_tree(*initializer_updated);
-	Extended.release_parser_names(*initializer_updated);
-	Extended.release_parser_tree(*initializer_fresh);
-	Extended.release_parser_names(*initializer_fresh);
-	free(initializer_new_source);
+test_type_query_ast_reuse :: () {
+	check_type_query_ast_reuse("size_of", .SIZE_OF);
+	check_type_query_ast_reuse("type_info", .TYPE_INFO);
+	check_type_query_ast_reuse("initializer_of", .INITIALIZER_OF, "struct { value: s64 = 42; }");
 
 	changed_source :=		copy_string("Target :: s64; result := type_info(Target);");
 	changed_old_source :=	copy_string("Target :: s64; result := size_of(Target);");
@@ -6220,6 +6030,7 @@ test_positive_unary_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(name.name == "value" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -6262,6 +6073,7 @@ test_negative_unary_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(name.name == "value" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -6333,6 +6145,7 @@ test_prefix_dereference_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(name.name == "value" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -6404,6 +6217,7 @@ test_pointer_dereference_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(name.name == "value" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -6446,6 +6260,7 @@ test_postfix_dereference_ast_reuse :: () {
 	assert_eligible_edit_matches_fresh(*updated, *fresh);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
+
 	free(old_source);
 	assert(reference.name == "pointer" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
@@ -6492,6 +6307,7 @@ test_cast_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(target.name == "Target" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -6533,6 +6349,7 @@ test_cast_ast_reuse :: () {
 	Extended.release_parser_tree(*pointer_old);
 	Extended.release_parser_names(*pointer_old);
 	free(pointer_old_source);
+
 	assert(pointer_ident.name == "Target" && Extended.reconstruct_source(*pointer_updated) == pointer_new_source);
 	Extended.release_parser_tree(*pointer_updated);
 	Extended.release_parser_names(*pointer_updated);
@@ -6572,6 +6389,7 @@ test_cast_ast_reuse :: () {
 	Extended.release_parser_tree(*view_old);
 	Extended.release_parser_names(*view_old);
 	free(view_old_source);
+
 	assert(view_name.name == "Target" && Extended.reconstruct_source(*view_updated) == view_new_source);
 	Extended.release_parser_tree(*view_updated);
 	Extended.release_parser_names(*view_updated);
@@ -6613,6 +6431,7 @@ test_cast_ast_reuse :: () {
 	Extended.release_parser_tree(*array_old);
 	Extended.release_parser_names(*array_old);
 	free(array_old_source);
+
 	assert(array_size.name == "size" && Extended.reconstruct_source(*array_updated) == array_new_source);
 	Extended.release_parser_tree(*array_updated);
 	Extended.release_parser_names(*array_updated);
@@ -6654,6 +6473,7 @@ test_cast_ast_reuse :: () {
 	Extended.release_parser_tree(*double_old);
 	Extended.release_parser_names(*double_old);
 	free(double_old_source);
+
 	assert(double_name.name == "Target" && Extended.reconstruct_source(*double_updated) == double_new_source);
 	Extended.release_parser_tree(*double_updated);
 	Extended.release_parser_names(*double_updated);
@@ -6703,6 +6523,7 @@ test_cast_flags_ast_reuse :: () {
 		Extended.release_parser_tree(*old);
 		Extended.release_parser_names(*old);
 		free(old_source);
+
 		assert(cast_node.target_type.type_valued_expression.(*Extended.Parser_Ident).name == "Target" && Extended.reconstruct_source(*updated) == new_source);
 		Extended.release_parser_tree(*updated);
 		Extended.release_parser_names(*updated);
@@ -6755,6 +6576,7 @@ test_call_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(updated_callee.name == "f" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -6782,6 +6604,7 @@ test_call_ast_reuse :: () {
 	Extended.release_parser_tree(*named_old);
 	Extended.release_parser_names(*named_old);
 	free(named_old_source);
+
 	assert(named_label.name == "name" && named_label.name.data == named_updated.tokens[10].ident_value.name.data);
 	Extended.release_parser_tree(*named_updated);
 	Extended.release_parser_names(*named_updated);
@@ -6831,6 +6654,7 @@ test_member_callee_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(argument.name.name == "named" && callee.right.(*Extended.Parser_Ident).name == "method" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -6870,6 +6694,7 @@ test_call_context_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(call.context_modification.modification_expressions[0].(*Extended.Parser_Ident).name == "extra");
 	assert(Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
@@ -6917,6 +6742,7 @@ test_call_context_fallback :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(modification.right.(*Extended.Parser_Ident).name == "extra" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -6959,6 +6785,7 @@ test_call_cast_fallback :: () {
 		Extended.release_parser_tree(*old);
 		Extended.release_parser_names(*old);
 		free(old_source);
+
 		assert(Extended.reconstruct_source(*updated) == new_source);
 		Extended.release_parser_tree(*updated);
 		Extended.release_parser_names(*updated);
@@ -7049,6 +6876,7 @@ check_call_cast_candidate_edit :: (old_expression: string, new_expression: strin
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -7086,6 +6914,7 @@ test_member_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(access.right.(*Extended.Parser_Ident).name == "field" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -7131,6 +6960,7 @@ test_member_ast_reuse :: () {
 	Extended.release_parser_tree(*chain_old);
 	Extended.release_parser_names(*chain_old);
 	free(chain_old_source);
+
 	assert(chain_inner.left.(*Extended.Parser_Ident).name == "object" && chain_outer.right.(*Extended.Parser_Ident).name == "member");
 	assert(Extended.reconstruct_source(*chain_updated) == chain_new_source);
 	Extended.release_parser_tree(*chain_updated);
@@ -7169,6 +6999,7 @@ test_subscript_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(subscript.right.(*Extended.Parser_Ident).name == "index" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -7221,6 +7052,7 @@ test_aggregate_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(array_literal.array_literal_info.array_members[0].(*Extended.Parser_Ident).name == "name");
 	assert(nested.struct_literal_info.arguments[1].(*Extended.Parser_Literal)._string == "blue");
 	assert(Extended.reconstruct_source(*updated) == new_source);
@@ -7309,6 +7141,7 @@ test_nested_block_ast_reuse :: () {
 	assert(updated_block.statements.count == fresh_block.statements.count && updated_block.statements.count == 3);
 	assert(updated_block.first_token == fresh_block.first_token && updated_block.one_past_last_token == fresh_block.one_past_last_token);
 	assert(updated_block.l0 == fresh_block.l0 && updated_block.c0 == fresh_block.c0 && updated_block.l1 == fresh_block.l1 && updated_block.c1 == fresh_block.c1);
+
 	for updated_block.statements {
 		other := fresh_block.statements[it_index];
 		assert(it.kind == other.kind && it.node_flags == other.node_flags);
@@ -7322,6 +7155,7 @@ test_nested_block_ast_reuse :: () {
 	assert(use.first_token == fresh_use.first_token && use.one_past_last_token == fresh_use.one_past_last_token);
 	assert(use.resolved_declaration == updated_block.statements[2].(*Extended.Parser_Declaration));
 	assert(fresh_use.resolved_declaration == fresh_block.statements[2].(*Extended.Parser_Declaration));
+
 	assert(updated.tokens.count == fresh.tokens.count);
 	for updated.tokens {
 		other := fresh.tokens[it_index];
@@ -7332,6 +7166,7 @@ test_nested_block_ast_reuse :: () {
 	}
 
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.recovery_records.count == fresh.recovery_records.count);
+
 	assert(updated.restart_points.count == fresh.restart_points.count);
 	for updated.restart_points {
 		other := fresh.restart_points[it_index];
@@ -7341,6 +7176,7 @@ test_nested_block_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	for updated.tokens {
 		other := fresh.tokens[it_index];
 		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
@@ -7400,6 +7236,7 @@ test_nested_block_scope_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(use.name == "outer" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -7494,6 +7331,7 @@ check_indentation_only_ast_reuse :: (before: string, after: string, old_indent_l
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(use.name == "target" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -7537,6 +7375,7 @@ test_nested_shadowing_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(use.name == "target" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -7606,6 +7445,7 @@ test_dependency_forward_binding_edit :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(use.name == "target" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -7646,6 +7486,7 @@ test_import_dependency_edit :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(use.name == "Basic" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -7691,6 +7532,7 @@ test_using_dependency_edit :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(using_type.name == "State" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -7729,6 +7571,7 @@ test_dependency_scope_move :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(use.name == "target" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -7774,6 +7617,7 @@ check_dependency_declaration_edit :: (before: string, after: string, edit_start:
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(use.name == "target" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -7821,6 +7665,7 @@ test_moved_closing_brace_ast_reuse :: () {
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
+
 	assert(use.name == "outer" && Extended.reconstruct_source(*updated) == new_source);
 	Extended.release_parser_tree(*updated);
 	Extended.release_parser_names(*updated);
@@ -7884,6 +7729,7 @@ test_default_edit_fallback :: () {
 	assert(import_updated.diagnostics.count == import_fresh.diagnostics.count && import_updated.restart_points.count == import_fresh.restart_points.count);
 	Default.release_parser_tree(*import_old);
 	free(import_before);
+
 	assert(use.name == "Basic");
 	Default.release_parser_tree(*import_updated);
 	Default.release_parser_tree(*import_fresh);
@@ -8667,6 +8513,45 @@ test_using_map_decline_fields :: (using_node: *Extended.Parser_Using, bindings: 
 	return false;
 }
 
+assert_overload_selection :: (source: string, expected_index: s64) {
+	parsed := Extended.parse_file(source, "overload_selection.jai");
+	assert(parsed.status == .COMPLETE);
+	statements := parsed.root.(*Extended.Parser_Block).statements;
+	main := statements[statements.count - 1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
+	call_statements := main.body_or_null.block.statements;
+	call := call_statements[call_statements.count - 1].(*Extended.Parser_Procedure_Call);
+	expected: *Extended.Parser_Procedure_Header;
+	if expected_index >= 0 {
+		expected = statements[expected_index].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
+	}
+
+	assert(Extended.resolve_overloaded_aggregate_call(call, parsed.root_scope) == expected);
+	Extended.release_parser_tree(*parsed);
+	Extended.release_parser_names(*parsed);
+}
+
+assert_mapped_field_fixture :: (source: string, filename: string, mapped_count: s64 = 1, unsupported_count: s64 = 0) {
+	parsed := Extended.parse_file(source, filename);
+	imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
+	assert(parsed.status == .COMPLETE && imports.mapped_names.count == mapped_count && imports.unsupported_using_filters.count == unsupported_count, "Mapped-field fixture: %", source);
+	root_statements := parsed.root.(*Extended.Parser_Block).statements;
+	procedure := root_statements[root_statements.count - 1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
+	statements := procedure.body_or_null.block.statements;
+	call := statements[statements.count - 1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+
+	if mapped_count {
+		assert(imports.mapped_names[0].source_name == "Clear");
+		assert(call.resolved_declaration == imports.mapped_names[0].declaration);
+	} else {
+		assert(call.resolved_declaration == null);
+	}
+
+	Extended.release_file_imports(*imports);
+	Extended.release_parser_tree(*parsed);
+	Extended.release_parser_names(*parsed);
+}
+
+// Using-map fixtures exercise this parser's field-import filtering; overload-only fixtures assert the chosen header directly.
 test_file_import_resolution :: () {
 	filename := join(#filepath, "../../../how_to/040_import_and_load/main.jai");
 	syntax := Extended.parse_file("item :: 1; value := item;", resolve_identifiers=false);
@@ -8989,12 +8874,13 @@ JAI;
 	Extended.release_parser_tree(*aggregate);
 	Extended.release_parser_names(*aggregate);
 
-	STATIC_SOURCE :: #string JAI
+	CONDITIONAL_FIELDS_SOURCE :: #string JAI
+%
 Procs :: struct {
-	#if true {
-		Clear: int;
+	#if % {
+		%
 	} else {
-		PushMatrix: int;
+		%
 	}
 }
 main :: () {
@@ -9003,116 +8889,38 @@ main :: () {
 	hidden := PushMatrix;
 }
 JAI;
-	static_value := Extended.parse_file(STATIC_SOURCE, filename);
-	static_imports := Extended.resolve_file_imports(*static_value, map_names=test_using_map_fields);
-	assert(static_value.status == .COMPLETE && static_imports.mapped_names.count == 1);
-	static_statements := static_value.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
-	assert(static_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == static_imports.mapped_names[0].declaration);
-	assert(static_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
-	Extended.release_file_imports(*static_imports);
-	Extended.release_parser_tree(*static_value);
-	Extended.release_parser_names(*static_value);
-
-	FALSE_SOURCE :: #string JAI
-Procs :: struct {
-	#if false {
-		PushMatrix: int;
-	} else {
-		#if true {
-			Clear: int;
-		}
-	}
-}
-main :: () {
-	using,map(rename) procs: Procs;
-	call := glClear;
-	hidden := PushMatrix;
+	NESTED_CLEAR_FIELDS :: #string JAI
+#if true {
+	Clear: int;
 }
 JAI;
-	false_value := Extended.parse_file(FALSE_SOURCE, filename);
-	false_imports := Extended.resolve_file_imports(*false_value, map_names=test_using_map_fields);
-	assert(false_value.status == .COMPLETE && false_imports.mapped_names.count == 1);
-	assert(false_imports.mapped_names[0].declaration.name == "Clear");
-	false_statements := false_value.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
-	assert(false_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == false_imports.mapped_names[0].declaration);
-	assert(false_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
-	Extended.release_file_imports(*false_imports);
-	Extended.release_parser_tree(*false_value);
-	Extended.release_parser_names(*false_value);
-
-	NEGATED_SOURCE :: #string JAI
-Procs :: struct {
-	#if !false {
-		Clear: int;
-	} else {
-		PushMatrix: int;
+	Conditional_Fields_Case :: struct {
+		prefix: string;
+		condition: string;
+		then_fields: string;
+		else_fields: string;
 	}
-}
-main :: () {
-	using,map(rename) procs: Procs;
-	call := glClear;
-	hidden := PushMatrix;
-}
-JAI;
-	negated_value := Extended.parse_file(NEGATED_SOURCE, filename);
-	negated_imports := Extended.resolve_file_imports(*negated_value, map_names=test_using_map_fields);
-	assert(negated_value.status == .COMPLETE && negated_imports.mapped_names.count == 1);
-	negated_statements := negated_value.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
-	assert(negated_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == negated_imports.mapped_names[0].declaration);
-	assert(negated_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
-	Extended.release_file_imports(*negated_imports);
-	Extended.release_parser_tree(*negated_value);
-	Extended.release_parser_names(*negated_value);
-
-	NEGATED_FALSE_SOURCE :: #string JAI
-Procs :: struct {
-	#if !true {
-		PushMatrix: int;
-	} else {
-		Clear: int;
+	for fixture: Conditional_Fields_Case.[
+		.{"", "true", "Clear: int;", "PushMatrix: int;"},
+		.{"", "false", "PushMatrix: int;", NESTED_CLEAR_FIELDS},
+		.{"", "!false", "Clear: int;", "PushMatrix: int;"},
+		.{"", "!true", "PushMatrix: int;", "Clear: int;"},
+		.{"Enabled :: true;", "Enabled", "Clear: int;", "PushMatrix: int;"},
+	] {
+		source := tprint(CONDITIONAL_FIELDS_SOURCE, fixture.prefix, fixture.condition, fixture.then_fields, fixture.else_fields);
+		conditional := Extended.parse_file(source, filename);
+		conditional_imports := Extended.resolve_file_imports(*conditional, map_names=test_using_map_fields);
+		assert(conditional.status == .COMPLETE && conditional_imports.mapped_names.count == 1);
+		assert(conditional_imports.mapped_names[0].declaration.name == "Clear");
+		root_statements := conditional.root.(*Extended.Parser_Block).statements;
+		procedure := root_statements[root_statements.count - 1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
+		statements := procedure.body_or_null.block.statements;
+		assert(statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == conditional_imports.mapped_names[0].declaration);
+		assert(statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
+		Extended.release_file_imports(*conditional_imports);
+		Extended.release_parser_tree(*conditional);
+		Extended.release_parser_names(*conditional);
 	}
-}
-main :: () {
-	using,map(rename) procs: Procs;
-	call := glClear;
-	hidden := PushMatrix;
-}
-JAI;
-	negated_false := Extended.parse_file(NEGATED_FALSE_SOURCE, filename);
-	negated_false_imports := Extended.resolve_file_imports(*negated_false, map_names=test_using_map_fields);
-	assert(negated_false.status == .COMPLETE && negated_false_imports.mapped_names.count == 1);
-	assert(negated_false_imports.mapped_names[0].declaration.name == "Clear");
-	negated_false_statements := negated_false.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
-	assert(negated_false_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == negated_false_imports.mapped_names[0].declaration);
-	assert(negated_false_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
-	Extended.release_file_imports(*negated_false_imports);
-	Extended.release_parser_tree(*negated_false);
-	Extended.release_parser_names(*negated_false);
-
-	CONSTANT_SOURCE :: #string JAI
-Enabled :: true;
-Procs :: struct {
-	#if Enabled {
-		Clear: int;
-	} else {
-		PushMatrix: int;
-	}
-}
-main :: () {
-	using,map(rename) procs: Procs;
-	call := glClear;
-	hidden := PushMatrix;
-}
-JAI;
-	constant_value := Extended.parse_file(CONSTANT_SOURCE, filename);
-	constant_imports := Extended.resolve_file_imports(*constant_value, map_names=test_using_map_fields);
-	assert(constant_value.status == .COMPLETE && constant_imports.mapped_names.count == 1);
-	constant_statements := constant_value.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
-	assert(constant_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == constant_imports.mapped_names[0].declaration);
-	assert(constant_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
-	Extended.release_file_imports(*constant_imports);
-	Extended.release_parser_tree(*constant_value);
-	Extended.release_parser_names(*constant_value);
 
 	AMBIGUOUS_CONSTANT_SOURCE :: #string JAI
 Enabled :: true;
@@ -9157,12 +8965,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	ambiguous_condition_alias := Extended.parse_file(AMBIGUOUS_CONDITION_ALIAS_SOURCE, filename);
-	ambiguous_condition_alias_imports := Extended.resolve_file_imports(*ambiguous_condition_alias, map_names=test_using_map_fields);
-	assert(ambiguous_condition_alias.status == .COMPLETE && ambiguous_condition_alias_imports.mapped_names.count == 0 && ambiguous_condition_alias_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*ambiguous_condition_alias_imports);
-	Extended.release_parser_tree(*ambiguous_condition_alias);
-	Extended.release_parser_names(*ambiguous_condition_alias);
+	assert_mapped_field_fixture(AMBIGUOUS_CONDITION_ALIAS_SOURCE, filename, 0, 1);
 
 	COMBINED_SOURCE :: #string JAI
 Left :: false;
@@ -9201,12 +9004,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	mutable_value := Extended.parse_file(MUTABLE_SOURCE, filename);
-	mutable_imports := Extended.resolve_file_imports(*mutable_value, map_names=test_using_map_fields);
-	assert(mutable_value.status == .COMPLETE && mutable_imports.mapped_names.count == 0 && mutable_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*mutable_imports);
-	Extended.release_parser_tree(*mutable_value);
-	Extended.release_parser_names(*mutable_value);
+	assert_mapped_field_fixture(MUTABLE_SOURCE, filename, 0, 1);
 
 	CONSTANT_CYCLE_SOURCE :: #string JAI
 First :: Second;
@@ -9222,12 +9020,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	constant_cycle := Extended.parse_file(CONSTANT_CYCLE_SOURCE, filename);
-	constant_cycle_imports := Extended.resolve_file_imports(*constant_cycle, map_names=test_using_map_fields);
-	assert(constant_cycle.status == .COMPLETE && constant_cycle_imports.mapped_names.count == 0 && constant_cycle_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*constant_cycle_imports);
-	Extended.release_parser_tree(*constant_cycle);
-	Extended.release_parser_names(*constant_cycle);
+	assert_mapped_field_fixture(CONSTANT_CYCLE_SOURCE, filename, 0, 1);
 
 	UNKNOWN_SOURCE :: #string JAI
 Procs :: struct {
@@ -9265,12 +9058,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	negated_unknown := Extended.parse_file(NEGATED_UNKNOWN_SOURCE, filename);
-	negated_unknown_imports := Extended.resolve_file_imports(*negated_unknown, map_names=test_using_map_fields);
-	assert(negated_unknown.status == .COMPLETE && negated_unknown_imports.mapped_names.count == 0 && negated_unknown_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*negated_unknown_imports);
-	Extended.release_parser_tree(*negated_unknown);
-	Extended.release_parser_names(*negated_unknown);
+	assert_mapped_field_fixture(NEGATED_UNKNOWN_SOURCE, filename, 0, 1);
 
 	ALIAS_SOURCE :: #string JAI
 Procs :: struct {
@@ -9315,193 +9103,32 @@ JAI;
 	Extended.release_parser_tree(*query_type);
 	Extended.release_parser_names(*query_type);
 
-	MEMBER_TYPE_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Container :: struct {
-	Nested: Child;
-}
-main :: () {
-	using,map(rename) procs := Container.{
-		Nested=Child.{
-			Clear=1
-		}
-	}.Nested;
+	MAPPED_MEMBER_BODY :: #string JAI
+%
+	using,map(rename) procs := %;
 	call := glClear;
-}
 JAI;
-	member_type := Extended.parse_file(MEMBER_TYPE_SOURCE, filename);
-	member_type_imports := Extended.resolve_file_imports(*member_type, map_names=test_using_map_fields);
-	assert(member_type.status == .COMPLETE && member_type_imports.mapped_names.count == 1 && member_type_imports.unsupported_using_filters.count == 0);
-	member_type_statements := member_type.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
-	assert(member_type_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == member_type_imports.mapped_names[0].declaration);
-	Extended.release_file_imports(*member_type_imports);
-	Extended.release_parser_tree(*member_type);
-	Extended.release_parser_names(*member_type);
-
-	TYPED_MEMBER_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Container :: struct {
-	Nested: Child;
-}
-main :: () {
-	container: Container = .{
-		Nested=Child.{
-			Clear=1
-		}
-	};
-	using,map(rename) procs := container.Nested;
-	call := glClear;
-}
-JAI;
-	typed_member := Extended.parse_file(TYPED_MEMBER_SOURCE, filename);
-	typed_member_imports := Extended.resolve_file_imports(*typed_member, map_names=test_using_map_fields);
-	assert(typed_member.status == .COMPLETE && typed_member_imports.mapped_names.count == 1 && typed_member_imports.unsupported_using_filters.count == 0);
-	typed_member_statements := typed_member.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
-	assert(typed_member_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == typed_member_imports.mapped_names[0].declaration);
-	Extended.release_file_imports(*typed_member_imports);
-	Extended.release_parser_tree(*typed_member);
-	Extended.release_parser_names(*typed_member);
-
-	INFERRED_MEMBER_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Container :: struct {
-	Nested: Child;
-}
-main :: () {
-	container := Container.{
-		Nested=Child.{
-			Clear=1
-		}
-	};
-	using,map(rename) procs := container.Nested;
-	call := glClear;
-}
-JAI;
-	inferred_member := Extended.parse_file(INFERRED_MEMBER_SOURCE, filename);
-	inferred_member_imports := Extended.resolve_file_imports(*inferred_member, map_names=test_using_map_fields);
-	assert(inferred_member.status == .COMPLETE && inferred_member_imports.mapped_names.count == 1 && inferred_member_imports.unsupported_using_filters.count == 0);
-	inferred_member_statements := inferred_member.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
-	assert(inferred_member_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inferred_member_imports.mapped_names[0].declaration);
-	Extended.release_file_imports(*inferred_member_imports);
-	Extended.release_parser_tree(*inferred_member);
-	Extended.release_parser_names(*inferred_member);
-
-	CALLED_MEMBER_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Container :: struct {
-	Nested: Child;
-}
-make :: () -> Container {
-	return .{
-		Nested=Child.{
-			Clear=1
-		}
-	};
-}
-main :: () {
-	using,map(rename) procs := make().Nested;
-	call := glClear;
-}
-JAI;
-	called_member := Extended.parse_file(CALLED_MEMBER_SOURCE, filename);
-	called_member_imports := Extended.resolve_file_imports(*called_member, map_names=test_using_map_fields);
-	assert(called_member.status == .COMPLETE && called_member_imports.mapped_names.count == 1 && called_member_imports.unsupported_using_filters.count == 0);
-	called_member_statements := called_member.root.(*Extended.Parser_Block).statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
-	assert(called_member_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == called_member_imports.mapped_names[0].declaration);
-	Extended.release_file_imports(*called_member_imports);
-	Extended.release_parser_tree(*called_member);
-	Extended.release_parser_names(*called_member);
-
-	CAST_MEMBER_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Container :: struct {
-	Nested: Child;
-}
-main :: () {
-	original := Container.{
-		Nested=Child.{
-			Clear=1
-		}
-	};
-	using,map(rename) procs := (cast(Container) original).Nested;
-	call := glClear;
-}
-JAI;
-	cast_member := Extended.parse_file(CAST_MEMBER_SOURCE, filename);
-	cast_member_imports := Extended.resolve_file_imports(*cast_member, map_names=test_using_map_fields);
-	assert(cast_member.status == .COMPLETE && cast_member_imports.mapped_names.count == 1 && cast_member_imports.unsupported_using_filters.count == 0);
-	cast_member_statements := cast_member.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
-	assert(cast_member_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == cast_member_imports.mapped_names[0].declaration);
-	Extended.release_file_imports(*cast_member_imports);
-	Extended.release_parser_tree(*cast_member);
-	Extended.release_parser_names(*cast_member);
-
-	RUN_MEMBER_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Container :: struct {
-	Nested: Child;
-}
-main :: () {
-	using,map(rename) procs := (#run Container.{
-		Nested=Child.{
-			Clear=1
-		}
-	}).Nested;
-	call := glClear;
-}
-JAI;
-	run_member := Extended.parse_file(RUN_MEMBER_SOURCE, filename);
-	run_member_imports := Extended.resolve_file_imports(*run_member, map_names=test_using_map_fields);
-	assert(run_member.status == .COMPLETE && run_member_imports.mapped_names.count == 1 && run_member_imports.unsupported_using_filters.count == 0);
-	run_member_statements := run_member.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
-	assert(run_member_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == run_member_imports.mapped_names[0].declaration);
-	Extended.release_file_imports(*run_member_imports);
-	Extended.release_parser_tree(*run_member);
-	Extended.release_parser_names(*run_member);
-
-	CONDITIONAL_MEMBER_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Container :: struct {
-	Nested: Child;
-}
-main :: (ready: bool) {
-	using,map(rename) procs := (
-		ifx ready
-			then Container.{
-				Nested=Child.{
-					Clear=1
-				}
-			} else Container.{
-				Nested=Child.{
-					Clear=2
-				}
-			}
-	).Nested;
-	call := glClear;
-}
-JAI;
-	conditional_member := Extended.parse_file(CONDITIONAL_MEMBER_SOURCE, filename);
-	conditional_member_imports := Extended.resolve_file_imports(*conditional_member, map_names=test_using_map_fields);
-	assert(conditional_member.status == .COMPLETE && conditional_member_imports.mapped_names.count == 1 && conditional_member_imports.unsupported_using_filters.count == 0);
-	conditional_member_statements := conditional_member.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
-	assert(conditional_member_statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == conditional_member_imports.mapped_names[0].declaration);
-	Extended.release_file_imports(*conditional_member_imports);
-	Extended.release_parser_tree(*conditional_member);
-	Extended.release_parser_names(*conditional_member);
+	Mapped_Member_Case :: struct {
+		extra_declarations: string;
+		parameters: string;
+		setup: string;
+		receiver: string;
+	}
+	for fixture: Mapped_Member_Case.[
+		.{"", "", "", "Container.{Nested=Child.{Clear=1}}.Nested"},
+		.{"", "", "container: Container = .{Nested=Child.{Clear=1}};", "container.Nested"},
+		.{"", "", "container := Container.{Nested=Child.{Clear=1}};", "container.Nested"},
+		.{tprint(CONTAINER_MAKER_SOURCE, ""), "", "", "make().Nested"},
+		.{"", "", "original := Container.{Nested=Child.{Clear=1}};", "(cast(Container) original).Nested"},
+		.{"", "", "", "(#run Container.{Nested=Child.{Clear=1}}).Nested"},
+		.{"", "ready: bool", "", "(ifx ready then Container.{Nested=Child.{Clear=1}} else Container.{Nested=Child.{Clear=2}}).Nested"},
+		.{"", "", "original := Container.{Nested=Child.{Clear=1}};\n\tcontainer := original;", "container.Nested"},
+		.{tprint(CONTAINER_MAKER_SOURCE, "value: $T"), "", "", "make(1).Nested"},
+	] {
+		body := tprint(MAPPED_MEMBER_BODY, fixture.setup, fixture.receiver);
+		source := tprint(CONTAINER_MEMBER_SOURCE, fixture.extra_declarations, tprint("main :: (%)", fixture.parameters), body);
+		assert_mapped_field_fixture(source, filename);
+	}
 
 	MISMATCHED_MEMBER_SOURCE :: #string JAI
 Child :: struct {
@@ -9529,12 +9156,7 @@ main :: (ready: bool) {
 	call := glClear;
 }
 JAI;
-	mismatched_member := Extended.parse_file(MISMATCHED_MEMBER_SOURCE, filename);
-	mismatched_member_imports := Extended.resolve_file_imports(*mismatched_member, map_names=test_using_map_fields);
-	assert(mismatched_member.status == .COMPLETE && mismatched_member_imports.mapped_names.count == 0 && mismatched_member_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*mismatched_member_imports);
-	Extended.release_parser_tree(*mismatched_member);
-	Extended.release_parser_names(*mismatched_member);
+	assert_mapped_field_fixture(MISMATCHED_MEMBER_SOURCE, filename, 0, 1);
 
 	STATIC_MEMBER_SOURCE :: #string JAI
 Child :: struct {
@@ -9596,12 +9218,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	overloaded_run_member := Extended.parse_file(OVERLOADED_RUN_MEMBER_SOURCE, filename);
-	overloaded_run_member_imports := Extended.resolve_file_imports(*overloaded_run_member, map_names=test_using_map_fields);
-	assert(overloaded_run_member.status == .COMPLETE && overloaded_run_member_imports.mapped_names.count == 0 && overloaded_run_member_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*overloaded_run_member_imports);
-	Extended.release_parser_tree(*overloaded_run_member);
-	Extended.release_parser_names(*overloaded_run_member);
+	assert_mapped_field_fixture(OVERLOADED_RUN_MEMBER_SOURCE, filename, 0, 1);
 
 	AMBIGUOUS_CAST_MEMBER_SOURCE :: #string JAI
 Child :: struct {
@@ -9621,12 +9238,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	ambiguous_cast_member := Extended.parse_file(AMBIGUOUS_CAST_MEMBER_SOURCE, filename);
-	ambiguous_cast_member_imports := Extended.resolve_file_imports(*ambiguous_cast_member, map_names=test_using_map_fields);
-	assert(ambiguous_cast_member.status == .COMPLETE && ambiguous_cast_member_imports.mapped_names.count == 0 && ambiguous_cast_member_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*ambiguous_cast_member_imports);
-	Extended.release_parser_tree(*ambiguous_cast_member);
-	Extended.release_parser_names(*ambiguous_cast_member);
+	assert_mapped_field_fixture(AMBIGUOUS_CAST_MEMBER_SOURCE, filename, 0, 1);
 
 	CALLED_OVERLOAD_MEMBER_SOURCE :: #string JAI
 Child :: struct {
@@ -9655,65 +9267,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	called_overload_member := Extended.parse_file(CALLED_OVERLOAD_MEMBER_SOURCE, filename);
-	called_overload_member_imports := Extended.resolve_file_imports(*called_overload_member, map_names=test_using_map_fields);
-	assert(called_overload_member.status == .COMPLETE && called_overload_member_imports.mapped_names.count == 0 && called_overload_member_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*called_overload_member_imports);
-	Extended.release_parser_tree(*called_overload_member);
-	Extended.release_parser_names(*called_overload_member);
-
-	CALLED_POLYMORPHIC_MEMBER_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Container :: struct {
-	Nested: Child;
-}
-make :: (value: $T) -> Container {
-	return .{
-		Nested=Child.{
-			Clear=1
-		}
-	};
-}
-main :: () {
-	using,map(rename) procs := make(1).Nested;
-	call := glClear;
-}
-JAI;
-	called_polymorphic_member := Extended.parse_file(CALLED_POLYMORPHIC_MEMBER_SOURCE, filename);
-	called_polymorphic_member_imports := Extended.resolve_file_imports(*called_polymorphic_member, map_names=test_using_map_fields);
-	assert(called_polymorphic_member.status == .COMPLETE && called_polymorphic_member_imports.mapped_names.count == 1 && called_polymorphic_member_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*called_polymorphic_member_imports);
-	Extended.release_parser_tree(*called_polymorphic_member);
-	Extended.release_parser_names(*called_polymorphic_member);
-
-	ALIASED_MEMBER_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Container :: struct {
-	Nested: Child;
-}
-main :: () {
-	original := Container.{
-		Nested=Child.{
-			Clear=1
-		}
-	};
-	container := original;
-	using,map(rename) procs := container.Nested;
-	call := glClear;
-}
-JAI;
-	aliased_member := Extended.parse_file(ALIASED_MEMBER_SOURCE, filename);
-	aliased_member_imports := Extended.resolve_file_imports(*aliased_member, map_names=test_using_map_fields);
-	assert(aliased_member.status == .COMPLETE && aliased_member_imports.mapped_names.count == 1 && aliased_member_imports.unsupported_using_filters.count == 0);
-	aliased_member_statements := aliased_member.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements;
-	assert(aliased_member_statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == aliased_member_imports.mapped_names[0].declaration);
-	Extended.release_file_imports(*aliased_member_imports);
-	Extended.release_parser_tree(*aliased_member);
-	Extended.release_parser_names(*aliased_member);
+	assert_mapped_field_fixture(CALLED_OVERLOAD_MEMBER_SOURCE, filename, 0, 1);
 
 	CYCLIC_MEMBER_SOURCE :: #string JAI
 Child :: struct {
@@ -9729,12 +9283,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	cyclic_member := Extended.parse_file(CYCLIC_MEMBER_SOURCE, filename);
-	cyclic_member_imports := Extended.resolve_file_imports(*cyclic_member, map_names=test_using_map_fields);
-	assert(cyclic_member.status == .COMPLETE && cyclic_member_imports.mapped_names.count == 0 && cyclic_member_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*cyclic_member_imports);
-	Extended.release_parser_tree(*cyclic_member);
-	Extended.release_parser_names(*cyclic_member);
+	assert_mapped_field_fixture(CYCLIC_MEMBER_SOURCE, filename, 0, 1);
 
 	OVERLOADED_MEMBER_SOURCE :: #string JAI
 Child :: struct {
@@ -9765,12 +9314,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	overloaded_member := Extended.parse_file(OVERLOADED_MEMBER_SOURCE, filename);
-	overloaded_member_imports := Extended.resolve_file_imports(*overloaded_member, map_names=test_using_map_fields);
-	assert(overloaded_member.status == .COMPLETE && overloaded_member_imports.mapped_names.count == 0 && overloaded_member_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*overloaded_member_imports);
-	Extended.release_parser_tree(*overloaded_member);
-	Extended.release_parser_names(*overloaded_member);
+	assert_mapped_field_fixture(OVERLOADED_MEMBER_SOURCE, filename, 0, 1);
 
 	AMBIGUOUS_ALIAS_MEMBER_SOURCE :: #string JAI
 Child :: struct {
@@ -9795,12 +9339,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	ambiguous_alias_member := Extended.parse_file(AMBIGUOUS_ALIAS_MEMBER_SOURCE, filename);
-	ambiguous_alias_member_imports := Extended.resolve_file_imports(*ambiguous_alias_member, map_names=test_using_map_fields);
-	assert(ambiguous_alias_member.status == .COMPLETE && ambiguous_alias_member_imports.mapped_names.count == 0 && ambiguous_alias_member_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*ambiguous_alias_member_imports);
-	Extended.release_parser_tree(*ambiguous_alias_member);
-	Extended.release_parser_names(*ambiguous_alias_member);
+	assert_mapped_field_fixture(AMBIGUOUS_ALIAS_MEMBER_SOURCE, filename, 0, 1);
 
 	AMBIGUOUS_VALUE_MEMBER_SOURCE :: #string JAI
 Child :: struct {
@@ -9816,12 +9355,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	ambiguous_value_member := Extended.parse_file(AMBIGUOUS_VALUE_MEMBER_SOURCE, filename);
-	ambiguous_value_member_imports := Extended.resolve_file_imports(*ambiguous_value_member, map_names=test_using_map_fields);
-	assert(ambiguous_value_member.status == .COMPLETE && ambiguous_value_member_imports.mapped_names.count == 0 && ambiguous_value_member_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*ambiguous_value_member_imports);
-	Extended.release_parser_tree(*ambiguous_value_member);
-	Extended.release_parser_names(*ambiguous_value_member);
+	assert_mapped_field_fixture(AMBIGUOUS_VALUE_MEMBER_SOURCE, filename, 0, 1);
 
 	MISSING_MEMBER_SOURCE :: #string JAI
 Child :: struct {
@@ -9839,12 +9373,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	missing_member := Extended.parse_file(MISSING_MEMBER_SOURCE, filename);
-	missing_member_imports := Extended.resolve_file_imports(*missing_member, map_names=test_using_map_fields);
-	assert(missing_member.status == .COMPLETE && missing_member_imports.mapped_names.count == 0 && missing_member_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*missing_member_imports);
-	Extended.release_parser_tree(*missing_member);
-	Extended.release_parser_names(*missing_member);
+	assert_mapped_field_fixture(MISSING_MEMBER_SOURCE, filename, 0, 1);
 
 	AMBIGUOUS_MEMBER_SOURCE :: #string JAI
 Child :: struct {
@@ -9865,12 +9394,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	ambiguous_member := Extended.parse_file(AMBIGUOUS_MEMBER_SOURCE, filename);
-	ambiguous_member_imports := Extended.resolve_file_imports(*ambiguous_member, map_names=test_using_map_fields);
-	assert(ambiguous_member.status == .COMPLETE && ambiguous_member_imports.mapped_names.count == 0 && ambiguous_member_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*ambiguous_member_imports);
-	Extended.release_parser_tree(*ambiguous_member);
-	Extended.release_parser_names(*ambiguous_member);
+	assert_mapped_field_fixture(AMBIGUOUS_MEMBER_SOURCE, filename, 0, 1);
 
 	UNKNOWN_QUERY_SOURCE :: #string JAI
 Procs :: struct {
@@ -9881,12 +9405,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	unknown_query := Extended.parse_file(UNKNOWN_QUERY_SOURCE, filename);
-	unknown_query_imports := Extended.resolve_file_imports(*unknown_query, map_names=test_using_map_fields);
-	assert(unknown_query.status == .COMPLETE && unknown_query_imports.mapped_names.count == 0 && unknown_query_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*unknown_query_imports);
-	Extended.release_parser_tree(*unknown_query);
-	Extended.release_parser_names(*unknown_query);
+	assert_mapped_field_fixture(UNKNOWN_QUERY_SOURCE, filename, 0, 1);
 
 	CYCLIC_QUERY_SOURCE :: #string JAI
 main :: () {
@@ -9895,12 +9414,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	cyclic_query := Extended.parse_file(CYCLIC_QUERY_SOURCE, filename);
-	cyclic_query_imports := Extended.resolve_file_imports(*cyclic_query, map_names=test_using_map_fields);
-	assert(cyclic_query.status == .COMPLETE && cyclic_query_imports.mapped_names.count == 0 && cyclic_query_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*cyclic_query_imports);
-	Extended.release_parser_tree(*cyclic_query);
-	Extended.release_parser_names(*cyclic_query);
+	assert_mapped_field_fixture(CYCLIC_QUERY_SOURCE, filename, 0, 1);
 
 	OVERLOADED_QUERY_SOURCE :: #string JAI
 Procs :: struct {
@@ -9924,12 +9438,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	overloaded_query := Extended.parse_file(OVERLOADED_QUERY_SOURCE, filename);
-	overloaded_query_imports := Extended.resolve_file_imports(*overloaded_query, map_names=test_using_map_fields);
-	assert(overloaded_query.status == .COMPLETE && overloaded_query_imports.mapped_names.count == 0 && overloaded_query_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*overloaded_query_imports);
-	Extended.release_parser_tree(*overloaded_query);
-	Extended.release_parser_names(*overloaded_query);
+	assert_mapped_field_fixture(OVERLOADED_QUERY_SOURCE, filename, 0, 1);
 
 	AMBIGUOUS_TYPE_SOURCE :: #string JAI
 Procs :: struct {
@@ -10085,12 +9594,7 @@ main :: (ready: bool) {
 	call := glClear;
 }
 JAI;
-	mismatched := Extended.parse_file(MISMATCHED_SOURCE, filename);
-	mismatched_imports := Extended.resolve_file_imports(*mismatched, map_names=test_using_map_fields);
-	assert(mismatched.status == .COMPLETE && mismatched_imports.mapped_names.count == 0 && mismatched_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*mismatched_imports);
-	Extended.release_parser_tree(*mismatched);
-	Extended.release_parser_names(*mismatched);
+	assert_mapped_field_fixture(MISMATCHED_SOURCE, filename, 0, 1);
 
 	STATIC_VALUE_SOURCE :: #string JAI
 Enabled :: false;
@@ -10141,12 +9645,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	ambiguous_static_ifx := Extended.parse_file(AMBIGUOUS_STATIC_IFX_SOURCE, filename);
-	ambiguous_static_ifx_imports := Extended.resolve_file_imports(*ambiguous_static_ifx, map_names=test_using_map_fields);
-	assert(ambiguous_static_ifx.status == .COMPLETE && ambiguous_static_ifx_imports.mapped_names.count == 0 && ambiguous_static_ifx_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*ambiguous_static_ifx_imports);
-	Extended.release_parser_tree(*ambiguous_static_ifx);
-	Extended.release_parser_names(*ambiguous_static_ifx);
+	assert_mapped_field_fixture(AMBIGUOUS_STATIC_IFX_SOURCE, filename, 0, 1);
 
 	STATIC_THEN_SOURCE :: #string JAI
 Procs :: struct {
@@ -10190,12 +9689,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	static_unknown := Extended.parse_file(STATIC_UNKNOWN_SOURCE, filename);
-	static_unknown_imports := Extended.resolve_file_imports(*static_unknown, map_names=test_using_map_fields);
-	assert(static_unknown.status == .COMPLETE && static_unknown_imports.mapped_names.count == 0 && static_unknown_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*static_unknown_imports);
-	Extended.release_parser_tree(*static_unknown);
-	Extended.release_parser_names(*static_unknown);
+	assert_mapped_field_fixture(STATIC_UNKNOWN_SOURCE, filename, 0, 1);
 
 	CYCLE_SOURCE :: #string JAI
 main :: () {
@@ -10429,6 +9923,7 @@ main :: () {
 }
 JAI
 	];
+
 	for complete_call_receiver_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
@@ -10535,6 +10030,7 @@ main :: () {
 }
 JAI
 	];
+
 	for unsupported_call_receiver_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
@@ -10558,6 +10054,7 @@ main :: () {
 }
 JAI
 	];
+
 	for complete_receiver_inventory_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
@@ -10605,6 +10102,7 @@ main :: () {
 }
 JAI
 	];
+
 	for unsupported_receiver_inventory_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
@@ -10637,12 +10135,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	overloaded_alias := Extended.parse_file(OVERLOADED_ALIAS_SOURCE, filename);
-	OVERLOADED_ALIAS_IMPORTS := Extended.resolve_file_imports(*overloaded_alias, map_names=test_using_map_fields);
-	assert(overloaded_alias.status == .COMPLETE && OVERLOADED_ALIAS_IMPORTS.mapped_names.count == 0 && OVERLOADED_ALIAS_IMPORTS.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*OVERLOADED_ALIAS_IMPORTS);
-	Extended.release_parser_tree(*overloaded_alias);
-	Extended.release_parser_names(*overloaded_alias);
+	assert_mapped_field_fixture(OVERLOADED_ALIAS_SOURCE, filename, 0, 1);
 
 	POLYMORPHIC_ALIAS_SOURCE :: #string JAI
 Procs :: struct {
@@ -10659,12 +10152,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	polymorphic_alias := Extended.parse_file(POLYMORPHIC_ALIAS_SOURCE, filename);
-	POLYMORPHIC_ALIAS_IMPORTS := Extended.resolve_file_imports(*polymorphic_alias, map_names=test_using_map_fields);
-	assert(polymorphic_alias.status == .COMPLETE && POLYMORPHIC_ALIAS_IMPORTS.mapped_names.count == 1 && POLYMORPHIC_ALIAS_IMPORTS.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*POLYMORPHIC_ALIAS_IMPORTS);
-	Extended.release_parser_tree(*polymorphic_alias);
-	Extended.release_parser_names(*polymorphic_alias);
+	assert_mapped_field_fixture(POLYMORPHIC_ALIAS_SOURCE, filename);
 
 	MUTABLE_PROCEDURE_SOURCE :: #string JAI
 Procs :: struct {
@@ -10681,12 +10169,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	mutable_procedure := Extended.parse_file(MUTABLE_PROCEDURE_SOURCE, filename);
-	MUTABLE_PROCEDURE_IMPORTS := Extended.resolve_file_imports(*mutable_procedure, map_names=test_using_map_fields);
-	assert(mutable_procedure.status == .COMPLETE && MUTABLE_PROCEDURE_IMPORTS.mapped_names.count == 0 && MUTABLE_PROCEDURE_IMPORTS.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*MUTABLE_PROCEDURE_IMPORTS);
-	Extended.release_parser_tree(*mutable_procedure);
-	Extended.release_parser_names(*mutable_procedure);
+	assert_mapped_field_fixture(MUTABLE_PROCEDURE_SOURCE, filename, 0, 1);
 
 	OVERLOADED_SOURCE :: #string JAI
 Procs :: struct {
@@ -10804,12 +10287,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	instantiated_overload := Extended.parse_file(INSTANCIATED_OVERLOAD_SOURCE, filename);
-	instantiated_overload_imports := Extended.resolve_file_imports(*instantiated_overload, map_names=test_using_map_fields);
-	assert(instantiated_overload.status == .COMPLETE && instantiated_overload_imports.mapped_names.count == 1 && instantiated_overload_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*instantiated_overload_imports);
-	Extended.release_parser_tree(*instantiated_overload);
-	Extended.release_parser_names(*instantiated_overload);
+	assert_mapped_field_fixture(INSTANCIATED_OVERLOAD_SOURCE, filename);
 
 	AGGREGATE_CONVERSION_SOURCE :: #string JAI
 Base :: struct {
@@ -10887,173 +10365,21 @@ JAI
 Input :: struct {
 	Value: int;
 }
-Procs :: struct {
-	Clear: int;
+make :: () {
 }
-Other :: struct {
-	PushMatrix: int;
-}
-make :: () -> Other {
-	return .{
-		PushMatrix=1
-	};
-}
-make :: (input: Input) -> Procs {
-	return .{
-		Clear=1
-	};
+make :: (input: Input) {
 }
 main :: () {
-	using,map(rename) procs := make(Input.{
-		Value=1
-	});
-	call := glClear;
+	make(Input.{Value=1});
 }
 JAI;
-	ary_overload := Extended.parse_file(ARY_OVERLOAD_SOURCE, filename);
-	ary_overload_imports := Extended.resolve_file_imports(*ary_overload, map_names=test_using_map_fields);
-	assert(ary_overload.status == .COMPLETE && ary_overload_imports.mapped_names.count == 1 && ary_overload_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*ary_overload_imports);
-	Extended.release_parser_tree(*ary_overload);
-	Extended.release_parser_names(*ary_overload);
+	assert_overload_selection(ARY_OVERLOAD_SOURCE, 2);
 
-	PRIMITIVE_OVERLOAD_SOURCE :: #string JAI
-Procs :: struct {
-	Clear: int;
-}
-Other :: struct {
-	PushMatrix: int;
-}
-make :: (number: s64) -> Other {
-	return .{
-		PushMatrix=1
-	};
-}
-make :: (text: string) -> Procs {
-	return .{
-		Clear=1
-	};
-}
-main :: () {
-	using,map(rename) procs := make("text");
-	call := glClear;
-}
-JAI;
-	primitive_overload := Extended.parse_file(PRIMITIVE_OVERLOAD_SOURCE, filename);
-	primitive_overload_imports := Extended.resolve_file_imports(*primitive_overload, map_names=test_using_map_fields);
-	assert(primitive_overload.status == .COMPLETE && primitive_overload_imports.mapped_names.count == 1 && primitive_overload_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*primitive_overload_imports);
-	Extended.release_parser_tree(*primitive_overload);
-	Extended.release_parser_names(*primitive_overload);
-
-	INTEGER_OVERLOAD_SOURCE :: #string JAI
-Procs :: struct {
-	Clear: int;
-}
-Other :: struct {
-	PushMatrix: int;
-}
-make :: (number: s64) -> Procs {
-	return .{
-		Clear=1
-	};
-}
-make :: (text: string) -> Other {
-	return .{
-		PushMatrix=1
-	};
-}
-main :: () {
-	using,map(rename) procs := make(1);
-	call := glClear;
-}
-JAI;
-	integer_overload := Extended.parse_file(INTEGER_OVERLOAD_SOURCE, filename);
-	integer_overload_imports := Extended.resolve_file_imports(*integer_overload, map_names=test_using_map_fields);
-	assert(integer_overload.status == .COMPLETE && integer_overload_imports.mapped_names.count == 1 && integer_overload_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*integer_overload_imports);
-	Extended.release_parser_tree(*integer_overload);
-	Extended.release_parser_names(*integer_overload);
-
-	NUMERIC_RANK_SOURCE :: #string JAI
-Procs :: struct {
-	Clear: int;
-}
-Other :: struct {
-	PushMatrix: int;
-}
-make :: (number: float64) -> Other {
-	return .{PushMatrix=1};
-}
-make :: (number: s64) -> Procs {
-	return .{Clear=1};
-}
-main :: () {
-	using,map(rename) procs := make(1);
-	call := glClear;
-}
-JAI
-	numeric_rank := Extended.parse_file(NUMERIC_RANK_SOURCE, filename);
-	numeric_rank_imports := Extended.resolve_file_imports(*numeric_rank, map_names=test_using_map_fields);
-	assert(numeric_rank.status == .COMPLETE && numeric_rank_imports.mapped_names.count == 1 && numeric_rank_imports.mapped_names[0].source_name == "Clear" && numeric_rank_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*numeric_rank_imports);
-	Extended.release_parser_tree(*numeric_rank);
-	Extended.release_parser_names(*numeric_rank);
-
-	CONVERTED_RANK_SOURCE :: #string JAI
-Procs :: struct {
-	Clear: int;
-}
-Other :: struct {
-	PushMatrix: int;
-}
-make :: (number: float64) -> Procs {
-	return .{Clear=1};
-}
-make :: (text: string) -> Other {
-	return .{PushMatrix=1};
-}
-main :: () {
-	using,map(rename) procs := make(1);
-	call := glClear;
-}
-JAI
-	converted_rank := Extended.parse_file(CONVERTED_RANK_SOURCE, filename);
-	converted_rank_imports := Extended.resolve_file_imports(*converted_rank, map_names=test_using_map_fields);
-	assert(
-		converted_rank.status == .COMPLETE
-		&& converted_rank_imports.mapped_names.count == 1
-		&& converted_rank_imports.mapped_names[0].source_name == "Clear"
-		&& converted_rank_imports.unsupported_using_filters.count == 0
-	);
-	Extended.release_file_imports(*converted_rank_imports);
-	Extended.release_parser_tree(*converted_rank);
-	Extended.release_parser_names(*converted_rank);
-
-	FLOAT_RANK_SOURCE :: #string JAI
-Procs :: struct {
-	Clear: int;
-}
-Other :: struct {
-	PushMatrix: int;
-}
-make :: (number: float64) -> Procs {
-	return .{Clear=1};
-}
-make :: (text: string) -> Other {
-	return .{PushMatrix=1};
-}
-main :: () {
-	using,map(rename) procs := make(1.5);
-	call := glClear;
-}
-JAI
-	float_rank := Extended.parse_file(FLOAT_RANK_SOURCE, filename);
-	float_rank_imports := Extended.resolve_file_imports(*float_rank, map_names=test_using_map_fields);
-	assert(float_rank.status == .COMPLETE && float_rank_imports.mapped_names.count == 1 && float_rank_imports.mapped_names[0].source_name == "Clear" && float_rank_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*float_rank_imports);
-	Extended.release_parser_tree(*float_rank);
-	Extended.release_parser_names(*float_rank);
+	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "s64", "string", "\"text\""), 1);
+	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "s64", "string", "1"), 0);
+	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "s64", "1"), 1);
+	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "string", "1"), 0);
+	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "string", "1.5"), 0);
 
 	NAMED_OVERLOAD_SOURCE :: #string JAI
 Input :: struct {
@@ -11062,132 +10388,44 @@ Input :: struct {
 Alternate :: struct {
 	Value: int;
 }
-Procs :: struct {
-	Clear: int;
+make :: (input: Input) {
 }
-Other :: struct {
-	PushMatrix: int;
-}
-make :: (input: Input) -> Procs {
-	return .{
-		Clear=1
-	};
-}
-make :: (input: Alternate) -> Other {
-	return .{
-		PushMatrix=1
-	};
+make :: (input: Alternate) {
 }
 main :: () {
-	using,map(rename) procs := make(input=Input.{
-		Value=1
-	});
-	call := glClear;
+	make(input=Input.{Value=1});
 }
 JAI;
-	named_overload := Extended.parse_file(NAMED_OVERLOAD_SOURCE, filename);
-	named_overload_imports := Extended.resolve_file_imports(*named_overload, map_names=test_using_map_fields);
-	assert(named_overload.status == .COMPLETE && named_overload_imports.mapped_names.count == 1 && named_overload_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*named_overload_imports);
-	Extended.release_parser_tree(*named_overload);
-	Extended.release_parser_names(*named_overload);
+	assert_overload_selection(NAMED_OVERLOAD_SOURCE, 2);
 
 	DEFAULTED_OVERLOAD_SOURCE :: #string JAI
 Input :: struct {
 	Value: int;
 }
-Procs :: struct {
-	Clear: int;
+make :: (input: Input, enabled: bool = true) {
 }
-Other :: struct {
-	PushMatrix: int;
-}
-make :: (input: Input, enabled: bool = true) -> Procs {
-	return .{Clear=1};
-}
-make :: (input: Input, required: string) -> Other {
-	return .{PushMatrix=1};
+make :: (input: Input, required: string) {
 }
 main :: () {
-	using,map(rename) procs := make(input=Input.{Value=1});
-	call := glClear;
+	make(%);
 }
-JAI
-	defaulted_overload := Extended.parse_file(DEFAULTED_OVERLOAD_SOURCE, filename);
-	defaulted_overload_imports := Extended.resolve_file_imports(*defaulted_overload, map_names=test_using_map_fields);
-	assert(
-		defaulted_overload.status == .COMPLETE
-		&& defaulted_overload_imports.mapped_names.count == 1
-		&& defaulted_overload_imports.mapped_names[0].source_name == "Clear"
-		&& defaulted_overload_imports.unsupported_using_filters.count == 0
-	);
-	Extended.release_file_imports(*defaulted_overload_imports);
-	Extended.release_parser_tree(*defaulted_overload);
-	Extended.release_parser_names(*defaulted_overload);
-
-	DEFAULTED_POSITIONAL_SOURCE :: #string JAI
-Input :: struct {
-	Value: int;
-}
-Procs :: struct {
-	Clear: int;
-}
-Other :: struct {
-	PushMatrix: int;
-}
-make :: (input: Input, enabled: bool = true) -> Procs {
-	return .{Clear=1};
-}
-make :: (input: Input, required: string) -> Other {
-	return .{PushMatrix=1};
-}
-main :: () {
-	using,map(rename) procs := make(Input.{Value=1});
-	call := glClear;
-}
-JAI
-	defaulted_positional := Extended.parse_file(DEFAULTED_POSITIONAL_SOURCE, filename);
-	defaulted_positional_imports := Extended.resolve_file_imports(*defaulted_positional, map_names=test_using_map_fields);
-	assert(
-		defaulted_positional.status == .COMPLETE
-		&& defaulted_positional_imports.mapped_names.count == 1
-		&& defaulted_positional_imports.mapped_names[0].source_name == "Clear"
-		&& defaulted_positional_imports.unsupported_using_filters.count == 0
-	);
-	Extended.release_file_imports(*defaulted_positional_imports);
-	Extended.release_parser_tree(*defaulted_positional);
-	Extended.release_parser_names(*defaulted_positional);
+JAI;
+	for argument: string.["input=Input.{Value=1}", "Input.{Value=1}"] {
+		assert_overload_selection(tprint(DEFAULTED_OVERLOAD_SOURCE, argument), 1);
+	}
 
 	TYPED_PRIMITIVE_SOURCE :: #string JAI
-Procs :: struct {
-	Clear: int;
+make :: (number: s64) {
 }
-Other :: struct {
-	PushMatrix: int;
-}
-make :: (number: s64) -> Other {
-	return .{
-		PushMatrix=1
-	};
-}
-make :: (text: string) -> Procs {
-	return .{
-		Clear=1
-	};
+make :: (text: string) {
 }
 main :: () {
 	original: string = "text";
 	text := original;
-	using,map(rename) procs := make(text);
-	call := glClear;
+	make(text);
 }
 JAI;
-	typed_primitive := Extended.parse_file(TYPED_PRIMITIVE_SOURCE, filename);
-	typed_primitive_imports := Extended.resolve_file_imports(*typed_primitive, map_names=test_using_map_fields);
-	assert(typed_primitive.status == .COMPLETE && typed_primitive_imports.mapped_names.count == 1 && typed_primitive_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*typed_primitive_imports);
-	Extended.release_parser_tree(*typed_primitive);
-	Extended.release_parser_names(*typed_primitive);
+	assert_overload_selection(TYPED_PRIMITIVE_SOURCE, 1);
 
 	LATER_MISMATCH_SOURCE :: #string JAI
 Input :: struct {
@@ -11196,35 +10434,53 @@ Input :: struct {
 Alternate :: struct {
 	Value: int;
 }
-Procs :: struct {
-	Clear: int;
+make :: (number: float64, input: Input) {
 }
-Other :: struct {
-	PushMatrix: int;
-}
-make :: (number: float64, input: Input) -> Other {
-	return .{
-		PushMatrix=1
-	};
-}
-make :: (number: s64, input: Alternate) -> Procs {
-	return .{
-		Clear=1
-	};
+make :: (number: s64, input: Alternate) {
 }
 main :: () {
-	using,map(rename) procs := make(1, Alternate.{
-		Value=1
-	});
-	call := glClear;
+	make(1, Alternate.{Value=1});
 }
 JAI;
-	later_mismatch := Extended.parse_file(LATER_MISMATCH_SOURCE, filename);
-	later_mismatch_imports := Extended.resolve_file_imports(*later_mismatch, map_names=test_using_map_fields);
-	assert(later_mismatch.status == .COMPLETE && later_mismatch_imports.mapped_names.count == 1 && later_mismatch_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*later_mismatch_imports);
-	Extended.release_parser_tree(*later_mismatch);
-	Extended.release_parser_names(*later_mismatch);
+	assert_overload_selection(LATER_MISMATCH_SOURCE, 3);
+
+	assert_overload_selection(tprint(MULTI_ARGUMENT_RANK_SOURCE, "first: float64, second: float64", "first: s64, second: float64", "1, 1"), 1);
+	assert_overload_selection(tprint(MULTI_ARGUMENT_RANK_SOURCE, "first: s64, second: s64", "first: float64, second: float64", "1, 1"), 0);
+	assert_overload_selection(tprint(MULTI_ARGUMENT_RANK_SOURCE, "first: s64, second: float64", "first: float64, second: s64", "1, 1"), -1);
+
+	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "u8", "string", "255"), 0);
+
+	for fixture: REJECTED_INTEGER_CASES {
+		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", fixture.value), -1);
+	}
+
+	for fixture: SIGNED_BOUNDARY_CASES {
+		for value, index: string.[fixture.lower, fixture.upper, fixture.below, fixture.above] {
+			if index == 2 && !fixture.below_is_negatable {
+				continue;
+			}
+
+
+			assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", value), ifx index < 2 || index == 3 && fixture.above_matches then 0 else -1);
+		}
+
+		if fixture.parameter_type == "s64" {
+			assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "s64", "u64", fixture.above), 0);
+			for value: string.["1", fixture.above] {
+				assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "u64", "string", value), 0);
+			}
+		} else {
+			for value: string.["1", "-1"] {
+				assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "s64", value), 1);
+			}
+		}
+	}
+
+	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "u16", "string", "65535"), 0);
+
+	for parameter_type: string.["u8", "u64", "u16"] {
+		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, parameter_type, "s64", "1"), 1);
+	}
 
 	CALLED_ALIAS_SOURCE :: #string JAI
 Child :: struct {
@@ -11255,12 +10511,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	called_alias := Extended.parse_file(CALLED_ALIAS_SOURCE, filename);
-	called_alias_imports := Extended.resolve_file_imports(*called_alias, map_names=test_using_map_fields);
-	assert(called_alias.status == .COMPLETE && called_alias_imports.mapped_names.count == 1 && called_alias_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*called_alias_imports);
-	Extended.release_parser_tree(*called_alias);
-	Extended.release_parser_names(*called_alias);
+	assert_mapped_field_fixture(CALLED_ALIAS_SOURCE, filename);
 
 	SHADOWED_OVERLOADS_SOURCE :: #string JAI
 Procs :: struct {
@@ -11291,7 +10542,12 @@ main :: () {
 JAI;
 	shadowed_overloads := Extended.parse_file(SHADOWED_OVERLOADS_SOURCE, filename);
 	shadowed_overloads_imports := Extended.resolve_file_imports(*shadowed_overloads, map_names=test_using_map_fields);
-	assert(shadowed_overloads.status == .COMPLETE && shadowed_overloads_imports.mapped_names.count == 1 && shadowed_overloads_imports.mapped_names[0].source_name == "Clear" && shadowed_overloads_imports.unsupported_using_filters.count == 0);
+	assert(
+		shadowed_overloads.status == .COMPLETE
+		&& shadowed_overloads_imports.mapped_names.count == 1
+		&& shadowed_overloads_imports.mapped_names[0].source_name == "Clear"
+		&& shadowed_overloads_imports.unsupported_using_filters.count == 0
+	);
 	Extended.release_file_imports(*shadowed_overloads_imports);
 	Extended.release_parser_tree(*shadowed_overloads);
 	Extended.release_parser_names(*shadowed_overloads);
@@ -11676,6 +10932,7 @@ main :: (choose: bool) {
 JAI,
 
 	];
+
 	for unsupported_calls {
 		parsed_call := Extended.parse_file(it, filename);
 		call_imports := Extended.resolve_file_imports(*parsed_call, map_names=test_using_map_fields);
@@ -11759,12 +11016,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	multiple_polymorphic := Extended.parse_file(MULTIPLE_POLYMORPHIC_SOURCE, filename);
-	multiple_polymorphic_imports := Extended.resolve_file_imports(*multiple_polymorphic, map_names=test_using_map_fields);
-	assert(multiple_polymorphic.status == .COMPLETE && multiple_polymorphic_imports.mapped_names.count == 1 && multiple_polymorphic_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*multiple_polymorphic_imports);
-	Extended.release_parser_tree(*multiple_polymorphic);
-	Extended.release_parser_names(*multiple_polymorphic);
+	assert_mapped_field_fixture(MULTIPLE_POLYMORPHIC_SOURCE, filename);
 
 	NAMED_POLYMORPHIC_SOURCE :: #string JAI
 Child :: struct {
@@ -11787,12 +11039,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	named_polymorphic := Extended.parse_file(NAMED_POLYMORPHIC_SOURCE, filename);
-	named_polymorphic_imports := Extended.resolve_file_imports(*named_polymorphic, map_names=test_using_map_fields);
-	assert(named_polymorphic.status == .COMPLETE && named_polymorphic_imports.mapped_names.count == 1 && named_polymorphic_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*named_polymorphic_imports);
-	Extended.release_parser_tree(*named_polymorphic);
-	Extended.release_parser_names(*named_polymorphic);
+	assert_mapped_field_fixture(NAMED_POLYMORPHIC_SOURCE, filename);
 
 	POLYMORPHIC_BOX_SOURCE :: #string JAI
 Child :: struct {
@@ -11851,12 +11098,7 @@ main :: (choose: bool) {
 	call := glClear;
 }
 JAI;
-	matching_polymorphic_box := Extended.parse_file(MATCHING_POLYMORPHIC_BOX_SOURCE, filename);
-	matching_polymorphic_box_imports := Extended.resolve_file_imports(*matching_polymorphic_box, map_names=test_using_map_fields);
-	assert(matching_polymorphic_box.status == .COMPLETE && matching_polymorphic_box_imports.mapped_names.count == 1 && matching_polymorphic_box_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*matching_polymorphic_box_imports);
-	Extended.release_parser_tree(*matching_polymorphic_box);
-	Extended.release_parser_names(*matching_polymorphic_box);
+	assert_mapped_field_fixture(MATCHING_POLYMORPHIC_BOX_SOURCE, filename);
 
 	POLYMORPHIC_PAIR_SOURCE :: #string JAI
 Child :: struct {
@@ -11886,12 +11128,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	polymorphic_pair := Extended.parse_file(POLYMORPHIC_PAIR_SOURCE, filename);
-	polymorphic_pair_imports := Extended.resolve_file_imports(*polymorphic_pair, map_names=test_using_map_fields);
-	assert(polymorphic_pair.status == .COMPLETE && polymorphic_pair_imports.mapped_names.count == 1 && polymorphic_pair_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*polymorphic_pair_imports);
-	Extended.release_parser_tree(*polymorphic_pair);
-	Extended.release_parser_names(*polymorphic_pair);
+	assert_mapped_field_fixture(POLYMORPHIC_PAIR_SOURCE, filename);
 
 	REORDERED_POLYMORPHIC_PAIR_SOURCE :: #string JAI
 Child :: struct {
@@ -11921,12 +11158,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	reordered_polymorphic_pair := Extended.parse_file(REORDERED_POLYMORPHIC_PAIR_SOURCE, filename);
-	reordered_polymorphic_pair_imports := Extended.resolve_file_imports(*reordered_polymorphic_pair, map_names=test_using_map_fields);
-	assert(reordered_polymorphic_pair.status == .COMPLETE && reordered_polymorphic_pair_imports.mapped_names.count == 1 && reordered_polymorphic_pair_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*reordered_polymorphic_pair_imports);
-	Extended.release_parser_tree(*reordered_polymorphic_pair);
-	Extended.release_parser_names(*reordered_polymorphic_pair);
+	assert_mapped_field_fixture(REORDERED_POLYMORPHIC_PAIR_SOURCE, filename);
 
 	NAMED_RETURN_PAIR_SOURCE :: #string JAI
 Child :: struct {
@@ -11956,12 +11188,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	named_return_pair := Extended.parse_file(NAMED_RETURN_PAIR_SOURCE, filename);
-	named_return_pair_imports := Extended.resolve_file_imports(*named_return_pair, map_names=test_using_map_fields);
-	assert(named_return_pair.status == .COMPLETE && named_return_pair_imports.mapped_names.count == 1 && named_return_pair_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*named_return_pair_imports);
-	Extended.release_parser_tree(*named_return_pair);
-	Extended.release_parser_names(*named_return_pair);
+	assert_mapped_field_fixture(NAMED_RETURN_PAIR_SOURCE, filename);
 
 	ALIASED_RETURN_PAIR_SOURCE :: #string JAI
 Child :: struct {
@@ -11992,12 +11219,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	aliased_return_pair := Extended.parse_file(ALIASED_RETURN_PAIR_SOURCE, filename);
-	aliased_return_pair_imports := Extended.resolve_file_imports(*aliased_return_pair, map_names=test_using_map_fields);
-	assert(aliased_return_pair.status == .COMPLETE && aliased_return_pair_imports.mapped_names.count == 1 && aliased_return_pair_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*aliased_return_pair_imports);
-	Extended.release_parser_tree(*aliased_return_pair);
-	Extended.release_parser_names(*aliased_return_pair);
+	assert_mapped_field_fixture(ALIASED_RETURN_PAIR_SOURCE, filename);
 
 	generic_sources: [] string = .[
 		#string JAI
@@ -12048,10 +11270,12 @@ main :: () {
 JAI,
 
 	];
+
 	for generic_sources {
 		generic := Extended.parse_file(it, filename);
 		generic_imports := Extended.resolve_file_imports(*generic, map_names=test_using_map_fields);
 		assert(generic.status == .COMPLETE && generic_imports.mapped_names.count == 1 && generic_imports.unsupported_using_filters.count == 0);
+
 		if it == generic_sources[1] {
 			structure := generic.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct);
 			parameter := structure.arguments_block.statements[0].(*Extended.Parser_Declaration);
@@ -12064,189 +11288,11 @@ JAI,
 		Extended.release_parser_names(*generic);
 	}
 
-	MULTIPLE_GENERIC_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Other :: struct {
-	PushMatrix: int;
-}
-Pair :: struct (First: Type, Second: Type) {
-	Left: First;
-	Right: Second;
-}
-main :: () {
-	pair: Pair(Other, Child);
-	using,map(rename) value := pair.Right;
-	call := glClear;
-}
-JAI;
-	multiple_generic := Extended.parse_file(MULTIPLE_GENERIC_SOURCE, filename);
-	multiple_generic_imports := Extended.resolve_file_imports(*multiple_generic, map_names=test_using_map_fields);
-	assert(multiple_generic.status == .COMPLETE && multiple_generic_imports.mapped_names.count == 1 && multiple_generic_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*multiple_generic_imports);
-	Extended.release_parser_tree(*multiple_generic);
-	Extended.release_parser_names(*multiple_generic);
-
-	ALIASED_GENERIC_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Other :: struct {
-	PushMatrix: int;
-}
-Pair :: struct (First: Type, Second: Type) {
-	Left: First;
-	Right: Second;
-}
-Alias :: Pair;
-AliasAgain :: Alias;
-main :: () {
-	pair: AliasAgain(Second=Child, First=Other);
-	using,map(rename) procs := pair.Right;
-	call := glClear;
-}
-JAI;
-	aliased_generic := Extended.parse_file(ALIASED_GENERIC_SOURCE, filename);
-	aliased_generic_imports := Extended.resolve_file_imports(*aliased_generic, map_names=test_using_map_fields);
-	assert(aliased_generic.status == .COMPLETE && aliased_generic_imports.mapped_names.count == 1 && aliased_generic_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*aliased_generic_imports);
-	Extended.release_parser_tree(*aliased_generic);
-	Extended.release_parser_names(*aliased_generic);
-
-	ALIASED_INSTANCE_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Other :: struct {
-	PushMatrix: int;
-}
-Pair :: struct (First: Type, Second: Type) {
-	Left: First;
-	Right: Second;
-}
-Instance :: Pair(Second=Child, First=Other);
-Alias :: Instance;
-main :: () {
-	pair: Alias;
-	using,map(rename) procs := pair.Right;
-	call := glClear;
-}
-JAI;
-	aliased_instance := Extended.parse_file(ALIASED_INSTANCE_SOURCE, filename);
-	aliased_instance_imports := Extended.resolve_file_imports(*aliased_instance, map_names=test_using_map_fields);
-	assert(aliased_instance.status == .COMPLETE && aliased_instance_imports.mapped_names.count == 1 && aliased_instance_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*aliased_instance_imports);
-	Extended.release_parser_tree(*aliased_instance);
-	Extended.release_parser_names(*aliased_instance);
-
-	EQUIVALENT_INSTANCE_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Other :: struct {
-	PushMatrix: int;
-}
-Pair :: struct (First: Type, Second: Type) {
-	Left: First;
-	Right: Second;
-}
-Instance :: Pair(Second=Child, First=Other);
-main :: (choose: bool) {
-	using,map(rename) procs := (
-		ifx choose
-			then Instance.{
-				Right=Child.{
-					Clear=1
-				}
-			} else Pair(Other, Child).{
-				Right=Child.{
-					Clear=2
-				}
-			}
-	).Right;
-	call := glClear;
-}
-JAI;
-	equivalent_instance := Extended.parse_file(EQUIVALENT_INSTANCE_SOURCE, filename);
-	equivalent_instance_imports := Extended.resolve_file_imports(*equivalent_instance, map_names=test_using_map_fields);
-	assert(equivalent_instance.status == .COMPLETE && equivalent_instance_imports.mapped_names.count == 1 && equivalent_instance_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*equivalent_instance_imports);
-	Extended.release_parser_tree(*equivalent_instance);
-	Extended.release_parser_names(*equivalent_instance);
-
-	NAMED_GENERIC_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Other :: struct {
-	PushMatrix: int;
-}
-Pair :: struct (First: Type, Second: Type) {
-	Left: First;
-	Right: Second;
-}
-main :: () {
-	pair: Pair(Second=Child, First=Other);
-	using,map(rename) procs := pair.Right;
-	call := glClear;
-}
-JAI;
-	named_generic := Extended.parse_file(NAMED_GENERIC_SOURCE, filename);
-	named_generic_imports := Extended.resolve_file_imports(*named_generic, map_names=test_using_map_fields);
-	assert(named_generic.status == .COMPLETE && named_generic_imports.mapped_names.count == 1 && named_generic_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*named_generic_imports);
-	Extended.release_parser_tree(*named_generic);
-	Extended.release_parser_names(*named_generic);
-
-	NESTED_GENERIC_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Other :: struct {
-	PushMatrix: int;
-}
-Pair :: struct (First: Type, Second: Type) {
-	Left: First;
-	Right: Second;
-}
-main :: () {
-	pair: Pair(Pair(Child, Other), Other);
-	using,map(rename) procs := pair.Left.Left;
-	call := glClear;
-}
-JAI;
-	nested_generic := Extended.parse_file(NESTED_GENERIC_SOURCE, filename);
-	nested_generic_imports := Extended.resolve_file_imports(*nested_generic, map_names=test_using_map_fields);
-	assert(nested_generic.status == .COMPLETE && nested_generic_imports.mapped_names.count == 1 && nested_generic_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*nested_generic_imports);
-	Extended.release_parser_tree(*nested_generic);
-	Extended.release_parser_names(*nested_generic);
-
-	NESTED_ALIAS_SOURCE :: #string JAI
-Child :: struct {
-	Clear: int;
-}
-Other :: struct {
-	PushMatrix: int;
-}
-Pair :: struct (First: Type, Second: Type) {
-	Left: First;
-	Right: Second;
-}
-Inner :: Pair(Child, Other);
-main :: () {
-	pair: Pair(Inner, Other);
-	using,map(rename) procs := pair.Left.Left;
-	call := glClear;
-}
-JAI;
-	nested_alias := Extended.parse_file(NESTED_ALIAS_SOURCE, filename);
-	nested_alias_imports := Extended.resolve_file_imports(*nested_alias, map_names=test_using_map_fields);
-	assert(nested_alias.status == .COMPLETE && nested_alias_imports.mapped_names.count == 1 && nested_alias_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*nested_alias_imports);
-	Extended.release_parser_tree(*nested_alias);
-	Extended.release_parser_names(*nested_alias);
+	for fixture: PAIR_MEMBER_CASES {
+		body := tprint(MAPPED_MEMBER_BODY, fixture.setup, fixture.receiver);
+		source := tprint(PAIR_MEMBER_SOURCE, fixture.extra_declarations, tprint("main :: (%)", fixture.parameters), body);
+		assert_mapped_field_fixture(source, filename);
+	}
 
 	INSTANTIATED_FIELD_SOURCE :: #string JAI
 Child :: struct {
@@ -12264,12 +11310,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	instantiated_field := Extended.parse_file(INSTANTIATED_FIELD_SOURCE, filename);
-	instantiated_field_imports := Extended.resolve_file_imports(*instantiated_field, map_names=test_using_map_fields);
-	assert(instantiated_field.status == .COMPLETE && instantiated_field_imports.mapped_names.count == 1 && instantiated_field_imports.unsupported_using_filters.count == 0);
-	Extended.release_file_imports(*instantiated_field_imports);
-	Extended.release_parser_tree(*instantiated_field);
-	Extended.release_parser_names(*instantiated_field);
+	assert_mapped_field_fixture(INSTANTIATED_FIELD_SOURCE, filename);
 
 	PARAMETERIZED_FIELD_SOURCE :: #string JAI
 Child :: struct {
@@ -12339,6 +11380,7 @@ main :: () {
 JAI,
 
 	];
+
 	for nested_field_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
@@ -12421,6 +11463,7 @@ main :: () {
 JAI,
 
 	];
+
 	for unsupported_nested_field_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
@@ -12489,6 +11532,7 @@ main :: () {
 JAI,
 
 	];
+
 	for complete_alias_sources {
 		complete_alias := Extended.parse_file(it, filename);
 		complete_alias_imports := Extended.resolve_file_imports(*complete_alias, map_names=test_using_map_fields);
@@ -12602,6 +11646,7 @@ main :: () {
 JAI,
 
 	];
+
 	for unsupported_alias_sources {
 		unsupported_alias := Extended.parse_file(it, filename);
 		unsupported_alias_imports := Extended.resolve_file_imports(*unsupported_alias, map_names=test_using_map_fields);
@@ -12810,6 +11855,7 @@ main :: () {
 JAI,
 
 	];
+
 	for unsupported_generic_sources {
 		generic := Extended.parse_file(it, filename);
 		generic_imports := Extended.resolve_file_imports(*generic, map_names=test_using_map_fields);
@@ -12911,6 +11957,7 @@ main :: () {
 }
 JAI
 	];
+
 	for complete_conditional_receiver_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
@@ -12973,6 +12020,7 @@ main :: () {
 }
 JAI
 	];
+
 	for unsupported_conditional_receiver_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names=test_using_map_fields);
@@ -13054,12 +12102,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	untyped_run := Extended.parse_file(UNTYPED_RUN_SOURCE, filename);
-	untyped_run_imports := Extended.resolve_file_imports(*untyped_run, map_names=test_using_map_fields);
-	assert(untyped_run.status == .COMPLETE && untyped_run_imports.mapped_names.count == 0 && untyped_run_imports.unsupported_using_filters.count == 1);
-	Extended.release_file_imports(*untyped_run_imports);
-	Extended.release_parser_tree(*untyped_run);
-	Extended.release_parser_names(*untyped_run);
+	assert_mapped_field_fixture(UNTYPED_RUN_SOURCE, filename, 0, 1);
 
 	UNRESOLVED_CALL_SOURCE :: #string JAI
 main :: () {
@@ -13109,6 +12152,7 @@ main :: () {
 JAI;
 	aggregate_collision := Extended.parse_file(AGGREGATE_COLLISION_SOURCE, filename);
 	aggregate_collision_imports := Extended.resolve_file_imports(*aggregate_collision, map_names=test_using_map_collision);
+
 	assert(aggregate_collision_imports.map_collisions.count == 1);
 	for scope: aggregate_collision.root_scope.children[1].children {
 		for reference: scope.references {
@@ -14313,6 +13357,7 @@ test_declaration_metadata :: () {
 	Extended.release_parser_tree(*aligned_old);
 	Extended.release_parser_names(*aligned_old);
 	free(aligned_old_source);
+
 	assert(aligned_decl.name == "value" && Extended.reconstruct_source(*aligned_updated) == aligned_new_source);
 	Extended.release_parser_tree(*aligned_updated);
 	Extended.release_parser_names(*aligned_updated);
@@ -14358,6 +13403,7 @@ test_declaration_metadata :: () {
 	Extended.release_parser_tree(*noted_old);
 	Extended.release_parser_names(*noted_old);
 	free(noted_old_source);
+
 	assert(note.text == "Tag(1)" && Extended.reconstruct_source(*noted_updated) == noted_new_source);
 	Extended.release_parser_tree(*noted_updated);
 	Extended.release_parser_names(*noted_updated);
@@ -14395,6 +13441,7 @@ test_declaration_metadata :: () {
 	Extended.release_parser_tree(*scoped_old);
 	Extended.release_parser_names(*scoped_old);
 	free(scoped_old_source);
+
 	assert(scoped_decl.name == "value" && Extended.reconstruct_source(*scoped_updated) == scoped_new_source);
 	Extended.release_parser_tree(*scoped_updated);
 	Extended.release_parser_names(*scoped_updated);
@@ -14405,6 +13452,7 @@ test_declaration_metadata :: () {
 	EXPORTED_SOURCE :: "{ `it := value; `it_index: Coordinates; `visited_index := 0; }";
 	exported := Extended.parse_block(EXPORTED_SOURCE);
 	assert(exported.status == .COMPLETE);
+
 	assert(exported.root.(*Extended.Parser_Block).statements.count == 3);
 	for exported.root.(*Extended.Parser_Block).statements {
 		declaration := it.(*Extended.Parser_Declaration);
@@ -14495,6 +13543,7 @@ test_operator_declarations :: () {
 		.{source="operator []= :: (value: *s64, index: s64, replacement: s64) {}", name="[]="},
 		.{source="operator *[] :: (value: *s64, index: s64) -> *s64 {}", name="*[]"},
 	];
+
 	assert(fixtures.count == 39);
 	for fixtures {
 		parsed := Extended.parse_declaration(it.source);
@@ -15147,6 +14196,7 @@ JAI;
 
 	assert(Extended.parse_block("{ value := ifx ready then 1 else 2; next(); }", warn_unnecessary_semicolons=true).diagnostics.count == 0);
 	optional_semicolons := Extended.parse_block("{ if ready { done(); }; while ready { tick(); }; value := 1; }", warn_unnecessary_semicolons=true);
+
 	assert(optional_semicolons.status == .COMPLETE && optional_semicolons.diagnostics.count == 2);
 	for optional_semicolons.diagnostics {
 		assert(it.kind == .UNNECESSARY_SEMICOLON && it.severity == .WARNING);
@@ -15342,6 +14392,7 @@ test_preserved_directive_forms :: () {
 	as_fields := Extended.parse_declaration("Container :: struct { #as using base: Base; }");
 	assert(as_fields.status == .COMPLETE);
 	as_members := as_fields.root.(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block.statements;
+
 	assert(as_members.count == 1);
 	for as_members {
 		using_node := it.(*Extended.Parser_Using);
@@ -15576,6 +14627,7 @@ JAI;
 	assert(memory_statements[4].instruction.operands[1].memory.displacement.expression.kind == .UNARY_OPERATOR);
 	assert(memory_statements[5].instruction.operands[1].memory.displacement.expression.kind == .UNARY_OPERATOR);
 	assert(memory_statements[6].instruction.operands[1].memory.scale.expression.kind == .BINARY_OPERATOR);
+
 	for 7..9 {
 		assert(memory_statements[it].instruction.operands[1].kind == .UNPARSED);
 	}

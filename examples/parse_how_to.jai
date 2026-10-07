@@ -4,6 +4,8 @@
 #import "File_Utilities";
 #import "String";
 
+#load "test_fixtures.jai";
+
 Parser :: #import "Jai_Parser"(ENABLE_TRIVIA=true);
 
 Token_Count :: struct {
@@ -40,6 +42,7 @@ First_Diagnostic_Signature_Count :: struct {
 }
 
 CORPUS_BASELINE_DATE :: "2026-09-25";
+
 CORPUS_BASELINE :: Corpus_Baseline_Entry.[
 	.{filename="005_strings.jai", diagnostic_count=3},
 	.{filename="006_structs.jai", diagnostic_count=5},
@@ -151,14 +154,17 @@ increment_first_signature :: (counts: *[..]First_Diagnostic_Signature_Count, dia
 	}
 
 
-	array_add(counts, .{
-		kind=diagnostic.kind,
-		expected_token=diagnostic.expected_token,
-		actual_token=diagnostic.actual_token,
-		recovery_action=diagnostic.recovery_action,
-		count=1,
-		representative_filename=diagnostic.filename,
-	});
+	array_add(
+		counts,
+		.{
+			kind=diagnostic.kind,
+			expected_token=diagnostic.expected_token,
+			actual_token=diagnostic.actual_token,
+			recovery_action=diagnostic.recovery_action,
+			count=1,
+			representative_filename=diagnostic.filename,
+		}
+	);
 }
 
 first_diagnostic_for_file :: (parsed: *Parser.Parsed_Source, filename: string) -> First_Diagnostic {
@@ -195,12 +201,13 @@ first_diagnostic_for_file :: (parsed: *Parser.Parsed_Source, filename: string) -
 test_lexer_only_recovery_report :: () {
 	identifier_length :: Parser.MAX_IDENTIFIER_LENGTH + 8;
 	suffix :: " :: 1;";
-	source := alloc_string(identifier_length + suffix.count);
+
+	source := make_long_identifier_source(identifier_length, suffix);
 	defer free(source);
-	for 0..identifier_length-1 source.data[it] = #char "a";
-	memcpy(source.data + identifier_length, suffix.data, suffix.count);
+
 	parsed := Parser.parse_file(source);
 	defer Parser.release_parser_tree(*parsed);
+
 	entry := first_diagnostic_for_file(*parsed, "lexer_error.jai");
 	assert(entry.status == .RECOVERED);
 	assert(entry.diagnostic_count == 1);
@@ -215,6 +222,7 @@ print_baseline_change :: (first_diagnostics: []First_Diagnostic, total_diagnosti
 	removed_diagnostics: s64;
 	added_diagnostics: s64;
 	print("Change from corpus baseline %:\n", CORPUS_BASELINE_DATE);
+
 	for CORPUS_BASELINE {
 		baseline_total += it.diagnostic_count;
 		current := find_first_diagnostic(first_diagnostics, it.filename);
@@ -248,6 +256,7 @@ print_baseline_change :: (first_diagnostics: []First_Diagnostic, total_diagnosti
 
 print_next_grammar_candidate :: (first_diagnostics: []First_Diagnostic) {
 	counts: [..]First_Diagnostic_Signature_Count;
+
 	for first_diagnostics {
 		if !it.has_diagnostic {
 			continue;
@@ -306,6 +315,7 @@ main :: () {
 	expected_token_counts: [..]Token_Count;
 	actual_token_counts: [..]Token_Count;
 	first_diagnostics: [..]First_Diagnostic;
+
 	for filename: filenames {
 		source, success := read_entire_file(filename);
 		assert(success, "Unable to read '%'.", filename);
@@ -352,6 +362,7 @@ main :: () {
 	print("Parsed % how_to files; % files required recovery and produced % diagnostics.\n", filenames.count, files_requiring_recovery, total_diagnostics);
 	print("Zero-diagnostic files: %/% (baseline %/%; % complete, % recovering without diagnostics).\n", zero_diagnostic_files, filenames.count, filenames.count - CORPUS_BASELINE.count, filenames.count, zero_diagnostic_files - zero_diagnostic_recovering_files, zero_diagnostic_recovering_files);
 	print_baseline_change(first_diagnostics, total_diagnostics);
+
 	print("Diagnostic kinds:\n");
 	for diagnostic_kind_counts {
 		print("  %: %\n", it_index.(type_of(Parser.Parse_Diagnostic.kind)), it);
@@ -359,6 +370,7 @@ main :: () {
 
 	print_token_counts("Expected tokens", expected_token_counts);
 	print_token_counts("Actual tokens", actual_token_counts);
+
 	print("Recovery actions:\n");
 	for recovery_action_counts {
 		print("  %: %\n", it_index.(Parser.Recovery_Action), it);
