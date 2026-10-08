@@ -8525,9 +8525,13 @@ assert_overload_selection :: (source: string, expected_index: s64) {
 		expected = statements[expected_index].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
 	}
 
-	assert(Extended.resolve_overloaded_aggregate_call(call, parsed.root_scope) == expected);
+	assert(Extended.resolve_overloaded_aggregate_call(call, parsed.root_scope) == expected, "Expected overload index % for source:\n%", expected_index, source);
 	Extended.release_parser_tree(*parsed);
 	Extended.release_parser_names(*parsed);
+}
+
+assert_multi_candidate_selection :: (parameters: []string, arguments: string, selected_index: s64) {
+	assert_overload_selection(make_multi_candidate_rank_source(parameters, arguments), selected_index);
 }
 
 assert_mapped_field_fixture :: (source: string, filename: string, mapped_count: s64 = 1, unsupported_count: s64 = 0) {
@@ -8895,17 +8899,17 @@ JAI;
 }
 JAI;
 	Conditional_Fields_Case :: struct {
-		prefix: string;
+		prefix: string = "";
 		condition: string;
 		then_fields: string;
 		else_fields: string;
 	}
 	for fixture: Conditional_Fields_Case.[
-		.{"", "true", "Clear: int;", "PushMatrix: int;"},
-		.{"", "false", "PushMatrix: int;", NESTED_CLEAR_FIELDS},
-		.{"", "!false", "Clear: int;", "PushMatrix: int;"},
-		.{"", "!true", "PushMatrix: int;", "Clear: int;"},
-		.{"Enabled :: true;", "Enabled", "Clear: int;", "PushMatrix: int;"},
+		.{								condition = "true",		then_fields = "Clear: int;",		else_fields = "PushMatrix: int;"},
+		.{								condition = "false",	then_fields = "PushMatrix: int;",	else_fields = NESTED_CLEAR_FIELDS},
+		.{								condition = "!false",	then_fields = "Clear: int;",		else_fields = "PushMatrix: int;"},
+		.{								condition = "!true",	then_fields = "PushMatrix: int;",	else_fields = "Clear: int;"},
+		.{prefix = "Enabled :: true;",	condition = "Enabled",	then_fields = "Clear: int;",		else_fields = "PushMatrix: int;"},
 	] {
 		source := tprint(CONDITIONAL_FIELDS_SOURCE, fixture.prefix, fixture.condition, fixture.then_fields, fixture.else_fields);
 		conditional := Extended.parse_file(source, filename);
@@ -9109,21 +9113,21 @@ JAI;
 	call := glClear;
 JAI;
 	Mapped_Member_Case :: struct {
-		extra_declarations: string;
-		parameters: string;
-		setup: string;
+		extra_declarations: string = "";
+		parameters: string = "";
+		setup: string = "";
 		receiver: string;
 	}
 	for fixture: Mapped_Member_Case.[
-		.{"", "", "", "Container.{Nested=Child.{Clear=1}}.Nested"},
-		.{"", "", "container: Container = .{Nested=Child.{Clear=1}};", "container.Nested"},
-		.{"", "", "container := Container.{Nested=Child.{Clear=1}};", "container.Nested"},
-		.{tprint(CONTAINER_MAKER_SOURCE, ""), "", "", "make().Nested"},
-		.{"", "", "original := Container.{Nested=Child.{Clear=1}};", "(cast(Container) original).Nested"},
-		.{"", "", "", "(#run Container.{Nested=Child.{Clear=1}}).Nested"},
-		.{"", "ready: bool", "", "(ifx ready then Container.{Nested=Child.{Clear=1}} else Container.{Nested=Child.{Clear=2}}).Nested"},
-		.{"", "", "original := Container.{Nested=Child.{Clear=1}};\n\tcontainer := original;", "container.Nested"},
-		.{tprint(CONTAINER_MAKER_SOURCE, "value: $T"), "", "", "make(1).Nested"},
+		.{																						receiver = "Container.{Nested=Child.{Clear=1}}.Nested"},
+		.{setup = "container: Container = .{Nested=Child.{Clear=1}};",							receiver = "container.Nested"},
+		.{setup = "container := Container.{Nested=Child.{Clear=1}};",							receiver = "container.Nested"},
+		.{extra_declarations = tprint(CONTAINER_MAKER_SOURCE, ""),								receiver = "make().Nested"},
+		.{setup = "original := Container.{Nested=Child.{Clear=1}};",							receiver = "(cast(Container) original).Nested"},
+		.{																						receiver = "(#run Container.{Nested=Child.{Clear=1}}).Nested"},
+		.{parameters = "ready: bool",															receiver = "(ifx ready then Container.{Nested=Child.{Clear=1}} else Container.{Nested=Child.{Clear=2}}).Nested"},
+		.{setup = "original := Container.{Nested=Child.{Clear=1}};\n\tcontainer := original;",	receiver = "container.Nested"},
+		.{extra_declarations = tprint(CONTAINER_MAKER_SOURCE, "value: $T"),						receiver = "make(1).Nested"},
 	] {
 		body := tprint(MAPPED_MEMBER_BODY, fixture.setup, fixture.receiver);
 		source := tprint(CONTAINER_MEMBER_SOURCE, fixture.extra_declarations, tprint("main :: (%)", fixture.parameters), body);
@@ -10381,6 +10385,46 @@ JAI;
 	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "string", "1"), 0);
 	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "string", "1.5"), 0);
 
+	for fixture: FLOAT_LITERAL_CASES {
+		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "string", fixture.value), 0);
+		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float32", "string", fixture.value), ifx fixture.float32_compatible then 0 else -1);
+		preferred_index := ifx fixture.preferred_type == "float32" then 0 else 1;
+		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float32", "float64", fixture.value), preferred_index);
+		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "float32", fixture.value), 1 - preferred_index);
+	}
+
+	for value: INTEGER_FLOAT32_VALUES {
+		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float32", "string", value), 0);
+		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float32", "s64", value), 1);
+		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "s64", "float32", value), 0);
+		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float32", "float64", value), 0);
+		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "float32", value), 1);
+	}
+
+	numeric_rank_cases := make_numeric_rank_cases();
+	defer array_free(numeric_rank_cases);
+
+	for fixture: numeric_rank_cases {
+		for order: 0..1 {
+			first := ifx order == 0
+				then fixture.first_parameters
+				else fixture.second_parameters;
+			second := ifx order == 0
+				then fixture.second_parameters
+				else fixture.first_parameters;
+			selected_index := ifx fixture.selected_index < 0 || order == 0 || fixture.selected_index == 2
+				then fixture.selected_index
+				else 1 - fixture.selected_index;
+
+			source := ifx fixture.third_parameters
+				then tprint(THREE_ARGUMENT_RANK_SOURCE, first, second, fixture.third_parameters, fixture.arguments)
+				else tprint(MULTI_ARGUMENT_RANK_SOURCE, first, second, fixture.arguments);
+			assert_overload_selection(source, selected_index);
+		}
+	}
+
+	check_multi_candidate_rank_cases(assert_multi_candidate_selection);
+
 	NAMED_OVERLOAD_SOURCE :: #string JAI
 Input :: struct {
 	Value: int;
@@ -10448,10 +10492,28 @@ JAI;
 	assert_overload_selection(tprint(MULTI_ARGUMENT_RANK_SOURCE, "first: s64, second: s64", "first: float64, second: float64", "1, 1"), 0);
 	assert_overload_selection(tprint(MULTI_ARGUMENT_RANK_SOURCE, "first: s64, second: float64", "first: float64, second: s64", "1, 1"), -1);
 
-	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "u8", "string", "255"), 0);
+	for fixture: UNSIGNED_BOUNDARY_CASES {
+		for value, index: string.["0", "-0", fixture.upper, "-1", fixture.above] {
+			if index == 4 && !fixture.above_is_representable {
+				continue;
+			}
 
-	for fixture: REJECTED_INTEGER_CASES {
-		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", fixture.value), -1);
+
+			assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", value), ifx index < 3 then 0 else -1);
+		}
+
+		for value: string.["-0", "1", fixture.upper] {
+			assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "s64", value), 1);
+			assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "s64", fixture.parameter_type, value), 0);
+		}
+
+		if fixture.parameter_type == "u64" {
+			for value: UNSIGNED_NEGATIVE_VALUES {
+				assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "u64", "string", value), -1);
+				assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "u64", "s64", value), 1);
+				assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "s64", "u64", value), 0);
+			}
+		}
 	}
 
 	for fixture: SIGNED_BOUNDARY_CASES {
@@ -10474,12 +10536,6 @@ JAI;
 				assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "s64", value), 1);
 			}
 		}
-	}
-
-	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "u16", "string", "65535"), 0);
-
-	for parameter_type: string.["u8", "u64", "u16"] {
-		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, parameter_type, "s64", "1"), 1);
 	}
 
 	CALLED_ALIAS_SOURCE :: #string JAI

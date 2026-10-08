@@ -662,7 +662,24 @@ resolve_called_procedure :: (declaration: *Parser_Declaration, root_scope: *Pars
 	return null;
 }
 
-Aggregate_Call_Match :: enum { UNKNOWN; MATCH; CONVERSION; MISMATCH; }
+Aggregate_Call_Match :: enum {
+	UNKNOWN;
+	MATCH;
+	CONVERSION;
+	MISMATCH;
+
+	INTEGER_FLOAT32_CONVERSION;
+	INTEGER_FLOAT64_CONVERSION;
+
+	INTEGER_U8\_CONVERSION :: ( 8 << 8) | 6;
+	INTEGER_U16_CONVERSION :: (16 << 8) | 6;
+	INTEGER_U32_CONVERSION :: (32 << 8) | 6;
+	INTEGER_U64_CONVERSION :: (64 << 8) | 6;
+
+	INTEGER_S8\_CONVERSION :: ( 8 << 8) | 7;
+	INTEGER_S16_CONVERSION :: (16 << 8) | 7;
+	INTEGER_S32_CONVERSION :: (32 << 8) | 7;
+}
 
 Parsed_Aggregate_Type :: struct {
 	declaration: *Parser_Declaration;
@@ -1099,9 +1116,14 @@ infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Par
 				return "bool";
 
 			case .NUMBER;
-				return ifx literal.value_flags & (.FLOAT | .DEFAULTS_TO_FLOAT64) != 0
-					then "f64"
-					else "s64";
+				if literal.value_flags & (.FLOAT | .DEFAULTS_TO_FLOAT64 | .REQUIRES_FLOAT64) != 0 {
+					return ifx literal.value_flags & (.DEFAULTS_TO_FLOAT64 | .REQUIRES_FLOAT64) != 0
+						then "f64"
+						else "f32";
+				}
+
+
+				return "s64";
 		}
 	}
 
@@ -1203,7 +1225,10 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 		parameter_primitive := parsed_primitive_type(parameter.type_inst.type_valued_expression);
 		if primitive && parameter_primitive {
 			array_free(visited);
-			if (primitive == parameter_primitive || primitive == "f64" && parameter_primitive == "float64"
+			if (primitive == parameter_primitive
+				|| (primitive == "f64" && parameter_primitive == "float64"
+					|| primitive == "f32" && parameter_primitive == "float32"
+				)
 				&& argument.expression && argument.expression.kind == .LITERAL
 				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
 			) {
@@ -1220,13 +1245,33 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 			}
 
 
-			if (primitive == "s64" && parameter_primitive == "float64"
+			if (primitive == "f64" && parameter_primitive == "float32"
+				&& argument.expression && argument.expression.kind == .LITERAL
+				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
+				&& argument.expression.(*Parser_Literal).value_flags & .REQUIRES_FLOAT64 != 0
+			) {
+				return .MISMATCH;
+			}
+
+
+			if ((
+					primitive == "s64" && (parameter_primitive == "float64" || parameter_primitive == "float32")
+					|| primitive == "f32" && parameter_primitive == "float64"
+					|| primitive == "f64" && parameter_primitive == "float32"
+				)
 				&& argument.expression && argument.expression.kind == .LITERAL
 				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
 			) {
 				converted = true;
 				if ranks {
-					array_add(ranks, .CONVERSION);
+					rank := Aggregate_Call_Match.CONVERSION;
+					if primitive == "s64" {
+						rank = ifx parameter_primitive == "float32"
+							then .INTEGER_FLOAT32_CONVERSION
+							else .INTEGER_FLOAT64_CONVERSION;
+					}
+
+					array_add(ranks, rank);
 				}
 
 				continue;
@@ -1246,6 +1291,7 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 						argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN == 0 && argument.expression.(*Parser_Literal)._u64 <= 32767
 						|| argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN != 0 && 0 - argument.expression.(*Parser_Literal)._u64 <= 32768
 					)
+					|| parameter_primitive == "u32" && argument.expression.(*Parser_Literal)._u64 <= 4294967295
 					|| parameter_primitive == "s32" && (
 						argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN == 0 && argument.expression.(*Parser_Literal)._u64 <= 2147483647
 						|| argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN != 0 && 0 - argument.expression.(*Parser_Literal)._u64 <= 2147483648
@@ -1254,7 +1300,28 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 			) {
 				converted = true;
 				if ranks {
-					array_add(ranks, .CONVERSION);
+					rank := Aggregate_Call_Match.CONVERSION;
+					if parameter_primitive.count >= 2 {
+						signed_parameter := parameter_primitive[0] == #char "s";
+						if parameter_primitive[1] == {
+							case #char "8";
+								rank = ifx signed_parameter
+									then .INTEGER_S8_CONVERSION
+									else .INTEGER_U8_CONVERSION;
+
+							case #char "1";
+								rank = ifx signed_parameter
+									then .INTEGER_S16_CONVERSION
+									else .INTEGER_U16_CONVERSION;
+
+							case #char "3";
+								rank = ifx signed_parameter
+									then .INTEGER_S32_CONVERSION
+									else .INTEGER_U32_CONVERSION;
+						}
+					}
+
+					array_add(ranks, rank);
 				}
 
 				continue;
@@ -1265,12 +1332,30 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 				&& argument.expression && argument.expression.kind == .LITERAL
 				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
 			) {
+				if (argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN != 0
+					&& argument.expression.(*Parser_Literal)._u64 != 0
+				) {
+					return .MISMATCH;
+				}
+
+
 				converted = true;
 				if ranks {
-					array_add(ranks, .CONVERSION);
+					array_add(ranks, .INTEGER_U64_CONVERSION);
 				}
 
 				continue;
+			}
+
+
+			if (primitive == "s64"
+				&& (parameter_primitive == "u8" || parameter_primitive == "u16" || parameter_primitive == "u32"
+					|| parameter_primitive == "s8" || parameter_primitive == "s16" || parameter_primitive == "s32"
+				)
+				&& argument.expression && argument.expression.kind == .LITERAL
+				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
+			) {
+				return .MISMATCH;
 			}
 
 
@@ -1342,6 +1427,32 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 			else .MATCH;
 }
 
+compare_aggregate_call_ranks :: (match: Aggregate_Call_Match, ranks: []Aggregate_Call_Match, best_match: Aggregate_Call_Match, best_ranks: []Aggregate_Call_Match) -> bool, bool {
+	better := match == .MATCH && best_match == .CONVERSION;
+	worse := match == .CONVERSION && best_match == .MATCH;
+	if match == .CONVERSION && best_match == .CONVERSION {
+		for ranks {
+			width := cast(s64) it >> 8;
+			best_width := cast(s64) best_ranks[it_index] >> 8;
+			integer_conversions := width != 0 && best_width != 0;
+
+			if (it == .MATCH && best_ranks[it_index] != .MATCH
+				|| it == .INTEGER_FLOAT32_CONVERSION && best_ranks[it_index] == .INTEGER_FLOAT64_CONVERSION
+				|| integer_conversions && width < best_width
+			) {
+				better = true;
+			} else if (it != .MATCH && best_ranks[it_index] == .MATCH
+				|| it == .INTEGER_FLOAT64_CONVERSION && best_ranks[it_index] == .INTEGER_FLOAT32_CONVERSION
+				|| integer_conversions && width > best_width
+			) {
+				worse = true;
+			}
+		}
+	}
+
+	return better, worse;
+}
+
 resolve_overloaded_aggregate_call :: (call: *Parser_Procedure_Call, root_scope: *Parser_Lexical_Scope) -> *Parser_Procedure_Header {
 	if !call.procedure_expression || call.procedure_expression.kind != .IDENT {
 		return null;
@@ -1366,7 +1477,6 @@ resolve_overloaded_aggregate_call :: (call: *Parser_Procedure_Call, root_scope: 
 	best_ranks: [..]Aggregate_Call_Match;
 	defer array_free(best_ranks);
 
-	tied := false;
 	for binding: scope.bindings {
 		if binding.name != declaration.name {
 			continue;
@@ -1395,20 +1505,10 @@ resolve_overloaded_aggregate_call :: (call: *Parser_Procedure_Call, root_scope: 
 
 
 		if match == .MATCH || match == .CONVERSION {
-			better := !selected || match == .MATCH && best_match == .CONVERSION;
-			worse := selected && match == .CONVERSION && best_match == .MATCH;
-			if selected && match == .CONVERSION && best_match == .CONVERSION {
-				for ranks {
-					if it == .MATCH && best_ranks[it_index] == .CONVERSION {
-						better = true;
-					} else if it == .CONVERSION && best_ranks[it_index] == .MATCH {
-						worse = true;
-					}
-				}
-
-				if better && worse {
-					return null;
-				}
+			better := !selected;
+			worse := false;
+			if selected {
+				better, worse = compare_aggregate_call_ranks(match, ranks, best_match, best_ranks);
 			}
 
 
@@ -1419,18 +1519,46 @@ resolve_overloaded_aggregate_call :: (call: *Parser_Procedure_Call, root_scope: 
 				for ranks {
 					array_add(*best_ranks, it);
 				}
-
-				tied = false;
-			} else if !better && !worse {
-				tied = true;
 			}
 		}
 	}
 
 
-	return ifx tied
-		then null
-		else selected;
+	if !selected {
+		return null;
+	}
+
+
+	for binding: scope.bindings {
+		if binding.name != declaration.name {
+			continue;
+		}
+
+
+		header := binding.declaration.expression.(*Parser_Procedure_Header);
+		if header == selected {
+			continue;
+		}
+
+
+		ranks: [..]Aggregate_Call_Match;
+		defer array_free(ranks);
+
+		match := match_aggregate_call_arguments(call, header, root_scope, *ranks);
+		if match == .UNKNOWN {
+			return null;
+		}
+
+
+		if match == .MATCH || match == .CONVERSION {
+			better, worse := compare_aggregate_call_ranks(best_match, best_ranks, match, ranks);
+			if !better || worse {
+				return null;
+			}
+		}
+	}
+
+	return selected;
 }
 
 instantiate_polymorphic_aggregate_call :: (call: *Parser_Procedure_Call, header: *Parser_Procedure_Header, visited: *[..]*Parser_Declaration, root_scope: *Parser_Lexical_Scope) -> *Parser_Node {

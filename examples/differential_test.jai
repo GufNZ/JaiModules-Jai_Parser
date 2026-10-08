@@ -1401,7 +1401,7 @@ assert_file_workspace_fixture :: (source: string, expected_declaration: string) 
 	assert(result.found_expected_declaration, "Compiler did not expose '%' for file fixture '%'.", expected_declaration, source);
 }
 
-assert_overload_workspace_fixture :: (first_parameters: string, second_parameters: string, expression: string, expected_index: s64, expected_declaration: string) {
+assert_overload_workspace_fixture :: (first_parameters: string, second_parameters: string, expression: string, expected_index: s64, expected_declaration: string, third_parameters: string = "") {
 	OVERLOAD_FIELD_SOURCE :: #string JAI
 Child :: struct {
 	Clear: s64;
@@ -1415,15 +1415,34 @@ make :: (%) -> % {
 make :: (%) -> % {
 	return .{1};
 }
+%
 % :: () -> s64 {
 	return %;
 }
 JAI;
-	assert(expected_index == 0 || expected_index == 1);
+	assert(expected_index == 0 || expected_index == 1 || expected_index == 2 && third_parameters);
 	first_result := ifx expected_index == 0 then "Child" else "Other";
 	second_result := ifx expected_index == 1 then "Child" else "Other";
-	source := tprint(OVERLOAD_FIELD_SOURCE, first_parameters, first_result, second_parameters, second_result, expected_declaration, expression);
+	third_source := "";
+	if third_parameters {
+		third_result := ifx expected_index == 2
+			then "Child"
+			else "Other";
+		third_source = tprint("make :: (%) -> % { return .{1}; }", third_parameters, third_result);
+	}
+
+	source := tprint(OVERLOAD_FIELD_SOURCE, first_parameters, first_result, second_parameters, second_result, third_source, expected_declaration, expression);
 	assert_file_workspace_fixture(source, expected_declaration);
+}
+
+assert_multi_candidate_workspace_fixture :: (parameters: []string, arguments: string, selected_index: s64) {
+	source := make_multi_candidate_rank_source(parameters, arguments, selected_index);
+	if selected_index < 0 {
+		rejected := capture_compiler_error(source);
+		assert(rejected.diagnostics.count > 0);
+	} else {
+		assert_file_workspace_fixture(source, "fixture_multi_candidate_rank");
+	}
 }
 
 test_file_workspace_fixtures :: () {
@@ -1488,12 +1507,12 @@ JAI,
 	);
 	Member_Access_Case :: struct {
 		declaration_name: string;
-		setup: string;
+		setup: string = "";
 		expression: string;
 	}
 
 	for fixture: Member_Access_Case.[
-		.{"fixture_member_type", "", "Container.{Nested=Child.{Clear=1}}.Nested.Clear"},
+		.{declaration_name = "fixture_member_type", expression = "Container.{Nested=Child.{Clear=1}}.Nested.Clear"},
 		.{"fixture_typed_member", "container: Container = .{Nested=Child.{Clear=1}};", "container.Nested.Clear"},
 		.{"fixture_inferred_member", "container := Container.{Nested=Child.{Clear=1}};", "container.Nested.Clear"},
 		.{"fixture_aliased_member", "original := Container.{Nested=Child.{Clear=1}};\n\tcontainer := original;", "container.Nested.Clear"},
@@ -1563,12 +1582,113 @@ JAI
 	assert_overload_workspace_fixture("value: float64", "value: s64", "make(1).Clear", 1, "fixture_exact_rank");
 	assert_overload_workspace_fixture("value: float64", "value: string", "make(1).Clear", 0, "fixture_converted_rank");
 	assert_overload_workspace_fixture("value: float64", "value: string", "make(1.5).Clear", 0, "fixture_float_rank");
-	assert_overload_workspace_fixture("value: u8", "value: string", "make(255).Clear", 0, "fixture_narrow_integer");
-	assert_overload_workspace_fixture("value: u8", "value: s64", "make(1).Clear", 1, "fixture_narrow_integer_exact");
 
-	for fixture: REJECTED_INTEGER_CASES {
-		overflow := capture_compiler_error(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", fixture.value));
-		assert(overflow.diagnostics.count > 0, "Compiler accepted out-of-range % literal %.", fixture.parameter_type, fixture.value);
+	for fixture: FLOAT_LITERAL_CASES {
+		expression := tprint("make(%).Clear", fixture.value);
+		assert_overload_workspace_fixture("value: float64", "value: string", expression, 0, "fixture_float64_literal");
+		if fixture.float32_compatible {
+			assert_overload_workspace_fixture("value: float32", "value: string", expression, 0, "fixture_float32_literal");
+		} else {
+			rejected := capture_compiler_error(tprint(UNARY_OVERLOAD_SOURCE, "float32", "string", fixture.value));
+			assert(rejected.diagnostics.count > 0, "Compiler accepted float32-incompatible literal %.", fixture.value);
+		}
+
+		preferred_index := ifx fixture.preferred_type == "float32" then 0 else 1;
+		assert_overload_workspace_fixture("value: float32", "value: float64", expression, preferred_index, "fixture_float_preference");
+		assert_overload_workspace_fixture("value: float64", "value: float32", expression, 1 - preferred_index, "fixture_float_reverse_preference");
+	}
+
+	for value: INTEGER_FLOAT32_VALUES {
+		expression := tprint("make(%).Clear", value);
+		assert_overload_workspace_fixture("value: float32", "value: string", expression, 0, "fixture_integer_float32");
+		assert_overload_workspace_fixture("value: float32", "value: s64", expression, 1, "fixture_integer_float32_rank");
+		assert_overload_workspace_fixture("value: s64", "value: float32", expression, 0, "fixture_integer_float32_reverse_rank");
+		assert_overload_workspace_fixture("value: float32", "value: float64", expression, 0, "fixture_integer_float_width_rank");
+		assert_overload_workspace_fixture("value: float64", "value: float32", expression, 1, "fixture_integer_float_width_reverse_rank");
+	}
+
+	assert_file_workspace_fixture(
+		#string JAI
+#import "Basic";
+fixture_integer_float32_rounding :: () {
+	rounded: float32 = 16777217;
+	assert(cast(s64) rounded == 16777216);
+}
+#run fixture_integer_float32_rounding();
+JAI,
+		"fixture_integer_float32_rounding"
+	);
+
+	numeric_rank_cases := make_numeric_rank_cases();
+	defer array_free(numeric_rank_cases);
+
+	for fixture: numeric_rank_cases {
+		for order: 0..1 {
+			first := ifx order == 0
+				then fixture.first_parameters
+				else fixture.second_parameters;
+			second := ifx order == 0
+				then fixture.second_parameters
+				else fixture.first_parameters;
+
+			if fixture.selected_index < 0 {
+				source := ifx fixture.third_parameters
+					then tprint(THREE_ARGUMENT_RANK_SOURCE, first, second, fixture.third_parameters, fixture.arguments)
+					else tprint(MULTI_ARGUMENT_RANK_SOURCE, first, second, fixture.arguments);
+				ambiguous := capture_compiler_error(source);
+				assert(ambiguous.diagnostics.count > 0);
+			} else {
+				selected_index := ifx order == 0 || fixture.selected_index == 2
+					then fixture.selected_index
+					else 1 - fixture.selected_index;
+
+				assert_overload_workspace_fixture(first, second, tprint("make(%).Clear", fixture.arguments), selected_index, "fixture_numeric_conversion_rank", fixture.third_parameters);
+			}
+		}
+	}
+
+	check_multi_candidate_rank_cases(assert_multi_candidate_workspace_fixture);
+
+	signed64_boundary := SIGNED_BOUNDARY_CASES[SIGNED_BOUNDARY_CASES.count - 1];
+	unsigned64_boundary := UNSIGNED_BOUNDARY_CASES[UNSIGNED_BOUNDARY_CASES.count - 1];
+	for unsigned: UNSIGNED_BOUNDARY_CASES {
+		for value: string.[signed64_boundary.below, unsigned64_boundary.above] {
+			for order: 0..1 {
+				first := ifx order == 0
+					then signed64_boundary.parameter_type
+					else unsigned.parameter_type;
+				second := ifx order == 0
+					then unsigned.parameter_type
+					else signed64_boundary.parameter_type;
+				rejected := capture_compiler_error(tprint(UNARY_OVERLOAD_SOURCE, first, second, value));
+				assert(rejected.diagnostics.count > 0, "Compiler accepted invalid mixed %/% literal %.", first, second, value);
+			}
+		}
+	}
+
+	for fixture: UNSIGNED_BOUNDARY_CASES {
+		for value: string.["0", "-0", "1", fixture.upper] {
+			expression := tprint("make(%).Clear", value);
+			parameter := tprint("value: %", fixture.parameter_type);
+			assert_overload_workspace_fixture(parameter, "value: string", expression, 0, "fixture_unsigned_bounds");
+			assert_overload_workspace_fixture(parameter, "value: s64", expression, 1, "fixture_unsigned_rank");
+			assert_overload_workspace_fixture("value: s64", parameter, expression, 0, "fixture_unsigned_reverse_rank");
+		}
+
+		for value: string.["-1", fixture.above] {
+			rejected := capture_compiler_error(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", value));
+			assert(rejected.diagnostics.count > 0, "Compiler accepted out-of-range % literal %.", fixture.parameter_type, value);
+		}
+
+		if fixture.parameter_type == "u64" {
+			for value: UNSIGNED_NEGATIVE_VALUES {
+				rejected := capture_compiler_error(tprint(UNARY_OVERLOAD_SOURCE, "u64", "string", value));
+				assert(rejected.diagnostics.count > 0, "Compiler accepted negative u64 literal %.", value);
+				expression := tprint("make(%).Clear", value);
+				assert_overload_workspace_fixture("value: u64", "value: s64", expression, 1, "fixture_negative_unsigned_rank");
+				assert_overload_workspace_fixture("value: s64", "value: u64", expression, 0, "fixture_negative_unsigned_reverse_rank");
+			}
+		}
 	}
 
 	SIGNED_BOUNDS_SOURCE :: #string JAI
@@ -1615,7 +1735,6 @@ JAI;
 		}
 	}
 
-	assert_overload_workspace_fixture("value: u16", "value: s64", "make(1).Clear", 1, "fixture_unsigned_16_rank");
 	assert_overload_workspace_fixture("first: float64, second: float64", "first: s64, second: float64", "make(1, 1).Clear", 1, "fixture_multi_argument_rank");
 	assert_overload_workspace_fixture("first: s64, second: s64", "first: float64, second: float64", "make(1, 1).Clear", 0, "fixture_exact_first_rank");
 	crossed_rank := capture_compiler_error(tprint(MULTI_ARGUMENT_RANK_SOURCE, "first: s64, second: float64", "first: float64, second: s64", "1, 1"));
