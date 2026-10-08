@@ -1,3 +1,39 @@
+Typed_Integer_Case :: struct {
+	parameter_type: string;
+	setup: string = "";
+	argument: string = "value";
+	compiler_accepts: bool;
+	parser_matches: bool;
+	rival_type: string = "string";
+}
+
+TYPED_INTEGER_CASES :: Typed_Integer_Case.[
+	.{parameter_type="u16",	setup="value: u8 = 255;",	compiler_accepts=true,	parser_matches=true},
+	.{parameter_type="s16",	setup="value: s8 = -128;",	compiler_accepts=true,	parser_matches=true},
+	.{parameter_type="s16",	setup="value: u8 = 255;",	compiler_accepts=true,	parser_matches=true},
+	.{parameter_type="u16",	setup="value: s8 = 1;",		compiler_accepts=false,	parser_matches=false},
+	.{parameter_type="u8",	setup="value: u16 = 1;",	compiler_accepts=false,	parser_matches=false},
+	.{parameter_type="s8",	setup="value: s16 = 1;",	compiler_accepts=false,	parser_matches=false},
+	.{parameter_type="s8",	setup="value: u8 = 1;",		compiler_accepts=false,	parser_matches=false},
+	.{parameter_type="u8",	setup="value: s8 = 1;",		compiler_accepts=false,	parser_matches=false},
+	.{parameter_type="u8",	argument="1",				compiler_accepts=true,	parser_matches=true},
+	.{parameter_type="u8",	setup="value :: 1;",		compiler_accepts=true,	parser_matches=false},
+	.{parameter_type="u8",	setup="value: u16 : 1;",	compiler_accepts=false,	parser_matches=false},
+	.{parameter_type="u16",	setup="value: u8 : 255;",	compiler_accepts=true,	parser_matches=true},
+	.{parameter_type="u8",	setup="value: u8 = 255;",	compiler_accepts=true,	parser_matches=true,	rival_type="u16"},
+	.{parameter_type="u8",	setup="value: u8 = 255;",	compiler_accepts=true,	parser_matches=true,	rival_type="s16"},
+	.{parameter_type="s8",	setup="value: s8 = -128;",	compiler_accepts=true,	parser_matches=true,	rival_type="s16"},
+];
+
+TYPED_INTEGER_OVERLOAD_SOURCE :: #string JAI
+make :: (value: %) {}
+make :: (value: %) {}
+main :: () {
+	%
+	make(%);
+}
+JAI;
+
 UNARY_OVERLOAD_SOURCE :: #string JAI
 make :: (value: %) {
 }
@@ -160,12 +196,35 @@ Float_Literal_Case :: struct {
 }
 
 FLOAT_LITERAL_CASES :: Float_Literal_Case.[
-	.{"0.0", "float32", true},
-	.{"1.5", "float32", true},
-	.{"-1.5", "float32", true},
-	.{"1.2345678", "float64", true},
-	.{"1.23456789", "float64", false},
-	.{"1.0e40", "float64", false},
+	.{"0.0",				"float32",	true},
+	.{"1.5",				"float32",	true},
+	.{"-1.5",				"float32",	true},
+	.{"1.2345678",			"float64",	true},
+	.{"1.23456789",			"float64",	false},
+	.{"1.0e40",				"float64",	false},
+	.{"0001.5000",			"float32",	true},
+	.{"1.5000",				"float32",	true},
+	.{"1_234.5_000",		"float32",	true},
+	.{"0001.2345678000",	"float64",	true},
+	.{"1.234_567_8",		"float64",	true},
+	.{"1.2345678900",		"float64",	false},
+	.{"1.5e0",				"float32",	true},
+	.{"1.5E+0",				"float32",	true},
+	.{"1.5e-2",				"float32",	true},
+	.{"12345678.0",			"float64",	true},
+	.{"123456789.0",		"float64",	false},
+	.{"3.0e38",				"float32",	true},
+	.{"3.4e38",				"float32",	true},
+	.{"3.4028235e38",		"float64",	true},
+	.{"3.4028236e38",		"float64",	true},
+	.{"3.4028237e38",		"float64",	false},
+	.{"-3.4028235e38",		"float64",	true},
+	.{"1.1754944e-38",		"float64",	true},
+	.{"1.1754943e-38",		"float64",	false},
+	.{"-1.1754943e-38",		"float64",	false},
+	.{"1.0e-38",			"float64",	false},
+	.{"1.0e-45",			"float64",	false},
+	.{"1.0e-46",			"float64",	false},
 ];
 
 INTEGER_FLOAT32_VALUES :: string.[

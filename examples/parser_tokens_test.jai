@@ -10385,7 +10385,33 @@ JAI;
 	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "string", "1"), 0);
 	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "string", "1.5"), 0);
 
+	for fixture: TYPED_INTEGER_CASES {
+		for order: 0..1 {
+			first := ifx order == 0
+				then fixture.parameter_type
+				else fixture.rival_type;
+			second := ifx order == 0
+				then fixture.rival_type
+				else fixture.parameter_type;
+			source := tprint(TYPED_INTEGER_OVERLOAD_SOURCE, first, second, fixture.setup, fixture.argument);
+			assert_overload_selection(source, ifx fixture.parser_matches then order else -1);
+		}
+	}
+
 	for fixture: FLOAT_LITERAL_CASES {
+		literal_tokens := Extended.materialise_tokens(fixture.value);
+		defer Extended.release_parser_names(*literal_tokens);
+
+		assert(literal_tokens.status == .COMPLETE);
+		literal_token := literal_tokens.tokens[ifx fixture.value[0] == #char "-" then 1 else 0];
+		assert(literal_token.type == .NUMBER);
+		assert(((literal_token.value_flags & .REQUIRES_FLOAT64) != 0) == !fixture.float32_compatible, "Required floating width for '%' disagrees with compiler acceptance.", fixture.value);
+		assert(
+			((literal_token.value_flags & .DEFAULTS_TO_FLOAT64) != 0) == (fixture.preferred_type == "float64" && fixture.float32_compatible),
+			"Default floating width for '%' disagrees with compiler overload selection.",
+			fixture.value
+		);
+
 		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "string", fixture.value), 0);
 		assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float32", "string", fixture.value), ifx fixture.float32_compatible then 0 else -1);
 		preferred_index := ifx fixture.preferred_type == "float32" then 0 else 1;

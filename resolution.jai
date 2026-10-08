@@ -1245,6 +1245,17 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 			}
 
 
+			if (primitive == "u8" && (parameter_primitive == "u16" || parameter_primitive == "s16")
+				|| primitive == "s8" && parameter_primitive == "s16"
+			) {
+				converted = true;
+				if ranks {
+					array_add(ranks, .CONVERSION);
+				}
+
+				continue;
+			}
+
 			if (primitive == "f64" && parameter_primitive == "float32"
 				&& argument.expression && argument.expression.kind == .LITERAL
 				&& argument.expression.(*Parser_Literal).value_type == .NUMBER

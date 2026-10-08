@@ -78,28 +78,129 @@ Compiler_Diagnostic_Result :: struct {
 	diagnostics: [..] Compiler_Diagnostic;
 }
 
+CLEAR_PROGRESS_LINE :: "\r\e[K";
+
+DIFFERENTIAL_SECTION_TOTAL	:: 23;
+CONTEXT_TEST_TOTAL			:: 1;
+TYPECHECKED_TEST_TOTAL		:: 1;
+FILE_SCOPE_TEST_TOTAL		:: 3;
+ASSEMBLY_CONTEXT_TEST_TOTAL	:: 8;
+MEMBER_QUERY_TEST_TOTAL		:: 3;
+DEFAULT_OVERLOAD_TEST_TOTAL	:: 10;
+INTEGER_ROUNDING_TEST_TOTAL	:: 1;
+AGGREGATE_TEST_TOTAL		:: 53;
+ASSIGNMENT_TEST_TOTAL		:: 2;
+RUNTIME_TEST_TOTAL			:: 7;
+
+Differential_Progress :: struct {
+	section_index: s64;
+	section_name: string;
+	test_index: s64;
+	test_total: s64;
+	test_depth: s64;
+	counting: bool;
+}
+
+differential_progress: Differential_Progress;
+previous_assertion_handler: (Source_Code_Location, string) -> bool;
+
+differential_assertion_failed :: (location: Source_Code_Location, message: string) -> bool {
+	print_differential_test();
+	print("fail\n");
+	return previous_assertion_handler(location, message);
+}
+
+print_differential_test :: () {
+	print("%[%/% %] %/%: ", CLEAR_PROGRESS_LINE, differential_progress.section_index, DIFFERENTIAL_SECTION_TOTAL, differential_progress.section_name, differential_progress.test_index, differential_progress.test_total);
+}
+
+begin_differential_section :: (section: string, total: s64) {
+	finish_differential_section();
+	differential_progress.section_index += 1;
+	differential_progress.section_name = section;
+	differential_progress.test_index = 0;
+	differential_progress.test_total = total;
+}
+
+finish_differential_section :: () {
+	assert(differential_progress.test_depth == 0);
+	assert(
+		differential_progress.test_index == differential_progress.test_total,
+		"Section '%' ran % tests, expected %.  Update its total.",
+		differential_progress.section_name,
+		differential_progress.test_index,
+		differential_progress.test_total
+	);
+}
+
+begin_differential_test :: () -> bool {
+	if differential_progress.counting {
+		differential_progress.test_total += 1;
+		return false;
+	}
+
+
+	if differential_progress.test_depth == 0 {
+		differential_progress.test_index += 1;
+		assert(differential_progress.test_index <= differential_progress.test_total, "Section '%' exceeded its total %.  Update its total.", differential_progress.section_name, differential_progress.test_total);
+		print_differential_test();
+	}
+
+	differential_progress.test_depth += 1;
+	return true;
+}
+
+finish_differential_test :: () {
+	differential_progress.test_depth -= 1;
+	if differential_progress.test_depth == 0 {
+		print("%", CLEAR_PROGRESS_LINE);
+	}
+}
+
 main :: () {
+	previous_assertion_handler = context.assertion_failed;
+	context.assertion_failed = differential_assertion_failed;
+	defer context.assertion_failed = previous_assertion_handler;
+
+	differential_progress.section_index = DIFFERENTIAL_SECTION_TOTAL - 1;
+	begin_differential_section("Runtime checks", RUNTIME_TEST_TOTAL);
+	begin_differential_test();
 	test_structural_difference_reporting();
+	finish_differential_test();
+	begin_differential_test();
 	test_comparison_layers();
+	finish_differential_test();
+	begin_differential_test();
 	assert_invalid_expression_compiler_message(
 		"1 +",
 		"Unable to parse an expression to the right of this binary operator."
 	);
+	finish_differential_test();
+	begin_differential_test();
 	test_compiler_related_diagnostics();
+	finish_differential_test();
+	begin_differential_test();
 	test_asm_semantic_diagnostics();
+	finish_differential_test();
+	begin_differential_test();
 	assert_trivia_round_trip(#string JAI
 value /* comment */ + 42;
 JAI
 	);
+	finish_differential_test();
+	begin_differential_test();
 	assert_trivia_round_trip(#string JAI
 text :: #string END
 body
 END; // tail
 JAI
 	);
+	finish_differential_test();
+	finish_differential_section();
 }
 
 capture_compiler_error :: (code: string, log_output := false) -> Compiler_Diagnostic_Result {
+	begin_differential_test();
 	fixture_path :: "jai_parser_compiler_diagnostic_fixture.jai";
 	normalized_code, tab_count := replace(code, "\t", "    ");
 	defer free(normalized_code);
@@ -121,6 +222,7 @@ capture_compiler_error :: (code: string, log_output := false) -> Compiler_Diagno
 	append_compiler_diagnostics(result.standard_error, *result.diagnostics);
 	append_compiler_diagnostics(result.standard_output, *result.diagnostics);
 	assert(result.diagnostics.count > 0, "Compiler failed without an Error diagnostic.\nstdout:\n%\nstderr:\n%", result.standard_output, result.standard_error);
+	finish_differential_test();
 	return result;
 }
 
@@ -307,7 +409,6 @@ test_context_modification_compiler_shape :: () {
 	assert(call.context_modification.modification_expressions[0].kind == .BINARY_OPERATOR);
 }
 
-#run test_context_modification_compiler_shape();
 
 normalize_tree :: (node: *Code_Node, layer := Comparison_Layer.SYNTAX) -> Normalized_Tree {
 	result: Normalized_Tree;
@@ -1210,6 +1311,11 @@ format_structural_differences :: (result: Differential_Result) -> string {
 }
 
 assert_expression_matches_code :: (source: string, expected_code: Code, layer := Comparison_Layer.SYNTAX, fully_pathed_filename: string = "") {
+	if !begin_differential_test() {
+		return;
+	}
+
+
 	parsed := Parser.parse_expression(source, fully_pathed_filename);
 	defer Parser.release_parser_tree(*parsed);
 
@@ -1219,6 +1325,7 @@ assert_expression_matches_code :: (source: string, expected_code: Code, layer :=
 	expected := normalize_tree(compiler_get_nodes(expected_code), layer);
 	difference := compare_normalized_trees(actual, expected);
 	assert(!difference.differences.count, "AST mismatch for '%':\n%", source, format_structural_differences(difference));
+	finish_differential_test();
 }
 
 assert_expression_fixture :: ($source: string, $layer := Comparison_Layer.SYNTAX) #expand {
@@ -1228,6 +1335,11 @@ assert_expression_fixture :: ($source: string, $layer := Comparison_Layer.SYNTAX
 }
 
 assert_statement_matches_code :: (source: string, expected_code: Code, file_scope := false) {
+	if !begin_differential_test() {
+		return;
+	}
+
+
 	parsed := ifx file_scope then Parser.parse_file(source) else Parser.parse_block(tprint("{ % }", source));
 	defer Parser.release_parser_tree(*parsed);
 
@@ -1244,6 +1356,7 @@ assert_statement_matches_code :: (source: string, expected_code: Code, file_scop
 	expected := normalize_tree(expected_block.statements[0]);
 	difference := compare_normalized_trees(actual, expected);
 	assert(!difference.differences.count, "Statement AST mismatch for '%':\n%", source, format_structural_differences(difference));
+	finish_differential_test();
 }
 
 assert_statement_fixture :: ($source: string) #expand {
@@ -1273,6 +1386,11 @@ assert_asm_block_shape :: (parsed: *Parser.Parsed_Source, actual_block: *Parser.
 }
 
 assert_asm_compiler_shape :: (source: string, expected_code: Code) {
+	if !begin_differential_test() {
+		return;
+	}
+
+
 	parsed := Parser.parse_block(source);
 	defer Parser.release_parser_tree(*parsed);
 
@@ -1280,9 +1398,15 @@ assert_asm_compiler_shape :: (source: string, expected_code: Code) {
 	actual_block := parsed.root.(*Parser.Parser_Block);
 	expected_block := compiler_get_nodes(expected_code).(*Code_Block);
 	assert_asm_block_shape(*parsed, actual_block, expected_block, actual_block, expected_block, 0);
+	finish_differential_test();
 }
 
 assert_nested_asm_compiler_shape :: (source: string, expected_code: Code) {
+	if !begin_differential_test() {
+		return;
+	}
+
+
 	parsed := Parser.parse_block(source);
 	defer Parser.release_parser_tree(*parsed);
 
@@ -1294,6 +1418,7 @@ assert_nested_asm_compiler_shape :: (source: string, expected_code: Code) {
 	expected_if := expected_root.statements[0].(*Code_If);
 	assert_asm_block_shape(*parsed, actual_if.then_block, expected_if.then_block, actual_root, expected_root, 0);
 	assert_asm_block_shape(*parsed, actual_if.else_block, expected_if.else_block, actual_root, expected_root, 0);
+	finish_differential_test();
 }
 
 assert_all_operator_fixtures :: () #expand {
@@ -1341,9 +1466,10 @@ assert_trivia_round_trip :: (source: string) {
 }
 
 run_typechecked_workspace_fixture :: (source: string, expected_declaration: string) -> Workspace_Fixture_Result {
+	begin_differential_test();
 	result: Workspace_Fixture_Result;
 	workspace := compiler_create_workspace("Jai_Parser differential fixture");
-	assert(workspace != 0, "Unable to create differential fixture workspace.");
+	assert(cast(bool) workspace, "Unable to create differential fixture workspace.");
 
 	options := get_build_options(workspace);
 	copy_commonly_propagated_fields(get_build_options(), *options);
@@ -1381,10 +1507,12 @@ run_typechecked_workspace_fixture :: (source: string, expected_declaration: stri
 	}
 
 	compiler_end_intercept(workspace);
+	finish_differential_test();
 	return result;
 }
 
 test_typechecked_workspace_fixture :: () {
+	begin_differential_section("Typechecked workspace", TYPECHECKED_TEST_TOTAL);
 	result := run_typechecked_workspace_fixture("fixture_value :: 1 + 2;", "fixture_value");
 	assert(result.completed);
 	assert(result.compilation_succeeded);
@@ -1401,7 +1529,7 @@ assert_file_workspace_fixture :: (source: string, expected_declaration: string) 
 	assert(result.found_expected_declaration, "Compiler did not expose '%' for file fixture '%'.", expected_declaration, source);
 }
 
-assert_overload_workspace_fixture :: (first_parameters: string, second_parameters: string, expression: string, expected_index: s64, expected_declaration: string, third_parameters: string = "") {
+assert_overload_workspace_fixture :: (first_parameters: string, second_parameters: string, expression: string, expected_index: s64, expected_declaration: string, third_parameters: string = "", setup: string = "") {
 	OVERLOAD_FIELD_SOURCE :: #string JAI
 Child :: struct {
 	Clear: s64;
@@ -1417,6 +1545,7 @@ make :: (%) -> % {
 }
 %
 % :: () -> s64 {
+	%
 	return %;
 }
 JAI;
@@ -1431,7 +1560,7 @@ JAI;
 		third_source = tprint("make :: (%) -> % { return .{1}; }", third_parameters, third_result);
 	}
 
-	source := tprint(OVERLOAD_FIELD_SOURCE, first_parameters, first_result, second_parameters, second_result, third_source, expected_declaration, expression);
+	source := tprint(OVERLOAD_FIELD_SOURCE, first_parameters, first_result, second_parameters, second_result, third_source, expected_declaration, setup, expression);
 	assert_file_workspace_fixture(source, expected_declaration);
 }
 
@@ -1443,14 +1572,35 @@ assert_multi_candidate_workspace_fixture :: (parameters: []string, arguments: st
 	} else {
 		assert_file_workspace_fixture(source, "fixture_multi_candidate_rank");
 	}
+
 }
 
 test_file_workspace_fixtures :: () {
+	begin_differential_section("File scopes", FILE_SCOPE_TEST_TOTAL);
 	for scope_name: string.["file", "export", "module"] {
 		declaration_name := tprint("fixture_%_scope", scope_name);
 		assert_file_workspace_fixture(tprint("#scope_%\n% :: 1;", scope_name, declaration_name), declaration_name);
 	}
 
+	begin_differential_section("Typed integer conversions", TYPED_INTEGER_CASES.count * 2);
+	for fixture: TYPED_INTEGER_CASES {
+		for order: 0..1 {
+			first := ifx order == 0
+				then fixture.parameter_type
+				else fixture.rival_type;
+			second := ifx order == 0
+				then fixture.rival_type
+				else fixture.parameter_type;
+			if fixture.compiler_accepts {
+				assert_overload_workspace_fixture(tprint("value: %", first), tprint("value: %", second), tprint("make(%).Clear", fixture.argument), order, "fixture_typed_integer", setup=fixture.setup);
+			} else {
+				rejected := capture_compiler_error(tprint(TYPED_INTEGER_OVERLOAD_SOURCE, first, second, fixture.setup, fixture.argument));
+				assert(rejected.diagnostics.count > 0);
+			}
+		}
+	}
+
+	begin_differential_section("Assembly and context", ASSEMBLY_CONTEXT_TEST_TOTAL);
 	assert_file_workspace_fixture("#no_reset fixture_no_reset: s64;", "fixture_no_reset");
 	assert_file_workspace_fixture("fixture_asm_registers :: () { #asm { mov apple:, 10; mov signed:, -10; banana: gpr; mov w: gpr === 15, 10; } }", "fixture_asm_registers");
 	assert_file_workspace_fixture("fixture_asm_pinning :: () { #asm { a: gpr === 9; t: gpr === a; x: gpr; x === a; } }", "fixture_asm_pinning");
@@ -1466,12 +1616,14 @@ JAI,
 
 		"fixture_add_context"
 	);
+	begin_differential_section("Pair members", PAIR_MEMBER_CASES.count);
 	for fixture: PAIR_MEMBER_CASES {
 		body := tprint("%\n\treturn %.Clear;", fixture.setup, fixture.receiver);
 		header := tprint("% :: (%) -> s64", fixture.declaration_name, fixture.parameters);
 		source := tprint(PAIR_MEMBER_SOURCE, fixture.extra_declarations, header, body);
 		assert_file_workspace_fixture(source, fixture.declaration_name);
 	}
+	begin_differential_section("Member queries", MEMBER_QUERY_TEST_TOTAL);
 	assert_file_workspace_fixture(
 		#string JAI
 #assert true;
@@ -1511,17 +1663,20 @@ JAI,
 		expression: string;
 	}
 
-	for fixture: Member_Access_Case.[
+	member_access_cases := Member_Access_Case.[
 		.{declaration_name = "fixture_member_type", expression = "Container.{Nested=Child.{Clear=1}}.Nested.Clear"},
 		.{"fixture_typed_member", "container: Container = .{Nested=Child.{Clear=1}};", "container.Nested.Clear"},
 		.{"fixture_inferred_member", "container := Container.{Nested=Child.{Clear=1}};", "container.Nested.Clear"},
 		.{"fixture_aliased_member", "original := Container.{Nested=Child.{Clear=1}};\n\tcontainer := original;", "container.Nested.Clear"},
-	] {
+	];
+	begin_differential_section("Member access", member_access_cases.count);
+	for fixture: member_access_cases {
 		body := tprint("%\n\treturn %;", fixture.setup, fixture.expression);
 		source := tprint(CONTAINER_MEMBER_SOURCE, "", tprint("% :: () -> s64", fixture.declaration_name), body);
 		assert_file_workspace_fixture(source, fixture.declaration_name);
 	}
 
+	begin_differential_section("Overloads and defaults", DEFAULT_OVERLOAD_TEST_TOTAL);
 	assert_file_workspace_fixture(tprint(CONTAINER_MEMBER_SOURCE, tprint(CONTAINER_MAKER_SOURCE, ""), "fixture_called_member :: () -> s64", "return make().Nested.Clear;"), "fixture_called_member");
 	assert_file_workspace_fixture(
 		#string JAI
@@ -1583,6 +1738,7 @@ JAI
 	assert_overload_workspace_fixture("value: float64", "value: string", "make(1).Clear", 0, "fixture_converted_rank");
 	assert_overload_workspace_fixture("value: float64", "value: string", "make(1.5).Clear", 0, "fixture_float_rank");
 
+	begin_differential_section("Floating literals", FLOAT_LITERAL_CASES.count * 4);
 	for fixture: FLOAT_LITERAL_CASES {
 		expression := tprint("make(%).Clear", fixture.value);
 		assert_overload_workspace_fixture("value: float64", "value: string", expression, 0, "fixture_float64_literal");
@@ -1598,6 +1754,7 @@ JAI
 		assert_overload_workspace_fixture("value: float64", "value: float32", expression, 1 - preferred_index, "fixture_float_reverse_preference");
 	}
 
+	begin_differential_section("Integer to float32", INTEGER_FLOAT32_VALUES.count * 5);
 	for value: INTEGER_FLOAT32_VALUES {
 		expression := tprint("make(%).Clear", value);
 		assert_overload_workspace_fixture("value: float32", "value: string", expression, 0, "fixture_integer_float32");
@@ -1607,6 +1764,7 @@ JAI
 		assert_overload_workspace_fixture("value: float64", "value: float32", expression, 1, "fixture_integer_float_width_reverse_rank");
 	}
 
+	begin_differential_section("Integer float32 rounding", INTEGER_ROUNDING_TEST_TOTAL);
 	assert_file_workspace_fixture(
 		#string JAI
 #import "Basic";
@@ -1622,6 +1780,7 @@ JAI,
 	numeric_rank_cases := make_numeric_rank_cases();
 	defer array_free(numeric_rank_cases);
 
+	begin_differential_section("Numeric rankings", numeric_rank_cases.count * 2);
 	for fixture: numeric_rank_cases {
 		for order: 0..1 {
 			first := ifx order == 0
@@ -1644,13 +1803,26 @@ JAI,
 
 				assert_overload_workspace_fixture(first, second, tprint("make(%).Clear", fixture.arguments), selected_index, "fixture_numeric_conversion_rank", fixture.third_parameters);
 			}
+
 		}
 	}
 
+	candidate_permutations_total: s64;
+	for fixture: MULTI_CANDIDATE_RANK_CASES {
+		permutation_count := 1;
+		for factor: 1..fixture.parameters.count {
+			permutation_count *= factor;
+		}
+
+		candidate_permutations_total += permutation_count;
+	}
+
+	begin_differential_section("Candidate permutations", candidate_permutations_total);
 	check_multi_candidate_rank_cases(assert_multi_candidate_workspace_fixture);
 
 	signed64_boundary := SIGNED_BOUNDARY_CASES[SIGNED_BOUNDARY_CASES.count - 1];
 	unsigned64_boundary := UNSIGNED_BOUNDARY_CASES[UNSIGNED_BOUNDARY_CASES.count - 1];
+	begin_differential_section("Invalid integer limits", UNSIGNED_BOUNDARY_CASES.count * 4);
 	for unsigned: UNSIGNED_BOUNDARY_CASES {
 		for value: string.[signed64_boundary.below, unsigned64_boundary.above] {
 			for order: 0..1 {
@@ -1666,6 +1838,7 @@ JAI,
 		}
 	}
 
+	begin_differential_section("Unsigned boundaries", UNSIGNED_BOUNDARY_CASES.count * 14 + UNSIGNED_NEGATIVE_VALUES.count * 3);
 	for fixture: UNSIGNED_BOUNDARY_CASES {
 		for value: string.["0", "-0", "1", fixture.upper] {
 			expression := tprint("make(%).Clear", value);
@@ -1689,6 +1862,7 @@ JAI,
 				assert_overload_workspace_fixture("value: s64", "value: u64", expression, 0, "fixture_negative_unsigned_reverse_rank");
 			}
 		}
+
 	}
 
 	SIGNED_BOUNDS_SOURCE :: #string JAI
@@ -1714,6 +1888,7 @@ fixture_signed_rank :: () -> s64 {
 }
 JAI;
 
+	begin_differential_section("Signed boundaries", SIGNED_BOUNDARY_CASES.count * 4 + 3);
 	for fixture: SIGNED_BOUNDARY_CASES {
 		assert_file_workspace_fixture(tprint(SIGNED_BOUNDS_SOURCE, fixture.parameter_type, fixture.lower, fixture.upper), "fixture_signed_bounds");
 		for value, index: string.[fixture.below, fixture.above] {
@@ -1733,8 +1908,10 @@ JAI;
 		} else {
 			assert_file_workspace_fixture(tprint(SIGNED_RANK_SOURCE, fixture.parameter_type), "fixture_signed_rank");
 		}
+
 	}
 
+	begin_differential_section("Aggregate and member inference", AGGREGATE_TEST_TOTAL);
 	assert_overload_workspace_fixture("first: float64, second: float64", "first: s64, second: float64", "make(1, 1).Clear", 1, "fixture_multi_argument_rank");
 	assert_overload_workspace_fixture("first: s64, second: s64", "first: float64, second: float64", "make(1, 1).Clear", 0, "fixture_exact_first_rank");
 	crossed_rank := capture_compiler_error(tprint(MULTI_ARGUMENT_RANK_SOURCE, "first: s64, second: float64", "first: float64, second: s64", "1, 1"));
@@ -2341,6 +2518,7 @@ JAI,
 }
 
 assert_declaration_workspace_fixture :: (source: string) {
+	begin_differential_test();
 	parsed := Parser.parse_declaration(source);
 	defer Parser.release_parser_tree(*parsed);
 
@@ -2405,9 +2583,11 @@ JAI
 
 	compiler_end_intercept(workspace);
 	assert(found, "Compiler did not expose declaration fixture '%'.", source);
+	finish_differential_test();
 }
 
 assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude_name: string) {
+	begin_differential_test();
 	parsed := Parser.parse_block(tprint("{ % }", source));
 	defer Parser.release_parser_tree(*parsed);
 
@@ -2468,98 +2648,109 @@ JAI
 
 	compiler_end_intercept(workspace);
 	assert(found, "Compiler did not expose assignment fixture '%'.", source);
+	finish_differential_test();
 }
 
 test_assignment_workspace_fixtures :: () {
+	begin_differential_section("Assignments", ASSIGNMENT_TEST_TOTAL);
 	assert_assignment_workspace_fixture("array[0], array[1] += fixture_pair();", "array: [4] s64;", "array");
 	assert_assignment_workspace_fixture("v.x, v.y, v.z = 1, 4, 9;", "v: struct { x, y, z: s64; };", "v");
 }
 
-#run,stallable test_assignment_workspace_fixtures();
 
 test_declaration_workspace_fixtures :: () {
-	assert_declaration_workspace_fixture("fixture_typed: **s64 = null;");
-	assert_declaration_workspace_fixture("fixture_fixed: [4] s64;");
-	assert_declaration_workspace_fixture("fixture_view: [] s64;");
-	assert_declaration_workspace_fixture("fixture_resizable: [..] s64;");
-	assert_declaration_workspace_fixture("fixture_callback: (value: s64) -> bool;");
-	assert_declaration_workspace_fixture("fixture_unnamed: (s64) -> bool;");
-	assert_declaration_workspace_fixture("fixture_bare: (s64);");
-	assert_declaration_workspace_fixture("fixture_polymorphic_callback :: (value: $T, f: (T) -> $R) -> R { return f(value); }");
-	assert_declaration_workspace_fixture("Fixture_Simple_Procedure :: #type () -> ();");
-	assert_declaration_workspace_fixture("fixture_compound: *(**void, [3] [5] Fixture_Constraint) -> ([..] #Context);");
-	assert_declaration_workspace_fixture("fixture_alias :: #type,distinct u32;");
-	assert_declaration_workspace_fixture("fixture_x, fixture_y: s64 = 7;");
-	assert_declaration_workspace_fixture("fixture_a, fixture_b := 1, 2;");
-	assert_declaration_workspace_fixture("fixture_aligned: s64 #align 16;");
-	assert_declaration_workspace_fixture("fixture_noted: s64; @FixtureNote");
-	assert_declaration_workspace_fixture("fixture_inline :: inline () {}");
-	assert_declaration_workspace_fixture("fixture_dump :: (value: s64) -> s64 #dump { return value; }");
-	assert_declaration_workspace_fixture("fixture_assert_macro :: (value: $T) #expand { #assert true \"supported\"; }");
-	assert_declaration_workspace_fixture("fixture_no_inline :: no_inline () {}");
-	assert_declaration_workspace_fixture("fixture_parameter_defaults :: (width: s64 = 640, height: s64 = 480) {}");
-	assert_declaration_workspace_fixture("Fixture_Aggregate_Defaults :: struct (width: s64 = 640, height: s64 = 480) {}");
-	assert_declaration_workspace_fixture("fixture_polymorphic_defaults :: (value: $T = 1, fallback: T = 2) -> T { return value; }");
-	assert_declaration_workspace_fixture("fixture_named_return_defaults :: () -> (value: s64 = 0, valid: bool = false) { return; }");
-	assert_declaration_workspace_fixture("fixture_modify :: (value: $T) -> T #modify { return true; } { return value; }");
-	assert_declaration_workspace_fixture("Fixture_Modified_Struct :: struct (T: Type) #modify { return true; } { value: T; }");
-	assert_declaration_workspace_fixture("Fixture_Struct :: struct { CONSTANT :: 1; }; @Serializable");
-	assert_declaration_workspace_fixture("Fixture_Defaulted_Field :: struct { w: s64; w = 1; }");
-	assert_declaration_workspace_fixture("operator + :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint #symmetric { return .{}; }");
-	assert_declaration_workspace_fixture("operator - :: (value: Fixture_Constraint) -> Fixture_Constraint { return value; }");
-	assert_declaration_workspace_fixture("operator * :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }");
-	assert_declaration_workspace_fixture("operator / :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }");
-	assert_declaration_workspace_fixture("operator % :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }");
-	assert_declaration_workspace_fixture("operator < :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
-	assert_declaration_workspace_fixture("operator > :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
-	assert_declaration_workspace_fixture("operator ! :: (value: Fixture_Constraint) -> bool { return false; }");
-	assert_declaration_workspace_fixture("operator ~ :: (value: Fixture_Constraint) -> Fixture_Constraint { return value; }");
-	assert_declaration_workspace_fixture("operator & :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }");
-	assert_declaration_workspace_fixture("operator | :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }");
-	assert_declaration_workspace_fixture("operator ^ :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }");
-	assert_declaration_workspace_fixture("operator == :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return true; }");
-	assert_declaration_workspace_fixture("operator != :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
-	assert_declaration_workspace_fixture("operator <= :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
-	assert_declaration_workspace_fixture("operator >= :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
-	assert_declaration_workspace_fixture("operator && :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
-	assert_declaration_workspace_fixture("operator || :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }");
-	assert_declaration_workspace_fixture("operator << :: (left: Fixture_Constraint, amount: s64) -> Fixture_Constraint { return left; }");
-	assert_declaration_workspace_fixture("operator >> :: (left: Fixture_Constraint, amount: s64) -> Fixture_Constraint { return left; }");
-	assert_declaration_workspace_fixture("operator <<< :: (left: Fixture_Constraint, amount: s64) -> Fixture_Constraint { return left; }");
-	assert_declaration_workspace_fixture("operator >>> :: (left: Fixture_Constraint, amount: s64) -> Fixture_Constraint { return left; }");
-	assert_declaration_workspace_fixture("operator += :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
-	assert_declaration_workspace_fixture("operator -= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
-	assert_declaration_workspace_fixture("operator *= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
-	assert_declaration_workspace_fixture("operator /= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
-	assert_declaration_workspace_fixture("operator %= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
-	assert_declaration_workspace_fixture("operator <<= :: (left: *Fixture_Constraint, amount: s64) {}");
-	assert_declaration_workspace_fixture("operator >>= :: (left: *Fixture_Constraint, amount: s64) {}");
-	assert_declaration_workspace_fixture("operator <<<= :: (left: *Fixture_Constraint, amount: s64) {}");
-	assert_declaration_workspace_fixture("operator >>>= :: (left: *Fixture_Constraint, amount: s64) {}");
-	assert_declaration_workspace_fixture("operator &= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
-	assert_declaration_workspace_fixture("operator |= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
-	assert_declaration_workspace_fixture("operator ^= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
-	assert_declaration_workspace_fixture("operator &&= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
-	assert_declaration_workspace_fixture("operator ||= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}");
-	assert_declaration_workspace_fixture("operator [] :: (value: Fixture_Constraint, index: s64) -> s64 { return value.value; }");
-	assert_declaration_workspace_fixture("operator []= :: (value: *Fixture_Constraint, index: s64, replacement: s64) { value.value = replacement; }");
-	assert_declaration_workspace_fixture("operator *[] :: (value: *Fixture_Constraint, index: s64) -> *s64 { return *value.value; }");
-	assert_declaration_workspace_fixture("fixture_uninitialized: s64 = ---;");
-	assert_declaration_workspace_fixture("fixture_character_default :: (value: u8 = #char \"A\") {}");
-	assert_declaration_workspace_fixture("fixture_this_constant :: #this;");
-	assert_declaration_workspace_fixture("fixture_caller_code_default :: (call := #caller_code) #expand {}");
+	declarations := string.[
+		"fixture_typed: **s64 = null;",
+		"fixture_fixed: [4] s64;",
+		"fixture_view: [] s64;",
+		"fixture_resizable: [..] s64;",
+		"fixture_callback: (value: s64) -> bool;",
+		"fixture_unnamed: (s64) -> bool;",
+		"fixture_bare: (s64);",
+		"fixture_polymorphic_callback :: (value: $T, f: (T) -> $R) -> R { return f(value); }",
+		"Fixture_Simple_Procedure :: #type () -> ();",
+		"fixture_compound: *(**void, [3] [5] Fixture_Constraint) -> ([..] #Context);",
+		"fixture_alias :: #type,distinct u32;",
+		"fixture_x, fixture_y: s64 = 7;",
+		"fixture_a, fixture_b := 1, 2;",
+		"fixture_aligned: s64 #align 16;",
+		"fixture_noted: s64; @FixtureNote",
+		"fixture_inline :: inline () {}",
+		"fixture_dump :: (value: s64) -> s64 #dump { return value; }",
+		"fixture_assert_macro :: (value: $T) #expand { #assert true \"supported\"; }",
+		"fixture_no_inline :: no_inline () {}",
+		"fixture_parameter_defaults :: (width: s64 = 640, height: s64 = 480) {}",
+		"Fixture_Aggregate_Defaults :: struct (width: s64 = 640, height: s64 = 480) {}",
+		"fixture_polymorphic_defaults :: (value: $T = 1, fallback: T = 2) -> T { return value; }",
+		"fixture_named_return_defaults :: () -> (value: s64 = 0, valid: bool = false) { return; }",
+		"fixture_modify :: (value: $T) -> T #modify { return true; } { return value; }",
+		"Fixture_Modified_Struct :: struct (T: Type) #modify { return true; } { value: T; }",
+		"Fixture_Struct :: struct { CONSTANT :: 1; }; @Serializable",
+		"Fixture_Defaulted_Field :: struct { w: s64; w = 1; }",
+		"operator + :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint #symmetric { return .{}; }",
+		"operator - :: (value: Fixture_Constraint) -> Fixture_Constraint { return value; }",
+		"operator * :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }",
+		"operator / :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }",
+		"operator % :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }",
+		"operator < :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }",
+		"operator > :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }",
+		"operator ! :: (value: Fixture_Constraint) -> bool { return false; }",
+		"operator ~ :: (value: Fixture_Constraint) -> Fixture_Constraint { return value; }",
+		"operator & :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }",
+		"operator | :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }",
+		"operator ^ :: (left: Fixture_Constraint, right: Fixture_Constraint) -> Fixture_Constraint { return left; }",
+		"operator == :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return true; }",
+		"operator != :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }",
+		"operator <= :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }",
+		"operator >= :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }",
+		"operator && :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }",
+		"operator || :: (left: Fixture_Constraint, right: Fixture_Constraint) -> bool { return false; }",
+		"operator << :: (left: Fixture_Constraint, amount: s64) -> Fixture_Constraint { return left; }",
+		"operator >> :: (left: Fixture_Constraint, amount: s64) -> Fixture_Constraint { return left; }",
+		"operator <<< :: (left: Fixture_Constraint, amount: s64) -> Fixture_Constraint { return left; }",
+		"operator >>> :: (left: Fixture_Constraint, amount: s64) -> Fixture_Constraint { return left; }",
+		"operator += :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}",
+		"operator -= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}",
+		"operator *= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}",
+		"operator /= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}",
+		"operator %= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}",
+		"operator <<= :: (left: *Fixture_Constraint, amount: s64) {}",
+		"operator >>= :: (left: *Fixture_Constraint, amount: s64) {}",
+		"operator <<<= :: (left: *Fixture_Constraint, amount: s64) {}",
+		"operator >>>= :: (left: *Fixture_Constraint, amount: s64) {}",
+		"operator &= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}",
+		"operator |= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}",
+		"operator ^= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}",
+		"operator &&= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}",
+		"operator ||= :: (left: *Fixture_Constraint, right: Fixture_Constraint) {}",
+		"operator [] :: (value: Fixture_Constraint, index: s64) -> s64 { return value.value; }",
+		"operator []= :: (value: *Fixture_Constraint, index: s64, replacement: s64) { value.value = replacement; }",
+		"operator *[] :: (value: *Fixture_Constraint, index: s64) -> *s64 { return *value.value; }",
+		"fixture_uninitialized: s64 = ---;",
+		"fixture_character_default :: (value: u8 = #char \"A\") {}",
+		"fixture_this_constant :: #this;",
+		"fixture_caller_code_default :: (call := #caller_code) #expand {}",
+	];
+	begin_differential_section("Declarations", declarations.count);
+	for source: declarations {
+		assert_declaration_workspace_fixture(source);
+	}
 }
 
 test_directive_workspace_fixtures :: () {
-	assert_declaration_workspace_fixture("Fixture_Using_Member :: struct { using member: Fixture_Constraint; }");
-	assert_declaration_workspace_fixture("Fixture_As_Member :: struct { #as using base: Fixture_Constraint; }");
-	assert_declaration_workspace_fixture("Fixture_Suffix_As_Member :: struct { using #as base: Fixture_Constraint; }");
-	assert_declaration_workspace_fixture("Fixture_Static_Member :: struct { #if true { enabled: s64; } else { disabled: s64; } }");
+	directives := string.[
+		"Fixture_Using_Member :: struct { using member: Fixture_Constraint; }",
+		"Fixture_As_Member :: struct { #as using base: Fixture_Constraint; }",
+		"Fixture_Suffix_As_Member :: struct { using #as base: Fixture_Constraint; }",
+		"Fixture_Static_Member :: struct { #if true { enabled: s64; } else { disabled: s64; } }",
+	];
+	begin_differential_section("Directives", directives.count);
+	for source: directives {
+		assert_declaration_workspace_fixture(source);
+	}
 }
 
-#run,stallable test_directive_workspace_fixtures();
-
-#run {
+test_syntax_fixtures :: () {
 	assert_statement_fixture("#if true { enabled := 1; } else { disabled := 2; }");
 	assert_statement_fixture("#asm { nop; }");
 	assert_asm_compiler_shape("{ #asm { nop; } }", #code { #asm { nop; } });
@@ -2890,6 +3081,31 @@ JAI
 	assert_statement_fixture("`push_context,defer_pop remap_context();");
 }
 
-#run,stallable test_typechecked_workspace_fixture();
-#run,stallable test_file_workspace_fixtures();
-#run,stallable test_declaration_workspace_fixtures();
+#run,stallable {
+	previous_assertion_handler = context.assertion_failed;
+	context.assertion_failed = differential_assertion_failed;
+	defer context.assertion_failed = previous_assertion_handler;
+
+	begin_differential_section("Context syntax", CONTEXT_TEST_TOTAL);
+	begin_differential_test();
+	test_context_modification_compiler_shape();
+	finish_differential_test();
+	finish_differential_section();
+
+	differential_progress.counting = true;
+	differential_progress.test_total = 0;
+	test_syntax_fixtures();
+	syntax_test_total := differential_progress.test_total;
+	differential_progress.counting = false;
+	differential_progress.test_total = differential_progress.test_index;
+	begin_differential_section("Syntax fixtures", syntax_test_total);
+	test_syntax_fixtures();
+
+	test_typechecked_workspace_fixture();
+	test_file_workspace_fixtures();
+	test_declaration_workspace_fixtures();
+	test_directive_workspace_fixtures();
+	test_assignment_workspace_fixtures();
+	finish_differential_section();
+	assert(differential_progress.section_index == DIFFERENTIAL_SECTION_TOTAL - 1);
+}
