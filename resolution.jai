@@ -679,6 +679,7 @@ Aggregate_Call_Match :: enum {
 	INTEGER_S8\_CONVERSION :: ( 8 << 8) | 7;
 	INTEGER_S16_CONVERSION :: (16 << 8) | 7;
 	INTEGER_S32_CONVERSION :: (32 << 8) | 7;
+	INTEGER_S64_CONVERSION :: (64 << 8) | 7;
 }
 
 Parsed_Aggregate_Type :: struct {
@@ -1100,7 +1101,23 @@ parsed_primitive_type :: (expression: *Parser_Node) -> string {
 	return "";
 }
 
-infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Parser_Declaration, root_scope: *Parser_Lexical_Scope) -> string {
+integer_primitive_width :: (primitive: string) -> s64 {
+	if primitive.count < 2 || (primitive[0] != #char "s" && primitive[0] != #char "u") {
+		return 0;
+	}
+
+
+	if primitive[1] == {
+		case #char "8";		return 8;
+		case #char "1";		return 16;
+		case #char "3";		return 32;
+		case #char "6";		return 64;
+	}
+
+	return 0;
+}
+
+infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Parser_Declaration, root_scope: *Parser_Lexical_Scope, typed: *bool = null) -> string {
 	if !expression {
 		return "";
 	}
@@ -1128,6 +1145,24 @@ infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Par
 	}
 
 
+	if expression.kind == .CAST {
+		cast_node := expression.(*Parser_Cast);
+		if cast_node.target_type {
+			primitive := parsed_primitive_type(cast_node.target_type.type_valued_expression);
+			if integer_primitive_width(primitive) != 0 {
+				if typed {
+					typed.* = true;
+				}
+
+				return primitive;
+			}
+		}
+
+
+		return "";
+	}
+
+
 	if expression.kind != .IDENT {
 		return "";
 	}
@@ -1149,9 +1184,16 @@ infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Par
 	array_add(visited, declaration);
 	defer visited.count -= 1;
 
-	return ifx declaration.type_inst
-		then parsed_primitive_type(declaration.type_inst.type_valued_expression)
-		else infer_primitive_expression_type(declaration.expression, visited, root_scope);
+	if declaration.type_inst {
+		if typed {
+			typed.* = true;
+		}
+
+		return parsed_primitive_type(declaration.type_inst.type_valued_expression);
+	}
+
+
+	return infer_primitive_expression_type(declaration.expression, visited, root_scope, typed);
 }
 
 match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser_Procedure_Header, root_scope: *Parser_Lexical_Scope, ranks: *[..]Aggregate_Call_Match = null) -> Aggregate_Call_Match {
@@ -1220,7 +1262,8 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 
 
 		visited: [..]*Parser_Declaration;
-		primitive := infer_primitive_expression_type(argument.expression, *visited, root_scope);
+		typed_primitive := false;
+		primitive := infer_primitive_expression_type(argument.expression, *visited, root_scope, *typed_primitive);
 		array_reset(*visited);
 		parameter_primitive := parsed_primitive_type(parameter.type_inst.type_valued_expression);
 		if primitive && parameter_primitive {
@@ -1245,16 +1288,27 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 			}
 
 
-			if (primitive == "u8" && (parameter_primitive == "u16" || parameter_primitive == "s16")
-				|| primitive == "s8" && parameter_primitive == "s16"
-			) {
+			primitive_width := integer_primitive_width(primitive);
+			parameter_width := integer_primitive_width(parameter_primitive);
+			if typed_primitive && primitive_width != 0 && parameter_width != 0 {
+				primitive_signed := primitive[0] == #char "s";
+				parameter_signed := parameter_primitive[0] == #char "s";
+				if (parameter_width < primitive_width
+					|| primitive_signed && !parameter_signed
+					|| !primitive_signed && parameter_signed && parameter_width == primitive_width
+				) {
+					return .MISMATCH;
+				}
+
+
 				converted = true;
 				if ranks {
-					array_add(ranks, .CONVERSION);
+					array_add(ranks, xx ((parameter_width << 8) | (ifx parameter_signed then 7 else 6)));
 				}
 
 				continue;
 			}
+
 
 			if (primitive == "f64" && parameter_primitive == "float32"
 				&& argument.expression && argument.expression.kind == .LITERAL

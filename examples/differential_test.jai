@@ -1582,8 +1582,11 @@ test_file_workspace_fixtures :: () {
 		assert_file_workspace_fixture(tprint("#scope_%\n% :: 1;", scope_name, declaration_name), declaration_name);
 	}
 
-	begin_differential_section("Typed integer conversions", TYPED_INTEGER_CASES.count * 2);
-	for fixture: TYPED_INTEGER_CASES {
+	typed_integer_cases := make_typed_integer_cases();
+	defer array_free(typed_integer_cases);
+
+	begin_differential_section("Typed integer conversions", typed_integer_cases.count * 2);
+	for fixture: typed_integer_cases {
 		for order: 0..1 {
 			first := ifx order == 0
 				then fixture.parameter_type

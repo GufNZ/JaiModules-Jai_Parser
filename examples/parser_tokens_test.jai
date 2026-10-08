@@ -10385,7 +10385,10 @@ JAI;
 	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "string", "1"), 0);
 	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "string", "1.5"), 0);
 
-	for fixture: TYPED_INTEGER_CASES {
+	typed_integer_cases := make_typed_integer_cases();
+	defer array_free(typed_integer_cases);
+
+	for fixture: typed_integer_cases {
 		for order: 0..1 {
 			first := ifx order == 0
 				then fixture.parameter_type

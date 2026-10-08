@@ -23,7 +23,110 @@ TYPED_INTEGER_CASES :: Typed_Integer_Case.[
 	.{parameter_type="u8",	setup="value: u8 = 255;",	compiler_accepts=true,	parser_matches=true,	rival_type="u16"},
 	.{parameter_type="u8",	setup="value: u8 = 255;",	compiler_accepts=true,	parser_matches=true,	rival_type="s16"},
 	.{parameter_type="s8",	setup="value: s8 = -128;",	compiler_accepts=true,	parser_matches=true,	rival_type="s16"},
+	.{parameter_type="u16",	setup="value: u8 = 255;",	compiler_accepts=true,	parser_matches=true,	rival_type="u32"},
+	.{parameter_type="s16",	setup="value: s8 = -128;",	compiler_accepts=true,	parser_matches=true,	rival_type="s32"},
+	.{parameter_type="u16",	setup="value: u8 = 255;",	compiler_accepts=true,	parser_matches=true,	rival_type="s32"},
+	.{parameter_type="u16",	setup="value: u8 = 255;",	compiler_accepts=false,	parser_matches=false,	rival_type="s16"},
 ];
+
+make_typed_integer_cases :: () -> [..] Typed_Integer_Case {
+	cases: [..] Typed_Integer_Case;
+	for fixture: TYPED_INTEGER_CASES {
+		array_add(*cases, fixture);
+	}
+
+	types := string.["u8", "u16", "u32", "u64", "s8", "s16", "s32", "s64"];
+	for source_type, source_index: types {
+		source_width := 8 << (source_index % 4);
+		source_signed := source_index >= 4;
+		value := ifx source_signed
+			then SIGNED_BOUNDARY_CASES[source_index % 4].lower
+			else UNSIGNED_BOUNDARY_CASES[source_index % 4].upper;
+
+		for target_type, target_index: types {
+			target_width := 8 << (target_index % 4);
+			target_signed := target_index >= 4;
+			compatible := (
+				target_width >= source_width
+				&& (source_signed == target_signed || !source_signed && target_signed && target_width > source_width)
+			);
+
+			for initializer: string.["=", ":"] {
+				array_add(
+					*cases,
+					.{
+						parameter_type=target_type,
+						setup=tprint("value: % % %;", source_type, initializer, value),
+						compiler_accepts=compatible,
+						parser_matches=compatible
+					}
+				);
+			}
+
+			array_add(
+				*cases,
+				.{
+					parameter_type=target_type,
+					setup=tprint("value: % = %;", source_type, value),
+					argument=tprint("cast(%) value", target_type),
+					compiler_accepts=true,
+					parser_matches=true
+				}
+			);
+		}
+
+		for first_index: 0..types.count - 2 {
+			for second_index: first_index + 1..types.count - 1 {
+				first_width := 8 << (first_index % 4);
+				second_width := 8 << (second_index % 4);
+				first_signed := first_index >= 4;
+				second_signed := second_index >= 4;
+				first_compatible := (
+					first_width >= source_width
+					&& (source_signed == first_signed || !source_signed && first_signed && first_width > source_width)
+				);
+				second_compatible := (
+					second_width >= source_width
+					&& (source_signed == second_signed || !source_signed && second_signed && second_width > source_width)
+				);
+				selected_index := -1;
+				if first_compatible {
+					selected_index = first_index;
+					if second_compatible {
+						if second_index == source_index || first_index != source_index && second_width < first_width {
+							selected_index = second_index;
+						} else if first_index != source_index && first_width == second_width {
+							selected_index = -1;
+						}
+					}
+				} else if second_compatible {
+					selected_index = second_index;
+				}
+
+				first_type := ifx selected_index == second_index
+					then types[second_index]
+					else types[first_index];
+				rival_type := ifx selected_index == second_index
+					then types[first_index]
+					else types[second_index];
+				array_add(
+					*cases,
+					.{
+						parameter_type=first_type,
+						setup=tprint("value: % = %;", source_type, value),
+						compiler_accepts=selected_index >= 0,
+						parser_matches=selected_index >= 0,
+						rival_type=rival_type
+					}
+				);
+			}
+		}
+	}
+
+	expected_count := TYPED_INTEGER_CASES.count + types.count * types.count * 3 + types.count * types.count * (types.count - 1) / 2;
+	assert(cases.count == expected_count, "Typed integer matrix has % cases, expected %.", cases.count, expected_count);
+	return cases;
+}
 
 TYPED_INTEGER_OVERLOAD_SOURCE :: #string JAI
 make :: (value: %) {}
@@ -360,10 +463,14 @@ make_numeric_rank_cases :: () -> [..] Numeric_Rank_Case {
 			selected_index := ifx fixture.selected_index < 0
 				then -1
 				else (fixture.selected_index + 3 - rotation) % 3;
-			array_add(*cases, .{
-				parameters[rotation], parameters[(rotation + 1) % 3],
-				fixture.arguments, selected_index, parameters[(rotation + 2) % 3]
-			});
+
+			array_add(
+				*cases,
+				.{
+					parameters[rotation], parameters[(rotation + 1) % 3],
+					fixture.arguments, selected_index, parameters[(rotation + 2) % 3]
+				}
+			);
 		}
 	}
 
