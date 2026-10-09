@@ -2,6 +2,7 @@
 #import "Basic";
 #import "Compiler";
 #import "File";
+#import "File_Utilities";
 #import "Process";
 #import "String";
 
@@ -80,7 +81,7 @@ Compiler_Diagnostic_Result :: struct {
 
 CLEAR_PROGRESS_LINE :: "\r\e[K";
 
-DIFFERENTIAL_SECTION_TOTAL	:: 23;
+DIFFERENTIAL_SECTION_TOTAL	:: 24;
 CONTEXT_TEST_TOTAL			:: 1;
 TYPECHECKED_TEST_TOTAL		:: 1;
 FILE_SCOPE_TEST_TOTAL		:: 3;
@@ -88,7 +89,7 @@ ASSEMBLY_CONTEXT_TEST_TOTAL	:: 8;
 MEMBER_QUERY_TEST_TOTAL		:: 3;
 DEFAULT_OVERLOAD_TEST_TOTAL	:: 10;
 INTEGER_ROUNDING_TEST_TOTAL	:: 1;
-AGGREGATE_TEST_TOTAL		:: 53;
+AGGREGATE_TEST_TOTAL		:: 53 + AGGREGATE_CHAIN_CASES.count * 2;
 ASSIGNMENT_TEST_TOTAL		:: 2;
 RUNTIME_TEST_TOTAL			:: 8;
 
@@ -269,6 +270,26 @@ retain_differential_fixture :: () -> bool {
 	return true;
 }
 
+delete_differential_build_artifact :: (info: *File_Visit_Info, stem: string) {
+	directory, basename, extension := path_decomp(info.full_name);
+	if !begins_with(basename, stem) {
+		return;
+	}
+
+
+	if basename.count != stem.count && basename[stem.count] != #char "_" {
+		return;
+	}
+
+
+	for artifact_extension: string.["exe", "rdi", "obj", "lib", "exp", "pdb", "ilk", "o", "a", "dll", "so", "dylib"] {
+		if extension == artifact_extension {
+			assert(file_delete(info.full_name), "Unable to remove successful fixture build artifact '%'.", info.full_name);
+			return;
+		}
+	}
+}
+
 cleanup_differential_fixture :: () {
 	if differential_progress.failed {
 		return;
@@ -276,6 +297,17 @@ cleanup_differential_fixture :: () {
 
 
 	if differential_progress.fixture_path {
+		directory, stem := path_decomp(differential_progress.fixture_path);
+		if !directory {
+			directory = ".";
+		}
+
+		visit_files(directory, recursive=false, user_data=stem, proc=delete_differential_build_artifact, visit_symlinks=false);
+		build_directory := tprint("%/.build", directory);
+		if file_exists(build_directory) {
+			visit_files(build_directory, recursive=false, user_data=stem, proc=delete_differential_build_artifact, visit_symlinks=false);
+		}
+
 		file_delete(differential_progress.fixture_path);
 	}
 	differential_progress.fixture_path = "";
@@ -374,12 +406,38 @@ test_differential_runner :: () {
 	rejected := capture_compiler_error(invalid_source);
 	assert(rejected.diagnostics.count > 0);
 	compiler_path := differential_progress.fixture_path;
+
+	stem := path_strip_extension(compiler_path);
+	assert(make_directory_if_it_does_not_exist(".build"));
+	artifact_paths := string.[
+		tprint("%.exe", stem), tprint("%.rdi", stem),
+		tprint(".build/%.obj", stem), tprint(".build/%.lib", stem),
+		tprint(".build/%.exp", stem), tprint(".build/%_0_w2.obj", stem)
+	];
+
+	for artifact_path: artifact_paths {
+		assert(write_entire_file(artifact_path, "fixture build artifact"));
+	}
+
+	neighbor_path := join(".build/", stem, "0.obj",, temp);
+	unrelated_path := tprint("%.txt", stem);
+	assert(path_strip_extension(path_filename(neighbor_path)) != stem, "Neighbor fixture path '%' has the same stem '%'.", neighbor_path, stem);
+	assert(write_entire_file(neighbor_path, "unrelated fixture artifact"));
+	assert(write_entire_file(unrelated_path, "not a build artifact"));
+	defer file_delete(neighbor_path);
+	defer file_delete(unrelated_path);
+
 	differential_progress.failed = true;
 	cleanup_differential_fixture();
 	compiler_source, compiler_exists := read_entire_file(compiler_path, log_errors=false);
 	defer free(compiler_source);
 
 	assert(compiler_exists && compiler_source == invalid_source, "Completed diagnostic fixture was not retained for a caller failure.");
+
+	for artifact_path: artifact_paths {
+		assert(file_exists(artifact_path), "Failed fixture build artifact was not retained: %.", artifact_path);
+	}
+
 	assert(differential_fixture_path() != compiler_path, "A rerun would overwrite the retained diagnostic fixture.");
 	differential_progress.failed = false;
 	cleanup_differential_fixture();
@@ -387,6 +445,13 @@ test_differential_runner :: () {
 	defer free(deleted_source);
 
 	assert(!compiler_still_exists, "Successful diagnostic fixture was not cleaned up.");
+
+	for artifact_path: artifact_paths {
+		assert(!file_exists(artifact_path), "Successful fixture build artifact was not cleaned up: %.", artifact_path);
+	}
+
+	assert(file_exists(neighbor_path), "Cleanup removed neighboring artifact '%' while cleaning stem '%'.", neighbor_path, stem);
+	assert(file_exists(unrelated_path), "Cleanup removed a file that was not a build artifact.");
 
 	workspace_source :: "fixture_retention :: 1;";
 	differential_progress.fixture_source = workspace_source;
@@ -403,7 +468,7 @@ test_differential_runner :: () {
 	cleanup_differential_fixture();
 }
 
-capture_compiler_error :: (code: string, log_output := false) -> Compiler_Diagnostic_Result {
+capture_compiler_error :: (code: string, log_output := false, require_error_diagnostic := true) -> Compiler_Diagnostic_Result {
 	begin_differential_test();
 	cleanup_differential_fixture();
 	fixture_path := differential_fixture_path();
@@ -427,7 +492,10 @@ capture_compiler_error :: (code: string, log_output := false) -> Compiler_Diagno
 
 	append_compiler_diagnostics(result.standard_error, *result.diagnostics);
 	append_compiler_diagnostics(result.standard_output, *result.diagnostics);
-	assert(result.diagnostics.count > 0, "Compiler failed without an Error diagnostic.\nstdout:\n%\nstderr:\n%", result.standard_output, result.standard_error);
+	if require_error_diagnostic {
+		assert(result.diagnostics.count > 0, "Compiler failed without an Error diagnostic.\nstdout:\n%\nstderr:\n%", result.standard_output, result.standard_error);
+	}
+
 	finish_differential_test();
 	return result;
 }
@@ -1745,7 +1813,16 @@ assert_file_workspace_fixture :: (source: string, expected_declaration: string) 
 	assert(result.found_expected_declaration, "Compiler did not expose '%' for file fixture '%'.", expected_declaration, source);
 }
 
-assert_overload_workspace_fixture :: (first_parameters: string, second_parameters: string, expression: string, expected_index: s64, expected_declaration: string, third_parameters: string = "", setup: string = "") {
+assert_overload_workspace_fixture :: (
+	first_parameters: string,
+	second_parameters: string,
+	expression: string,
+	expected_index: s64,
+	expected_declaration: string,
+	third_parameters: string = "",
+	setup: string = "",
+	globals: string = ""
+) {
 	OVERLOAD_FIELD_SOURCE :: #string JAI
 Child :: struct {
 	Clear: s64;
@@ -1774,6 +1851,10 @@ JAI;
 			then "Child"
 			else "Other";
 		third_source = tprint("make :: (%) -> % { return .{1}; }", third_parameters, third_result);
+	}
+
+	if globals {
+		third_source = tprint("%\n%", third_source, globals);
 	}
 
 	source := tprint(OVERLOAD_FIELD_SOURCE, first_parameters, first_result, second_parameters, second_result, third_source, expected_declaration, setup, expression);
@@ -1821,14 +1902,57 @@ test_typed_integer_fixtures :: () {
 				then fixture.rival_type
 				else fixture.parameter_type;
 			if fixture.compiler_accepts {
-				assert_overload_workspace_fixture(tprint("value: %", first), tprint("value: %", second), tprint("make(%).Clear", fixture.argument), order, "fixture_typed_integer", setup=fixture.setup);
+				assert_overload_workspace_fixture(
+					tprint("value: %", first),
+					tprint("value: %", second),
+					tprint("make(%).Clear", fixture.argument),
+					order,
+					"fixture_typed_integer",
+					setup=fixture.setup,
+					globals=fixture.globals
+				);
 			} else {
-				rejected := capture_compiler_error(tprint(TYPED_INTEGER_OVERLOAD_SOURCE, first, second, fixture.setup, fixture.argument));
+				rejected := capture_compiler_error(tprint(TYPED_INTEGER_OVERLOAD_SOURCE, first, second, fixture.globals, fixture.setup, fixture.argument));
 				assert(rejected.diagnostics.count > 0);
 			}
 		}
 	}
 
+}
+
+test_typed_float_fixtures :: () {
+	typed_float_cases := make_typed_float_cases();
+	defer array_free(typed_float_cases);
+
+	if !begin_differential_section("Typed floating conversions", typed_float_cases.count * 2) {
+		return;
+	}
+
+
+	for fixture: typed_float_cases {
+		for order: 0..1 {
+			first := ifx order == 0
+				then fixture.parameter_type
+				else fixture.rival_type;
+			second := ifx order == 0
+				then fixture.rival_type
+				else fixture.parameter_type;
+			if fixture.compiler_accepts {
+				assert_overload_workspace_fixture(
+					tprint("value: %", first),
+					tprint("value: %", second),
+					tprint("make(%).Clear", fixture.argument),
+					order,
+					"fixture_typed_float",
+					setup=fixture.setup,
+					globals=fixture.globals
+				);
+			} else {
+				rejected := capture_compiler_error(tprint(TYPED_INTEGER_OVERLOAD_SOURCE, first, second, fixture.globals, fixture.setup, fixture.argument));
+				assert(rejected.diagnostics.count > 0);
+			}
+		}
+	}
 }
 
 test_assembly_context_fixtures :: () {
@@ -2053,9 +2177,25 @@ test_integer_rounding_fixture :: () {
 	assert_file_workspace_fixture(
 		#string JAI
 #import "Basic";
+#assert float == float32;
+#assert int == s64;
 fixture_integer_float32_rounding :: () {
 	rounded: float32 = 16777217;
 	assert(cast(s64) rounded == 16777216);
+
+	integer_source: u32 = 16777217;
+	rounded_cast: float32 = cast(float32) integer_source;
+	assert(cast(s64) rounded_cast == 16777216);
+
+	wide_source: s64 = 9007199254740993;
+	rounded_wide: float64 = cast(float64) wide_source;
+	assert(cast(s64) rounded_wide == 9007199254740992);
+
+	fraction: float64 = -1.75;
+	assert(cast(s64) fraction == -1);
+
+	positive_fraction: float32 = 1.75;
+	assert(cast(u64) positive_fraction == 1);
 }
 #run fixture_integer_float32_rounding();
 JAI,
@@ -2083,9 +2223,7 @@ test_numeric_rank_fixtures :: () {
 				else fixture.first_parameters;
 
 			if fixture.selected_index < 0 {
-				source := ifx fixture.third_parameters
-					then tprint(THREE_ARGUMENT_RANK_SOURCE, first, second, fixture.third_parameters, fixture.arguments)
-					else tprint(MULTI_ARGUMENT_RANK_SOURCE, first, second, fixture.arguments);
+				source := make_numeric_rank_source(fixture, first, second);
 				ambiguous := capture_compiler_error(source);
 				assert(ambiguous.diagnostics.count > 0);
 			} else {
@@ -2093,7 +2231,7 @@ test_numeric_rank_fixtures :: () {
 					then fixture.selected_index
 					else 1 - fixture.selected_index;
 
-				assert_overload_workspace_fixture(first, second, tprint("make(%).Clear", fixture.arguments), selected_index, "fixture_numeric_conversion_rank", fixture.third_parameters);
+				assert_overload_workspace_fixture(first, second, tprint("make(%).Clear", fixture.arguments), selected_index, "fixture_numeric_conversion_rank", fixture.third_parameters, fixture.setup, fixture.globals);
 			}
 
 		}
@@ -2242,6 +2380,49 @@ test_aggregate_member_fixtures :: () {
 	assert_overload_workspace_fixture("first: s64, second: s64", "first: float64, second: float64", "make(1, 1).Clear", 0, "fixture_exact_first_rank");
 	crossed_rank := capture_compiler_error(tprint(MULTI_ARGUMENT_RANK_SOURCE, "first: s64, second: float64", "first: float64, second: s64", "1, 1"));
 	assert(crossed_rank.diagnostics.count > 0);
+
+	for fixture: AGGREGATE_CHAIN_CASES {
+		for order: 0..1 {
+			first := ifx order == 0
+				then fixture.parameter_type
+				else fixture.rival_type;
+			second := ifx order == 0
+				then fixture.rival_type
+				else fixture.parameter_type;
+
+			if fixture.compiler_accepts {
+				assert_overload_workspace_fixture(
+					tprint("value: %", first), tprint("value: %", second), "make(value).Clear", order, "fixture_multihop_conversion",
+					setup="value: Wrapper;", globals=fixture.globals
+				);
+			} else {
+				rejected := capture_compiler_error(
+					tprint(TYPED_INTEGER_OVERLOAD_SOURCE, first, second, fixture.globals, "value: Wrapper;", "value"),
+					require_error_diagnostic=fixture.requires_error_diagnostic
+				);
+				assert(rejected.diagnostics.count > 0 || !fixture.requires_error_diagnostic);
+
+				if !fixture.requires_error_diagnostic {
+					circular_dependency := false;
+					for output: string.[rejected.standard_error, rejected.standard_output] {
+						for source_line: split(output, "\n") {
+							line := source_line;
+							if line.count && line[line.count - 1] == #char "\r" {
+								line.count -= 1;
+							}
+
+							if line == "The program contains circular dependencies." {
+								circular_dependency = true;
+							}
+						}
+					}
+
+					assert(circular_dependency, "Compiler did not report the expected aggregate dependency cycle.");
+				}
+			}
+		}
+	}
+
 	assert_file_workspace_fixture(
 		#string JAI
 Base :: struct { Value: s64; }
@@ -3460,6 +3641,7 @@ run_compile_time_sections :: () {
 	test_declaration_workspace_fixtures();
 	test_directive_workspace_fixtures();
 	test_assignment_workspace_fixtures();
+	test_typed_float_fixtures();
 	finish_differential_section();
 	assert(differential_progress.section_index == DIFFERENTIAL_SECTION_TOTAL - 1);
 }

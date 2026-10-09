@@ -504,7 +504,7 @@ resolve_struct_instantiation :: (expression: *Parser_Node, root_scope: *Parser_L
 		if (parameter.expression || !parameter.type_inst || !parameter.type_inst.type_valued_expression || parameter.type_inst.must_implement
 			|| parameter.type_inst.type_valued_expression.kind != .IDENT
 			|| parameter.type_inst.type_valued_expression.(*Parser_Ident).name != "Type"
-			|| !parsed_primitive_type(argument.expression) && !resolve_complete_aggregate_type(argument.expression, root_scope, visited_types).declaration
+			|| !parsed_primitive_type(argument.expression, root_scope) && !resolve_complete_aggregate_type(argument.expression, root_scope, visited_types).declaration
 		) {
 			return null;
 		}
@@ -670,6 +670,8 @@ Aggregate_Call_Match :: enum {
 
 	INTEGER_FLOAT32_CONVERSION;
 	INTEGER_FLOAT64_CONVERSION;
+	AGGREGATE_CONVERSION :: 8;
+	FLOAT_WIDTH_CONVERSION :: 9;
 
 	INTEGER_U8\_CONVERSION :: ( 8 << 8) | 6;
 	INTEGER_U16_CONVERSION :: (16 << 8) | 6;
@@ -681,6 +683,8 @@ Aggregate_Call_Match :: enum {
 	INTEGER_S32_CONVERSION :: (32 << 8) | 7;
 	INTEGER_S64_CONVERSION :: (64 << 8) | 7;
 }
+
+TYPED_INTEGER_CONVERSION_FLAG :: 128;
 
 Parsed_Aggregate_Type :: struct {
 	declaration: *Parser_Declaration;
@@ -863,7 +867,7 @@ resolve_complete_aggregate_type :: (expression: *Parser_Node, root_scope: *Parse
 
 
 		for type_arguments {
-			if !parsed_primitive_type(it.expression) && !resolve_complete_aggregate_type(it.expression, root_scope, visited_types).declaration {
+			if !parsed_primitive_type(it.expression, root_scope) && !resolve_complete_aggregate_type(it.expression, root_scope, visited_types).declaration {
 				return .{};
 			}
 		}
@@ -982,8 +986,8 @@ compare_aggregate_types :: (left: *Parser_Node, right: *Parser_Node, root_scope:
 		}
 
 		array_free(visited);
-		left_primitive := parsed_primitive_type(left_argument);
-		right_primitive := parsed_primitive_type(right_argument);
+		left_primitive := parsed_primitive_type(left_argument, root_scope);
+		right_primitive := parsed_primitive_type(right_argument, root_scope);
 		if left_primitive || right_primitive {
 			if !left_primitive || !right_primitive {
 				return .MISMATCH;
@@ -1009,12 +1013,149 @@ compare_aggregate_types :: (left: *Parser_Node, right: *Parser_Node, root_scope:
 	return .MATCH;
 }
 
-match_aggregate_conversion :: (source: *Parser_Node, target: *Parser_Node, root_scope: *Parser_Lexical_Scope) -> Aggregate_Call_Match {
+aggregate_members_hidden_by_filter :: (expression: *Parser_Node, filter: *Parser_Using, root_scope: *Parser_Lexical_Scope, visited: *[..]*Parser_Declaration = null) -> bool {
+	if (filter.filter_type != .EXCEPT
+		|| !filter.filter_expression || filter.filter_expression.kind != .LITERAL
+	) {
+		return false;
+	}
+
+
+	aggregate := resolve_complete_aggregate_type(expression, root_scope);
+	if !aggregate.declaration {
+		return false;
+	}
+
+
+	local_visited: [..]*Parser_Declaration;
+	defer array_free(local_visited);
+
+	if !visited {
+		visited = *local_visited;
+	}
+
+	for visited.* {
+		if it == aggregate.declaration {
+			return false;
+		}
+	}
+
+	array_add(visited, aggregate.declaration);
+	defer visited.count -= 1;
+
+	structure := aggregate.declaration.expression.(*Parser_Struct);
+	if !structure.block {
+		return false;
+	}
+
+
+	if aggregate.type_arguments.count > 0 {
+		for parameter_node: structure.arguments_block.statements {
+			parameter := parameter_node.(*Parser_Declaration);
+			if !binding_is_unique(root_scope, parameter) || import_name_visible(filter, parameter.name) {
+				return false;
+			}
+		}
+	}
+
+
+	return aggregate_statements_hidden_by_filter(structure.block.statements, filter, aggregate, root_scope, visited);
+}
+
+aggregate_statements_hidden_by_filter :: (statements: []*Parser_Node, filter: *Parser_Using, container: Parsed_Aggregate_Type, root_scope: *Parser_Lexical_Scope, visited: *[..]*Parser_Declaration) -> bool {
+	for statement: statements {
+		if statement.kind == .IF {
+			conditional := statement.(*Parser_If);
+			condition: bool;
+			if (conditional.if_flags & .IS_STATIC == 0
+				|| !evaluate_literal_boolean(conditional.condition, *condition, root_scope)
+			) {
+				return false;
+			}
+
+
+			branch := ifx condition
+				then conditional.then_block
+				else conditional.else_block;
+			if branch && !aggregate_statements_hidden_by_filter(branch.statements, filter, container, root_scope, visited) {
+				return false;
+			}
+
+
+			continue;
+		}
+
+
+		field: *Parser_Declaration;
+		if statement.kind == .DECLARATION {
+			field = statement.(*Parser_Declaration);
+		} else if statement.kind == .USING {
+			using_node := statement.(*Parser_Using);
+			if !using_node.expression || using_node.expression.kind != .DECLARATION {
+				return false;
+			}
+
+
+			field = using_node.expression.(*Parser_Declaration);
+			if !field.type_inst || !field.type_inst.type_valued_expression {
+				return false;
+			}
+
+
+			substitution_visited: [..]*Parser_Declaration;
+			defer array_free(substitution_visited);
+
+			field_type := substitute_aggregate_field_type(field.type_inst.type_valued_expression, container, root_scope, *substitution_visited);
+			if !field_type || !aggregate_members_hidden_by_filter(field_type, using_node, root_scope, visited) {
+				return false;
+			}
+		} else {
+			return false;
+		}
+
+
+		if !binding_is_unique(root_scope, field) || import_name_visible(filter, field.name) {
+			return false;
+		}
+
+
+		structure := container.declaration.expression.(*Parser_Struct);
+		if container.type_arguments.count > 0 {
+			for parameter_node: structure.arguments_block.statements {
+				if field.name == parameter_node.(*Parser_Declaration).name {
+					return false;
+				}
+			}
+		}
+	}
+
+
+	return true;
+}
+
+match_aggregate_conversion :: (source: *Parser_Node, target: *Parser_Node, root_scope: *Parser_Lexical_Scope, conversion_path: *[..]*Parser_Declaration = null) -> Aggregate_Call_Match {
 	source_type := resolve_complete_aggregate_type(source, root_scope);
 	if !source_type.declaration {
 		return .UNKNOWN;
 	}
 
+
+	local_path: [..]*Parser_Declaration;
+	defer array_free(local_path);
+
+	if !conversion_path {
+		conversion_path = *local_path;
+	}
+
+	for conversion_path.* {
+		if it == source_type.declaration {
+			return .UNKNOWN;
+		}
+	}
+
+
+	array_add(conversion_path, source_type.declaration);
+	defer conversion_path.count -= 1;
 
 	structure := source_type.declaration.expression.(*Parser_Struct);
 	if !structure.block {
@@ -1030,6 +1171,7 @@ match_aggregate_conversion :: (source: *Parser_Node, target: *Parser_Node, root_
 
 
 	matched := false;
+	routes_hidden := true;
 	for statement: structure.block.statements {
 		if statement.kind != .USING {
 			continue;
@@ -1043,8 +1185,9 @@ match_aggregate_conversion :: (source: *Parser_Node, target: *Parser_Node, root_
 
 
 		field := using_node.expression.(*Parser_Declaration);
-		if field.flags & .IS_MARKED_AS_AS == 0 {
-			continue;
+		explicit_conversion := (field.flags & .IS_MARKED_AS_AS != 0);
+		if !explicit_conversion && using_node.filter_type != .NONE {
+			return .UNKNOWN;
 		}
 
 
@@ -1056,18 +1199,30 @@ match_aggregate_conversion :: (source: *Parser_Node, target: *Parser_Node, root_
 		visited: [..]*Parser_Declaration;
 		field_type := substitute_aggregate_field_type(field.type_inst.type_valued_expression, source_type, root_scope, *visited);
 		array_free(visited);
-		comparison := compare_aggregate_types(field_type, target, root_scope);
+
+		comparison := ifx explicit_conversion
+			then compare_aggregate_types(field_type, target, root_scope)
+			else Aggregate_Call_Match.MISMATCH;
+		if comparison == .MISMATCH {
+			comparison = match_aggregate_conversion(field_type, target, root_scope, conversion_path);
+		}
+
 		if comparison == .UNKNOWN {
 			return .UNKNOWN;
 		}
 
 
-		if comparison == .MATCH {
-			if matched {
+		if comparison == .MATCH || comparison == .CONVERSION {
+			hidden_route := (
+				explicit_conversion && binding_is_unique(root_scope, field)
+				&& aggregate_members_hidden_by_filter(field_type, using_node, root_scope)
+			);
+			if matched && (!routes_hidden || !hidden_route) {
 				return .UNKNOWN;
 			}
 
 
+			routes_hidden = hidden_route;
 			matched = true;
 		}
 	}
@@ -1078,23 +1233,64 @@ match_aggregate_conversion :: (source: *Parser_Node, target: *Parser_Node, root_
 		else .MISMATCH;
 }
 
-parsed_primitive_type :: (expression: *Parser_Node) -> string {
-	if !expression || expression.kind != .IDENT {
-		return "";
-	}
+parsed_primitive_type :: (expression: *Parser_Node, root_scope: *Parser_Lexical_Scope = null) -> string {
+	visited: [..]*Parser_Declaration;
+	defer array_free(visited);
+
+	names: [] string = .["bool", "string", "s8", "s16", "s32", "s64", "u8", "u16", "u32", "u64", "float32", "float64"];
+	while expression && expression.kind == .IDENT {
+		ident := expression.(*Parser_Ident);
+		if ident.name == "int" || ident.name == "float" {
+			if ident.resolved_declaration {
+					return "";
+			}
 
 
-	ident := expression.(*Parser_Ident);
-	if ident.resolved_declaration {
-		return "";
-	}
-
-
-	names: [] string = .["bool", "string", "s8", "s16", "s32", "s64", "u8", "u16", "u32", "u64", "float32", "float64", "int", "float"];
-	for name: names {
-		if ident.name == name {
-			return name;
+			return ifx ident.name == "int" then "s64" else "float32";
 		}
+
+
+		for name: names {
+			if ident.name == name {
+				if ident.resolved_declaration || visited.count != 0 && (name == "bool" || name == "string") {
+					return "";
+				}
+
+
+				return name;
+			}
+		}
+
+		declaration := ident.resolved_declaration;
+		if !root_scope || !declaration || !binding_is_unique(root_scope, declaration) || declaration.flags & .IS_CONSTANT == 0 {
+			return "";
+		}
+
+
+		if declaration.type_inst {
+			annotation := declaration.type_inst.type_valued_expression;
+			if (!annotation || annotation.kind != .IDENT
+				|| annotation.(*Parser_Ident).name != "Type" || annotation.(*Parser_Ident).resolved_declaration
+			) {
+				return "";
+			}
+		}
+
+		if declaration.first_token > expression.first_token {
+			binding_scope := find_binding_scope(root_scope, declaration);
+			if binding_scope.owner && binding_scope.owner.kind == .BLOCK && binding_scope.owner.(*Parser_Block).block_type == .IMPERATIVE {
+				return "";
+			}
+		}
+
+		for visited {
+			if it == declaration {
+				return "";
+			}
+		}
+
+		array_add(*visited, declaration);
+		expression = declaration.expression;
 	}
 
 
@@ -1125,7 +1321,7 @@ infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Par
 
 	if expression.kind == .LITERAL {
 		literal := expression.(*Parser_Literal);
-		if raw_literal && literal.value_type == .NUMBER && literal.value_flags & (.FLOAT | .DEFAULTS_TO_FLOAT64 | .REQUIRES_FLOAT64) == 0 {
+		if raw_literal && literal.value_type == .NUMBER {
 			raw_literal.* = literal;
 		}
 
@@ -1139,8 +1335,8 @@ infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Par
 			case .NUMBER;
 				if literal.value_flags & (.FLOAT | .DEFAULTS_TO_FLOAT64 | .REQUIRES_FLOAT64) != 0 {
 					return ifx literal.value_flags & (.DEFAULTS_TO_FLOAT64 | .REQUIRES_FLOAT64) != 0
-						then "f64"
-						else "f32";
+						then "float64"
+						else "float32";
 				}
 
 
@@ -1152,8 +1348,8 @@ infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Par
 	if expression.kind == .CAST {
 		cast_node := expression.(*Parser_Cast);
 		if cast_node.target_type {
-			primitive := parsed_primitive_type(cast_node.target_type.type_valued_expression);
-			if integer_primitive_width(primitive) != 0 {
+			primitive := parsed_primitive_type(cast_node.target_type.type_valued_expression, root_scope);
+			if integer_primitive_width(primitive) != 0 || primitive == "float32" || primitive == "float64" {
 				if typed {
 					typed.* = true;
 				}
@@ -1201,7 +1397,7 @@ infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Par
 			typed.* = true;
 		}
 
-		return parsed_primitive_type(declaration.type_inst.type_valued_expression);
+		return parsed_primitive_type(declaration.type_inst.type_valued_expression, root_scope);
 	}
 
 
@@ -1291,14 +1487,13 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 
 		primitive := infer_primitive_expression_type(argument.expression, *visited, root_scope, *typed_primitive, *literal_argument);
 		array_reset(*visited);
-		parameter_primitive := parsed_primitive_type(parameter.type_inst.type_valued_expression);
+		parameter_primitive := parsed_primitive_type(parameter.type_inst.type_valued_expression, root_scope);
 		if primitive && parameter_primitive {
 			array_free(visited);
 			if (primitive == parameter_primitive
-				|| (primitive == "f64" && parameter_primitive == "float64"
-					|| primitive == "f32" && parameter_primitive == "float32"
+				&& (primitive != "float32" && primitive != "float64"
+					|| typed_primitive || literal_argument && literal_argument.value_type == .NUMBER
 				)
-				&& literal_argument && literal_argument.value_type == .NUMBER
 			) {
 				if ranks {
 					array_add(ranks, .MATCH);
@@ -1328,14 +1523,41 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 
 				converted = true;
 				if ranks {
-					array_add(ranks, xx ((parameter_width << 8) | (ifx parameter_signed then 7 else 6)));
+					array_add(ranks, xx ((parameter_width << 8) | TYPED_INTEGER_CONVERSION_FLAG | (ifx parameter_signed then 7 else 6)));
 				}
 
 				continue;
 			}
 
 
-			if (primitive == "f64" && parameter_primitive == "float32"
+			if (typed_primitive
+				&& (primitive_width != 0 && (parameter_primitive == "float32" || parameter_primitive == "float64")
+					|| parameter_width != 0 && (primitive == "float32" || primitive == "float64")
+				)
+			) {
+				return .MISMATCH;
+			}
+
+
+			if (typed_primitive
+				&& (primitive == "float32" || primitive == "float64")
+				&& (parameter_primitive == "float32" || parameter_primitive == "float64")
+			) {
+				if primitive == "float64" && parameter_primitive == "float32" {
+					return .MISMATCH;
+				}
+
+
+				converted = true;
+				if ranks {
+					array_add(ranks, .FLOAT_WIDTH_CONVERSION);
+				}
+
+				continue;
+			}
+
+
+			if (primitive == "float64" && parameter_primitive == "float32"
 				&& literal_argument && literal_argument.value_type == .NUMBER
 				&& literal_argument.value_flags & .REQUIRES_FLOAT64 != 0
 			) {
@@ -1345,14 +1567,14 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 
 			if ((
 					primitive == "s64" && (parameter_primitive == "float64" || parameter_primitive == "float32")
-					|| primitive == "f32" && parameter_primitive == "float64"
-					|| primitive == "f64" && parameter_primitive == "float32"
+					|| primitive == "float32" && parameter_primitive == "float64"
+					|| primitive == "float64" && parameter_primitive == "float32"
 				)
 				&& literal_argument && literal_argument.value_type == .NUMBER
 			) {
 				converted = true;
 				if ranks {
-					rank := Aggregate_Call_Match.CONVERSION;
+					rank := Aggregate_Call_Match.FLOAT_WIDTH_CONVERSION;
 					if primitive == "s64" {
 						rank = ifx parameter_primitive == "float32"
 							then .INTEGER_FLOAT32_CONVERSION
@@ -1475,7 +1697,7 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 		}
 
 		if ranks {
-			array_add(ranks, match);
+			array_add(ranks, ifx match == .CONVERSION then .AGGREGATE_CONVERSION else match);
 		}
 	}
 
@@ -1497,9 +1719,12 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 
 
 		visited: [..]*Parser_Declaration;
-		default_type := infer_primitive_expression_type(parameter.expression, *visited, root_scope);
+		default_typed := false;
+		default_type := infer_primitive_expression_type(parameter.expression, *visited, root_scope, *default_typed);
 		array_free(visited);
-		if !default_type || default_type != parsed_primitive_type(parameter.type_inst.type_valued_expression) {
+		if (!default_type || default_type != parsed_primitive_type(parameter.type_inst.type_valued_expression, root_scope)
+			|| (default_type == "float32" || default_type == "float64") && !default_typed
+		) {
 			return .UNKNOWN;
 		}
 	}
@@ -1516,18 +1741,55 @@ compare_aggregate_call_ranks :: (match: Aggregate_Call_Match, ranks: []Aggregate
 	better := match == .MATCH && best_match == .CONVERSION;
 	worse := match == .CONVERSION && best_match == .MATCH;
 	if match == .CONVERSION && best_match == .CONVERSION {
+		aggregate_conversion := false;
+		best_aggregate_conversion := false;
+		unproved_numeric_crossing := false;
+
+		for ranks {
+			if it == .AGGREGATE_CONVERSION {
+				aggregate_conversion = true;
+			}
+
+			if best_ranks[it_index] == .AGGREGATE_CONVERSION {
+				best_aggregate_conversion = true;
+			}
+
+			if (it != best_ranks[it_index]
+				&& (it == .FLOAT_WIDTH_CONVERSION || best_ranks[it_index] == .FLOAT_WIDTH_CONVERSION
+					|| cast(s64) it & TYPED_INTEGER_CONVERSION_FLAG != 0
+					|| cast(s64) best_ranks[it_index] & TYPED_INTEGER_CONVERSION_FLAG != 0
+					|| it == .MATCH && best_ranks[it_index] != .AGGREGATE_CONVERSION
+					|| best_ranks[it_index] == .MATCH && it != .AGGREGATE_CONVERSION
+				)
+			) {
+				unproved_numeric_crossing = true;
+			}
+		}
+
+		if aggregate_conversion != best_aggregate_conversion {
+			if unproved_numeric_crossing {
+				return false, false;
+			}
+
+
+			return !aggregate_conversion, aggregate_conversion;
+		}
+
+
 		for ranks {
 			width := cast(s64) it >> 8;
 			best_width := cast(s64) best_ranks[it_index] >> 8;
-			integer_conversions := width != 0 && best_width != 0;
+			integer_conversions := (width != 0 && best_width != 0);
 
 			if (it == .MATCH && best_ranks[it_index] != .MATCH
 				|| it == .INTEGER_FLOAT32_CONVERSION && best_ranks[it_index] == .INTEGER_FLOAT64_CONVERSION
+				|| width != 0 && (best_ranks[it_index] == .INTEGER_FLOAT32_CONVERSION || best_ranks[it_index] == .INTEGER_FLOAT64_CONVERSION)
 				|| integer_conversions && width < best_width
 			) {
 				better = true;
 			} else if (it != .MATCH && best_ranks[it_index] == .MATCH
 				|| it == .INTEGER_FLOAT64_CONVERSION && best_ranks[it_index] == .INTEGER_FLOAT32_CONVERSION
+				|| best_width != 0 && (it == .INTEGER_FLOAT32_CONVERSION || it == .INTEGER_FLOAT64_CONVERSION)
 				|| integer_conversions && width > best_width
 			) {
 				worse = true;
@@ -1555,6 +1817,19 @@ resolve_overloaded_aggregate_call :: (call: *Parser_Procedure_Call, root_scope: 
 		return null;
 	}
 
+
+	inference_pool: Pool;
+	owns_inference_pool := !root_scope.inference_pool;
+	if owns_inference_pool {
+		set_allocators(*inference_pool);
+		root_scope.inference_pool = *inference_pool;
+	}
+	defer {
+		if owns_inference_pool {
+			root_scope.inference_pool = null;
+			release(*inference_pool);
+		}
+	}
 
 	selected: *Parser_Procedure_Header;
 	best_match := Aggregate_Call_Match.MISMATCH;

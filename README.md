@@ -10,6 +10,11 @@ Run these from `modules/Jai_Parser/examples` with `jai <file>.jai -x64 && ./<fil
 - `differential_test.jai` compares parser ASTs and selected diagnostics with the Jai compiler, including contextual and typechecked fixtures.
 - `parse_how_to.jai` parses the `how_to` corpus, checks nonfatal roots and exact source round trips, and reports zero-diagnostic files, first failing source lines, and diagnostic changes against its checked-in baseline.
 
+Run `bash clean_build_artifacts.sh` from `examples` after testing to remove generated build outputs.
+The script preserves tracked files, symlinks, and retained differential fixtures with their matching outputs.
+Use `--dry-run` to preview deletion, or repeat `--resolved jai_parser_differential_<section>_<test>_<serial>.jai` to also remove specific dealt-with fixtures and their outputs.
+It targets its own directory regardless of the caller's working directory.
+
 ## Lexer
 
 This module starts from `Jai_Lexer` and adds current parser-oriented tokenisation.

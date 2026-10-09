@@ -8525,7 +8525,11 @@ assert_overload_selection :: (source: string, expected_index: s64) {
 		expected = statements[expected_index].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
 	}
 
+	inference_pool := parsed.root_scope.inference_pool;
 	assert(Extended.resolve_overloaded_aggregate_call(call, parsed.root_scope) == expected, "Expected overload index % for source:\n%", expected_index, source);
+	assert(parsed.root_scope.inference_pool == inference_pool);
+	assert(Extended.resolve_overloaded_aggregate_call(call, parsed.root_scope) == expected);
+	assert(parsed.root_scope.inference_pool == inference_pool);
 	Extended.release_parser_tree(*parsed);
 	Extended.release_parser_names(*parsed);
 }
@@ -9222,7 +9226,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	assert_mapped_field_fixture(OVERLOADED_RUN_MEMBER_SOURCE, filename, 0, 1);
+	assert_mapped_field_fixture(OVERLOADED_RUN_MEMBER_SOURCE, filename);
 
 	AMBIGUOUS_CAST_MEMBER_SOURCE :: #string JAI
 Child :: struct {
@@ -9271,7 +9275,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	assert_mapped_field_fixture(CALLED_OVERLOAD_MEMBER_SOURCE, filename, 0, 1);
+	assert_mapped_field_fixture(CALLED_OVERLOAD_MEMBER_SOURCE, filename);
 
 	CYCLIC_MEMBER_SOURCE :: #string JAI
 Child :: struct {
@@ -9318,7 +9322,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	assert_mapped_field_fixture(OVERLOADED_MEMBER_SOURCE, filename, 0, 1);
+	assert_mapped_field_fixture(OVERLOADED_MEMBER_SOURCE, filename);
 
 	AMBIGUOUS_ALIAS_MEMBER_SOURCE :: #string JAI
 Child :: struct {
@@ -9442,7 +9446,7 @@ main :: () {
 	call := glClear;
 }
 JAI;
-	assert_mapped_field_fixture(OVERLOADED_QUERY_SOURCE, filename, 0, 1);
+	assert_mapped_field_fixture(OVERLOADED_QUERY_SOURCE, filename);
 
 	AMBIGUOUS_TYPE_SOURCE :: #string JAI
 Procs :: struct {
@@ -10385,8 +10389,29 @@ JAI;
 	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "string", "1"), 0);
 	assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, "float64", "string", "1.5"), 0);
 
+	for fixture: AGGREGATE_CHAIN_CASES {
+		for order: 0..1 {
+			first := ifx order == 0
+				then fixture.parameter_type
+				else fixture.rival_type;
+			second := ifx order == 0
+				then fixture.rival_type
+				else fixture.parameter_type;
+
+			source := tprint(TYPED_INTEGER_OVERLOAD_SOURCE, first, second, fixture.globals, "value: Wrapper;", "value");
+			assert_overload_selection(source, ifx fixture.parser_matches then order else -1);
+		}
+	}
+
 	typed_integer_cases := make_typed_integer_cases();
 	defer array_free(typed_integer_cases);
+
+	typed_float_cases := make_typed_float_cases();
+	defer array_free(typed_float_cases);
+
+	for fixture: typed_float_cases {
+		array_add(*typed_integer_cases, fixture);
+	}
 
 	for fixture: typed_integer_cases {
 		for order: 0..1 {
@@ -10396,7 +10421,7 @@ JAI;
 			second := ifx order == 0
 				then fixture.rival_type
 				else fixture.parameter_type;
-			source := tprint(TYPED_INTEGER_OVERLOAD_SOURCE, first, second, fixture.setup, fixture.argument);
+			source := tprint(TYPED_INTEGER_OVERLOAD_SOURCE, first, second, fixture.globals, fixture.setup, fixture.argument);
 			assert_overload_selection(source, ifx fixture.parser_matches then order else -1);
 		}
 	}
@@ -10445,10 +10470,8 @@ JAI;
 				then fixture.selected_index
 				else 1 - fixture.selected_index;
 
-			source := ifx fixture.third_parameters
-				then tprint(THREE_ARGUMENT_RANK_SOURCE, first, second, fixture.third_parameters, fixture.arguments)
-				else tprint(MULTI_ARGUMENT_RANK_SOURCE, first, second, fixture.arguments);
-			assert_overload_selection(source, selected_index);
+			source := make_numeric_rank_source(fixture, first, second);
+			assert_overload_selection(source, ifx fixture.parser_matches then selected_index else -1);
 		}
 	}
 
