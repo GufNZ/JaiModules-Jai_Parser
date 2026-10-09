@@ -125,6 +125,9 @@ Section 16 is complete for the audited reuse shapes: eligible subtrees copy into
 - [x] Separate syntactic comparisons from future semantic comparisons.
 - [x] Add round-trip helpers for trivia-enabled imports.
 - [x] For invalid input rejected by the parser, shell out to the compiler, always passing `-x64` for speed, and capture its error messages for comparison.
+- [x] Select a differential section by number or exact quoted name after the compiler's `-` separator; list the shared section inventory with `- list`, and skip unselected compile-time and runtime work.
+- [x] Show ANSI-coloured section, per-section test, and cumulative selected-run progress.  Derive global totals from the shared inventory and avoid double-counting nested compiler checks.
+- [x] Retain diagnostic files when a fixture or its caller fails, and save in-memory workspace/syntax inputs on assertion failure.  Print the retained path, avoid overwriting earlier failures, and cover retention and successful cleanup in the runtime runner checks.
 
 ### 6. Parse Primary Expressions
 
@@ -695,15 +698,18 @@ Establish how bindings attach to syntax and become invalid after an edit before 
 										- [x] Share leading/trailing zero, digit separator, exponent case/sign, and pre-decimal significant-digit fixtures.  Compiler witnesses and parser selection agree in both overload declaration orders.
 										- [x] Verify upper magnitude and minimum-normal boundaries, negative counterparts, and subnormal/underflow magnitudes.  The compiler accepts `3.4028236e38` for `float32` but rejects `3.4028237e38`; below-normal magnitudes require `float64` even when representable as a `float32` subnormal.
 										- [x] Assert lexer `REQUIRES_FLOAT64` and `DEFAULTS_TO_FLOAT64` flags against every shared floating fixture's compiler acceptance and overload preference.  Existing lexer and resolver behaviour passes without production changes.
-									- [ ] Compare typed integer widening, narrowing, and signedness conversions; distinguish raw literals, constant aliases, and typed mutable values before supporting additional matches.
+									- [x] Compare typed integer widening, narrowing, and signedness conversions; distinguish raw literals, literal-ended constant aliases, and typed mutable values before supporting additional matches.  Computed constant expressions remain unsupported until constant evaluation is available.
 										- [x] Share an initial 8/16-bit compiler/parser matrix covering typed mutable bounds, widening, narrowing, same-width signedness changes, raw literals, raw constant aliases, typed constants, and exact-match precedence.  Fifteen cases run in both overload declaration orders; compatibility expectations remain explicit and named fixtures inherit source/rival defaults.
 										- [x] Establish compiler-proven `u8` to `u16`, `s8` to `s16`, and `u8` to `s16` widening below exact matches.  Typed constants use their declared type rather than their initialiser's range; full-width support and ranking are verified below.
 										- [x] Extend compiler comparisons across all integer widths, including wider unsigned-to-signed conversions, signed-to-unsigned changes, narrowing, explicit casts, and competing converted candidates; support only proven matches and preferences.
 											- [x] Generate all 64 source/destination pairs for typed mutable values and typed constants at signed lower or unsigned upper bounds.  Implicit conversion requires full source-range containment: same-signedness widening and wider unsigned-to-signed conversion are accepted; narrowing and signed-to-unsigned conversion are known mismatches.
 											- [x] Verify explicit integer casts for all 64 source/destination pairs and infer their target primitive type.  Casts allow the tested narrowing and signedness changes without applying raw-literal range rules to the typed result.
 											- [x] Generate all 28 destination-overload pairs for each of eight typed sources (224 ranking cases), checking both declaration orders.  Preserve exact-match priority, prefer narrower compatible conversions, reject equal-width converted ties, and exclude incompatible rivals; width-encoded ranks include signed 64-bit conversion.
-											- [x] Assert the generated inventory size to prevent duplicated nesting: 19 hand-written cases plus 192 conversion/cast cases and 224 ranking cases, for 435 cases and 870 comparisons per suite.  Parser, compiler-differential, and corpus gates pass; the corpus remains 84/84 complete with zero diagnostics.
-										- [ ] Model raw constant-alias adaptation separately from typed values.  The compiler accepts `value :: 1` for `u8`, while `value: u16 : 1` cannot narrow; parser matching deliberately leaves the raw alias unresolved until value and binding checks are proven.
+											- [x] Assert the generated inventory size to prevent duplicated nesting: the original all-width matrix had 19 handwritten cases plus 192 conversion/cast cases and 224 ranking cases, for 435 cases and 870 comparisons per suite.  Raw-alias fixtures extend this inventory below.  Parser, compiler-differential, and corpus gates pass; the corpus remains 84/84 complete with zero diagnostics.
+										- [x] Model raw constant-alias adaptation separately from typed values.  Uniquely bound, acyclic, untyped `::` chains ending in integer literals reuse the literal's range and ranking; typed constants and mutable declarations retain their declared or inferred type.
+											- [x] Verify direct and chained constants at signed/unsigned boundaries, range failures, the full `u64` payload, exact `s64` priority, narrower-width preference, and equal-width signedness ambiguity in both overload orders.
+											- [x] Keep cycles, missing and duplicate bindings, and imperative use-before-declaration aliases unresolved.  Compiler fixtures reject those invalid sources; data-scope forward references are not prohibited by the imperative source-order guard.
+											- [x] Keep inferred mutable aliases typed instead of adapting their initialisers.  A mutable `s64` exact match beats an incompatible `u8` rival, while a typed `u16` constant cannot narrow merely because its value is 1.  The shared matrix has 40 handwritten cases plus 416 generated cases, for 456 cases and 912 comparisons per suite.
 									- [ ] Compare typed floating-width and integer/floating conversions, including precision loss and required explicit casts; retain unknown results for unsupported source types.
 									- [ ] Compare multi-hop `#as using` aggregate conversion chains, ambiguous paths, and recursive or incomplete targets; require complete types and unique compiler-proven paths before selecting a return type.
 									- [ ] Compare preferences across integer-width, floating, and aggregate conversion classes; preserve exact-match priority without imposing an unproven total ordering on conversions.
@@ -737,6 +743,7 @@ Establish how bindings attach to syntax and become invalid after an edit before 
 		- [ ] Verify non-zero defaults inherited by omitted named fields, reordered named fields, and explicit overrides: for `Record :: struct { a: int = 3; b: int; }`, compare `Record.{b=0}` with fully specified `Record.{1, 2}`.
 		- [ ] Check compiler rejection of incomplete positional initialisers despite field defaults, plus duplicate and unknown named fields; preserve parser syntax/round-trips and distinguish syntax acceptance from semantic validity.
 - [ ] Evaluate constants required by language semantics.
+	- [ ] Evaluate non-literal raw numeric constants before adapting their values to overload parameters.  The compiler accepts `value :: 1 + 2` for `u8`, but parser matching deliberately keeps this unsupported without proving the computed value; literal-ended constant aliases are supported separately above.
 - [ ] Resolve overloads and polymorphs.
 - [ ] Model desugaring and compiler-generated nodes where observable.
 

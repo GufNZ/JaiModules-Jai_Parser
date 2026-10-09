@@ -1117,7 +1117,7 @@ integer_primitive_width :: (primitive: string) -> s64 {
 	return 0;
 }
 
-infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Parser_Declaration, root_scope: *Parser_Lexical_Scope, typed: *bool = null) -> string {
+infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Parser_Declaration, root_scope: *Parser_Lexical_Scope, typed: *bool = null, raw_literal: **Parser_Literal = null) -> string {
 	if !expression {
 		return "";
 	}
@@ -1125,6 +1125,10 @@ infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Par
 
 	if expression.kind == .LITERAL {
 		literal := expression.(*Parser_Literal);
+		if raw_literal && literal.value_type == .NUMBER && literal.value_flags & (.FLOAT | .DEFAULTS_TO_FLOAT64 | .REQUIRES_FLOAT64) == 0 {
+			raw_literal.* = literal;
+		}
+
 		if literal.value_type == {
 			case .STRING;
 				return "string";
@@ -1174,6 +1178,14 @@ infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Par
 	}
 
 
+	if raw_literal && declaration.first_token > expression.first_token {
+		binding_scope := find_binding_scope(root_scope, declaration);
+		if binding_scope.owner && binding_scope.owner.kind == .BLOCK && binding_scope.owner.(*Parser_Block).block_type == .IMPERATIVE {
+			return "";
+		}
+	}
+
+
 	for visited.* {
 		if it == declaration {
 			return "";
@@ -1193,7 +1205,16 @@ infer_primitive_expression_type :: (expression: *Parser_Node, visited: *[..]*Par
 	}
 
 
-	return infer_primitive_expression_type(declaration.expression, visited, root_scope, typed);
+	if declaration.flags & .IS_CONSTANT == 0 {
+		if typed {
+			typed.* = true;
+		}
+
+		return infer_primitive_expression_type(declaration.expression, visited, root_scope, typed);
+	}
+
+
+	return infer_primitive_expression_type(declaration.expression, visited, root_scope, typed, raw_literal);
 }
 
 match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser_Procedure_Header, root_scope: *Parser_Lexical_Scope, ranks: *[..]Aggregate_Call_Match = null) -> Aggregate_Call_Match {
@@ -1263,7 +1284,12 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 
 		visited: [..]*Parser_Declaration;
 		typed_primitive := false;
-		primitive := infer_primitive_expression_type(argument.expression, *visited, root_scope, *typed_primitive);
+		literal_argument: *Parser_Literal;
+		if argument.expression && argument.expression.kind == .LITERAL {
+			literal_argument = argument.expression.(*Parser_Literal);
+		}
+
+		primitive := infer_primitive_expression_type(argument.expression, *visited, root_scope, *typed_primitive, *literal_argument);
 		array_reset(*visited);
 		parameter_primitive := parsed_primitive_type(parameter.type_inst.type_valued_expression);
 		if primitive && parameter_primitive {
@@ -1272,8 +1298,7 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 				|| (primitive == "f64" && parameter_primitive == "float64"
 					|| primitive == "f32" && parameter_primitive == "float32"
 				)
-				&& argument.expression && argument.expression.kind == .LITERAL
-				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
+				&& literal_argument && literal_argument.value_type == .NUMBER
 			) {
 				if ranks {
 					array_add(ranks, .MATCH);
@@ -1311,9 +1336,8 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 
 
 			if (primitive == "f64" && parameter_primitive == "float32"
-				&& argument.expression && argument.expression.kind == .LITERAL
-				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
-				&& argument.expression.(*Parser_Literal).value_flags & .REQUIRES_FLOAT64 != 0
+				&& literal_argument && literal_argument.value_type == .NUMBER
+				&& literal_argument.value_flags & .REQUIRES_FLOAT64 != 0
 			) {
 				return .MISMATCH;
 			}
@@ -1324,8 +1348,7 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 					|| primitive == "f32" && parameter_primitive == "float64"
 					|| primitive == "f64" && parameter_primitive == "float32"
 				)
-				&& argument.expression && argument.expression.kind == .LITERAL
-				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
+				&& literal_argument && literal_argument.value_type == .NUMBER
 			) {
 				converted = true;
 				if ranks {
@@ -1344,22 +1367,21 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 
 
 			if (primitive == "s64"
-				&& argument.expression && argument.expression.kind == .LITERAL
-				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
-				&& (parameter_primitive == "u8" && argument.expression.(*Parser_Literal)._u64 <= 255
+				&& literal_argument && literal_argument.value_type == .NUMBER
+				&& (parameter_primitive == "u8" && literal_argument._u64 <= 255
 					|| parameter_primitive == "s8" && (
-						argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN == 0 && argument.expression.(*Parser_Literal)._u64 <= 127
-						|| argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN != 0 && 0 - argument.expression.(*Parser_Literal)._u64 <= 128
+						literal_argument.value_flags & .MINUS_SIGN == 0 && literal_argument._u64 <= 127
+						|| literal_argument.value_flags & .MINUS_SIGN != 0 && 0 - literal_argument._u64 <= 128
 					)
-					|| parameter_primitive == "u16" && argument.expression.(*Parser_Literal)._u64 <= 65535
+					|| parameter_primitive == "u16" && literal_argument._u64 <= 65535
 					|| parameter_primitive == "s16" && (
-						argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN == 0 && argument.expression.(*Parser_Literal)._u64 <= 32767
-						|| argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN != 0 && 0 - argument.expression.(*Parser_Literal)._u64 <= 32768
+						literal_argument.value_flags & .MINUS_SIGN == 0 && literal_argument._u64 <= 32767
+						|| literal_argument.value_flags & .MINUS_SIGN != 0 && 0 - literal_argument._u64 <= 32768
 					)
-					|| parameter_primitive == "u32" && argument.expression.(*Parser_Literal)._u64 <= 4294967295
+					|| parameter_primitive == "u32" && literal_argument._u64 <= 4294967295
 					|| parameter_primitive == "s32" && (
-						argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN == 0 && argument.expression.(*Parser_Literal)._u64 <= 2147483647
-						|| argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN != 0 && 0 - argument.expression.(*Parser_Literal)._u64 <= 2147483648
+						literal_argument.value_flags & .MINUS_SIGN == 0 && literal_argument._u64 <= 2147483647
+						|| literal_argument.value_flags & .MINUS_SIGN != 0 && 0 - literal_argument._u64 <= 2147483648
 					)
 				)
 			) {
@@ -1394,11 +1416,10 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 
 
 			if (primitive == "s64" && parameter_primitive == "u64"
-				&& argument.expression && argument.expression.kind == .LITERAL
-				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
+				&& literal_argument && literal_argument.value_type == .NUMBER
 			) {
-				if (argument.expression.(*Parser_Literal).value_flags & .MINUS_SIGN != 0
-					&& argument.expression.(*Parser_Literal)._u64 != 0
+				if (literal_argument.value_flags & .MINUS_SIGN != 0
+					&& literal_argument._u64 != 0
 				) {
 					return .MISMATCH;
 				}
@@ -1417,8 +1438,7 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 				&& (parameter_primitive == "u8" || parameter_primitive == "u16" || parameter_primitive == "u32"
 					|| parameter_primitive == "s8" || parameter_primitive == "s16" || parameter_primitive == "s32"
 				)
-				&& argument.expression && argument.expression.kind == .LITERAL
-				&& argument.expression.(*Parser_Literal).value_type == .NUMBER
+				&& literal_argument && literal_argument.value_type == .NUMBER
 			) {
 				return .MISMATCH;
 			}

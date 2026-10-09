@@ -346,6 +346,20 @@ The harness keeps syntax and semantic normalisation separate, provides trivia ro
 Compiling the suite runs its compile-time AST and workspace fixtures; running the resulting executable is also required to verify structural-diff and compiler-diagnostic assertions.
 Both checks pass after the diagnostic-location fixture correction; earlier compile-time fixture results alone did not establish runtime coverage.
 
+By default, the differential suite runs every section.  Pass one section number or exact, quoted section name after the compiler's `-` separator to rerun only that section.  The executable keeps the same selection, so unselected runtime checks are skipped too.  `list` prints section numbers, names, and test totals without running fixtures or producing an executable; `all` explicitly selects the full suite.
+
+Run these from `modules/Jai_Parser/examples`:
+
+```bash
+jai differential_test.jai -x64 -quiet - list
+jai differential_test.jai -x64 -quiet - 5 && ./differential_test.exe
+jai differential_test.jai -x64 -quiet - "Runtime checks" && ./differential_test.exe
+```
+
+ANSI-coloured progress shows the original section number, the current test within that section, and the cumulative test count for the selected run.  A shared inventory supplies totals across compile-time and runtime checks; nested compiler calls count only once within their parent test.
+
+On assertion failure, the harness prints the retained fixture path.  Diagnostic fixture files remain available until the next test starts, so a failure in the caller also preserves the compiler input.  In-memory workspace and syntax fixtures are saved on failure.  Retained files use `jai_parser_differential_<section>_<test>_<serial>.jai` in the working directory; retries choose an unused serial rather than overwriting an earlier failure.  Successful fixtures are cleaned up.
+
 For invalid-source fixtures, `capture_compiler_error` writes the supplied code to a temporary fixture, invokes `jai -x64`, and returns structured primary diagnostics with their related information.
 `assert_compiler_error_message` and `assert_invalid_expression_compiler_message` provide concise assertions for common cases; pass `log_output=true` to `capture_compiler_error` when the complete compiler rendering is useful.
 Captured compiler locations use exclusive `l0`, `c0`, `l1`, and `c1` ranges; the redirected caret run determines the end column.

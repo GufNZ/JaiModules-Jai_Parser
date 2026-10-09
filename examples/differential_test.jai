@@ -90,7 +90,26 @@ DEFAULT_OVERLOAD_TEST_TOTAL	:: 10;
 INTEGER_ROUNDING_TEST_TOTAL	:: 1;
 AGGREGATE_TEST_TOTAL		:: 53;
 ASSIGNMENT_TEST_TOTAL		:: 2;
-RUNTIME_TEST_TOTAL			:: 7;
+RUNTIME_TEST_TOTAL			:: 8;
+
+Differential_Section :: struct {
+	name: string;
+	total: s64;
+}
+
+COMPILED_SECTION :: #run -> string {
+	arguments := get_build_options().compile_time_command_line;
+	assert(arguments.count <= 1, "Pass one section number or quoted name after '-'; use '- list' to list sections.");
+	if arguments.count {
+		return arguments[0];
+	}
+
+
+	return "";
+};
+
+SYNTAX_TEST_TOTAL :: #run count_syntax_tests();
+DIFFERENTIAL_SECTIONS :: #run collect_differential_sections();
 
 Differential_Progress :: struct {
 	section_index: s64;
@@ -98,6 +117,15 @@ Differential_Progress :: struct {
 	test_index: s64;
 	test_total: s64;
 	test_depth: s64;
+	global_index: s64;
+	global_total: s64;
+	selection: string;
+	section_enabled: bool;
+	planning: bool;
+	sections: [DIFFERENTIAL_SECTION_TOTAL] Differential_Section;
+	fixture_source: string;
+	fixture_path: string;
+	failed: bool;
 	counting: bool;
 }
 
@@ -105,24 +133,90 @@ differential_progress: Differential_Progress;
 previous_assertion_handler: (Source_Code_Location, string) -> bool;
 
 differential_assertion_failed :: (location: Source_Code_Location, message: string) -> bool {
+	differential_progress.failed = true;
 	print_differential_test();
-	print("fail\n");
+	print("\e[91mFAIL\e[0m\n");
+	if !retain_differential_fixture() {
+		print("Unable to save failed fixture.\n");
+	} else if differential_progress.fixture_path {
+		print("\e[93mRetained fixture: %\e[0m\n", differential_progress.fixture_path);
+	}
+
 	return previous_assertion_handler(location, message);
 }
 
 print_differential_test :: () {
-	print("%[%/% %] %/%: ", CLEAR_PROGRESS_LINE, differential_progress.section_index, DIFFERENTIAL_SECTION_TOTAL, differential_progress.section_name, differential_progress.test_index, differential_progress.test_total);
+	print(
+		"%\e[90m[\e[91m%\e[90m/\e[91m%\e[90m]\e[0m \e[96m%\e[0m \e[93m%/%\e[0m \e[90m(total\e[0m \e[92m%\e[34m/\e[92m%\e[0m\e[90m)\e[0m: ",
+		CLEAR_PROGRESS_LINE,
+		differential_progress.section_index,
+		DIFFERENTIAL_SECTION_TOTAL,
+		differential_progress.section_name,
+		differential_progress.test_index,
+		differential_progress.test_total,
+		differential_progress.global_index,
+		differential_progress.global_total
+	);
 }
 
-begin_differential_section :: (section: string, total: s64) {
+section_is_selected :: (selection: string, section: string, index: s64) -> bool {
+	return !selection || selection == "all" || selection == section || selection == tprint("%", index);
+}
+
+prepare_differential_run :: (selection: string) -> bool {
+	PADDING := "                            ";
+	differential_progress = .{selection=selection};
+
+	maxNameLen: int;
+	for DIFFERENTIAL_SECTIONS {
+		if it.name.count > maxNameLen {
+			maxNameLen = it.name.count;
+		}
+	}
+
+	for section, index: DIFFERENTIAL_SECTIONS {
+		if selection == "list" {
+			padding := string.{count=maxNameLen - section.name.count + 1, data=PADDING.data};
+			print("\e[36m%\e[0m: %%(% tests)\n", FormatInt.{value=index + 1, minimum_digits=2, padding=32}, section.name, padding, FormatInt.{value=section.total, minimum_digits=3, padding=32});
+			differential_progress.global_total += section.total;
+		} else if section_is_selected(selection, section.name, index + 1) {
+			differential_progress.global_total += section.total;
+		}
+	}
+
+	if selection == "list" {
+		print("%Total: % tests\n", PADDING, differential_progress.global_total);
+		return false;
+	}
+
+
+	assert(differential_progress.global_total > 0, "Unknown section '%'.  Use '- list' to list sections.", selection);
+	return true;
+}
+
+begin_differential_section :: (section: string, total: s64) -> bool {
 	finish_differential_section();
 	differential_progress.section_index += 1;
 	differential_progress.section_name = section;
 	differential_progress.test_index = 0;
 	differential_progress.test_total = total;
+	if differential_progress.planning {
+		assert(differential_progress.section_index <= DIFFERENTIAL_SECTION_TOTAL);
+		differential_progress.sections[differential_progress.section_index - 1] = .{name=section, total=total};
+		return false;
+	}
+
+
+	differential_progress.section_enabled = section_is_selected(differential_progress.selection, section, differential_progress.section_index);
+	return differential_progress.section_enabled;
 }
 
 finish_differential_section :: () {
+	if differential_progress.planning || !differential_progress.section_enabled {
+		return;
+	}
+
+
 	assert(differential_progress.test_depth == 0);
 	assert(
 		differential_progress.test_index == differential_progress.test_total,
@@ -141,7 +235,9 @@ begin_differential_test :: () -> bool {
 
 
 	if differential_progress.test_depth == 0 {
+		cleanup_differential_fixture();
 		differential_progress.test_index += 1;
+		differential_progress.global_index += 1;
 		assert(differential_progress.test_index <= differential_progress.test_total, "Section '%' exceeded its total %.  Update its total.", differential_progress.section_name, differential_progress.test_total);
 		print_differential_test();
 	}
@@ -157,13 +253,71 @@ finish_differential_test :: () {
 	}
 }
 
+retain_differential_fixture :: () -> bool {
+	if !differential_progress.fixture_source || differential_progress.fixture_path {
+		return true;
+	}
+
+
+	path := differential_fixture_path();
+	if !write_entire_file(path, differential_progress.fixture_source) {
+		return false;
+	}
+
+
+	differential_progress.fixture_path = path;
+	return true;
+}
+
+cleanup_differential_fixture :: () {
+	if differential_progress.failed {
+		return;
+	}
+
+
+	if differential_progress.fixture_path {
+		file_delete(differential_progress.fixture_path);
+	}
+	differential_progress.fixture_path = "";
+	differential_progress.fixture_source = "";
+}
+
+differential_fixture_path :: () -> string {
+	serial := 1;
+	path := tprint("jai_parser_differential_%_%_%.jai", differential_progress.section_index, differential_progress.test_index, serial);
+	file, exists := file_open(path, log_errors=false);
+	while exists {
+		file_close(*file);
+		serial += 1;
+		path = tprint("jai_parser_differential_%_%_%.jai", differential_progress.section_index, differential_progress.test_index, serial);
+		file, exists = file_open(path, log_errors=false);
+	}
+
+	return path;
+}
+
 main :: () {
 	previous_assertion_handler = context.assertion_failed;
 	context.assertion_failed = differential_assertion_failed;
 	defer context.assertion_failed = previous_assertion_handler;
 
+	if !prepare_differential_run(COMPILED_SECTION) {
+		return;
+	}
+
+
+	for section, index: DIFFERENTIAL_SECTIONS {
+		if index < DIFFERENTIAL_SECTION_TOTAL - 1 && section_is_selected(COMPILED_SECTION, section.name, index + 1) {
+			differential_progress.global_index += section.total;
+		}
+	}
+
 	differential_progress.section_index = DIFFERENTIAL_SECTION_TOTAL - 1;
-	begin_differential_section("Runtime checks", RUNTIME_TEST_TOTAL);
+	if !begin_differential_section("Runtime checks", RUNTIME_TEST_TOTAL) {
+		return;
+	}
+
+
 	begin_differential_test();
 	test_structural_difference_reporting();
 	finish_differential_test();
@@ -196,18 +350,70 @@ END; // tail
 JAI
 	);
 	finish_differential_test();
+	begin_differential_test();
+	test_differential_runner();
+	finish_differential_test();
 	finish_differential_section();
+	cleanup_differential_fixture();
+	assert(differential_progress.global_index == differential_progress.global_total);
+	print("\e[92mPASS\e[0m %/% tests\n", differential_progress.global_index, differential_progress.global_total);
+}
+
+test_differential_runner :: () {
+	previous_progress := differential_progress;
+	defer differential_progress = previous_progress;
+
+	assert(section_is_selected("1", DIFFERENTIAL_SECTIONS[0].name, 1));
+	assert(section_is_selected("Runtime checks", DIFFERENTIAL_SECTIONS[DIFFERENTIAL_SECTION_TOTAL - 1].name, DIFFERENTIAL_SECTION_TOTAL));
+	assert(!section_is_selected("1", "Runtime checks", DIFFERENTIAL_SECTION_TOTAL));
+	assert(section_is_selected("all", "Runtime checks", DIFFERENTIAL_SECTION_TOTAL));
+	assert(DIFFERENTIAL_SECTIONS[0].total == CONTEXT_TEST_TOTAL);
+	assert(DIFFERENTIAL_SECTIONS[DIFFERENTIAL_SECTION_TOTAL - 1].total == RUNTIME_TEST_TOTAL);
+
+	invalid_source :: "value :: ;";
+	rejected := capture_compiler_error(invalid_source);
+	assert(rejected.diagnostics.count > 0);
+	compiler_path := differential_progress.fixture_path;
+	differential_progress.failed = true;
+	cleanup_differential_fixture();
+	compiler_source, compiler_exists := read_entire_file(compiler_path, log_errors=false);
+	defer free(compiler_source);
+
+	assert(compiler_exists && compiler_source == invalid_source, "Completed diagnostic fixture was not retained for a caller failure.");
+	assert(differential_fixture_path() != compiler_path, "A rerun would overwrite the retained diagnostic fixture.");
+	differential_progress.failed = false;
+	cleanup_differential_fixture();
+	deleted_source, compiler_still_exists := read_entire_file(compiler_path, log_errors=false);
+	defer free(deleted_source);
+
+	assert(!compiler_still_exists, "Successful diagnostic fixture was not cleaned up.");
+
+	workspace_source :: "fixture_retention :: 1;";
+	differential_progress.fixture_source = workspace_source;
+	assert(retain_differential_fixture(), "Unable to retain an in-memory workspace fixture.");
+	workspace_path := differential_progress.fixture_path;
+	differential_progress.failed = true;
+	cleanup_differential_fixture();
+	workspace_text, workspace_exists := read_entire_file(workspace_path, log_errors=false);
+	defer free(workspace_text);
+
+	assert(workspace_exists && workspace_text == workspace_source, "Workspace fixture snapshot was not retained.");
+	assert(differential_fixture_path() != workspace_path, "A rerun would overwrite the retained workspace fixture.");
+	differential_progress.failed = false;
+	cleanup_differential_fixture();
 }
 
 capture_compiler_error :: (code: string, log_output := false) -> Compiler_Diagnostic_Result {
 	begin_differential_test();
-	fixture_path :: "jai_parser_compiler_diagnostic_fixture.jai";
+	cleanup_differential_fixture();
+	fixture_path := differential_fixture_path();
 	normalized_code, tab_count := replace(code, "\t", "    ");
 	defer free(normalized_code);
 
+	differential_progress.fixture_source = code;
+	differential_progress.fixture_path = fixture_path;
 	written := write_entire_file(fixture_path, normalized_code);
 	assert(written, "Unable to write compiler diagnostic fixture '%'.", fixture_path);
-	defer file_delete(fixture_path);
 
 	result: Compiler_Diagnostic_Result;
 	result.process_result, result.standard_output, result.standard_error = run_command(
@@ -1316,6 +1522,7 @@ assert_expression_matches_code :: (source: string, expected_code: Code, layer :=
 	}
 
 
+	differential_progress.fixture_source = source;
 	parsed := Parser.parse_expression(source, fully_pathed_filename);
 	defer Parser.release_parser_tree(*parsed);
 
@@ -1340,6 +1547,7 @@ assert_statement_matches_code :: (source: string, expected_code: Code, file_scop
 	}
 
 
+	differential_progress.fixture_source = source;
 	parsed := ifx file_scope then Parser.parse_file(source) else Parser.parse_block(tprint("{ % }", source));
 	defer Parser.release_parser_tree(*parsed);
 
@@ -1391,6 +1599,7 @@ assert_asm_compiler_shape :: (source: string, expected_code: Code) {
 	}
 
 
+	differential_progress.fixture_source = source;
 	parsed := Parser.parse_block(source);
 	defer Parser.release_parser_tree(*parsed);
 
@@ -1407,6 +1616,7 @@ assert_nested_asm_compiler_shape :: (source: string, expected_code: Code) {
 	}
 
 
+	differential_progress.fixture_source = source;
 	parsed := Parser.parse_block(source);
 	defer Parser.release_parser_tree(*parsed);
 
@@ -1460,6 +1670,7 @@ assert_all_precedence_pairs :: () #expand {
 }
 
 assert_trivia_round_trip :: (source: string) {
+	differential_progress.fixture_source = source;
 	parsed := Parser.materialise_tokens(source);
 	reconstructed := Parser.reconstruct_source(*parsed);
 	assert(reconstructed == source, "Trivia round trip differed for source:\n%", source);
@@ -1467,6 +1678,7 @@ assert_trivia_round_trip :: (source: string) {
 
 run_typechecked_workspace_fixture :: (source: string, expected_declaration: string) -> Workspace_Fixture_Result {
 	begin_differential_test();
+	differential_progress.fixture_source = source;
 	result: Workspace_Fixture_Result;
 	workspace := compiler_create_workspace("Jai_Parser differential fixture");
 	assert(cast(bool) workspace, "Unable to create differential fixture workspace.");
@@ -1512,7 +1724,11 @@ run_typechecked_workspace_fixture :: (source: string, expected_declaration: stri
 }
 
 test_typechecked_workspace_fixture :: () {
-	begin_differential_section("Typechecked workspace", TYPECHECKED_TEST_TOTAL);
+	if !begin_differential_section("Typechecked workspace", TYPECHECKED_TEST_TOTAL) {
+		return;
+	}
+
+
 	result := run_typechecked_workspace_fixture("fixture_value :: 1 + 2;", "fixture_value");
 	assert(result.completed);
 	assert(result.compilation_succeeded);
@@ -1576,16 +1792,26 @@ assert_multi_candidate_workspace_fixture :: (parameters: []string, arguments: st
 }
 
 test_file_workspace_fixtures :: () {
-	begin_differential_section("File scopes", FILE_SCOPE_TEST_TOTAL);
+	if !begin_differential_section("File scopes", FILE_SCOPE_TEST_TOTAL) {
+		return;
+	}
+
+
 	for scope_name: string.["file", "export", "module"] {
 		declaration_name := tprint("fixture_%_scope", scope_name);
 		assert_file_workspace_fixture(tprint("#scope_%\n% :: 1;", scope_name, declaration_name), declaration_name);
 	}
+}
 
+test_typed_integer_fixtures :: () {
 	typed_integer_cases := make_typed_integer_cases();
 	defer array_free(typed_integer_cases);
 
-	begin_differential_section("Typed integer conversions", typed_integer_cases.count * 2);
+	if !begin_differential_section("Typed integer conversions", typed_integer_cases.count * 2) {
+		return;
+	}
+
+
 	for fixture: typed_integer_cases {
 		for order: 0..1 {
 			first := ifx order == 0
@@ -1603,7 +1829,14 @@ test_file_workspace_fixtures :: () {
 		}
 	}
 
-	begin_differential_section("Assembly and context", ASSEMBLY_CONTEXT_TEST_TOTAL);
+}
+
+test_assembly_context_fixtures :: () {
+	if !begin_differential_section("Assembly and context", ASSEMBLY_CONTEXT_TEST_TOTAL) {
+		return;
+	}
+
+
 	assert_file_workspace_fixture("#no_reset fixture_no_reset: s64;", "fixture_no_reset");
 	assert_file_workspace_fixture("fixture_asm_registers :: () { #asm { mov apple:, 10; mov signed:, -10; banana: gpr; mov w: gpr === 15, 10; } }", "fixture_asm_registers");
 	assert_file_workspace_fixture("fixture_asm_pinning :: () { #asm { a: gpr === 9; t: gpr === a; x: gpr; x === a; } }", "fixture_asm_pinning");
@@ -1619,14 +1852,28 @@ JAI,
 
 		"fixture_add_context"
 	);
-	begin_differential_section("Pair members", PAIR_MEMBER_CASES.count);
+}
+
+test_pair_member_fixtures :: () {
+	if !begin_differential_section("Pair members", PAIR_MEMBER_CASES.count) {
+		return;
+	}
+
+
 	for fixture: PAIR_MEMBER_CASES {
 		body := tprint("%\n\treturn %.Clear;", fixture.setup, fixture.receiver);
 		header := tprint("% :: (%) -> s64", fixture.declaration_name, fixture.parameters);
 		source := tprint(PAIR_MEMBER_SOURCE, fixture.extra_declarations, header, body);
 		assert_file_workspace_fixture(source, fixture.declaration_name);
 	}
-	begin_differential_section("Member queries", MEMBER_QUERY_TEST_TOTAL);
+}
+
+test_member_query_fixtures :: () {
+	if !begin_differential_section("Member queries", MEMBER_QUERY_TEST_TOTAL) {
+		return;
+	}
+
+
 	assert_file_workspace_fixture(
 		#string JAI
 #assert true;
@@ -1660,6 +1907,9 @@ JAI,
 
 		"fixture_query_field"
 	);
+}
+
+test_member_access_fixtures :: () {
 	Member_Access_Case :: struct {
 		declaration_name: string;
 		setup: string = "";
@@ -1672,14 +1922,25 @@ JAI,
 		.{"fixture_inferred_member", "container := Container.{Nested=Child.{Clear=1}};", "container.Nested.Clear"},
 		.{"fixture_aliased_member", "original := Container.{Nested=Child.{Clear=1}};\n\tcontainer := original;", "container.Nested.Clear"},
 	];
-	begin_differential_section("Member access", member_access_cases.count);
+	if !begin_differential_section("Member access", member_access_cases.count) {
+		return;
+	}
+
+
 	for fixture: member_access_cases {
 		body := tprint("%\n\treturn %;", fixture.setup, fixture.expression);
 		source := tprint(CONTAINER_MEMBER_SOURCE, "", tprint("% :: () -> s64", fixture.declaration_name), body);
 		assert_file_workspace_fixture(source, fixture.declaration_name);
 	}
 
-	begin_differential_section("Overloads and defaults", DEFAULT_OVERLOAD_TEST_TOTAL);
+}
+
+test_default_overload_fixtures :: () {
+	if !begin_differential_section("Overloads and defaults", DEFAULT_OVERLOAD_TEST_TOTAL) {
+		return;
+	}
+
+
 	assert_file_workspace_fixture(tprint(CONTAINER_MEMBER_SOURCE, tprint(CONTAINER_MAKER_SOURCE, ""), "fixture_called_member :: () -> s64", "return make().Nested.Clear;"), "fixture_called_member");
 	assert_file_workspace_fixture(
 		#string JAI
@@ -1741,7 +2002,14 @@ JAI
 	assert_overload_workspace_fixture("value: float64", "value: string", "make(1).Clear", 0, "fixture_converted_rank");
 	assert_overload_workspace_fixture("value: float64", "value: string", "make(1.5).Clear", 0, "fixture_float_rank");
 
-	begin_differential_section("Floating literals", FLOAT_LITERAL_CASES.count * 4);
+}
+
+test_floating_literal_fixtures :: () {
+	if !begin_differential_section("Floating literals", FLOAT_LITERAL_CASES.count * 4) {
+		return;
+	}
+
+
 	for fixture: FLOAT_LITERAL_CASES {
 		expression := tprint("make(%).Clear", fixture.value);
 		assert_overload_workspace_fixture("value: float64", "value: string", expression, 0, "fixture_float64_literal");
@@ -1757,7 +2025,14 @@ JAI
 		assert_overload_workspace_fixture("value: float64", "value: float32", expression, 1 - preferred_index, "fixture_float_reverse_preference");
 	}
 
-	begin_differential_section("Integer to float32", INTEGER_FLOAT32_VALUES.count * 5);
+}
+
+test_integer_float32_fixtures :: () {
+	if !begin_differential_section("Integer to float32", INTEGER_FLOAT32_VALUES.count * 5) {
+		return;
+	}
+
+
 	for value: INTEGER_FLOAT32_VALUES {
 		expression := tprint("make(%).Clear", value);
 		assert_overload_workspace_fixture("value: float32", "value: string", expression, 0, "fixture_integer_float32");
@@ -1767,7 +2042,14 @@ JAI
 		assert_overload_workspace_fixture("value: float64", "value: float32", expression, 1, "fixture_integer_float_width_reverse_rank");
 	}
 
-	begin_differential_section("Integer float32 rounding", INTEGER_ROUNDING_TEST_TOTAL);
+}
+
+test_integer_rounding_fixture :: () {
+	if !begin_differential_section("Integer float32 rounding", INTEGER_ROUNDING_TEST_TOTAL) {
+		return;
+	}
+
+
 	assert_file_workspace_fixture(
 		#string JAI
 #import "Basic";
@@ -1780,10 +2062,17 @@ JAI,
 		"fixture_integer_float32_rounding"
 	);
 
+}
+
+test_numeric_rank_fixtures :: () {
 	numeric_rank_cases := make_numeric_rank_cases();
 	defer array_free(numeric_rank_cases);
 
-	begin_differential_section("Numeric rankings", numeric_rank_cases.count * 2);
+	if !begin_differential_section("Numeric rankings", numeric_rank_cases.count * 2) {
+		return;
+	}
+
+
 	for fixture: numeric_rank_cases {
 		for order: 0..1 {
 			first := ifx order == 0
@@ -1810,6 +2099,9 @@ JAI,
 		}
 	}
 
+}
+
+test_candidate_permutation_fixtures :: () {
 	candidate_permutations_total: s64;
 	for fixture: MULTI_CANDIDATE_RANK_CASES {
 		permutation_count := 1;
@@ -1820,12 +2112,22 @@ JAI,
 		candidate_permutations_total += permutation_count;
 	}
 
-	begin_differential_section("Candidate permutations", candidate_permutations_total);
-	check_multi_candidate_rank_cases(assert_multi_candidate_workspace_fixture);
+	if !begin_differential_section("Candidate permutations", candidate_permutations_total) {
+		return;
+	}
 
+
+	check_multi_candidate_rank_cases(assert_multi_candidate_workspace_fixture);
+}
+
+test_invalid_integer_fixtures :: () {
 	signed64_boundary := SIGNED_BOUNDARY_CASES[SIGNED_BOUNDARY_CASES.count - 1];
 	unsigned64_boundary := UNSIGNED_BOUNDARY_CASES[UNSIGNED_BOUNDARY_CASES.count - 1];
-	begin_differential_section("Invalid integer limits", UNSIGNED_BOUNDARY_CASES.count * 4);
+	if !begin_differential_section("Invalid integer limits", UNSIGNED_BOUNDARY_CASES.count * 4) {
+		return;
+	}
+
+
 	for unsigned: UNSIGNED_BOUNDARY_CASES {
 		for value: string.[signed64_boundary.below, unsigned64_boundary.above] {
 			for order: 0..1 {
@@ -1841,7 +2143,14 @@ JAI,
 		}
 	}
 
-	begin_differential_section("Unsigned boundaries", UNSIGNED_BOUNDARY_CASES.count * 14 + UNSIGNED_NEGATIVE_VALUES.count * 3);
+}
+
+test_unsigned_boundary_fixtures :: () {
+	if !begin_differential_section("Unsigned boundaries", UNSIGNED_BOUNDARY_CASES.count * 14 + UNSIGNED_NEGATIVE_VALUES.count * 3) {
+		return;
+	}
+
+
 	for fixture: UNSIGNED_BOUNDARY_CASES {
 		for value: string.["0", "-0", "1", fixture.upper] {
 			expression := tprint("make(%).Clear", value);
@@ -1868,6 +2177,9 @@ JAI,
 
 	}
 
+}
+
+test_signed_boundary_fixtures :: () {
 	SIGNED_BOUNDS_SOURCE :: #string JAI
 make :: (value: %) -> s64 {
 	return value;
@@ -1891,7 +2203,11 @@ fixture_signed_rank :: () -> s64 {
 }
 JAI;
 
-	begin_differential_section("Signed boundaries", SIGNED_BOUNDARY_CASES.count * 4 + 3);
+	if !begin_differential_section("Signed boundaries", SIGNED_BOUNDARY_CASES.count * 4 + 3) {
+		return;
+	}
+
+
 	for fixture: SIGNED_BOUNDARY_CASES {
 		assert_file_workspace_fixture(tprint(SIGNED_BOUNDS_SOURCE, fixture.parameter_type, fixture.lower, fixture.upper), "fixture_signed_bounds");
 		for value, index: string.[fixture.below, fixture.above] {
@@ -1914,7 +2230,14 @@ JAI;
 
 	}
 
-	begin_differential_section("Aggregate and member inference", AGGREGATE_TEST_TOTAL);
+}
+
+test_aggregate_member_fixtures :: () {
+	if !begin_differential_section("Aggregate and member inference", AGGREGATE_TEST_TOTAL) {
+		return;
+	}
+
+
 	assert_overload_workspace_fixture("first: float64, second: float64", "first: s64, second: float64", "make(1, 1).Clear", 1, "fixture_multi_argument_rank");
 	assert_overload_workspace_fixture("first: s64, second: s64", "first: float64, second: float64", "make(1, 1).Clear", 0, "fixture_exact_first_rank");
 	crossed_rank := capture_compiler_error(tprint(MULTI_ARGUMENT_RANK_SOURCE, "first: s64, second: float64", "first: float64, second: s64", "1, 1"));
@@ -2522,6 +2845,8 @@ JAI,
 
 assert_declaration_workspace_fixture :: (source: string) {
 	begin_differential_test();
+	fixture_source := tprint("Fixture_Constraint :: struct { value: s64; }\nfixture_procedure :: () {\n%\n}\n", source);
+	differential_progress.fixture_source = fixture_source;
 	parsed := Parser.parse_declaration(source);
 	defer Parser.release_parser_tree(*parsed);
 
@@ -2535,13 +2860,7 @@ assert_declaration_workspace_fixture :: (source: string) {
 	options.write_added_strings = false;
 	set_build_options(options, workspace);
 	compiler_begin_intercept(workspace);
-	add_build_string(tprint(#string JAI
-Fixture_Constraint :: struct { value: s64; }
-fixture_procedure :: () {
-	%
-}
-JAI
-	, source), workspace);
+	add_build_string(fixture_source, workspace);
 
 	found := false;
 	while true {
@@ -2591,6 +2910,8 @@ JAI
 
 assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude_name: string) {
 	begin_differential_test();
+	fixture_source := tprint("fixture_pair :: () -> (s64, s64) { return 1, 2; }\nfixture_procedure :: () {\n%\n%\n}\n", prelude, source);
+	differential_progress.fixture_source = fixture_source;
 	parsed := Parser.parse_block(tprint("{ % }", source));
 	defer Parser.release_parser_tree(*parsed);
 
@@ -2606,14 +2927,7 @@ assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude
 	options.write_added_strings = false;
 	set_build_options(options, workspace);
 	compiler_begin_intercept(workspace);
-	add_build_string(tprint(#string JAI
-fixture_pair :: () -> (s64, s64) { return 1, 2; }
-fixture_procedure :: () {
-	%
-	%
-}
-JAI
-	, prelude, source), workspace);
+	add_build_string(fixture_source, workspace);
 
 	found := false;
 	while true {
@@ -2655,7 +2969,11 @@ JAI
 }
 
 test_assignment_workspace_fixtures :: () {
-	begin_differential_section("Assignments", ASSIGNMENT_TEST_TOTAL);
+	if !begin_differential_section("Assignments", ASSIGNMENT_TEST_TOTAL) {
+		return;
+	}
+
+
 	assert_assignment_workspace_fixture("array[0], array[1] += fixture_pair();", "array: [4] s64;", "array");
 	assert_assignment_workspace_fixture("v.x, v.y, v.z = 1, 4, 9;", "v: struct { x, y, z: s64; };", "v");
 }
@@ -2734,7 +3052,11 @@ test_declaration_workspace_fixtures :: () {
 		"fixture_this_constant :: #this;",
 		"fixture_caller_code_default :: (call := #caller_code) #expand {}",
 	];
-	begin_differential_section("Declarations", declarations.count);
+	if !begin_differential_section("Declarations", declarations.count) {
+		return;
+	}
+
+
 	for source: declarations {
 		assert_declaration_workspace_fixture(source);
 	}
@@ -2747,7 +3069,11 @@ test_directive_workspace_fixtures :: () {
 		"Fixture_Suffix_As_Member :: struct { using #as base: Fixture_Constraint; }",
 		"Fixture_Static_Member :: struct { #if true { enabled: s64; } else { disabled: s64; } }",
 	];
-	begin_differential_section("Directives", directives.count);
+	if !begin_differential_section("Directives", directives.count) {
+		return;
+	}
+
+
 	for source: directives {
 		assert_declaration_workspace_fixture(source);
 	}
@@ -3084,31 +3410,76 @@ JAI
 	assert_statement_fixture("`push_context,defer_pop remap_context();");
 }
 
-#run,stallable {
-	previous_assertion_handler = context.assertion_failed;
-	context.assertion_failed = differential_assertion_failed;
-	defer context.assertion_failed = previous_assertion_handler;
-
-	begin_differential_section("Context syntax", CONTEXT_TEST_TOTAL);
-	begin_differential_test();
-	test_context_modification_compiler_shape();
-	finish_differential_test();
-	finish_differential_section();
-
-	differential_progress.counting = true;
-	differential_progress.test_total = 0;
+count_syntax_tests :: () -> s64 {
+	previous_progress := differential_progress;
+	differential_progress = .{counting=true};
 	test_syntax_fixtures();
-	syntax_test_total := differential_progress.test_total;
-	differential_progress.counting = false;
-	differential_progress.test_total = differential_progress.test_index;
-	begin_differential_section("Syntax fixtures", syntax_test_total);
-	test_syntax_fixtures();
+	total := differential_progress.test_total;
+	differential_progress = previous_progress;
+	return total;
+}
+
+collect_differential_sections :: () -> [DIFFERENTIAL_SECTION_TOTAL] Differential_Section {
+	previous_progress := differential_progress;
+	differential_progress = .{planning=true};
+	run_compile_time_sections();
+	begin_differential_section("Runtime checks", RUNTIME_TEST_TOTAL);
+	assert(differential_progress.section_index == DIFFERENTIAL_SECTION_TOTAL);
+	sections := differential_progress.sections;
+	differential_progress = previous_progress;
+	return sections;
+}
+
+run_compile_time_sections :: () {
+	if begin_differential_section("Context syntax", CONTEXT_TEST_TOTAL) {
+		begin_differential_test();
+		test_context_modification_compiler_shape();
+		finish_differential_test();
+	}
+	if begin_differential_section("Syntax fixtures", SYNTAX_TEST_TOTAL) {
+		test_syntax_fixtures();
+	}
 
 	test_typechecked_workspace_fixture();
 	test_file_workspace_fixtures();
+	test_typed_integer_fixtures();
+	test_assembly_context_fixtures();
+	test_pair_member_fixtures();
+	test_member_query_fixtures();
+	test_member_access_fixtures();
+	test_default_overload_fixtures();
+	test_floating_literal_fixtures();
+	test_integer_float32_fixtures();
+	test_integer_rounding_fixture();
+	test_numeric_rank_fixtures();
+	test_candidate_permutation_fixtures();
+	test_invalid_integer_fixtures();
+	test_unsigned_boundary_fixtures();
+	test_signed_boundary_fixtures();
+	test_aggregate_member_fixtures();
 	test_declaration_workspace_fixtures();
 	test_directive_workspace_fixtures();
 	test_assignment_workspace_fixtures();
 	finish_differential_section();
 	assert(differential_progress.section_index == DIFFERENTIAL_SECTION_TOTAL - 1);
+}
+
+#run,stallable {
+	previous_assertion_handler = context.assertion_failed;
+	context.assertion_failed = differential_assertion_failed;
+	defer context.assertion_failed = previous_assertion_handler;
+
+	if prepare_differential_run(COMPILED_SECTION) {
+		run_compile_time_sections();
+		cleanup_differential_fixture();
+		expected_total := differential_progress.global_total;
+		if section_is_selected(COMPILED_SECTION, "Runtime checks", DIFFERENTIAL_SECTION_TOTAL) {
+			expected_total -= RUNTIME_TEST_TOTAL;
+		}
+
+		assert(differential_progress.global_index == expected_total);
+		print("\e[32mPASS\e[0m compile-time checks (%/% total tests)\n", differential_progress.global_index, differential_progress.global_total);
+	} else {
+		set_build_options_dc(.{do_output=false});
+	}
 }
