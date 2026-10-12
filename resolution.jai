@@ -1049,20 +1049,43 @@ aggregate_members_hidden_by_filter :: (expression: *Parser_Node, filter: *Parser
 	}
 
 
+	parameter_shadow := false;
 	if aggregate.type_arguments.count > 0 {
+		bindings: [..]Parser_Binding;
+		defer array_free(bindings);
+
+		if !collect_aggregate_bindings(structure.block.statements, *bindings, root_scope) {
+			return false;
+		}
+
+
 		for parameter_node: structure.arguments_block.statements {
 			parameter := parameter_node.(*Parser_Declaration);
 			if !binding_is_unique(root_scope, parameter) || import_name_visible(filter, parameter.name) {
 				return false;
 			}
+
+
+			for bindings {
+				if it.name == parameter.name {
+					parameter_shadow = true;
+				}
+			}
 		}
 	}
 
 
-	return aggregate_statements_hidden_by_filter(structure.block.statements, filter, aggregate, root_scope, visited);
+	return aggregate_statements_hidden_by_filter(structure.block.statements, filter, aggregate, root_scope, visited, parameter_shadow);
 }
 
-aggregate_statements_hidden_by_filter :: (statements: []*Parser_Node, filter: *Parser_Using, container: Parsed_Aggregate_Type, root_scope: *Parser_Lexical_Scope, visited: *[..]*Parser_Declaration) -> bool {
+aggregate_statements_hidden_by_filter :: (
+	statements: []*Parser_Node,
+	filter: *Parser_Using,
+	container: Parsed_Aggregate_Type,
+	root_scope: *Parser_Lexical_Scope,
+	visited: *[..]*Parser_Declaration,
+	parameter_shadow: bool
+) -> bool {
 	for statement: statements {
 		if statement.kind == .IF {
 			conditional := statement.(*Parser_If);
@@ -1077,7 +1100,7 @@ aggregate_statements_hidden_by_filter :: (statements: []*Parser_Node, filter: *P
 			branch := ifx condition
 				then conditional.then_block
 				else conditional.else_block;
-			if branch && !aggregate_statements_hidden_by_filter(branch.statements, filter, container, root_scope, visited) {
+			if branch && !aggregate_statements_hidden_by_filter(branch.statements, filter, container, root_scope, visited, parameter_shadow) {
 				return false;
 			}
 
@@ -1089,6 +1112,20 @@ aggregate_statements_hidden_by_filter :: (statements: []*Parser_Node, filter: *P
 		field: *Parser_Declaration;
 		if statement.kind == .DECLARATION {
 			field = statement.(*Parser_Declaration);
+			if parameter_shadow {
+				if !field.type_inst || !field.type_inst.type_valued_expression || field.type_inst.must_implement {
+					return false;
+				}
+
+
+				substitution_visited: [..]*Parser_Declaration;
+				defer array_free(substitution_visited);
+
+				field_type := substitute_aggregate_field_type(field.type_inst.type_valued_expression, container, root_scope, *substitution_visited);
+				if !parsed_primitive_type(field_type, root_scope) && !resolve_complete_aggregate_type(field_type, root_scope).declaration {
+					return false;
+				}
+			}
 		} else if statement.kind == .USING {
 			using_node := statement.(*Parser_Using);
 			if !using_node.expression || using_node.expression.kind != .DECLARATION {
@@ -1122,7 +1159,7 @@ aggregate_statements_hidden_by_filter :: (statements: []*Parser_Node, filter: *P
 		structure := container.declaration.expression.(*Parser_Struct);
 		if container.type_arguments.count > 0 {
 			for parameter_node: structure.arguments_block.statements {
-				if field.name == parameter_node.(*Parser_Declaration).name {
+				if field.name == parameter_node.(*Parser_Declaration).name && statement.kind != .DECLARATION {
 					return false;
 				}
 			}
@@ -1744,6 +1781,9 @@ compare_aggregate_call_ranks :: (match: Aggregate_Call_Match, ranks: []Aggregate
 		aggregate_conversion := false;
 		best_aggregate_conversion := false;
 		unproved_numeric_crossing := false;
+		numeric_exact_better := false;
+		numeric_exact_worse := false;
+		differing_numeric_conversions := false;
 
 		for ranks {
 			if it == .AGGREGATE_CONVERSION {
@@ -1752,6 +1792,19 @@ compare_aggregate_call_ranks :: (match: Aggregate_Call_Match, ranks: []Aggregate
 
 			if best_ranks[it_index] == .AGGREGATE_CONVERSION {
 				best_aggregate_conversion = true;
+			}
+
+			if it == .MATCH && best_ranks[it_index] != .MATCH && best_ranks[it_index] != .AGGREGATE_CONVERSION {
+				numeric_exact_better = true;
+			} else if best_ranks[it_index] == .MATCH && it != .MATCH && it != .AGGREGATE_CONVERSION {
+				numeric_exact_worse = true;
+			}
+
+			if (it != best_ranks[it_index]
+				&& it != .MATCH && best_ranks[it_index] != .MATCH
+				&& it != .AGGREGATE_CONVERSION && best_ranks[it_index] != .AGGREGATE_CONVERSION
+			) {
+				differing_numeric_conversions = true;
 			}
 
 			if (it != best_ranks[it_index]
@@ -1767,6 +1820,16 @@ compare_aggregate_call_ranks :: (match: Aggregate_Call_Match, ranks: []Aggregate
 		}
 
 		if aggregate_conversion != best_aggregate_conversion {
+			if numeric_exact_better || numeric_exact_worse {
+				if differing_numeric_conversions {
+					return false, false;
+				}
+
+
+				return numeric_exact_better, numeric_exact_worse;
+			}
+
+
 			if unproved_numeric_crossing {
 				return false, false;
 			}
@@ -2212,6 +2275,52 @@ evaluate_constant_boolean :: (expression: *Parser_Node, result: *bool, visited: 
 
 		case .BINARY_OPERATOR;
 			binary := expression.(*Parser_Binary_Operator);
+			if binary.operator_type == {
+				case .IS_EQUAL;			#through;
+				case .IS_NOT_EQUAL;		#through;
+				case .LESS_OR_EQUAL;	#through;
+				case .GREATER_OR_EQUAL;	#through;
+				case #char "<";			#through;
+				case #char ">";
+					left_literal: *Parser_Literal;
+					right_literal: *Parser_Literal;
+					infer_primitive_expression_type(binary.left, visited, root_scope, raw_literal = *left_literal);
+					infer_primitive_expression_type(binary.right, visited, root_scope, raw_literal = *right_literal);
+					if !left_literal || !right_literal {
+						return false;
+					}
+
+
+					literals: [2]*Parser_Literal = .[left_literal, right_literal];
+					for literal: literals {
+						if literal.value_flags & (.FLOAT | .DEFAULTS_TO_FLOAT64 | .REQUIRES_FLOAT64) != 0 {
+							return false;
+						}
+
+
+						negative := (literal.value_flags & .MINUS_SIGN != 0 && literal._u64 != 0);
+						if (	negative && literal._u64 < 0x8000000000000000
+							|| !negative && literal._u64 > 0x7fffffffffffffff
+						) {
+							return false;
+						}
+					}
+
+					left := cast, no_check(s64) left_literal._u64;
+					right := cast, no_check(s64) right_literal._u64;
+					if binary.operator_type == {
+						case .IS_EQUAL;			result.* = left == right;
+						case .IS_NOT_EQUAL;		result.* = left != right;
+						case .LESS_OR_EQUAL;	result.* = left <= right;
+						case .GREATER_OR_EQUAL;	result.* = left >= right;
+						case #char "<";			result.* = left < right;
+						case #char ">";			result.* = left > right;
+					}
+
+					return true;
+			}
+
+
 			if binary.operator_type != .LOGICAL_AND && binary.operator_type != .LOGICAL_OR {
 				return false;
 			}

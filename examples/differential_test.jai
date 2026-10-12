@@ -1,8 +1,21 @@
 // Normalise parser and compiler ASTs from paired fixtures and compare their syntax; child workspaces cover contextual nodes, while invalid fixtures compare diagnostics.
-#import "Basic";
+CHECK_DIFFERENTIAL_MEMORY :: true;
+PROFILE_DIFFERENTIAL_MEMORY :: false;
+
+#if PROFILE_DIFFERENTIAL_MEMORY {
+	#import "Atomics";
+	#import "Basic"()(MEMORY_DEBUGGER=true, VISUALIZE_MEMORY_DEBUGGER=false, REPLACEMENT_INTERFACE=Differential_Allocation_Debugger);
+	#import "Flat_Pool";
+	#import "Hash_Table";
+} else {
+	#import "Basic"()(MEMORY_DEBUGGER=CHECK_DIFFERENTIAL_MEMORY, VISUALIZE_MEMORY_DEBUGGER=false);
+}
+
 #import "Compiler";
+#import "Base64";
 #import "File";
 #import "File_Utilities";
+#import "Pool";
 #import "Process";
 #import "String";
 
@@ -22,6 +35,52 @@ Normalized_Field :: struct {
 
 Normalized_Tree :: struct {
 	fields: [..] Normalized_Field;
+}
+
+restore_fixture_temp :: (mark: Temporary_Storage_State) {
+	cleanup_differential_fixture();
+	if !differential_progress.failed {
+		set_temporary_storage_mark(mark);
+		if differential_progress.test_depth == 0 && differential_progress.test_index > 0 {
+			profile_workspace_memory("after_fixture_cleanup");
+		}
+	}
+}
+
+auto_release_fixture_temp :: () #expand {
+	#if PROFILE_DIFFERENTIAL_MEMORY {
+		begin_fixture_allocation_profile();
+		differential_allocation_events.scope_depth += 1;
+		`defer {
+			differential_allocation_events.scope_depth -= 1;
+			finish_fixture_allocation_profile();
+		}
+	}
+
+	temporary_mark := get_temporary_storage_mark();
+	`defer restore_fixture_temp(temporary_mark);
+}
+
+push_fixture_allocator :: () #expand {
+	#if PROFILE_DIFFERENTIAL_MEMORY {
+		begin_fixture_allocation_profile();
+		differential_allocation_events.scope_depth += 1;
+		`defer {
+			differential_allocation_events.scope_depth -= 1;
+			finish_fixture_allocation_profile();
+		}
+	}
+
+	temporary_mark := get_temporary_storage_mark();
+	`defer restore_fixture_temp(temporary_mark);
+
+	`fixture_storage: Pool;
+	set_allocators(*fixture_storage);
+	`defer release(*fixture_storage);
+
+	original_allocator := context.allocator;
+	context.allocator = .{proc=pool_allocator_proc, data=*fixture_storage};
+	`defer context.allocator = original_allocator;
 }
 
 procedure_syntax_flags :: (flags: type_of(Code_Procedure_Header.procedure_flags)) -> type_of(Code_Procedure_Header.procedure_flags) {
@@ -73,6 +132,7 @@ Compiler_Diagnostic :: struct {
 }
 
 Compiler_Diagnostic_Result :: struct {
+	storage: *Pool;
 	process_result: Process_Result;
 	standard_output: string;
 	standard_error: string;
@@ -96,11 +156,12 @@ RUNTIME_TEST_TOTAL			:: 8;
 Differential_Section :: struct {
 	name: string;
 	total: s64;
+	batchable: bool;
 }
 
 COMPILED_SECTION :: #run -> string {
 	arguments := get_build_options().compile_time_command_line;
-	assert(arguments.count <= 1, "Pass one section number or quoted name after '-'; use '- list' to list sections.");
+	assert(arguments.count <= 1 || arguments.count == 3, "Pass a section after '-', optionally followed by first and last fixture indices.");
 	if arguments.count {
 		return arguments[0];
 	}
@@ -109,8 +170,26 @@ COMPILED_SECTION :: #run -> string {
 	return "";
 };
 
-SYNTAX_TEST_TOTAL :: #run count_syntax_tests();
-DIFFERENTIAL_SECTIONS :: #run collect_differential_sections();
+Differential_Batch :: struct {
+	first: s64 = 1;
+	last: s64;
+}
+
+COMPILED_BATCH :: #run -> Differential_Batch {
+	arguments := get_build_options().compile_time_command_line;
+	if arguments.count != 3 {
+		return .{};
+	}
+
+
+	first, first_valid, first_remainder := string_to_int(arguments[1], T=s64);
+	last, last_valid, last_remainder := string_to_int(arguments[2], T=s64);
+	assert(first_valid && last_valid && !first_remainder && !last_remainder && first >= 1 && last >= first, "Invalid fixture batch bounds.");
+	return .{first=first, last=last};
+};
+
+SYNTAX_TEST_TOTAL :: #run,stallable count_syntax_tests();
+DIFFERENTIAL_SECTIONS :: #run,stallable collect_differential_sections();
 
 Differential_Progress :: struct {
 	section_index: s64;
@@ -132,6 +211,314 @@ Differential_Progress :: struct {
 
 differential_progress: Differential_Progress;
 previous_assertion_handler: (Source_Code_Location, string) -> bool;
+
+#if PROFILE_DIFFERENTIAL_MEMORY {
+	Differential_Allocation :: struct {
+		size: s64;
+		allocator: Allocator;
+		counted: bool;
+	}
+
+	Differential_Allocation_Events :: struct {
+		allocations: Table(*void, Differential_Allocation);
+		gate: u32;
+		live_count: s64;
+		live_bytes: s64;
+		peak_count: s64;
+		peak_bytes: s64;
+		initial_count: s64;
+		initial_bytes: s64;
+		scope_depth: s64;
+		escaped_results: s64;
+		active: bool;
+		fixture_index: s64;
+		first_fixture_index: s64;
+		fixture_section: string;
+	}
+
+	differential_allocation_events: Differential_Allocation_Events;
+	#add_context differential_memory_observer := false;
+
+	lock_differential_allocations :: () {
+		while atomic_swap(*differential_allocation_events.gate, 1) != 0 {
+		}
+	}
+
+	differential_ignored_allocator :: (allocator: Allocator) -> bool {
+		return allocator.proc == pool_allocator_proc || allocator.proc == flat_pool_allocator_proc
+			|| allocator.proc == temporary_allocator_proc;
+	}
+
+	Differential_Allocation_Debugger :: struct {
+		check_alloc :: (allocator: Allocator, memory: *void, size: s64) {
+			_check_alloc(allocator, memory, size);
+			if !memory || context.inside_memory_debugger || differential_ignored_allocator(allocator) {
+				return;
+			}
+
+
+			context.inside_memory_debugger = true;
+			defer context.inside_memory_debugger = false;
+
+			using differential_allocation_events;
+			lock_differential_allocations();
+			defer atomic_store(*gate, 0);
+
+			counted := !context.differential_memory_observer;
+			table_add(*allocations, memory, .{size=size, allocator=allocator, counted=counted});
+			if counted {
+				live_count += 1;
+				live_bytes += size;
+				peak_count = max(peak_count, live_count);
+				peak_bytes = max(peak_bytes, live_bytes);
+			}
+		}
+
+		check_free :: (allocator: Allocator, memory: *void) {
+			if memory && !context.inside_memory_debugger && !differential_ignored_allocator(allocator) {
+				context.inside_memory_debugger = true;
+				defer context.inside_memory_debugger = false;
+
+				using differential_allocation_events;
+				lock_differential_allocations();
+				defer atomic_store(*gate, 0);
+
+				found, allocation := table_find(*allocations, memory);
+				if found {
+					if allocation.counted {
+						live_count -= 1;
+						live_bytes -= allocation.size;
+					}
+
+					table_remove(*allocations, memory);
+				}
+			}
+
+			_check_free(allocator, memory);
+		}
+
+		check_create_heap :: (allocator: Allocator) {
+			_check_create_heap(allocator);
+		}
+
+		check_destroy_heap :: (allocator: Allocator) {
+			if !context.inside_memory_debugger {
+				context.inside_memory_debugger = true;
+				defer context.inside_memory_debugger = false;
+
+				using differential_allocation_events;
+				lock_differential_allocations();
+				defer atomic_store(*gate, 0);
+
+				for allocations {
+					if it.allocator.proc == allocator.proc && it.allocator.data == allocator.data {
+						if it.counted {
+							live_count -= 1;
+							live_bytes -= it.size;
+						}
+
+						table_remove(*allocations, it_index);
+					}
+				}
+			}
+
+			_check_destroy_heap(allocator);
+		}
+	}
+
+	test_differential_allocation_events :: () {
+		using differential_allocation_events;
+		before_count := live_count;
+		before_bytes := live_bytes;
+		peak_count = live_count;
+		peak_bytes = live_bytes;
+		first := alloc(64);
+		second := alloc(96);
+		second = realloc(second, 192, 96);
+		assert(live_count == before_count + 2 && live_bytes == before_bytes + 256);
+
+		free(first);
+		free(second);
+		assert(live_count == before_count && live_bytes == before_bytes);
+		assert(peak_count == before_count + 2 && peak_bytes == before_bytes + 256);
+		context.differential_memory_observer = true;
+		observer_allocation := alloc(1024);
+		context.differential_memory_observer = false;
+		assert(live_count == before_count && live_bytes == before_bytes);
+
+		free(observer_allocation);
+		assert(live_count == before_count && live_bytes == before_bytes);
+		assert(peak_count == before_count + 2 && peak_bytes == before_bytes + 256);
+		print("Allocation-event self-check: transient peak 2 allocations / 256 requested bytes; retained 0/0\n");
+	}
+
+	begin_fixture_allocation_profile :: () {
+		if differential_progress.counting || differential_progress.planning || !differential_progress.section_enabled {
+			return;
+		}
+
+
+		using differential_allocation_events;
+		lock_differential_allocations();
+		defer atomic_store(*gate, 0);
+
+		if !active {
+			initial_count = live_count;
+			initial_bytes = live_bytes;
+			peak_count = live_count;
+			peak_bytes = live_bytes;
+			fixture_index = 0;
+			active = true;
+		}
+	}
+
+	finish_fixture_allocation_profile :: () {
+		using differential_allocation_events;
+		if !active || scope_depth != 0 || escaped_results != 0 || differential_progress.test_depth != 0 {
+			return;
+		}
+
+
+		if fixture_index == 0 {
+			active = false;
+			return;
+		}
+
+
+		lock_differential_allocations();
+		count_peak := peak_count;
+		byte_peak := peak_bytes;
+		count_delta := live_count - initial_count;
+		byte_delta := live_bytes - initial_bytes;
+		count_baseline := initial_count;
+		byte_baseline := initial_bytes;
+		active = false;
+		atomic_store(*gate, 0);
+		context.differential_memory_observer = true;
+		defer context.differential_memory_observer = false;
+
+		auto_release_temp();
+		if first_fixture_index != fixture_index {
+			print(
+				"Allocation events '%' shared cleanup scope %..% (not per-fixture): peak % allocations / % requested backing bytes; above baseline %/%; retained %/%\n",
+				fixture_section,
+				first_fixture_index,
+				fixture_index,
+				count_peak,
+				byte_peak,
+				count_peak - count_baseline,
+				byte_peak - byte_baseline,
+				count_delta,
+				byte_delta
+			);
+			return;
+		}
+
+
+		print(
+			"Allocation events '%' fixture %: peak % allocations / % requested backing bytes; above baseline %/%; retained %/%\n",
+			fixture_section, fixture_index,
+			count_peak, byte_peak, count_peak - count_baseline, byte_peak - byte_baseline, count_delta, byte_delta
+		);
+	}
+}
+
+#if PROFILE_DIFFERENTIAL_MEMORY && OS == .WINDOWS {
+	#import "Windows";
+	Differential_Process_Memory_Counters :: struct {
+		size: u32;
+		page_fault_count: u32;
+		peak_working_set: SIZE_T;
+		working_set: SIZE_T;
+		quota_peak_paged_pool: SIZE_T;
+		quota_paged_pool: SIZE_T;
+		quota_peak_non_paged_pool: SIZE_T;
+		quota_non_paged_pool: SIZE_T;
+		commit: SIZE_T;
+		peak_commit: SIZE_T;
+	}
+
+	Differential_Psapi :: #library,system "Psapi";
+	GetProcessMemoryInfo :: (process: HANDLE, counters: *Differential_Process_Memory_Counters, size: u32) -> BOOL #foreign Differential_Psapi;
+}
+
+profile_workspace_memory :: (phase: string) {
+	#if PROFILE_DIFFERENTIAL_MEMORY && OS == .WINDOWS {
+		previous_observer := context.differential_memory_observer;
+		context.differential_memory_observer = true;
+		defer context.differential_memory_observer = previous_observer;
+
+		auto_release_temp();
+		counters: Differential_Process_Memory_Counters;
+		counters.size = xx size_of(Differential_Process_Memory_Counters);
+		queried := GetProcessMemoryInfo(GetCurrentProcess(), *counters, counters.size);
+		assert(queried == .TRUE, "Unable to query compiler-process memory at '%'.", phase);
+		allocations, bytes := differential_memory_snapshot();
+		print(
+			"Workspace memory '%' fixture %: %; working-set % bytes; commit % bytes; process peaks %/% bytes; tracked % allocations / % bytes\n",
+			differential_progress.section_name,
+			differential_progress.test_index,
+			phase,
+			counters.working_set,
+			counters.commit,
+			counters.peak_working_set,
+			counters.peak_commit,
+			allocations,
+			bytes
+		);
+	}
+}
+
+#if PROFILE_DIFFERENTIAL_MEMORY {
+	Differential_Memory_Profile :: struct {
+		initial_allocations: s64;
+		initial_bytes: s64;
+		initial_temporary_bytes: s64;
+		previous_allocations: s64;
+		previous_bytes: s64;
+		peak_bytes: s64;
+		peak_temporary_bytes: s64;
+	}
+
+	differential_memory_profile: Differential_Memory_Profile;
+
+	profile_differential_memory :: () {
+		previous_observer := context.differential_memory_observer;
+		context.differential_memory_observer = true;
+		defer context.differential_memory_observer = previous_observer;
+
+		auto_release_temp();
+		temporary_bytes := context.temporary_storage.total_bytes_occupied;
+		allocations, bytes := differential_memory_snapshot();
+		if differential_progress.test_index == 0 {
+			differential_memory_profile = .{
+				initial_allocations=allocations, initial_bytes=bytes, initial_temporary_bytes=temporary_bytes,
+				previous_allocations=allocations, previous_bytes=bytes,
+				peak_bytes=bytes, peak_temporary_bytes=temporary_bytes
+			};
+		}
+
+		using differential_memory_profile;
+		peak_bytes = max(peak_bytes, bytes);
+		peak_temporary_bytes = max(peak_temporary_bytes, temporary_bytes);
+		print(
+			"Memory '%' %/%: retained % allocations / % bytes; interval % allocations / % bytes; temporary delta % bytes; sampled heap/temporary peaks %/% bytes\n",
+			differential_progress.section_name,
+			differential_progress.test_index,
+			differential_progress.test_total,
+			allocations - initial_allocations,
+			bytes - initial_bytes,
+			allocations - previous_allocations,
+			bytes - previous_bytes,
+			temporary_bytes - initial_temporary_bytes,
+			peak_bytes,
+			peak_temporary_bytes
+		);
+
+		previous_allocations = allocations;
+		previous_bytes = bytes;
+	}
+}
 
 differential_assertion_failed :: (location: Source_Code_Location, message: string) -> bool {
 	differential_progress.failed = true;
@@ -167,6 +554,26 @@ section_is_selected :: (selection: string, section: string, index: s64) -> bool 
 prepare_differential_run :: (selection: string) -> bool {
 	PADDING := "                            ";
 	differential_progress = .{selection=selection};
+	#if PROFILE_DIFFERENTIAL_MEMORY {
+		if selection == "allocation-events" {
+			test_differential_allocation_events();
+			return false;
+		}
+	}
+
+
+	if selection == "list-machine" {
+		print("Index\tNameBase64\tTotal\tRuntime\tBatchable\n");
+		for section, index: DIFFERENTIAL_SECTIONS {
+			name := base64_encode(section.name);
+			defer free(name.data);
+
+			print("%\t%\t%\t%\t%\n", index + 1, name, section.total, index == DIFFERENTIAL_SECTIONS.count - 1, section.batchable);
+		}
+
+		return false;
+	}
+
 
 	maxNameLen: int;
 	for DIFFERENTIAL_SECTIONS {
@@ -181,7 +588,13 @@ prepare_differential_run :: (selection: string) -> bool {
 			print("\e[36m%\e[0m: %%(% tests)\n", FormatInt.{value=index + 1, minimum_digits=2, padding=32}, section.name, padding, FormatInt.{value=section.total, minimum_digits=3, padding=32});
 			differential_progress.global_total += section.total;
 		} else if section_is_selected(selection, section.name, index + 1) {
-			differential_progress.global_total += section.total;
+			if COMPILED_BATCH.last {
+				assert(selection && selection != "all" && section.batchable, "Fixture batches require one explicitly selected batchable section.");
+				assert(COMPILED_BATCH.last <= section.total, "Fixture batch exceeds the section total.");
+				differential_progress.global_total += COMPILED_BATCH.last - COMPILED_BATCH.first + 1;
+			} else {
+				differential_progress.global_total += section.total;
+			}
 		}
 	}
 
@@ -192,10 +605,13 @@ prepare_differential_run :: (selection: string) -> bool {
 
 
 	assert(differential_progress.global_total > 0, "Unknown section '%'.  Use '- list' to list sections.", selection);
+	#if PROFILE_DIFFERENTIAL_MEMORY {
+		assert(selection && selection != "all", "Memory profiling requires one selected section; combined runs can exhaust memory.");
+	}
 	return true;
 }
 
-begin_differential_section :: (section: string, total: s64) -> bool {
+begin_differential_section :: (section: string, total: s64, batchable := false) -> bool {
 	finish_differential_section();
 	differential_progress.section_index += 1;
 	differential_progress.section_name = section;
@@ -203,12 +619,18 @@ begin_differential_section :: (section: string, total: s64) -> bool {
 	differential_progress.test_total = total;
 	if differential_progress.planning {
 		assert(differential_progress.section_index <= DIFFERENTIAL_SECTION_TOTAL);
-		differential_progress.sections[differential_progress.section_index - 1] = .{name=section, total=total};
+		differential_progress.sections[differential_progress.section_index - 1] = .{name=section, total=total, batchable=batchable};
 		return false;
 	}
 
 
 	differential_progress.section_enabled = section_is_selected(differential_progress.selection, section, differential_progress.section_index);
+	#if PROFILE_DIFFERENTIAL_MEMORY {
+		if differential_progress.section_enabled {
+			profile_differential_memory();
+		}
+	}
+
 	return differential_progress.section_enabled;
 }
 
@@ -226,6 +648,23 @@ finish_differential_section :: () {
 		differential_progress.test_index,
 		differential_progress.test_total
 	);
+
+}
+
+skip_differential_batch_fixture :: () -> bool {
+	if !COMPILED_BATCH.last {
+		return false;
+	}
+
+
+	assert(differential_progress.test_depth == 0);
+	next_index := differential_progress.test_index + 1;
+	if next_index < COMPILED_BATCH.first || next_index > COMPILED_BATCH.last {
+		differential_progress.test_index = next_index;
+		return true;
+	}
+
+	return false;
 }
 
 begin_differential_test :: () -> bool {
@@ -237,8 +676,24 @@ begin_differential_test :: () -> bool {
 
 	if differential_progress.test_depth == 0 {
 		cleanup_differential_fixture();
+		#if PROFILE_DIFFERENTIAL_MEMORY {
+			if differential_progress.test_index > 0 && differential_progress.test_index % 32 == 0 {
+				profile_differential_memory();
+			}
+		}
+
 		differential_progress.test_index += 1;
 		differential_progress.global_index += 1;
+		#if PROFILE_DIFFERENTIAL_MEMORY {
+			begin_fixture_allocation_profile();
+			if differential_allocation_events.fixture_index == 0 {
+				differential_allocation_events.first_fixture_index = differential_progress.test_index;
+			}
+
+			differential_allocation_events.fixture_index = differential_progress.test_index;
+			differential_allocation_events.fixture_section = differential_progress.section_name;
+		}
+
 		assert(differential_progress.test_index <= differential_progress.test_total, "Section '%' exceeded its total %.  Update its total.", differential_progress.section_name, differential_progress.test_total);
 		print_differential_test();
 	}
@@ -251,6 +706,9 @@ finish_differential_test :: () {
 	differential_progress.test_depth -= 1;
 	if differential_progress.test_depth == 0 {
 		print("%", CLEAR_PROGRESS_LINE);
+		#if PROFILE_DIFFERENTIAL_MEMORY {
+			finish_fixture_allocation_profile();
+		}
 	}
 }
 
@@ -350,30 +808,50 @@ main :: () {
 	}
 
 
+	#if CHECK_DIFFERENTIAL_MEMORY {
+		before_allocations, before_bytes := differential_memory_snapshot();
+		checkpoint_allocations := before_allocations;
+		checkpoint_bytes := before_bytes;
+		defer {
+			after_allocations, after_bytes := differential_memory_snapshot();
+			print("Differential runtime retained: % allocations, % bytes\n", after_allocations - before_allocations, after_bytes - before_bytes);
+		}
+	}
+
 	begin_differential_test();
+	structural_temporary_bytes := context.temporary_storage.total_bytes_occupied;
 	test_structural_difference_reporting();
+	assert(context.temporary_storage.total_bytes_occupied == structural_temporary_bytes, "Structural comparison retained temporary storage.");
 	finish_differential_test();
+	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("structural differences", *checkpoint_allocations, *checkpoint_bytes);
 	begin_differential_test();
+	layers_temporary_bytes := context.temporary_storage.total_bytes_occupied;
 	test_comparison_layers();
+	assert(context.temporary_storage.total_bytes_occupied == layers_temporary_bytes, "Comparison layers retained temporary storage.");
 	finish_differential_test();
+	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("comparison layers", *checkpoint_allocations, *checkpoint_bytes);
 	begin_differential_test();
 	assert_invalid_expression_compiler_message(
 		"1 +",
 		"Unable to parse an expression to the right of this binary operator."
 	);
 	finish_differential_test();
+	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("invalid expression", *checkpoint_allocations, *checkpoint_bytes);
 	begin_differential_test();
 	test_compiler_related_diagnostics();
 	finish_differential_test();
+	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("related diagnostics", *checkpoint_allocations, *checkpoint_bytes);
 	begin_differential_test();
 	test_asm_semantic_diagnostics();
 	finish_differential_test();
+	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("ASM diagnostics", *checkpoint_allocations, *checkpoint_bytes);
 	begin_differential_test();
 	assert_trivia_round_trip(#string JAI
 value /* comment */ + 42;
 JAI
 	);
 	finish_differential_test();
+	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("ordinary trivia", *checkpoint_allocations, *checkpoint_bytes);
 	begin_differential_test();
 	assert_trivia_round_trip(#string JAI
 text :: #string END
@@ -382,13 +860,50 @@ END; // tail
 JAI
 	);
 	finish_differential_test();
+	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("here-string trivia", *checkpoint_allocations, *checkpoint_bytes);
 	begin_differential_test();
 	test_differential_runner();
 	finish_differential_test();
+	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("runner checks", *checkpoint_allocations, *checkpoint_bytes);
 	finish_differential_section();
+	profile_completed_differential_section();
 	cleanup_differential_fixture();
 	assert(differential_progress.global_index == differential_progress.global_total);
 	print("\e[92mPASS\e[0m %/% tests\n", differential_progress.global_index, differential_progress.global_total);
+}
+
+#if CHECK_DIFFERENTIAL_MEMORY || PROFILE_DIFFERENTIAL_MEMORY {
+	differential_memory_checkpoint :: (name: string, allocations: *s64, bytes: *s64) {
+		after_allocations, after_bytes := differential_memory_snapshot();
+		print("% retained: % allocations, % bytes\n", name, after_allocations - allocations.*, after_bytes - bytes.*);
+		assert(after_allocations == allocations.* && after_bytes == bytes.*, "Runtime check '%' retained fixture allocations.", name);
+		allocations.* = after_allocations;
+		bytes.* = after_bytes;
+	}
+
+	differential_memory_snapshot :: () -> s64, s64 {
+		#if PROFILE_DIFFERENTIAL_MEMORY {
+			previous_observer := context.differential_memory_observer;
+			context.differential_memory_observer = true;
+			defer context.differential_memory_observer = previous_observer;
+		}
+
+		options: Leak_Report_Options;
+		options.scan_global_memory_to_remove_leaks = false;
+		options.scan_leaks_to_combine = false;
+		report := make_leak_report(options);
+		defer deinit(*report);
+
+		allocations: s64;
+		bytes: s64;
+
+		for report.sorted_summaries {
+			allocations += it.count;
+			bytes += it.bytes;
+		}
+
+		return allocations, bytes;
+	}
 }
 
 test_differential_runner :: () {
@@ -404,6 +919,8 @@ test_differential_runner :: () {
 
 	invalid_source :: "value :: ;";
 	rejected := capture_compiler_error(invalid_source);
+	defer release_compiler_diagnostic_result(*rejected);
+
 	assert(rejected.diagnostics.count > 0);
 	compiler_path := differential_progress.fixture_path;
 
@@ -468,7 +985,28 @@ test_differential_runner :: () {
 	cleanup_differential_fixture();
 }
 
+release_compiler_diagnostic_result :: (result: *Compiler_Diagnostic_Result) {
+	storage := result.storage;
+	allocator := storage.block_allocator;
+	release(storage);
+	free(storage,, allocator=allocator);
+	result.* = .{};
+	#if PROFILE_DIFFERENTIAL_MEMORY {
+		differential_allocation_events.escaped_results -= 1;
+		finish_fixture_allocation_profile();
+	}
+}
+
 capture_compiler_error :: (code: string, log_output := false, require_error_diagnostic := true) -> Compiler_Diagnostic_Result {
+	#if PROFILE_DIFFERENTIAL_MEMORY {
+		begin_fixture_allocation_profile();
+		differential_allocation_events.escaped_results += 1;
+	}
+
+	storage := New(Pool);
+	set_allocators(storage);
+	push_allocator(pool_allocator_proc, storage);
+
 	begin_differential_test();
 	cleanup_differential_fixture();
 	fixture_path := differential_fixture_path();
@@ -481,6 +1019,7 @@ capture_compiler_error :: (code: string, log_output := false, require_error_diag
 	assert(written, "Unable to write compiler diagnostic fixture '%'.", fixture_path);
 
 	result: Compiler_Diagnostic_Result;
+	result.storage = storage;
 	result.process_result, result.standard_output, result.standard_error = run_command(
 		"jai", "-x64", fixture_path,
 		capture_and_return_output=true,
@@ -503,7 +1042,10 @@ capture_compiler_error :: (code: string, log_output := false, require_error_diag
 append_compiler_diagnostics :: (output: string, diagnostics: *[..] Compiler_Diagnostic) {
 	current: *Compiler_Diagnostic;
 	pending_location: *Compiler_Source_Location;
-	for line: split(output, "\n") {
+	lines := split(output, "\n");
+	defer free(lines.data);//QUESTION: free string?
+
+	for line: lines {
 		found_error, location, message := parse_compiler_message_line(line, ": Error: ");
 		if found_error {
 			array_add(diagnostics, .{location=location, message=message});
@@ -576,6 +1118,8 @@ parse_compiler_message_line :: (line: string, marker: string) -> bool, Compiler_
 
 assert_compiler_error_message :: (code: string, expected_message: string) {
 	result := capture_compiler_error(code);
+	defer release_compiler_diagnostic_result(*result);
+
 	actual := result.diagnostics[0].message;
 	assert(
 		actual == expected_message,
@@ -586,6 +1130,8 @@ assert_compiler_error_message :: (code: string, expected_message: string) {
 }
 
 assert_invalid_expression_compiler_message :: (source: string, expected_message: string) {
+	push_fixture_allocator();
+
 	parsed := Parser.parse_expression(source);
 	defer Parser.release_parser_tree(*parsed);
 
@@ -611,6 +1157,8 @@ JAI,
 
 		log_output=true
 	);
+	defer release_compiler_diagnostic_result(*result);
+
 	assert(result.diagnostics.count == 1);
 
 	diagnostic := result.diagnostics[0];
@@ -626,6 +1174,8 @@ JAI,
 }
 
 assert_asm_semantic_error :: (instruction: string, expected_message: string) {
+	push_fixture_allocator();
+
 	source := tprint(#string JAI
 main :: () {
     #asm { % }
@@ -640,6 +1190,8 @@ JAI
 	assert(asm_body.statements[0].(*Parser.Parser_Asm).statements[0].kind == .INSTRUCTION);
 
 	result := capture_compiler_error(source);
+	defer release_compiler_diagnostic_result(*result);
+
 	assert(result.diagnostics.count == 1);
 	assert(result.diagnostics[0].location.l0 == 2 && result.diagnostics[0].location.c0 == 12);
 	assert(result.diagnostics[0].location.c1 > result.diagnostics[0].location.c0);
@@ -653,24 +1205,38 @@ test_asm_semantic_diagnostics :: () {
 }
 
 test_structural_difference_reporting :: () {
+	push_fixture_allocator();
+
 	actual_source := Parser.parse_expression("left + right");
 	expected_source := Parser.parse_expression("left - right");
 	defer Parser.release_parser_tree(*actual_source);
 	defer Parser.release_parser_tree(*expected_source);
 
 	actual := normalize_parser_tree(actual_source.root);
+	defer array_free(actual.fields);
+
 	expected := normalize_parser_tree(expected_source.root);
+	defer array_free(expected.fields);
+
 	result := compare_normalized_trees(actual, expected);
+	defer array_free(result.differences);
+
 	assert(result.differences.count == 1);
 	assert(result.differences[0].path == "root.operator");
 }
 
 test_comparison_layers :: () {
+	push_fixture_allocator();
+
 	parsed := Parser.parse_expression("value");
 	defer Parser.release_parser_tree(*parsed);
 
 	syntax := normalize_parser_tree(parsed.root, .SYNTAX);
+	defer array_free(syntax.fields);
+
 	semantic := normalize_parser_tree(parsed.root, .SEMANTIC);
+	defer array_free(semantic.fields);
+
 	assert(find_normalized_field(syntax.fields, "root.has_type") == null);
 	assert(find_normalized_field(semantic.fields, "root.has_type") != null);
 }
@@ -1591,14 +2157,22 @@ assert_expression_matches_code :: (source: string, expected_code: Code, layer :=
 
 
 	differential_progress.fixture_source = source;
+	push_fixture_allocator();
+
 	parsed := Parser.parse_expression(source, fully_pathed_filename);
 	defer Parser.release_parser_tree(*parsed);
 
 	assert(parsed.status == .COMPLETE, "Parser did not complete fixture '%'.", source);
 
 	actual := normalize_parser_tree(parsed.root, layer);
+	defer array_free(actual.fields);
+
 	expected := normalize_tree(compiler_get_nodes(expected_code), layer);
+	defer array_free(expected.fields);
+
 	difference := compare_normalized_trees(actual, expected);
+	defer array_free(difference.differences);
+
 	assert(!difference.differences.count, "AST mismatch for '%':\n%", source, format_structural_differences(difference));
 	finish_differential_test();
 }
@@ -1616,6 +2190,8 @@ assert_statement_matches_code :: (source: string, expected_code: Code, file_scop
 
 
 	differential_progress.fixture_source = source;
+	push_fixture_allocator();
+
 	parsed := ifx file_scope then Parser.parse_file(source) else Parser.parse_block(tprint("{ % }", source));
 	defer Parser.release_parser_tree(*parsed);
 
@@ -1629,8 +2205,14 @@ assert_statement_matches_code :: (source: string, expected_code: Code, file_scop
 	assert(expected_block.statements.count == 1, "Compiler produced % statements for fixture '%'.", expected_block.statements.count, source);
 
 	actual := normalize_parser_tree(actual_block.statements[0]);
+	defer array_free(actual.fields);
+
 	expected := normalize_tree(expected_block.statements[0]);
+	defer array_free(expected.fields);
+
 	difference := compare_normalized_trees(actual, expected);
+	defer array_free(difference.differences);
+
 	assert(!difference.differences.count, "Statement AST mismatch for '%':\n%", source, format_structural_differences(difference));
 	finish_differential_test();
 }
@@ -1668,6 +2250,8 @@ assert_asm_compiler_shape :: (source: string, expected_code: Code) {
 
 
 	differential_progress.fixture_source = source;
+	push_fixture_allocator();
+
 	parsed := Parser.parse_block(source);
 	defer Parser.release_parser_tree(*parsed);
 
@@ -1685,6 +2269,8 @@ assert_nested_asm_compiler_shape :: (source: string, expected_code: Code) {
 
 
 	differential_progress.fixture_source = source;
+	push_fixture_allocator();
+
 	parsed := Parser.parse_block(source);
 	defer Parser.release_parser_tree(*parsed);
 
@@ -1739,6 +2325,8 @@ assert_all_precedence_pairs :: () #expand {
 
 assert_trivia_round_trip :: (source: string) {
 	differential_progress.fixture_source = source;
+	push_fixture_allocator();
+
 	parsed := Parser.materialise_tokens(source);
 	reconstructed := Parser.reconstruct_source(*parsed);
 	assert(reconstructed == source, "Trivia round trip differed for source:\n%", source);
@@ -1748,8 +2336,10 @@ run_typechecked_workspace_fixture :: (source: string, expected_declaration: stri
 	begin_differential_test();
 	differential_progress.fixture_source = source;
 	result: Workspace_Fixture_Result;
+	profile_workspace_memory("before_create");
 	workspace := compiler_create_workspace("Jai_Parser differential fixture");
 	assert(cast(bool) workspace, "Unable to create differential fixture workspace.");
+	profile_workspace_memory("after_create");
 
 	options := get_build_options(workspace);
 	copy_commonly_propagated_fields(get_build_options(), *options);
@@ -1786,7 +2376,11 @@ run_typechecked_workspace_fixture :: (source: string, expected_declaration: stri
 		}
 	}
 
+	profile_workspace_memory("complete");
 	compiler_end_intercept(workspace);
+	profile_workspace_memory("after_end_intercept");
+	compiler_destroy_workspace(workspace);
+	profile_workspace_memory("after_destroy");
 	finish_differential_test();
 	return result;
 }
@@ -1806,6 +2400,13 @@ test_typechecked_workspace_fixture :: () {
 }
 
 assert_file_workspace_fixture :: (source: string, expected_declaration: string) {
+	if skip_differential_batch_fixture() {
+		return;
+	}
+
+
+	auto_release_fixture_temp();
+
 	result := run_typechecked_workspace_fixture(source, expected_declaration);
 	assert(result.completed, "Compiler did not complete file fixture '%'.", source);
 	assert(result.compilation_succeeded, "Compiler rejected file fixture '%'.", source);
@@ -1823,6 +2424,13 @@ assert_overload_workspace_fixture :: (
 	setup: string = "",
 	globals: string = ""
 ) {
+	if skip_differential_batch_fixture() {
+		return;
+	}
+
+
+	auto_release_fixture_temp();
+
 	OVERLOAD_FIELD_SOURCE :: #string JAI
 Child :: struct {
 	Clear: s64;
@@ -1861,11 +2469,30 @@ JAI;
 	assert_file_workspace_fixture(source, expected_declaration);
 }
 
+assert_compiler_rejected :: (source: string) {
+	if skip_differential_batch_fixture() {
+		return;
+	}
+
+
+	auto_release_fixture_temp();
+	rejected := capture_compiler_error(source);
+	defer release_compiler_diagnostic_result(*rejected);
+
+	assert(rejected.diagnostics.count > 0);
+}
+
 assert_multi_candidate_workspace_fixture :: (parameters: []string, arguments: string, selected_index: s64) {
+	if skip_differential_batch_fixture() {
+		return;
+	}
+
+
+	auto_release_fixture_temp();
+
 	source := make_multi_candidate_rank_source(parameters, arguments, selected_index);
 	if selected_index < 0 {
-		rejected := capture_compiler_error(source);
-		assert(rejected.diagnostics.count > 0);
+		assert_compiler_rejected(source);
 	} else {
 		assert_file_workspace_fixture(source, "fixture_multi_candidate_rank");
 	}
@@ -1873,6 +2500,8 @@ assert_multi_candidate_workspace_fixture :: (parameters: []string, arguments: st
 }
 
 test_file_workspace_fixtures :: () {
+	auto_release_fixture_temp();
+
 	if !begin_differential_section("File scopes", FILE_SCOPE_TEST_TOTAL) {
 		return;
 	}
@@ -1885,16 +2514,25 @@ test_file_workspace_fixtures :: () {
 }
 
 test_typed_integer_fixtures :: () {
+	auto_release_fixture_temp();
+
 	typed_integer_cases := make_typed_integer_cases();
 	defer array_free(typed_integer_cases);
 
-	if !begin_differential_section("Typed integer conversions", typed_integer_cases.count * 2) {
+	if !begin_differential_section("Typed integer conversions", typed_integer_cases.count * 2, batchable=true) {
 		return;
 	}
 
 
 	for fixture: typed_integer_cases {
 		for order: 0..1 {
+			if skip_differential_batch_fixture() {
+				continue;
+			}
+
+
+			auto_release_fixture_temp();
+
 			first := ifx order == 0
 				then fixture.parameter_type
 				else fixture.rival_type;
@@ -1913,6 +2551,8 @@ test_typed_integer_fixtures :: () {
 				);
 			} else {
 				rejected := capture_compiler_error(tprint(TYPED_INTEGER_OVERLOAD_SOURCE, first, second, fixture.globals, fixture.setup, fixture.argument));
+				defer release_compiler_diagnostic_result(*rejected);
+
 				assert(rejected.diagnostics.count > 0);
 			}
 		}
@@ -1921,16 +2561,25 @@ test_typed_integer_fixtures :: () {
 }
 
 test_typed_float_fixtures :: () {
+	auto_release_fixture_temp();
+
 	typed_float_cases := make_typed_float_cases();
 	defer array_free(typed_float_cases);
 
-	if !begin_differential_section("Typed floating conversions", typed_float_cases.count * 2) {
+	if !begin_differential_section("Typed floating conversions", typed_float_cases.count * 2, batchable=true) {
 		return;
 	}
 
 
 	for fixture: typed_float_cases {
 		for order: 0..1 {
+			if skip_differential_batch_fixture() {
+				continue;
+			}
+
+
+			auto_release_fixture_temp();
+
 			first := ifx order == 0
 				then fixture.parameter_type
 				else fixture.rival_type;
@@ -1949,6 +2598,8 @@ test_typed_float_fixtures :: () {
 				);
 			} else {
 				rejected := capture_compiler_error(tprint(TYPED_INTEGER_OVERLOAD_SOURCE, first, second, fixture.globals, fixture.setup, fixture.argument));
+				defer release_compiler_diagnostic_result(*rejected);
+
 				assert(rejected.diagnostics.count > 0);
 			}
 		}
@@ -1956,6 +2607,8 @@ test_typed_float_fixtures :: () {
 }
 
 test_assembly_context_fixtures :: () {
+	auto_release_fixture_temp();
+
 	if !begin_differential_section("Assembly and context", ASSEMBLY_CONTEXT_TEST_TOTAL) {
 		return;
 	}
@@ -1979,6 +2632,8 @@ JAI,
 }
 
 test_pair_member_fixtures :: () {
+	auto_release_fixture_temp();
+
 	if !begin_differential_section("Pair members", PAIR_MEMBER_CASES.count) {
 		return;
 	}
@@ -1993,6 +2648,8 @@ test_pair_member_fixtures :: () {
 }
 
 test_member_query_fixtures :: () {
+	auto_release_fixture_temp();
+
 	if !begin_differential_section("Member queries", MEMBER_QUERY_TEST_TOTAL) {
 		return;
 	}
@@ -2034,6 +2691,8 @@ JAI,
 }
 
 test_member_access_fixtures :: () {
+	auto_release_fixture_temp();
+
 	Member_Access_Case :: struct {
 		declaration_name: string;
 		setup: string = "";
@@ -2060,6 +2719,8 @@ test_member_access_fixtures :: () {
 }
 
 test_default_overload_fixtures :: () {
+	auto_release_fixture_temp();
+
 	if !begin_differential_section("Overloads and defaults", DEFAULT_OVERLOAD_TEST_TOTAL) {
 		return;
 	}
@@ -2112,6 +2773,8 @@ make :: (input: s64, required: string) -> Child { return .{Clear=1}; }
 main :: () { return make(input=1).Clear; }
 JAI
 	);
+	defer release_compiler_diagnostic_result(*missing_overload_argument);
+
 	assert(missing_overload_argument.diagnostics.count > 0);
 	unresolved_default := capture_compiler_error(
 		#string JAI
@@ -2120,6 +2783,8 @@ make :: (input: s64, enabled: bool = Missing) -> Child { return .{Clear=1}; }
 main :: () { return make(1).Clear; }
 JAI
 	);
+	defer release_compiler_diagnostic_result(*unresolved_default);
+
 	assert(unresolved_default.diagnostics.count > 0);
 	assert_overload_workspace_fixture("value: s64", "value: string", "make(1).Clear", 0, "fixture_primitive_overload");
 	assert_overload_workspace_fixture("value: float64", "value: s64", "make(1).Clear", 1, "fixture_exact_rank");
@@ -2129,7 +2794,9 @@ JAI
 }
 
 test_floating_literal_fixtures :: () {
-	if !begin_differential_section("Floating literals", FLOAT_LITERAL_CASES.count * 4) {
+	auto_release_fixture_temp();
+
+	if !begin_differential_section("Floating literals", FLOAT_LITERAL_CASES.count * 4, batchable=true) {
 		return;
 	}
 
@@ -2140,8 +2807,7 @@ test_floating_literal_fixtures :: () {
 		if fixture.float32_compatible {
 			assert_overload_workspace_fixture("value: float32", "value: string", expression, 0, "fixture_float32_literal");
 		} else {
-			rejected := capture_compiler_error(tprint(UNARY_OVERLOAD_SOURCE, "float32", "string", fixture.value));
-			assert(rejected.diagnostics.count > 0, "Compiler accepted float32-incompatible literal %.", fixture.value);
+			assert_compiler_rejected(tprint(UNARY_OVERLOAD_SOURCE, "float32", "string", fixture.value));
 		}
 
 		preferred_index := ifx fixture.preferred_type == "float32" then 0 else 1;
@@ -2152,7 +2818,9 @@ test_floating_literal_fixtures :: () {
 }
 
 test_integer_float32_fixtures :: () {
-	if !begin_differential_section("Integer to float32", INTEGER_FLOAT32_VALUES.count * 5) {
+	auto_release_fixture_temp();
+
+	if !begin_differential_section("Integer to float32", INTEGER_FLOAT32_VALUES.count * 5, batchable=true) {
 		return;
 	}
 
@@ -2205,16 +2873,25 @@ JAI,
 }
 
 test_numeric_rank_fixtures :: () {
+	auto_release_fixture_temp();
+
 	numeric_rank_cases := make_numeric_rank_cases();
 	defer array_free(numeric_rank_cases);
 
-	if !begin_differential_section("Numeric rankings", numeric_rank_cases.count * 2) {
+	if !begin_differential_section("Numeric rankings", numeric_rank_cases.count * 2, batchable=true) {
 		return;
 	}
 
 
 	for fixture: numeric_rank_cases {
 		for order: 0..1 {
+			if skip_differential_batch_fixture() {
+				continue;
+			}
+
+
+			auto_release_fixture_temp();
+
 			first := ifx order == 0
 				then fixture.first_parameters
 				else fixture.second_parameters;
@@ -2225,6 +2902,8 @@ test_numeric_rank_fixtures :: () {
 			if fixture.selected_index < 0 {
 				source := make_numeric_rank_source(fixture, first, second);
 				ambiguous := capture_compiler_error(source);
+				defer release_compiler_diagnostic_result(*ambiguous);
+
 				assert(ambiguous.diagnostics.count > 0);
 			} else {
 				selected_index := ifx order == 0 || fixture.selected_index == 2
@@ -2240,6 +2919,8 @@ test_numeric_rank_fixtures :: () {
 }
 
 test_candidate_permutation_fixtures :: () {
+	auto_release_fixture_temp();
+
 	candidate_permutations_total: s64;
 	for fixture: MULTI_CANDIDATE_RANK_CASES {
 		permutation_count := 1;
@@ -2250,7 +2931,7 @@ test_candidate_permutation_fixtures :: () {
 		candidate_permutations_total += permutation_count;
 	}
 
-	if !begin_differential_section("Candidate permutations", candidate_permutations_total) {
+	if !begin_differential_section("Candidate permutations", candidate_permutations_total, batchable=true) {
 		return;
 	}
 
@@ -2269,6 +2950,8 @@ test_invalid_integer_fixtures :: () {
 	for unsigned: UNSIGNED_BOUNDARY_CASES {
 		for value: string.[signed64_boundary.below, unsigned64_boundary.above] {
 			for order: 0..1 {
+				auto_release_fixture_temp();
+
 				first := ifx order == 0
 					then signed64_boundary.parameter_type
 					else unsigned.parameter_type;
@@ -2276,6 +2959,8 @@ test_invalid_integer_fixtures :: () {
 					then unsigned.parameter_type
 					else signed64_boundary.parameter_type;
 				rejected := capture_compiler_error(tprint(UNARY_OVERLOAD_SOURCE, first, second, value));
+				defer release_compiler_diagnostic_result(*rejected);
+
 				assert(rejected.diagnostics.count > 0, "Compiler accepted invalid mixed %/% literal %.", first, second, value);
 			}
 		}
@@ -2284,12 +2969,14 @@ test_invalid_integer_fixtures :: () {
 }
 
 test_unsigned_boundary_fixtures :: () {
-	if !begin_differential_section("Unsigned boundaries", UNSIGNED_BOUNDARY_CASES.count * 14 + UNSIGNED_NEGATIVE_VALUES.count * 3) {
+	if !begin_differential_section("Unsigned boundaries", UNSIGNED_BOUNDARY_CASES.count * 14 + UNSIGNED_NEGATIVE_VALUES.count * 3, batchable=true) {
 		return;
 	}
 
 
 	for fixture: UNSIGNED_BOUNDARY_CASES {
+		auto_release_fixture_temp();
+
 		for value: string.["0", "-0", "1", fixture.upper] {
 			expression := tprint("make(%).Clear", value);
 			parameter := tprint("value: %", fixture.parameter_type);
@@ -2299,14 +2986,12 @@ test_unsigned_boundary_fixtures :: () {
 		}
 
 		for value: string.["-1", fixture.above] {
-			rejected := capture_compiler_error(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", value));
-			assert(rejected.diagnostics.count > 0, "Compiler accepted out-of-range % literal %.", fixture.parameter_type, value);
+			assert_compiler_rejected(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", value));
 		}
 
 		if fixture.parameter_type == "u64" {
 			for value: UNSIGNED_NEGATIVE_VALUES {
-				rejected := capture_compiler_error(tprint(UNARY_OVERLOAD_SOURCE, "u64", "string", value));
-				assert(rejected.diagnostics.count > 0, "Compiler accepted negative u64 literal %.", value);
+				assert_compiler_rejected(tprint(UNARY_OVERLOAD_SOURCE, "u64", "string", value));
 				expression := tprint("make(%).Clear", value);
 				assert_overload_workspace_fixture("value: u64", "value: s64", expression, 1, "fixture_negative_unsigned_rank");
 				assert_overload_workspace_fixture("value: s64", "value: u64", expression, 0, "fixture_negative_unsigned_reverse_rank");
@@ -2347,12 +3032,16 @@ JAI;
 
 
 	for fixture: SIGNED_BOUNDARY_CASES {
+		auto_release_fixture_temp();
+
 		assert_file_workspace_fixture(tprint(SIGNED_BOUNDS_SOURCE, fixture.parameter_type, fixture.lower, fixture.upper), "fixture_signed_bounds");
 		for value, index: string.[fixture.below, fixture.above] {
 			if index == 1 && fixture.above_matches {
 				assert_overload_workspace_fixture(tprint("value: %", fixture.parameter_type), "value: string", tprint("make(%).Clear", value), 0, "fixture_signed_outside");
 			} else {
 				overflow := capture_compiler_error(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", value));
+				defer release_compiler_diagnostic_result(*overflow);
+
 				assert(overflow.diagnostics.count > 0, "Compiler accepted out-of-range % literal %.", fixture.parameter_type, value);
 			}
 		}
@@ -2371,18 +3060,26 @@ JAI;
 }
 
 test_aggregate_member_fixtures :: () {
-	if !begin_differential_section("Aggregate and member inference", AGGREGATE_TEST_TOTAL) {
+	auto_release_fixture_temp();
+
+	if !begin_differential_section("Aggregate and member inference", AGGREGATE_TEST_TOTAL, batchable=true) {
 		return;
 	}
 
 
 	assert_overload_workspace_fixture("first: float64, second: float64", "first: s64, second: float64", "make(1, 1).Clear", 1, "fixture_multi_argument_rank");
 	assert_overload_workspace_fixture("first: s64, second: s64", "first: float64, second: float64", "make(1, 1).Clear", 0, "fixture_exact_first_rank");
-	crossed_rank := capture_compiler_error(tprint(MULTI_ARGUMENT_RANK_SOURCE, "first: s64, second: float64", "first: float64, second: s64", "1, 1"));
-	assert(crossed_rank.diagnostics.count > 0);
+	assert_compiler_rejected(tprint(MULTI_ARGUMENT_RANK_SOURCE, "first: s64, second: float64", "first: float64, second: s64", "1, 1"));
 
 	for fixture: AGGREGATE_CHAIN_CASES {
 		for order: 0..1 {
+			if skip_differential_batch_fixture() {
+				continue;
+			}
+
+
+			auto_release_fixture_temp();
+
 			first := ifx order == 0
 				then fixture.parameter_type
 				else fixture.rival_type;
@@ -2400,6 +3097,8 @@ test_aggregate_member_fixtures :: () {
 					tprint(TYPED_INTEGER_OVERLOAD_SOURCE, first, second, fixture.globals, "value: Wrapper;", "value"),
 					require_error_diagnostic=fixture.requires_error_diagnostic
 				);
+				defer release_compiler_diagnostic_result(*rejected);
+
 				assert(rejected.diagnostics.count > 0 || !fixture.requires_error_diagnostic);
 
 				if !fixture.requires_error_diagnostic {
@@ -2449,7 +3148,7 @@ JAI,
 
 		"fixture_exact_aggregate"
 	);
-	ambiguous_aggregate_conversion := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 First :: struct { Value: s64; }
 Second :: struct { Value: s64; }
@@ -2461,7 +3160,6 @@ make :: (value: Second) -> Other { return .{PushMatrix=1}; }
 main :: () { return make(Wrapper.{first=First.{Value=1}, second=Second.{Value=2}}).Clear; }
 JAI
 	);
-	assert(ambiguous_aggregate_conversion.diagnostics.count > 0);
 	assert_file_workspace_fixture(
 		#string JAI
 Fixture_Input :: struct { Value: s64; }
@@ -2629,7 +3327,7 @@ JAI,
 
 		"fixture_same_box"
 	);
-	invalid_instantiation := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 Child :: struct { Clear: s64; }
 Other :: struct { PushMatrix: s64; }
@@ -2679,7 +3377,7 @@ JAI,
 
 		"fixture_subscript_receiver"
 	);
-	scalar_member := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 main :: () {
 	scalar := 1;
@@ -2687,9 +3385,7 @@ main :: () {
 }
 JAI
 	);
-	assert(scalar_member.diagnostics.count > 0);
-	assert(invalid_instantiation.diagnostics.count > 0);
-	missing_instantiation := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 Child :: struct { Clear: s64; }
 Pair :: struct (First: Type, Second: Type) { Right: Second; }
@@ -2699,8 +3395,7 @@ main :: () {
 }
 JAI
 	);
-	assert(missing_instantiation.diagnostics.count > 0);
-	unknown_instantiation := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 Child :: struct { Clear: s64; }
 Pair :: struct (First: Type, Second: Type) { Right: Second; }
@@ -2711,8 +3406,7 @@ main :: () {
 }
 JAI
 	);
-	assert(unknown_instantiation.diagnostics.count > 0);
-	duplicate_instantiation := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 Child :: struct { Clear: s64; }
 Pair :: struct (First: Type, Second: Type) { Right: Second; }
@@ -2722,7 +3416,6 @@ main :: () {
 }
 JAI
 	);
-	assert(duplicate_instantiation.diagnostics.count > 0);
 	assert_file_workspace_fixture(
 		#string JAI
 Fixture_Child :: struct { Clear: s64; }
@@ -2750,7 +3443,7 @@ JAI,
 
 		"fixture_inferred_alias"
 	);
-	ambiguous_alias := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 Child :: struct { Clear: s64; }
 Box :: struct (T: Type) { Nested: T; }
@@ -2762,8 +3455,7 @@ main :: () {
 }
 JAI
 	);
-	assert(ambiguous_alias.diagnostics.count > 0);
-	incomplete_alias := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 Child :: struct { Clear: s64; }
 Box :: struct (T: Type) { Nested: T; }
@@ -2774,7 +3466,6 @@ main :: () {
 }
 JAI
 	);
-	assert(incomplete_alias.diagnostics.count > 0);
 	assert_file_workspace_fixture(
 		#string JAI
 Fixture_Child :: struct { Clear: s64; }
@@ -2888,30 +3579,27 @@ JAI,
 
 		"fixture_instance_static"
 	);
-	unknown_query := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 C :: struct { Clear: s64; }
 Box :: struct (T: Type) { Nested: T; }
 main :: () { value: type_of(missing()); return value.Nested.Clear; }
 JAI
 	);
-	assert(unknown_query.diagnostics.count > 0);
-	unknown_cast := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 C :: struct { Clear: s64; }
 Box :: struct (T: Type) { Nested: T; }
 main :: () { original := Box(C).{Nested=C.{Clear=1}}; return (cast(Box(Missing)) original).Nested.Clear; }
 JAI
 	);
-	assert(unknown_cast.diagnostics.count > 0);
-	unknown_static := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 C :: struct { Clear: s64; }
 Box :: struct (T: Type) { Nested: T; }
 main :: () { return (#ifx Unknown then Box(C).{Nested=C.{Clear=1}} else Box(C).{Nested=C.{Clear=2}}).Nested.Clear; }
 JAI
 	);
-	assert(unknown_static.diagnostics.count > 0);
 	assert_file_workspace_fixture(
 		#string JAI
 Fixture_Child :: struct { Clear: s64; }
@@ -2926,7 +3614,7 @@ JAI,
 
 		"fixture_named_field"
 	);
-	incomplete_nested_field := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 Child :: struct { Clear: s64; }
 Box :: struct (T: Type) { Nested: T; }
@@ -2937,7 +3625,6 @@ main :: () {
 }
 JAI
 	);
-	assert(incomplete_nested_field.diagnostics.count > 0);
 	assert_file_workspace_fixture(
 		#string JAI
 Fixture_Box :: struct (T: Type) { Clear: s64; Nested: T; }
@@ -3025,16 +3712,27 @@ JAI,
 }
 
 assert_declaration_workspace_fixture :: (source: string) {
+	if skip_differential_batch_fixture() {
+		return;
+	}
+
+
 	begin_differential_test();
+	push_fixture_allocator();
+
 	fixture_source := tprint("Fixture_Constraint :: struct { value: s64; }\nfixture_procedure :: () {\n%\n}\n", source);
 	differential_progress.fixture_source = fixture_source;
+
 	parsed := Parser.parse_declaration(source);
 	defer Parser.release_parser_tree(*parsed);
 
 	assert(parsed.status == .COMPLETE, "Parser did not complete declaration fixture '%'.", source);
 	actual := normalize_parser_tree(parsed.root);
+	defer array_free(actual.fields);
 
+	profile_workspace_memory("before_create");
 	workspace := compiler_create_workspace("Jai_Parser declaration fixture");
+	profile_workspace_memory("after_create");
 	options := get_build_options(workspace);
 	copy_commonly_propagated_fields(get_build_options(), *options);
 	options.output_type = .NO_OUTPUT;
@@ -3071,7 +3769,11 @@ assert_declaration_workspace_fixture :: (source: string) {
 
 
 						expected := normalize_tree(statement);
+						defer array_free(expected.fields);
+
 						difference := compare_normalized_trees(actual, expected);
+						defer array_free(difference.differences);
+
 						assert(!difference.differences.count, "Declaration AST mismatch for '%':\n%", source, format_structural_differences(difference));
 						found = true;
 					}
@@ -3084,15 +3786,22 @@ assert_declaration_workspace_fixture :: (source: string) {
 		}
 	}
 
+	profile_workspace_memory("complete");
 	compiler_end_intercept(workspace);
+	profile_workspace_memory("after_end_intercept");
+	compiler_destroy_workspace(workspace);
+	profile_workspace_memory("after_destroy");
 	assert(found, "Compiler did not expose declaration fixture '%'.", source);
 	finish_differential_test();
 }
 
 assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude_name: string) {
 	begin_differential_test();
+	push_fixture_allocator();
+
 	fixture_source := tprint("fixture_pair :: () -> (s64, s64) { return 1, 2; }\nfixture_procedure :: () {\n%\n%\n}\n", prelude, source);
 	differential_progress.fixture_source = fixture_source;
+
 	parsed := Parser.parse_block(tprint("{ % }", source));
 	defer Parser.release_parser_tree(*parsed);
 
@@ -3100,8 +3809,11 @@ assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude
 	actual_block := parsed.root.(*Parser.Parser_Block);
 	assert(actual_block.statements.count == 1);
 	actual := normalize_parser_tree(actual_block.statements[0]);
+	defer array_free(actual.fields);
 
+	profile_workspace_memory("before_create");
 	workspace := compiler_create_workspace("Jai_Parser assignment fixture");
+	profile_workspace_memory("after_create");
 	options := get_build_options(workspace);
 	copy_commonly_propagated_fields(get_build_options(), *options);
 	options.output_type = .NO_OUTPUT;
@@ -3132,7 +3844,11 @@ assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude
 
 
 					expected := normalize_tree(statements[1]);
+					defer array_free(expected.fields);
+
 					difference := compare_normalized_trees(actual, expected);
+					defer array_free(difference.differences);
+
 					assert(!difference.differences.count, "Assignment AST mismatch for '%':\n%", source, format_structural_differences(difference));
 					found = true;
 				}
@@ -3144,7 +3860,11 @@ assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude
 		}
 	}
 
+	profile_workspace_memory("complete");
 	compiler_end_intercept(workspace);
+	profile_workspace_memory("after_end_intercept");
+	compiler_destroy_workspace(workspace);
+	profile_workspace_memory("after_destroy");
 	assert(found, "Compiler did not expose assignment fixture '%'.", source);
 	finish_differential_test();
 }
@@ -3161,6 +3881,8 @@ test_assignment_workspace_fixtures :: () {
 
 
 test_declaration_workspace_fixtures :: () {
+	auto_release_fixture_temp();
+
 	declarations := string.[
 		"fixture_typed: **s64 = null;",
 		"fixture_fixed: [4] s64;",
@@ -3233,7 +3955,7 @@ test_declaration_workspace_fixtures :: () {
 		"fixture_this_constant :: #this;",
 		"fixture_caller_code_default :: (call := #caller_code) #expand {}",
 	];
-	if !begin_differential_section("Declarations", declarations.count) {
+	if !begin_differential_section("Declarations", declarations.count, batchable=true) {
 		return;
 	}
 
@@ -3244,6 +3966,8 @@ test_declaration_workspace_fixtures :: () {
 }
 
 test_directive_workspace_fixtures :: () {
+	auto_release_fixture_temp();
+
 	directives := string.[
 		"Fixture_Using_Member :: struct { using member: Fixture_Constraint; }",
 		"Fixture_As_Member :: struct { #as using base: Fixture_Constraint; }",
@@ -3261,6 +3985,8 @@ test_directive_workspace_fixtures :: () {
 }
 
 test_syntax_fixtures :: () {
+	auto_release_fixture_temp();
+
 	assert_statement_fixture("#if true { enabled := 1; } else { disabled := 2; }");
 	assert_statement_fixture("#asm { nop; }");
 	assert_asm_compiler_shape("{ #asm { nop; } }", #code { #asm { nop; } });
@@ -3616,34 +4342,51 @@ run_compile_time_sections :: () {
 		begin_differential_test();
 		test_context_modification_compiler_shape();
 		finish_differential_test();
-	}
-	if begin_differential_section("Syntax fixtures", SYNTAX_TEST_TOTAL) {
-		test_syntax_fixtures();
+		profile_completed_differential_section();
 	}
 
-	test_typechecked_workspace_fixture();
-	test_file_workspace_fixtures();
-	test_typed_integer_fixtures();
-	test_assembly_context_fixtures();
-	test_pair_member_fixtures();
-	test_member_query_fixtures();
-	test_member_access_fixtures();
-	test_default_overload_fixtures();
-	test_floating_literal_fixtures();
-	test_integer_float32_fixtures();
-	test_integer_rounding_fixture();
-	test_numeric_rank_fixtures();
-	test_candidate_permutation_fixtures();
-	test_invalid_integer_fixtures();
-	test_unsigned_boundary_fixtures();
-	test_signed_boundary_fixtures();
-	test_aggregate_member_fixtures();
-	test_declaration_workspace_fixtures();
-	test_directive_workspace_fixtures();
-	test_assignment_workspace_fixtures();
-	test_typed_float_fixtures();
+	if begin_differential_section("Syntax fixtures", SYNTAX_TEST_TOTAL) {
+		test_syntax_fixtures();
+		profile_completed_differential_section();
+	}
+
+	run_differential_section(test_typechecked_workspace_fixture);
+	run_differential_section(test_file_workspace_fixtures);
+	run_differential_section(test_typed_integer_fixtures);
+	run_differential_section(test_assembly_context_fixtures);
+	run_differential_section(test_pair_member_fixtures);
+	run_differential_section(test_member_query_fixtures);
+	run_differential_section(test_member_access_fixtures);
+	run_differential_section(test_default_overload_fixtures);
+	run_differential_section(test_floating_literal_fixtures);
+	run_differential_section(test_integer_float32_fixtures);
+	run_differential_section(test_integer_rounding_fixture);
+	run_differential_section(test_numeric_rank_fixtures);
+	run_differential_section(test_candidate_permutation_fixtures);
+	run_differential_section(test_invalid_integer_fixtures);
+	run_differential_section(test_unsigned_boundary_fixtures);
+	run_differential_section(test_signed_boundary_fixtures);
+	run_differential_section(test_aggregate_member_fixtures);
+	run_differential_section(test_declaration_workspace_fixtures);
+	run_differential_section(test_directive_workspace_fixtures);
+	run_differential_section(test_assignment_workspace_fixtures);
+	run_differential_section(test_typed_float_fixtures);
 	finish_differential_section();
 	assert(differential_progress.section_index == DIFFERENTIAL_SECTION_TOTAL - 1);
+}
+
+profile_completed_differential_section :: () {
+	#if PROFILE_DIFFERENTIAL_MEMORY {
+		if !differential_progress.planning && differential_progress.section_enabled {
+			cleanup_differential_fixture();
+			profile_differential_memory();
+		}
+	}
+}
+
+run_differential_section :: (test: () -> ()) {
+	test();
+	profile_completed_differential_section();
 }
 
 #run,stallable {

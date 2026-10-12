@@ -334,6 +334,430 @@ Aggregate_Conversion_Case :: struct {
 AGGREGATE_CHAIN_CASES :: Aggregate_Conversion_Case.[
 	.{
 		globals=#string JAI
+Base :: struct {
+	#if 1 == 1 && 1 != 2 && -1 < 0 && 2 > 1 && -9223372036854775808 <= -9223372036854775808 && 9223372036854775807 >= 9223372036854775807 {
+		Value: s64;
+	} else {
+		Invalid: Missing;
+	}
+}
+Wrapper :: struct {
+	#as using,except(Value) first: Base;
+	#as using,except(Value) second: Base;
+}
+JAI
+	},
+	.{
+		globals=#string JAI
+Base :: struct {
+	#if 1 == 2 || 1 != 1 || 0 < -1 || 1 > 2 || 9223372036854775807 <= -9223372036854775808 || -9223372036854775808 >= 9223372036854775807 {
+		Invalid: Missing;
+	} else {
+		Value: s64;
+	}
+}
+Wrapper :: struct {
+	#as using,except(Value) first: Base;
+	#as using,except(Value) second: Base;
+}
+JAI
+	},
+	.{
+		globals=#string JAI
+Enabled :: Left < Right;
+Left :: Alias;
+Alias :: -1;
+Right :: 1;
+Base :: struct {
+	#if Enabled {
+		#if Right != Left {
+			Value: s64;
+		}
+	}
+}
+Wrapper :: struct {
+	#as using,except(Value) first: Base;
+	#as using,except(Value) second: Base;
+}
+JAI
+	},
+	.{
+		globals=#string JAI
+Base :: struct (T: Type) {
+	#if -1 < 1 {
+		T: s64;
+	} else {
+		Invalid: Missing;
+	}
+}
+Wrapper :: struct {
+	#as using,except(T) first: Base(s64);
+	#as using,except(T) second: Base(T=s64);
+}
+JAI,
+		parameter_type="Base(s64)"
+	},
+	.{
+		globals=#string JAI
+Leaf :: struct {
+	Value: s64;
+}
+Base :: struct {
+	#if 0 < 1 {
+		using,except(Value) leaf: Leaf;
+	}
+}
+Wrapper :: struct {
+	#as using,except(leaf) first: Base;
+	#as using,except(leaf) second: Base;
+}
+JAI
+	},
+	.{
+		globals=#string JAI
+Zero :: -0;
+Base :: struct {
+	#if Zero == 0 && -9223372036854775808 < 9223372036854775807 {
+		Value: s64;
+	}
+}
+Wrapper :: struct {
+	#as using,except(Value) first: Base;
+	#as using,except(Value) second: Base;
+}
+JAI
+	},
+	.{
+		globals=#string JAI
+Base :: struct {
+	#if 1.5 < 2.0 {
+		Value: s64;
+	}
+}
+Wrapper :: struct {
+	#as using,except(Value) first: Base;
+	#as using,except(Value) second: Base;
+}
+JAI,
+		parser_matches=false
+	},
+	.{
+		globals=#string JAI
+Bound: s64 : 1;
+Base :: struct {
+	#if Bound == 1 {
+		Value: s64;
+	}
+}
+Wrapper :: struct {
+	#as using,except(Value) first: Base;
+	#as using,except(Value) second: Base;
+}
+JAI,
+		parser_matches=false
+	},
+	.{
+		globals=#string JAI
+Bound :: 1 + 2;
+Base :: struct {
+	#if Bound == 3 {
+		Value: s64;
+	}
+}
+Wrapper :: struct {
+	#as using,except(Value) first: Base;
+	#as using,except(Value) second: Base;
+}
+JAI,
+		parser_matches=false
+	},
+	.{
+		globals=#string JAI
+Base :: struct {
+	#if 18446744073709551615 > 9223372036854775807 {
+		Value: s64;
+	}
+}
+Wrapper :: struct {
+	#as using,except(Value) first: Base;
+	#as using,except(Value) second: Base;
+}
+JAI,
+		parser_matches=false
+	},
+	.{
+		globals=#string JAI
+Bound: s64 = 1;
+Base :: struct {
+	#if Bound == 1 {
+		Value: s64;
+	}
+}
+Wrapper :: struct {
+	#as using,except(Value) first: Base;
+	#as using,except(Value) second: Base;
+}
+JAI,
+		compiler_accepts=false,
+		parser_matches=false
+	},
+	.{
+		globals=#string JAI
+Base :: struct {
+	#if 1 < 2 {
+		Value: s64;
+		Other: s64;
+	}
+}
+Wrapper :: struct {
+	#as using,except(Value) first: Base;
+	#as using,except(Value) second: Base;
+}
+JAI,
+		compiler_accepts=false,
+		parser_matches=false
+	},
+	.{
+		globals=#string JAI
+Bound :: Alias;
+Alias :: Bound;
+Base :: struct {
+	#if Bound == 1 {
+		Value: s64;
+	}
+}
+Wrapper :: struct {
+	#as using,except(Value) first: Base;
+	#as using,except(Value) second: Base;
+}
+JAI,
+		compiler_accepts=false,
+		parser_matches=false,
+		requires_error_diagnostic=false
+	},
+	.{
+		globals=#string JAI
+Bound :: 1;
+Bound :: 2;
+Base :: struct {
+	#if Bound == 1 {
+		Value: s64;
+	}
+}
+Wrapper :: struct {
+	#as using,except(Value) first: Base;
+	#as using,except(Value) second: Base;
+}
+JAI,
+		compiler_accepts=false,
+		parser_matches=false
+	},
+	.{
+		globals=#string JAI
+Base :: struct (U: Type) {
+	U: float32;
+}
+Wrapper :: struct {
+	#as using,except(U) first: Base(s64);
+	#as using,except(U) second: Base(U=s64);
+}
+JAI,
+		parameter_type="Base(s64)"
+	},
+	.{
+		globals=#string JAI
+Base :: struct (T: Type, U: Type) {
+	T: s64;
+	U: float32;
+}
+Wrapper :: struct {
+	#as using,except(T, U) first: Base(s64, float32);
+	#as using,except(U, T) second: Base(U=float32, T=s64);
+}
+JAI,
+		parameter_type="Base(s64, float32)"
+	},
+	.{
+		globals=#string JAI
+Leaf :: struct {
+	Value: s64;
+}
+Base :: struct (T: Type) {
+	T: Leaf;
+	Value: s64;
+}
+Wrapper :: struct {
+	#as using,except(T, Value) first: Base(s64);
+	#as using,except(Value, T) second: Base(s64);
+}
+JAI,
+		parameter_type="Base(s64)"
+	},
+	.{
+		globals=#string JAI
+Base :: struct (T: Type) {
+	#if true {
+		T: s64;
+	} else {
+		Inactive: Missing;
+	}
+}
+Wrapper :: struct {
+	#as using,except(T) first: Base(s64);
+	#as using,except(T) second: Base(s64);
+}
+JAI,
+		parameter_type="Base(s64)"
+	},
+	.{
+		globals=#string JAI
+Base :: struct (T: Type) {
+	#if false {
+		T: Missing;
+	}
+	Value: T;
+}
+Wrapper :: struct {
+	#as using,except(T, Value) first: Base(s64);
+	#as using,except(T, Value) second: Base(s64);
+}
+JAI,
+		parameter_type="Base(s64)"
+	},
+	.{
+		globals=#string JAI
+Base :: struct (T: Type) {
+	T: s64;
+}
+Target :: Base(s64);
+Wrapper :: struct {
+	#as using,except(T) first: Target;
+	#as using,except(T) second: Base(s64);
+	#as using,except(T) third: Target;
+}
+JAI,
+		parameter_type="Target"
+	},
+	.{
+		globals=#string JAI
+Base :: struct (T: Type) {
+	T: s64;
+}
+Wrapper :: struct {
+	#as using,except(T) first: Base(s64);
+	#as using,except(T) second: Base(s64);
+}
+JAI,
+		parameter_type="Wrapper",
+		rival_type="Base(s64)"
+	},
+	.{
+		globals=#string JAI
+Base :: struct (T: Type) {
+	T: s64;
+}
+Middle :: struct (T: Type) {
+	#as using,except(T) base: Base(T);
+}
+Wrapper :: struct {
+	#as using,except(T, base) first: Middle(s64);
+	#as using,except(base, T) second: Middle(s64);
+}
+JAI,
+		parameter_type="Base(s64)"
+	},
+	.{
+		globals=#string JAI
+Base :: struct (T: Type) {
+	T: s64;
+	Value: s64;
+}
+Wrapper :: struct {
+	#as using,except(Value) first: Base(s64);
+	#as using,except(Value) second: Base(s64);
+}
+JAI,
+		parameter_type="Base(s64)",
+		compiler_accepts=false,
+		parser_matches=false
+	},
+	.{
+		globals=#string JAI
+Base :: struct (T: Type) {
+	T: s64;
+	T: float32;
+}
+Wrapper :: struct {
+	#as using,except(T) first: Base(s64);
+	#as using,except(T) second: Base(s64);
+}
+JAI,
+		parameter_type="Base(s64)",
+		compiler_accepts=false,
+		parser_matches=false
+	},
+	.{
+		globals=#string JAI
+Base :: struct (T: Type) {
+	T: s64;
+	Value: T;
+}
+Wrapper :: struct {
+	#as using,except(T, Value) first: Base(s64);
+	#as using,except(T, Value) second: Base(s64);
+}
+JAI,
+		parameter_type="Base(s64)",
+		compiler_accepts=false,
+		parser_matches=false
+	},
+	.{
+		globals=#string JAI
+Leaf :: struct {
+	Value: s64;
+}
+Base :: struct (T: Type) {
+	using,except(Value) T: Leaf;
+}
+Wrapper :: struct {
+	#as using,except(T) first: Base(s64);
+	#as using,except(T) second: Base(s64);
+}
+JAI,
+		parameter_type="Base(s64)",
+		parser_matches=false
+	},
+	.{
+		globals=#string JAI
+Base :: struct (T: Type) {
+	T :: s64;
+	Value: T;
+}
+Wrapper :: struct {
+	#as using,except(T, Value) first: Base(s64);
+	#as using,except(T, Value) second: Base(s64);
+}
+JAI,
+		parameter_type="Base(s64)",
+		parser_matches=false
+	},
+	.{
+		globals=#string JAI
+Base :: struct (T: Type) {
+	T: s64;
+	Value: Missing;
+}
+Wrapper :: struct {
+	#as using,except(T, Value) first: Base(s64);
+	#as using,except(T, Value) second: Base(s64);
+}
+JAI,
+		parameter_type="Base(s64)",
+		compiler_accepts=false,
+		parser_matches=false
+	},
+.{
+	globals=#string JAI
 Base :: struct (Left: Type, Right: Type) {
 	First: Left;
 	Second: Right;
@@ -467,8 +891,7 @@ Wrapper :: struct {
 	#as using,except(T) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)",
-		parser_matches=false
+		parameter_type="Base(s64)"
 	},
 	.{
 		globals=#string JAI
@@ -698,8 +1121,7 @@ Wrapper :: struct {
 	#as using,except(Value) first: Base;
 	#as using,except(Value) second: Base;
 }
-JAI,
-		parser_matches=false
+JAI
 	},
 	.{
 		globals=#string JAI
@@ -1766,13 +2188,85 @@ JAI;
 
 NUMERIC_RANK_CASES :: Numeric_Rank_Case.[
 	.{
+		first_parameters="number: u16, aggregate: Wrapper",
+		second_parameters="number: u8, aggregate: Base",
+		arguments="number, value",
+		selected_index=1,
+		setup="value: Wrapper; number: u8 = 1;",
+		globals=MIXED_AGGREGATE_RANK_GLOBALS
+	},
+	.{
+		first_parameters="aggregate: Wrapper, number: u16",
+		second_parameters="aggregate: Base, number: u8",
+		arguments="number=number, aggregate=value",
+		selected_index=1,
+		setup="value: Wrapper; number: u8 = 1;",
+		globals=MIXED_AGGREGATE_RANK_GLOBALS
+	},
+	.{
+		first_parameters="aggregate: Wrapper, number: u16",
+		second_parameters="aggregate: Base, number: u8",
+		arguments="value, number",
+		selected_index=1,
+		setup="value: Wrapper; number: u8 : 1;",
+		globals=MIXED_AGGREGATE_RANK_GLOBALS
+	},
+	.{
+		first_parameters="aggregate: Wrapper, number: u16",
+		second_parameters="aggregate: Base, number: u8",
+		arguments="value, number",
+		selected_index=1,
+		setup="value: Wrapper; original: u8 = 1; number := original;",
+		globals=MIXED_AGGREGATE_RANK_GLOBALS
+	},
+	.{
+		first_parameters="aggregate: Wrapper, number: u16",
+		second_parameters="aggregate: Base, number: u8",
+		arguments="value, cast(u8) number",
+		selected_index=1,
+		setup="value: Wrapper; number: s64 = 1;",
+		globals=MIXED_AGGREGATE_RANK_GLOBALS
+	},
+	.{
+		first_parameters="aggregate: Wrapper, number: float64",
+		second_parameters="aggregate: Base, number: float32",
+		arguments="value, number",
+		selected_index=1,
+		setup="value: Wrapper; original: float32 = 1.5; number := original;",
+		globals=MIXED_AGGREGATE_RANK_GLOBALS
+	},
+	.{
+		first_parameters="aggregate: Wrapper, number: u16, enabled: bool = true",
+		second_parameters="aggregate: Base, number: u8, enabled: bool = false",
+		arguments="number=number, aggregate=value",
+		selected_index=1,
+		setup="value: Wrapper; number: u8 = 1;",
+		globals=MIXED_AGGREGATE_RANK_GLOBALS
+	},
+	.{
+		first_parameters="aggregate: Wrapper, integer: u16, floating: float64",
+		second_parameters="aggregate: Base, integer: u8, floating: float32",
+		arguments="value, integer, floating",
+		selected_index=1,
+		setup="value: Wrapper; integer: u8 = 1; floating: float32 = 1.5;",
+		globals=MIXED_AGGREGATE_RANK_GLOBALS
+	},
+	.{
+		first_parameters="aggregate: Wrapper, number: u16, literal: u8",
+		second_parameters="aggregate: Base, number: u8, literal: float32",
+		arguments="value, number, 1",
+		selected_index=1,
+		setup="value: Wrapper; number: u8 = 1;",
+		globals=MIXED_AGGREGATE_RANK_GLOBALS,
+		parser_matches=false
+	},
+	.{
 		first_parameters="aggregate: Wrapper, number: float32",
 		second_parameters="aggregate: Base, number: s64",
 		arguments="value, 1",
 		selected_index=1,
 		setup="value: Wrapper;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS,
-		parser_matches=false
+		globals=MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
 		first_parameters="number: float32, aggregate: Wrapper",
@@ -1796,8 +2290,7 @@ NUMERIC_RANK_CASES :: Numeric_Rank_Case.[
 		arguments="value, number",
 		selected_index=1,
 		setup="value: Wrapper; number: u8 = 1;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS,
-		parser_matches=false
+		globals=MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
 		first_parameters="aggregate: Wrapper, number: float64",
@@ -1805,8 +2298,7 @@ NUMERIC_RANK_CASES :: Numeric_Rank_Case.[
 		arguments="value, number",
 		selected_index=1,
 		setup="value: Wrapper; number: float32 = 1.5;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS,
-		parser_matches=false
+		globals=MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
 		first_parameters="aggregate: Wrapper, number: float64",
@@ -1814,8 +2306,7 @@ NUMERIC_RANK_CASES :: Numeric_Rank_Case.[
 		arguments="value, 1.5",
 		selected_index=1,
 		setup="value: Wrapper;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS,
-		parser_matches=false
+		globals=MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
 		first_parameters="aggregate: Wrapper, first: float32, second: float64",
