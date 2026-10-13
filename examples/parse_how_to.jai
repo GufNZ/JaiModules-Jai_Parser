@@ -360,7 +360,15 @@ main :: () {
 	}
 
 	print("Parsed % how_to files; % files required recovery and produced % diagnostics.\n", filenames.count, files_requiring_recovery, total_diagnostics);
-	print("Zero-diagnostic files: %/% (baseline %/%; % complete, % recovering without diagnostics).\n", zero_diagnostic_files, filenames.count, filenames.count - CORPUS_BASELINE.count, filenames.count, zero_diagnostic_files - zero_diagnostic_recovering_files, zero_diagnostic_recovering_files);
+	print(
+		"Zero-diagnostic files: %/% (baseline %/%; % complete, % recovering without diagnostics).\n",
+		zero_diagnostic_files,
+		filenames.count,
+		filenames.count - CORPUS_BASELINE.count,
+		filenames.count,
+		zero_diagnostic_files - zero_diagnostic_recovering_files,
+		zero_diagnostic_recovering_files
+	);
 	print_baseline_change(first_diagnostics, total_diagnostics);
 
 	print("Diagnostic kinds:\n");
@@ -384,7 +392,8 @@ main :: () {
 		}
 
 
-		print("  %:%: status=%, diagnostics=%, kind=%, expected=%, actual=%, recovery=%, message=%\n    %\n",
+		print(
+			"  %:%: status=%, diagnostics=%, kind=%, expected=%, actual=%, recovery=%, message=%\n    %\n",
 			it.filename,
 			it.line,
 			it.status,

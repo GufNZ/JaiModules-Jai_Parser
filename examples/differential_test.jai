@@ -1,15 +1,7 @@
 // Normalise parser and compiler ASTs from paired fixtures and compare their syntax; child workspaces cover contextual nodes, while invalid fixtures compare diagnostics.
 CHECK_DIFFERENTIAL_MEMORY :: true;
-PROFILE_DIFFERENTIAL_MEMORY :: false;
 
-#if PROFILE_DIFFERENTIAL_MEMORY {
-	#import "Atomics";
-	#import "Basic"()(MEMORY_DEBUGGER=true, VISUALIZE_MEMORY_DEBUGGER=false, REPLACEMENT_INTERFACE=Differential_Allocation_Debugger);
-	#import "Flat_Pool";
-	#import "Hash_Table";
-} else {
-	#import "Basic"()(MEMORY_DEBUGGER=CHECK_DIFFERENTIAL_MEMORY, VISUALIZE_MEMORY_DEBUGGER=false);
-}
+#import "Basic"()(MEMORY_DEBUGGER=CHECK_DIFFERENTIAL_MEMORY, VISUALIZE_MEMORY_DEBUGGER=false);
 
 #import "Compiler";
 #import "Base64";
@@ -28,51 +20,52 @@ Comparison_Layer :: enum u8 {
 	SEMANTIC;
 }
 
-Normalized_Field :: struct {
+Normalised_Field :: struct {
 	path: string;
 	value: string;
 }
 
-Normalized_Tree :: struct {
-	fields: [..] Normalized_Field;
+Normalised_Tree :: struct {
+	fields: [..] Normalised_Field;
 }
 
-restore_fixture_temp :: (mark: Temporary_Storage_State) {
+Fixture_Temporary_Storage :: struct {
+	storage: Temporary_Storage;
+	buffer: [4096] u8;
+}
+
+initialize_fixture_temporary_storage :: (temporary: *Fixture_Temporary_Storage) {
+	temporary.storage.data = temporary.buffer.data;
+	temporary.storage.size = temporary.buffer.count;
+}
+
+reset_fixture_temporary_storage :: (temporary: *Fixture_Temporary_Storage) {
+	reset_temporary_storage(*temporary.storage);
+	assert(temporary.storage.total_bytes_occupied == 0 && temporary.storage.high_water_mark == 0);
+}
+
+release_fixture_temporary_storage :: (storage: *Temporary_Storage, previous_storage: *Temporary_Storage) {
 	cleanup_differential_fixture();
 	if !differential_progress.failed {
-		set_temporary_storage_mark(mark);
-		if differential_progress.test_depth == 0 && differential_progress.test_index > 0 {
-			profile_workspace_memory("after_fixture_cleanup");
-		}
+		reset_fixture_temporary_storage(cast(*Fixture_Temporary_Storage) storage);
 	}
+	context.temporary_storage = previous_storage;
 }
 
 auto_release_fixture_temp :: () #expand {
-	#if PROFILE_DIFFERENTIAL_MEMORY {
-		begin_fixture_allocation_profile();
-		differential_allocation_events.scope_depth += 1;
-		`defer {
-			differential_allocation_events.scope_depth -= 1;
-			finish_fixture_allocation_profile();
-		}
-	}
-
-	temporary_mark := get_temporary_storage_mark();
-	`defer restore_fixture_temp(temporary_mark);
+	previous_temporary_storage := context.temporary_storage;
+	`fixture_temporaries: Fixture_Temporary_Storage;
+	initialize_fixture_temporary_storage(*fixture_temporaries);
+	context.temporary_storage = *fixture_temporaries.storage;
+	`defer release_fixture_temporary_storage(*fixture_temporaries.storage, previous_temporary_storage);
 }
 
 push_fixture_allocator :: () #expand {
-	#if PROFILE_DIFFERENTIAL_MEMORY {
-		begin_fixture_allocation_profile();
-		differential_allocation_events.scope_depth += 1;
-		`defer {
-			differential_allocation_events.scope_depth -= 1;
-			finish_fixture_allocation_profile();
-		}
-	}
-
-	temporary_mark := get_temporary_storage_mark();
-	`defer restore_fixture_temp(temporary_mark);
+	previous_temporary_storage := context.temporary_storage;
+	`fixture_temporaries: Fixture_Temporary_Storage;
+	initialize_fixture_temporary_storage(*fixture_temporaries);
+	context.temporary_storage = *fixture_temporaries.storage;
+	`defer release_fixture_temporary_storage(*fixture_temporaries.storage, previous_temporary_storage);
 
 	`fixture_storage: Pool;
 	set_allocators(*fixture_storage);
@@ -133,6 +126,7 @@ Compiler_Diagnostic :: struct {
 
 Compiler_Diagnostic_Result :: struct {
 	storage: *Pool;
+	temporary_storage: *Fixture_Temporary_Storage;
 	process_result: Process_Result;
 	standard_output: string;
 	standard_error: string;
@@ -159,8 +153,27 @@ Differential_Section :: struct {
 	batchable: bool;
 }
 
-COMPILED_SECTION :: #run -> string {
+COMPILED_RUN_DIRECTORY :: #run -> string {
 	arguments := get_build_options().compile_time_command_line;
+	if arguments.count && begins_with(arguments[arguments.count - 1], "runner-dir=") {
+		return advance(arguments[arguments.count - 1], "runner-dir=".count);
+	}
+
+
+	return "";
+};
+
+get_differential_arguments :: () -> [] string {
+	arguments := get_build_options().compile_time_command_line;
+	if COMPILED_RUN_DIRECTORY {
+		arguments.count -= 1;
+	}
+
+	return arguments;
+}
+
+COMPILED_SECTION :: #run -> string {
+	arguments := get_differential_arguments();
 	assert(arguments.count <= 1 || arguments.count == 3, "Pass a section after '-', optionally followed by first and last fixture indices.");
 	if arguments.count {
 		return arguments[0];
@@ -176,7 +189,7 @@ Differential_Batch :: struct {
 }
 
 COMPILED_BATCH :: #run -> Differential_Batch {
-	arguments := get_build_options().compile_time_command_line;
+	arguments := get_differential_arguments();
 	if arguments.count != 3 {
 		return .{};
 	}
@@ -207,318 +220,11 @@ Differential_Progress :: struct {
 	fixture_path: string;
 	failed: bool;
 	counting: bool;
+	runtime_temporary_storage: *Temporary_Storage;
 }
 
 differential_progress: Differential_Progress;
 previous_assertion_handler: (Source_Code_Location, string) -> bool;
-
-#if PROFILE_DIFFERENTIAL_MEMORY {
-	Differential_Allocation :: struct {
-		size: s64;
-		allocator: Allocator;
-		counted: bool;
-	}
-
-	Differential_Allocation_Events :: struct {
-		allocations: Table(*void, Differential_Allocation);
-		gate: u32;
-		live_count: s64;
-		live_bytes: s64;
-		peak_count: s64;
-		peak_bytes: s64;
-		initial_count: s64;
-		initial_bytes: s64;
-		scope_depth: s64;
-		escaped_results: s64;
-		active: bool;
-		fixture_index: s64;
-		first_fixture_index: s64;
-		fixture_section: string;
-	}
-
-	differential_allocation_events: Differential_Allocation_Events;
-	#add_context differential_memory_observer := false;
-
-	lock_differential_allocations :: () {
-		while atomic_swap(*differential_allocation_events.gate, 1) != 0 {
-		}
-	}
-
-	differential_ignored_allocator :: (allocator: Allocator) -> bool {
-		return allocator.proc == pool_allocator_proc || allocator.proc == flat_pool_allocator_proc
-			|| allocator.proc == temporary_allocator_proc;
-	}
-
-	Differential_Allocation_Debugger :: struct {
-		check_alloc :: (allocator: Allocator, memory: *void, size: s64) {
-			_check_alloc(allocator, memory, size);
-			if !memory || context.inside_memory_debugger || differential_ignored_allocator(allocator) {
-				return;
-			}
-
-
-			context.inside_memory_debugger = true;
-			defer context.inside_memory_debugger = false;
-
-			using differential_allocation_events;
-			lock_differential_allocations();
-			defer atomic_store(*gate, 0);
-
-			counted := !context.differential_memory_observer;
-			table_add(*allocations, memory, .{size=size, allocator=allocator, counted=counted});
-			if counted {
-				live_count += 1;
-				live_bytes += size;
-				peak_count = max(peak_count, live_count);
-				peak_bytes = max(peak_bytes, live_bytes);
-			}
-		}
-
-		check_free :: (allocator: Allocator, memory: *void) {
-			if memory && !context.inside_memory_debugger && !differential_ignored_allocator(allocator) {
-				context.inside_memory_debugger = true;
-				defer context.inside_memory_debugger = false;
-
-				using differential_allocation_events;
-				lock_differential_allocations();
-				defer atomic_store(*gate, 0);
-
-				found, allocation := table_find(*allocations, memory);
-				if found {
-					if allocation.counted {
-						live_count -= 1;
-						live_bytes -= allocation.size;
-					}
-
-					table_remove(*allocations, memory);
-				}
-			}
-
-			_check_free(allocator, memory);
-		}
-
-		check_create_heap :: (allocator: Allocator) {
-			_check_create_heap(allocator);
-		}
-
-		check_destroy_heap :: (allocator: Allocator) {
-			if !context.inside_memory_debugger {
-				context.inside_memory_debugger = true;
-				defer context.inside_memory_debugger = false;
-
-				using differential_allocation_events;
-				lock_differential_allocations();
-				defer atomic_store(*gate, 0);
-
-				for allocations {
-					if it.allocator.proc == allocator.proc && it.allocator.data == allocator.data {
-						if it.counted {
-							live_count -= 1;
-							live_bytes -= it.size;
-						}
-
-						table_remove(*allocations, it_index);
-					}
-				}
-			}
-
-			_check_destroy_heap(allocator);
-		}
-	}
-
-	test_differential_allocation_events :: () {
-		using differential_allocation_events;
-		before_count := live_count;
-		before_bytes := live_bytes;
-		peak_count = live_count;
-		peak_bytes = live_bytes;
-		first := alloc(64);
-		second := alloc(96);
-		second = realloc(second, 192, 96);
-		assert(live_count == before_count + 2 && live_bytes == before_bytes + 256);
-
-		free(first);
-		free(second);
-		assert(live_count == before_count && live_bytes == before_bytes);
-		assert(peak_count == before_count + 2 && peak_bytes == before_bytes + 256);
-		context.differential_memory_observer = true;
-		observer_allocation := alloc(1024);
-		context.differential_memory_observer = false;
-		assert(live_count == before_count && live_bytes == before_bytes);
-
-		free(observer_allocation);
-		assert(live_count == before_count && live_bytes == before_bytes);
-		assert(peak_count == before_count + 2 && peak_bytes == before_bytes + 256);
-		print("Allocation-event self-check: transient peak 2 allocations / 256 requested bytes; retained 0/0\n");
-	}
-
-	begin_fixture_allocation_profile :: () {
-		if differential_progress.counting || differential_progress.planning || !differential_progress.section_enabled {
-			return;
-		}
-
-
-		using differential_allocation_events;
-		lock_differential_allocations();
-		defer atomic_store(*gate, 0);
-
-		if !active {
-			initial_count = live_count;
-			initial_bytes = live_bytes;
-			peak_count = live_count;
-			peak_bytes = live_bytes;
-			fixture_index = 0;
-			active = true;
-		}
-	}
-
-	finish_fixture_allocation_profile :: () {
-		using differential_allocation_events;
-		if !active || scope_depth != 0 || escaped_results != 0 || differential_progress.test_depth != 0 {
-			return;
-		}
-
-
-		if fixture_index == 0 {
-			active = false;
-			return;
-		}
-
-
-		lock_differential_allocations();
-		count_peak := peak_count;
-		byte_peak := peak_bytes;
-		count_delta := live_count - initial_count;
-		byte_delta := live_bytes - initial_bytes;
-		count_baseline := initial_count;
-		byte_baseline := initial_bytes;
-		active = false;
-		atomic_store(*gate, 0);
-		context.differential_memory_observer = true;
-		defer context.differential_memory_observer = false;
-
-		auto_release_temp();
-		if first_fixture_index != fixture_index {
-			print(
-				"Allocation events '%' shared cleanup scope %..% (not per-fixture): peak % allocations / % requested backing bytes; above baseline %/%; retained %/%\n",
-				fixture_section,
-				first_fixture_index,
-				fixture_index,
-				count_peak,
-				byte_peak,
-				count_peak - count_baseline,
-				byte_peak - byte_baseline,
-				count_delta,
-				byte_delta
-			);
-			return;
-		}
-
-
-		print(
-			"Allocation events '%' fixture %: peak % allocations / % requested backing bytes; above baseline %/%; retained %/%\n",
-			fixture_section, fixture_index,
-			count_peak, byte_peak, count_peak - count_baseline, byte_peak - byte_baseline, count_delta, byte_delta
-		);
-	}
-}
-
-#if PROFILE_DIFFERENTIAL_MEMORY && OS == .WINDOWS {
-	#import "Windows";
-	Differential_Process_Memory_Counters :: struct {
-		size: u32;
-		page_fault_count: u32;
-		peak_working_set: SIZE_T;
-		working_set: SIZE_T;
-		quota_peak_paged_pool: SIZE_T;
-		quota_paged_pool: SIZE_T;
-		quota_peak_non_paged_pool: SIZE_T;
-		quota_non_paged_pool: SIZE_T;
-		commit: SIZE_T;
-		peak_commit: SIZE_T;
-	}
-
-	Differential_Psapi :: #library,system "Psapi";
-	GetProcessMemoryInfo :: (process: HANDLE, counters: *Differential_Process_Memory_Counters, size: u32) -> BOOL #foreign Differential_Psapi;
-}
-
-profile_workspace_memory :: (phase: string) {
-	#if PROFILE_DIFFERENTIAL_MEMORY && OS == .WINDOWS {
-		previous_observer := context.differential_memory_observer;
-		context.differential_memory_observer = true;
-		defer context.differential_memory_observer = previous_observer;
-
-		auto_release_temp();
-		counters: Differential_Process_Memory_Counters;
-		counters.size = xx size_of(Differential_Process_Memory_Counters);
-		queried := GetProcessMemoryInfo(GetCurrentProcess(), *counters, counters.size);
-		assert(queried == .TRUE, "Unable to query compiler-process memory at '%'.", phase);
-		allocations, bytes := differential_memory_snapshot();
-		print(
-			"Workspace memory '%' fixture %: %; working-set % bytes; commit % bytes; process peaks %/% bytes; tracked % allocations / % bytes\n",
-			differential_progress.section_name,
-			differential_progress.test_index,
-			phase,
-			counters.working_set,
-			counters.commit,
-			counters.peak_working_set,
-			counters.peak_commit,
-			allocations,
-			bytes
-		);
-	}
-}
-
-#if PROFILE_DIFFERENTIAL_MEMORY {
-	Differential_Memory_Profile :: struct {
-		initial_allocations: s64;
-		initial_bytes: s64;
-		initial_temporary_bytes: s64;
-		previous_allocations: s64;
-		previous_bytes: s64;
-		peak_bytes: s64;
-		peak_temporary_bytes: s64;
-	}
-
-	differential_memory_profile: Differential_Memory_Profile;
-
-	profile_differential_memory :: () {
-		previous_observer := context.differential_memory_observer;
-		context.differential_memory_observer = true;
-		defer context.differential_memory_observer = previous_observer;
-
-		auto_release_temp();
-		temporary_bytes := context.temporary_storage.total_bytes_occupied;
-		allocations, bytes := differential_memory_snapshot();
-		if differential_progress.test_index == 0 {
-			differential_memory_profile = .{
-				initial_allocations=allocations, initial_bytes=bytes, initial_temporary_bytes=temporary_bytes,
-				previous_allocations=allocations, previous_bytes=bytes,
-				peak_bytes=bytes, peak_temporary_bytes=temporary_bytes
-			};
-		}
-
-		using differential_memory_profile;
-		peak_bytes = max(peak_bytes, bytes);
-		peak_temporary_bytes = max(peak_temporary_bytes, temporary_bytes);
-		print(
-			"Memory '%' %/%: retained % allocations / % bytes; interval % allocations / % bytes; temporary delta % bytes; sampled heap/temporary peaks %/% bytes\n",
-			differential_progress.section_name,
-			differential_progress.test_index,
-			differential_progress.test_total,
-			allocations - initial_allocations,
-			bytes - initial_bytes,
-			allocations - previous_allocations,
-			bytes - previous_bytes,
-			temporary_bytes - initial_temporary_bytes,
-			peak_bytes,
-			peak_temporary_bytes
-		);
-
-		previous_allocations = allocations;
-		previous_bytes = bytes;
-	}
-}
 
 differential_assertion_failed :: (location: Source_Code_Location, message: string) -> bool {
 	differential_progress.failed = true;
@@ -554,13 +260,6 @@ section_is_selected :: (selection: string, section: string, index: s64) -> bool 
 prepare_differential_run :: (selection: string) -> bool {
 	PADDING := "                            ";
 	differential_progress = .{selection=selection};
-	#if PROFILE_DIFFERENTIAL_MEMORY {
-		if selection == "allocation-events" {
-			test_differential_allocation_events();
-			return false;
-		}
-	}
-
 
 	if selection == "list-machine" {
 		print("Index\tNameBase64\tTotal\tRuntime\tBatchable\n");
@@ -605,9 +304,6 @@ prepare_differential_run :: (selection: string) -> bool {
 
 
 	assert(differential_progress.global_total > 0, "Unknown section '%'.  Use '- list' to list sections.", selection);
-	#if PROFILE_DIFFERENTIAL_MEMORY {
-		assert(selection && selection != "all", "Memory profiling requires one selected section; combined runs can exhaust memory.");
-	}
 	return true;
 }
 
@@ -625,11 +321,6 @@ begin_differential_section :: (section: string, total: s64, batchable := false) 
 
 
 	differential_progress.section_enabled = section_is_selected(differential_progress.selection, section, differential_progress.section_index);
-	#if PROFILE_DIFFERENTIAL_MEMORY {
-		if differential_progress.section_enabled {
-			profile_differential_memory();
-		}
-	}
 
 	return differential_progress.section_enabled;
 }
@@ -676,23 +367,8 @@ begin_differential_test :: () -> bool {
 
 	if differential_progress.test_depth == 0 {
 		cleanup_differential_fixture();
-		#if PROFILE_DIFFERENTIAL_MEMORY {
-			if differential_progress.test_index > 0 && differential_progress.test_index % 32 == 0 {
-				profile_differential_memory();
-			}
-		}
-
 		differential_progress.test_index += 1;
 		differential_progress.global_index += 1;
-		#if PROFILE_DIFFERENTIAL_MEMORY {
-			begin_fixture_allocation_profile();
-			if differential_allocation_events.fixture_index == 0 {
-				differential_allocation_events.first_fixture_index = differential_progress.test_index;
-			}
-
-			differential_allocation_events.fixture_index = differential_progress.test_index;
-			differential_allocation_events.fixture_section = differential_progress.section_name;
-		}
 
 		assert(differential_progress.test_index <= differential_progress.test_total, "Section '%' exceeded its total %.  Update its total.", differential_progress.section_name, differential_progress.test_total);
 		print_differential_test();
@@ -706,9 +382,14 @@ finish_differential_test :: () {
 	differential_progress.test_depth -= 1;
 	if differential_progress.test_depth == 0 {
 		print("%", CLEAR_PROGRESS_LINE);
-		#if PROFILE_DIFFERENTIAL_MEMORY {
-			finish_fixture_allocation_profile();
+
+		if differential_progress.runtime_temporary_storage && !differential_progress.failed {
+			assert(context.temporary_storage == differential_progress.runtime_temporary_storage);
+			cleanup_differential_fixture();
+			reset_fixture_temporary_storage(cast(*Fixture_Temporary_Storage) context.temporary_storage);
+			assert(context.temporary_storage.total_bytes_occupied == 0 && context.temporary_storage.high_water_mark == 0);
 		}
+
 	}
 }
 
@@ -796,6 +477,14 @@ main :: () {
 	}
 
 
+	runtime_temporaries: Fixture_Temporary_Storage;
+	initialize_fixture_temporary_storage(*runtime_temporaries);
+	previous_temporary_storage := context.temporary_storage;
+	context.temporary_storage = *runtime_temporaries.storage;
+	defer release_fixture_temporary_storage(*runtime_temporaries.storage, previous_temporary_storage);
+
+	differential_progress.runtime_temporary_storage = *runtime_temporaries.storage;
+
 	for section, index: DIFFERENTIAL_SECTIONS {
 		if index < DIFFERENTIAL_SECTION_TOTAL - 1 && section_is_selected(COMPILED_SECTION, section.name, index + 1) {
 			differential_progress.global_index += section.total;
@@ -823,35 +512,47 @@ main :: () {
 	test_structural_difference_reporting();
 	assert(context.temporary_storage.total_bytes_occupied == structural_temporary_bytes, "Structural comparison retained temporary storage.");
 	finish_differential_test();
-	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("structural differences", *checkpoint_allocations, *checkpoint_bytes);
+	#if CHECK_DIFFERENTIAL_MEMORY {
+		differential_memory_checkpoint("structural differences", *checkpoint_allocations, *checkpoint_bytes);
+	}
 	begin_differential_test();
 	layers_temporary_bytes := context.temporary_storage.total_bytes_occupied;
 	test_comparison_layers();
 	assert(context.temporary_storage.total_bytes_occupied == layers_temporary_bytes, "Comparison layers retained temporary storage.");
 	finish_differential_test();
-	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("comparison layers", *checkpoint_allocations, *checkpoint_bytes);
+	#if CHECK_DIFFERENTIAL_MEMORY {
+		differential_memory_checkpoint("comparison layers", *checkpoint_allocations, *checkpoint_bytes);
+	}
 	begin_differential_test();
 	assert_invalid_expression_compiler_message(
 		"1 +",
 		"Unable to parse an expression to the right of this binary operator."
 	);
 	finish_differential_test();
-	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("invalid expression", *checkpoint_allocations, *checkpoint_bytes);
+	#if CHECK_DIFFERENTIAL_MEMORY {
+		differential_memory_checkpoint("invalid expression", *checkpoint_allocations, *checkpoint_bytes);
+	}
 	begin_differential_test();
 	test_compiler_related_diagnostics();
 	finish_differential_test();
-	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("related diagnostics", *checkpoint_allocations, *checkpoint_bytes);
+	#if CHECK_DIFFERENTIAL_MEMORY {
+		differential_memory_checkpoint("related diagnostics", *checkpoint_allocations, *checkpoint_bytes);
+	}
 	begin_differential_test();
 	test_asm_semantic_diagnostics();
 	finish_differential_test();
-	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("ASM diagnostics", *checkpoint_allocations, *checkpoint_bytes);
+	#if CHECK_DIFFERENTIAL_MEMORY {
+		differential_memory_checkpoint("ASM diagnostics", *checkpoint_allocations, *checkpoint_bytes);
+	}
 	begin_differential_test();
 	assert_trivia_round_trip(#string JAI
 value /* comment */ + 42;
 JAI
 	);
 	finish_differential_test();
-	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("ordinary trivia", *checkpoint_allocations, *checkpoint_bytes);
+	#if CHECK_DIFFERENTIAL_MEMORY {
+		differential_memory_checkpoint("ordinary trivia", *checkpoint_allocations, *checkpoint_bytes);
+	}
 	begin_differential_test();
 	assert_trivia_round_trip(#string JAI
 text :: #string END
@@ -860,19 +561,22 @@ END; // tail
 JAI
 	);
 	finish_differential_test();
-	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("here-string trivia", *checkpoint_allocations, *checkpoint_bytes);
+	#if CHECK_DIFFERENTIAL_MEMORY {
+		differential_memory_checkpoint("here-string trivia", *checkpoint_allocations, *checkpoint_bytes);
+	}
 	begin_differential_test();
 	test_differential_runner();
 	finish_differential_test();
-	#if CHECK_DIFFERENTIAL_MEMORY differential_memory_checkpoint("runner checks", *checkpoint_allocations, *checkpoint_bytes);
+	#if CHECK_DIFFERENTIAL_MEMORY {
+		differential_memory_checkpoint("runner checks", *checkpoint_allocations, *checkpoint_bytes);
+	}
 	finish_differential_section();
-	profile_completed_differential_section();
 	cleanup_differential_fixture();
 	assert(differential_progress.global_index == differential_progress.global_total);
 	print("\e[92mPASS\e[0m %/% tests\n", differential_progress.global_index, differential_progress.global_total);
 }
 
-#if CHECK_DIFFERENTIAL_MEMORY || PROFILE_DIFFERENTIAL_MEMORY {
+#if CHECK_DIFFERENTIAL_MEMORY {
 	differential_memory_checkpoint :: (name: string, allocations: *s64, bytes: *s64) {
 		after_allocations, after_bytes := differential_memory_snapshot();
 		print("% retained: % allocations, % bytes\n", name, after_allocations - allocations.*, after_bytes - bytes.*);
@@ -882,12 +586,6 @@ JAI
 	}
 
 	differential_memory_snapshot :: () -> s64, s64 {
-		#if PROFILE_DIFFERENTIAL_MEMORY {
-			previous_observer := context.differential_memory_observer;
-			context.differential_memory_observer = true;
-			defer context.differential_memory_observer = previous_observer;
-		}
-
 		options: Leak_Report_Options;
 		options.scan_global_memory_to_remove_leaks = false;
 		options.scan_leaks_to_combine = false;
@@ -906,6 +604,54 @@ JAI
 	}
 }
 
+test_fixture_temporary_reset :: () {
+	auto_release_temp();
+	outer_storage := context.temporary_storage;
+	outer_text := tprint("fixture parent %", 42);
+	outer_mark := get_temporary_storage_mark();
+	#if CHECK_DIFFERENTIAL_MEMORY {
+		before_allocations, before_bytes := differential_memory_snapshot();
+	}
+
+	{
+		push_fixture_allocator();
+		assert(context.temporary_storage != outer_storage);
+		bytes := talloc(fixture_temporaries.buffer.count + 1);
+		assert(bytes != null);
+		storage := cast(*Temporary_Storage_Paged_Alloc) context.temporary_storage;
+		assert(storage.overflow_pages != null && storage.total_bytes_occupied > 0 && storage.high_water_mark > 0);
+	}
+
+	assert(context.temporary_storage == outer_storage);
+	after_mark := get_temporary_storage_mark();
+	assert(after_mark.top_overflow_page == outer_mark.top_overflow_page);
+	assert(after_mark.current_page_bytes_occupied == outer_mark.current_page_bytes_occupied);
+	assert(after_mark.total_bytes_occupied == outer_mark.total_bytes_occupied);
+	assert(outer_text == "fixture parent 42");
+
+	preserved_temporaries: Fixture_Temporary_Storage;
+	initialize_fixture_temporary_storage(*preserved_temporaries);
+	context.temporary_storage = *preserved_temporaries.storage;
+	preserved_bytes := talloc(preserved_temporaries.buffer.count + 1);
+	assert(preserved_bytes != null);
+	preserved_storage := cast(*Temporary_Storage_Paged_Alloc) context.temporary_storage;
+	preserved_page := preserved_storage.overflow_pages;
+	preserved_occupied := preserved_storage.total_bytes_occupied;
+	previous_failed := differential_progress.failed;
+	differential_progress.failed = true;
+	release_fixture_temporary_storage(*preserved_temporaries.storage, outer_storage);
+	differential_progress.failed = previous_failed;
+	assert(context.temporary_storage == outer_storage);
+	assert(preserved_storage.overflow_pages == preserved_page && preserved_page != null);
+	assert(preserved_storage.total_bytes_occupied == preserved_occupied);
+	reset_temporary_storage(*preserved_temporaries.storage);
+	assert(outer_text == "fixture parent 42");
+	#if CHECK_DIFFERENTIAL_MEMORY {
+		after_allocations, after_bytes := differential_memory_snapshot();
+		assert(after_allocations == before_allocations && after_bytes == before_bytes, "Fixture temporary reset retained an overflow page.");
+	}
+}
+
 test_differential_runner :: () {
 	previous_progress := differential_progress;
 	defer differential_progress = previous_progress;
@@ -916,6 +662,7 @@ test_differential_runner :: () {
 	assert(section_is_selected("all", "Runtime checks", DIFFERENTIAL_SECTION_TOTAL));
 	assert(DIFFERENTIAL_SECTIONS[0].total == CONTEXT_TEST_TOTAL);
 	assert(DIFFERENTIAL_SECTIONS[DIFFERENTIAL_SECTION_TOTAL - 1].total == RUNTIME_TEST_TOTAL);
+	test_fixture_temporary_reset();
 
 	invalid_source :: "value :: ;";
 	rejected := capture_compiler_error(invalid_source);
@@ -927,9 +674,12 @@ test_differential_runner :: () {
 	stem := path_strip_extension(compiler_path);
 	assert(make_directory_if_it_does_not_exist(".build"));
 	artifact_paths := string.[
-		tprint("%.exe", stem), tprint("%.rdi", stem),
-		tprint(".build/%.obj", stem), tprint(".build/%.lib", stem),
-		tprint(".build/%.exp", stem), tprint(".build/%_0_w2.obj", stem)
+		tprint("%.exe", stem),
+		tprint("%.rdi", stem),
+		tprint(".build/%.obj", stem),
+		tprint(".build/%.lib", stem),
+		tprint(".build/%.exp", stem),
+		tprint(".build/%_0_w2.obj", stem)
 	];
 
 	for artifact_path: artifact_paths {
@@ -988,38 +738,41 @@ test_differential_runner :: () {
 release_compiler_diagnostic_result :: (result: *Compiler_Diagnostic_Result) {
 	storage := result.storage;
 	allocator := storage.block_allocator;
+	cleanup_differential_fixture();
+	if !differential_progress.failed {
+		reset_fixture_temporary_storage(result.temporary_storage);
+	}
+
 	release(storage);
 	free(storage,, allocator=allocator);
 	result.* = .{};
-	#if PROFILE_DIFFERENTIAL_MEMORY {
-		differential_allocation_events.escaped_results -= 1;
-		finish_fixture_allocation_profile();
-	}
 }
 
 capture_compiler_error :: (code: string, log_output := false, require_error_diagnostic := true) -> Compiler_Diagnostic_Result {
-	#if PROFILE_DIFFERENTIAL_MEMORY {
-		begin_fixture_allocation_profile();
-		differential_allocation_events.escaped_results += 1;
-	}
 
 	storage := New(Pool);
 	set_allocators(storage);
 	push_allocator(pool_allocator_proc, storage);
+	temporary_storage := New(Fixture_Temporary_Storage);
+	initialize_fixture_temporary_storage(temporary_storage);
+	previous_temporary_storage := context.temporary_storage;
+	context.temporary_storage = *temporary_storage.storage;
+	defer context.temporary_storage = previous_temporary_storage;
 
 	begin_differential_test();
 	cleanup_differential_fixture();
 	fixture_path := differential_fixture_path();
-	normalized_code, tab_count := replace(code, "\t", "    ");
-	defer free(normalized_code);
+	normalised_code, tab_count := replace(code, "\t", "    ");
+	defer free(normalised_code);
 
 	differential_progress.fixture_source = code;
 	differential_progress.fixture_path = fixture_path;
-	written := write_entire_file(fixture_path, normalized_code);
+	written := write_entire_file(fixture_path, normalised_code);
 	assert(written, "Unable to write compiler diagnostic fixture '%'.", fixture_path);
 
 	result: Compiler_Diagnostic_Result;
 	result.storage = storage;
+	result.temporary_storage = temporary_storage;
 	result.process_result, result.standard_output, result.standard_error = run_command(
 		"jai", "-x64", fixture_path,
 		capture_and_return_output=true,
@@ -1027,7 +780,7 @@ capture_compiler_error :: (code: string, log_output := false, require_error_diag
 	);
 
 	assert(result.process_result.type == .EXITED, "Compiler diagnostic fixture failed to run.");
-	assert(result.process_result.exit_code != 0, "Compiler accepted invalid fixture:\n%", normalized_code);
+	assert(result.process_result.exit_code != 0, "Compiler accepted invalid fixture:\n%", normalised_code);
 
 	append_compiler_diagnostics(result.standard_error, *result.diagnostics);
 	append_compiler_diagnostics(result.standard_output, *result.diagnostics);
@@ -1139,12 +892,14 @@ assert_invalid_expression_compiler_message :: (source: string, expected_message:
 	assert(parsed.diagnostics.count > 0, "Parser rejected '%' without a diagnostic.", source);
 	assert(parsed.diagnostics[0].message == expected_message, "Parser diagnostic differed.\nExpected: %\nActual:   %\n", expected_message, parsed.diagnostics[0].message);
 
-	code := tprint(#string JAI
+	code := tprint(
+		#string JAI
 main :: () {
     value := %;
 }
-JAI
-	, source);
+JAI,
+		source
+	);
 	assert_compiler_error_message(code, expected_message);
 }
 
@@ -1176,12 +931,14 @@ JAI,
 assert_asm_semantic_error :: (instruction: string, expected_message: string) {
 	push_fixture_allocator();
 
-	source := tprint(#string JAI
+	source := tprint(
+		#string JAI
 main :: () {
     #asm { % }
 }
-JAI
-	, instruction);
+JAI,
+		instruction
+	);
 	parsed := Parser.parse_file(source);
 	defer Parser.release_parser_tree(*parsed);
 
@@ -1212,13 +969,13 @@ test_structural_difference_reporting :: () {
 	defer Parser.release_parser_tree(*actual_source);
 	defer Parser.release_parser_tree(*expected_source);
 
-	actual := normalize_parser_tree(actual_source.root);
+	actual := normalise_parser_tree(actual_source.root);
 	defer array_free(actual.fields);
 
-	expected := normalize_parser_tree(expected_source.root);
+	expected := normalise_parser_tree(expected_source.root);
 	defer array_free(expected.fields);
 
-	result := compare_normalized_trees(actual, expected);
+	result := compare_normalised_trees(actual, expected);
 	defer array_free(result.differences);
 
 	assert(result.differences.count == 1);
@@ -1231,14 +988,14 @@ test_comparison_layers :: () {
 	parsed := Parser.parse_expression("value");
 	defer Parser.release_parser_tree(*parsed);
 
-	syntax := normalize_parser_tree(parsed.root, .SYNTAX);
+	syntax := normalise_parser_tree(parsed.root, .SYNTAX);
 	defer array_free(syntax.fields);
 
-	semantic := normalize_parser_tree(parsed.root, .SEMANTIC);
+	semantic := normalise_parser_tree(parsed.root, .SEMANTIC);
 	defer array_free(semantic.fields);
 
-	assert(find_normalized_field(syntax.fields, "root.has_type") == null);
-	assert(find_normalized_field(semantic.fields, "root.has_type") != null);
+	assert(find_normalised_field(syntax.fields, "root.has_type") == null);
+	assert(find_normalised_field(semantic.fields, "root.has_type") != null);
 }
 
 test_context_modification_compiler_shape :: () {
@@ -1250,408 +1007,433 @@ test_context_modification_compiler_shape :: () {
 }
 
 
-normalize_tree :: (node: *Code_Node, layer := Comparison_Layer.SYNTAX) -> Normalized_Tree {
-	result: Normalized_Tree;
-	normalize_node(node, "root", layer, *result);
+normalise_tree :: (node: *Code_Node, layer := Comparison_Layer.SYNTAX) -> Normalised_Tree {
+	result: Normalised_Tree;
+	normalise_node(node, "root", layer, *result);
 	return result;
 }
 
-normalize_parser_tree :: (node: *Parser.Parser_Node, layer := Comparison_Layer.SYNTAX) -> Normalized_Tree {
-	result: Normalized_Tree;
-	normalize_parser_node(node, "root", layer, *result);
+normalise_parser_tree :: (node: *Parser.Parser_Node, layer := Comparison_Layer.SYNTAX) -> Normalised_Tree {
+	result: Normalised_Tree;
+	normalise_parser_node(node, "root", layer, *result);
 	return result;
 }
 
-normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Comparison_Layer, result: *Normalized_Tree) {
+normalise_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Comparison_Layer, result: *Normalised_Tree) {
 	if !node {
-		add_normalized_field(result, path, "kind", "<null>");
+		add_normalised_field(result, path, "kind", "<null>");
 		return;
 	}
 
 
-	add_normalized_field(result, path, "kind", tprint("%", node.kind));
-	add_normalized_field(result, path, "parenthesized", tprint("%", (node.node_flags & .IS_PARENTHESIZED) != 0));
+	add_normalised_field(result, path, "kind", tprint("%", node.kind));
+	add_normalised_field(result, path, "parenthesized", tprint("%", (node.node_flags & .IS_PARENTHESIZED) != 0));
 
 	if layer == .SEMANTIC {
-		add_normalized_field(result, path, "has_type", tprint("%", node.type != null));
+		add_normalised_field(result, path, "has_type", tprint("%", node.type != null));
 	}
 
 	if node.kind == {
 		case .IDENT;
 			ident := node.(*Parser.Parser_Ident);
-			add_normalized_field(result, path, "name", ident.name);
-			add_normalized_field(result, path, "has_scope_modifier", tprint("%", (ident.flags & .HAS_SCOPE_MODIFIER) != 0));
-			add_normalized_field(result, path, "do_not_resolve", tprint("%", (ident.flags & .DO_NOT_RESOLVE_DUE_TO_PARSER) != 0));
+			add_normalised_field(result, path, "name", ident.name);
+			add_normalised_field(result, path, "has_scope_modifier", tprint("%", (ident.flags & .HAS_SCOPE_MODIFIER) != 0));
+			add_normalised_field(result, path, "do_not_resolve", tprint("%", (ident.flags & .DO_NOT_RESOLVE_DUE_TO_PARSER) != 0));
 
 		case .LITERAL;
 			literal := node.(*Parser.Parser_Literal);
-			add_normalized_field(result, path, "value_type", tprint("%", literal.value_type));
-			add_normalized_field(result, path, "value_flags", tprint("%", literal.value_flags));
+			add_normalised_field(result, path, "value_type", tprint("%", literal.value_type));
+			add_normalised_field(result, path, "value_flags", tprint("%", literal.value_flags));
 
 			if literal.value_type == {
 				case .NUMBER;
 					if literal.value_flags & .FLOAT {
-						add_normalized_field(result, path, "float64", tprint("%", literal._float64));
+						add_normalised_field(result, path, "float64", tprint("%", literal._float64));
 					} else {
-						add_normalized_field(result, path, "u64", tprint("%", literal._u64));
+						add_normalised_field(result, path, "u64", tprint("%", literal._u64));
 					}
 
 				case .STRING;
-					add_normalized_field(result, path, "string", literal._string);
+					add_normalised_field(result, path, "string", literal._string);
 
 				case .BOOLEAN;
-					add_normalized_field(result, path, "boolean", tprint("%", literal._u64));
+					add_normalised_field(result, path, "boolean", tprint("%", literal._u64));
 
 				case .POINTER;
 					if literal.pointer_literal_info {
-						add_normalized_field(result, path, "pointer_type", tprint("%", literal.pointer_literal_info.pointer_literal_type));
-						add_normalized_field(result, path, "pointer_offset", tprint("%", literal.pointer_literal_info.offset_from_symbol));
+						add_normalised_field(result, path, "pointer_type", tprint("%", literal.pointer_literal_info.pointer_literal_type));
+						add_normalised_field(result, path, "pointer_offset", tprint("%", literal.pointer_literal_info.offset_from_symbol));
 					} else {
-						add_normalized_field(result, path, "pointer_type", "<missing>");
+						add_normalised_field(result, path, "pointer_type", "<missing>");
 					}
 
 				case .ARRAY;
 					info := literal.array_literal_info;
-					add_normalized_field(result, path, "untyped", tprint("%", (info.array_literal_flags & .WAS_UNTYPED) != 0));
-					add_normalized_field(result, path, "member_count", tprint("%", info.array_members.count));
+					add_normalised_field(result, path, "untyped", tprint("%", (info.array_literal_flags & .WAS_UNTYPED) != 0));
+					add_normalised_field(result, path, "member_count", tprint("%", info.array_members.count));
 					if info.element_type {
-						normalize_parser_node(info.element_type.type_valued_expression, tprint("%.element_type", path), layer, result);
+						normalise_parser_node(info.element_type.type_valued_expression, tprint("%.element_type", path), layer, result);
 					}
 
 					for info.array_members {
-						normalize_parser_node(it, tprint("%.member[%]", path, it_index), layer, result);
+						normalise_parser_node(it, tprint("%.member[%]", path, it_index), layer, result);
 					}
 
 				case .STRUCT;
 					info := literal.struct_literal_info;
-					add_normalized_field(result, path, "argument_count", tprint("%", info.arguments.count));
+					add_normalised_field(result, path, "argument_count", tprint("%", info.arguments.count));
 					if info.type_expression {
-						normalize_parser_node(info.type_expression.type_valued_expression, tprint("%.type_expression", path), layer, result);
+						normalise_parser_node(info.type_expression.type_valued_expression, tprint("%.type_expression", path), layer, result);
 					}
 
 					for info.arguments {
-						normalize_parser_node(it, tprint("%.argument[%]", path, it_index), layer, result);
+						normalise_parser_node(it, tprint("%.argument[%]", path, it_index), layer, result);
 					}
 			}
 
 		case .UNARY_OPERATOR;
 			unary := node.(*Parser.Parser_Unary_Operator);
-			add_normalized_field(result, path, "operator", tprint("%", unary.operator_type));
-			normalize_parser_node(unary.subexpression, tprint("%.operand", path), layer, result);
+			add_normalised_field(result, path, "operator", tprint("%", unary.operator_type));
+			normalise_parser_node(unary.subexpression, tprint("%.operand", path), layer, result);
 
 		case .BINARY_OPERATOR;
 			binary := node.(*Parser.Parser_Binary_Operator);
-			add_normalized_field(result, path, "operator", tprint("%", binary.operator_type));
-			add_normalized_field(result, path, "operator_flags", tprint("%", binary.flags));
-			normalize_parser_node(binary.left, tprint("%.left", path), layer, result);
-			normalize_parser_node(binary.right, tprint("%.right", path), layer, result);
+			add_normalised_field(result, path, "operator", tprint("%", binary.operator_type));
+			add_normalised_field(result, path, "operator_flags", tprint("%", binary.flags));
+			normalise_parser_node(binary.left, tprint("%.left", path), layer, result);
+			normalise_parser_node(binary.right, tprint("%.right", path), layer, result);
 
 		case .PROCEDURE_CALL;
 			call := node.(*Parser.Parser_Procedure_Call);
-			add_normalized_field(result, path, "flags", tprint("%", call.flags));
-			add_normalized_field(result, path, "argument_count", tprint("%", call.arguments_unsorted.count));
-			add_normalized_field(result, path, "has_context_modification", tprint("%", call.context_modification != null));
-			normalize_parser_node(call.procedure_expression, tprint("%.procedure", path), layer, result);
+			add_normalised_field(result, path, "flags", tprint("%", call.flags));
+			add_normalised_field(result, path, "argument_count", tprint("%", call.arguments_unsorted.count));
+			add_normalised_field(result, path, "has_context_modification", tprint("%", call.context_modification != null));
+			normalise_parser_node(call.procedure_expression, tprint("%.procedure", path), layer, result);
 			for call.arguments_unsorted {
 				argument_path := tprint("%.argument[%]", path, it_index);
-				add_normalized_field(result, argument_path, "name", ifx it.name then it.name.name else "<positional>");
-				normalize_parser_node(it.expression, tprint("%.expression", argument_path), layer, result);
+				add_normalised_field(result, argument_path, "name", ifx it.name then it.name.name else "<positional>");
+				normalise_parser_node(it.expression, tprint("%.expression", argument_path), layer, result);
 			}
 
 			if call.context_modification {
-				add_normalized_field(result, path, "context_count", tprint("%", call.context_modification.modification_expressions.count));
+				add_normalised_field(result, path, "context_count", tprint("%", call.context_modification.modification_expressions.count));
 				for call.context_modification.modification_expressions {
-					normalize_parser_node(it, tprint("%.context[%]", path, it_index), layer, result);
+					normalise_parser_node(it, tprint("%.context[%]", path, it_index), layer, result);
 				}
 			}
 
 		case .CAST;
 			cast_node := node.(*Parser.Parser_Cast);
-			add_normalized_field(result, path, "cast_flags", tprint("%", cast_node.cast_flags));
+			add_normalised_field(result, path, "cast_flags", tprint("%", cast_node.cast_flags));
 			if cast_node.target_type {
-				normalize_parser_node(cast_node.target_type.type_valued_expression, tprint("%.target_type", path), layer, result);
+				normalise_parser_node(cast_node.target_type.type_valued_expression, tprint("%.target_type", path), layer, result);
 			}
 
-			normalize_parser_node(cast_node.expression, tprint("%.expression", path), layer, result);
+			normalise_parser_node(cast_node.expression, tprint("%.expression", path), layer, result);
 
 		case .EXPRESSION_QUERY;
 			query := node.(*Parser.Parser_Expression_Query);
-			add_normalized_field(result, path, "query_kind", tprint("%", query.query_kind));
-			normalize_parser_node(query.expression_to_query, tprint("%.expression", path), layer, result);
+			add_normalised_field(result, path, "query_kind", tprint("%", query.query_kind));
+			normalise_parser_node(query.expression_to_query, tprint("%.expression", path), layer, result);
 
 		case .TYPE_QUERY;
 			query := node.(*Parser.Parser_Type_Query);
-			add_normalized_field(result, path, "query_kind", tprint("%", query.query_kind));
-			normalize_parser_node(query.type_to_query.type_valued_expression, tprint("%.type", path), layer, result);
+			add_normalised_field(result, path, "query_kind", tprint("%", query.query_kind));
+			normalise_parser_node(query.type_to_query.type_valued_expression, tprint("%.type", path), layer, result);
 
 		case .DIRECTIVE_CODE;
 			directive := node.(*Parser.Parser_Directive_Code);
-			add_normalized_field(result, path, "code_flags", tprint("%", directive.code_flags));
-			normalize_parser_node(directive.expression, tprint("%.expression", path), layer, result);
+			add_normalised_field(result, path, "code_flags", tprint("%", directive.code_flags));
+			normalise_parser_node(directive.expression, tprint("%.expression", path), layer, result);
 
 		case .DIRECTIVE_RUN;
 			directive := node.(*Parser.Parser_Directive_Run);
-			add_normalized_field(result, path, "flags", tprint("%", directive.flags));
-			add_normalized_field(result, path, "assertion_string", directive.assertion_string);
-			normalize_parser_node(directive.expression, tprint("%.expression", path), layer, result);
+			add_normalised_field(result, path, "flags", tprint("%", directive.flags));
+			add_normalised_field(result, path, "assertion_string", directive.assertion_string);
+			normalise_parser_node(directive.expression, tprint("%.expression", path), layer, result);
 
 		case .DIRECTIVE_INSERT;
 			directive := node.(*Parser.Parser_Directive_Insert);
-			normalize_parser_node(directive.expression, tprint("%.expression", path), layer, result);
-			normalize_parser_node(directive.scope_redirection, tprint("%.scope", path), layer, result);
-			normalize_parser_node(directive.break_replacement, tprint("%.break", path), layer, result);
-			normalize_parser_node(directive.continue_replacement, tprint("%.continue", path), layer, result);
-			normalize_parser_node(directive.remove_replacement, tprint("%.remove", path), layer, result);
+			normalise_parser_node(directive.expression, tprint("%.expression", path), layer, result);
+			normalise_parser_node(directive.scope_redirection, tprint("%.scope", path), layer, result);
+			normalise_parser_node(directive.break_replacement, tprint("%.break", path), layer, result);
+			normalise_parser_node(directive.continue_replacement, tprint("%.continue", path), layer, result);
+			normalise_parser_node(directive.remove_replacement, tprint("%.remove", path), layer, result);
 
 		case .DIRECTIVE_BAKE;
 			directive := node.(*Parser.Parser_Directive_Bake);
-			add_normalized_field(result, path, "bake_type", tprint("%", directive.bake_type));
-			normalize_parser_node(directive.procedure_call, tprint("%.call", path), layer, result);
+			add_normalised_field(result, path, "bake_type", tprint("%", directive.bake_type));
+			normalise_parser_node(directive.procedure_call, tprint("%.call", path), layer, result);
 
 		case .DIRECTIVE_LOCATION;
 			directive := node.(*Parser.Parser_Directive_Location);
-			add_normalized_field(result, path, "caller", tprint("%", directive.is_caller_location));
-			normalize_parser_node(directive.expression, tprint("%.expression", path), layer, result);
+			add_normalised_field(result, path, "caller", tprint("%", directive.is_caller_location));
+			normalise_parser_node(directive.expression, tprint("%.expression", path), layer, result);
 
 		case .DIRECTIVE_LIBRARY;
 			directive := node.(*Parser.Parser_Directive_Library);
-			add_normalized_field(result, path, "name", directive.name);
-			add_normalized_field(result, path, "flags", tprint("%", directive.library_flags));
+			add_normalised_field(result, path, "name", directive.name);
+			add_normalised_field(result, path, "flags", tprint("%", directive.library_flags));
 
 		case .DIRECTIVE_LOAD;
-			add_normalized_field(result, path, "name", node.(*Parser.Parser_Directive_Load).short_name);
+			add_normalised_field(result, path, "name", node.(*Parser.Parser_Directive_Load).short_name);
 
 		case .DIRECTIVE_BYTES;
-			normalize_parser_node(node.(*Parser.Parser_Directive_Bytes).expression, tprint("%.expression", path), layer, result);
+			normalise_parser_node(node.(*Parser.Parser_Directive_Bytes).expression, tprint("%.expression", path), layer, result);
 
 		case .DIRECTIVE_PROCEDURE_NAME;
-			normalize_parser_node(node.(*Parser.Parser_Directive_Procedure_Name).argument, tprint("%.argument", path), layer, result);
+			normalise_parser_node(node.(*Parser.Parser_Directive_Procedure_Name).argument, tprint("%.argument", path), layer, result);
 
 		case .DIRECTIVE_WILDCARD;
 
 		case .DIRECTIVE_EXISTS;
 			directive := node.(*Parser.Parser_Directive_Exists);
-			normalize_parser_node(directive.query_expression, tprint("%.query", path), layer, result);
-			normalize_parser_node(directive.sync_expression, tprint("%.sync", path), layer, result);
+			normalise_parser_node(directive.query_expression, tprint("%.query", path), layer, result);
+			normalise_parser_node(directive.sync_expression, tprint("%.sync", path), layer, result);
 
 		case .DIRECTIVE_IMPORT;
 			directive := node.(*Parser.Parser_Directive_Import);
-			add_normalized_field(result, path, "name", directive.name);
-			add_normalized_field(result, path, "flags", tprint("%", directive.flags));
-			add_normalized_field(result, path, "import_type", tprint("%", directive.import_type));
-			add_normalized_field(result, path, "module_argument_count", tprint("%", ifx directive.module_parameters_call then directive.module_parameters_call.arguments_unsorted.count else 0));
-			add_normalized_field(result, path, "program_argument_count", tprint("%", ifx directive.program_parameters_call then directive.program_parameters_call.arguments_unsorted.count else 0));
+			add_normalised_field(result, path, "name", directive.name);
+			add_normalised_field(result, path, "flags", tprint("%", directive.flags));
+			add_normalised_field(result, path, "import_type", tprint("%", directive.import_type));
+			add_normalised_field(
+				result,
+				path,
+				"module_argument_count",
+				tprint(
+					"%",
+					ifx directive.module_parameters_call
+						then directive.module_parameters_call.arguments_unsorted.count
+				)
+			);
+			add_normalised_field(
+				result,
+				path,
+				"program_argument_count",
+				tprint(
+					"%",
+					ifx directive.program_parameters_call
+						then directive.program_parameters_call.arguments_unsorted.count
+				)
+			);
 
 		case .DIRECTIVE_POKE_NAME;
 			directive := node.(*Parser.Parser_Directive_Poke_Name);
-			add_normalized_field(result, path, "name", directive.name);
+			add_normalised_field(result, path, "name", directive.name);
 
 		case .DIRECTIVE_THROUGH;
 
 		case .DIRECTIVE_OVERLAY;
 			directive := node.(*Parser.Parser_Directive_Overlay);
-			normalize_parser_node(directive.target_expression, tprint("%.target", path), layer, result);
-			normalize_parser_node(directive.declaration_or_using, tprint("%.declaration", path), layer, result);
+			normalise_parser_node(directive.target_expression, tprint("%.target", path), layer, result);
+			normalise_parser_node(directive.declaration_or_using, tprint("%.declaration", path), layer, result);
 
 		case .DIRECTIVE_ADD_CONTEXT;
-			normalize_parser_node(node.(*Parser.Parser_Directive_Add_Context).expression, tprint("%.expression", path), layer, result);
+			normalise_parser_node(node.(*Parser.Parser_Directive_Add_Context).expression, tprint("%.expression", path), layer, result);
 
 		case .DIRECTIVE_CONTEXT_TYPE;
 
 		case .DIRECTIVE_SCOPE;
-			add_normalized_field(result, path, "scope_type", tprint("%", node.(*Parser.Parser_Directive_Scope).scope_type));
+			add_normalised_field(result, path, "scope_type", tprint("%", node.(*Parser.Parser_Directive_Scope).scope_type));
 
 		case .DIRECTIVE_MODULE_PARAMETERS;
 			directive := node.(*Parser.Parser_Directive_Module_Parameters);
-			normalize_parser_node(directive.module_parameters, tprint("%.module", path), layer, result);
-			normalize_parser_node(directive.program_parameters, tprint("%.program", path), layer, result);
-			normalize_parser_node(directive.common_code, tprint("%.common", path), layer, result);
+			normalise_parser_node(directive.module_parameters, tprint("%.module", path), layer, result);
+			normalise_parser_node(directive.program_parameters, tprint("%.program", path), layer, result);
+			normalise_parser_node(directive.common_code, tprint("%.common", path), layer, result);
 
 		case .DIRECTIVE_MODIFY;
-			normalize_parser_node(node.(*Parser.Parser_Directive_Modify).block, tprint("%.block", path), layer, result);
+			normalise_parser_node(node.(*Parser.Parser_Directive_Modify).block, tprint("%.block", path), layer, result);
 
 		case .TYPE_INSTANTIATION;
 			type_inst := node.(*Parser.Parser_Type_Instantiation);
-			add_normalized_field(result, path, "inst_flags", tprint("%", type_inst.inst_flags));
-			normalize_parser_node(type_inst.type_valued_expression, tprint("%.expression", path), layer, result);
-			normalize_parser_node(type_inst.must_implement, tprint("%.restriction", path), layer, result);
-			normalize_parser_node(type_inst.pointer_to, tprint("%.pointer_to", path), layer, result);
-			normalize_parser_node(type_inst.type_directive_target, tprint("%.directive_target", path), layer, result);
-			normalize_parser_node(type_inst.array_element_type, tprint("%.element_type", path), layer, result);
-			normalize_parser_node(type_inst.array_dimension, tprint("%.dimension", path), layer, result);
+			add_normalised_field(result, path, "inst_flags", tprint("%", type_inst.inst_flags));
+			normalise_parser_node(type_inst.type_valued_expression, tprint("%.expression", path), layer, result);
+			normalise_parser_node(type_inst.must_implement, tprint("%.restriction", path), layer, result);
+			normalise_parser_node(type_inst.pointer_to, tprint("%.pointer_to", path), layer, result);
+			normalise_parser_node(type_inst.type_directive_target, tprint("%.directive_target", path), layer, result);
+			normalise_parser_node(type_inst.array_element_type, tprint("%.element_type", path), layer, result);
+			normalise_parser_node(type_inst.array_dimension, tprint("%.dimension", path), layer, result);
 
 		case .PROCEDURE_HEADER;
 			header := node.(*Parser.Parser_Procedure_Header);
-			add_normalized_field(result, path, "flags", tprint("%", procedure_syntax_flags(header.procedure_flags)));
+			add_normalised_field(result, path, "flags", tprint("%", procedure_syntax_flags(header.procedure_flags)));
 			if layer == .SEMANTIC {
-				add_normalized_field(result, path, "name", header.name);
+				add_normalised_field(result, path, "name", header.name);
 			}
 
-			add_normalized_field(result, path, "foreign_name", header.foreign_function_name);
-			add_normalized_field(result, path, "library", ifx header.library_identifier then header.library_identifier.name else "");
-			add_normalized_field(result, path, "deprecated", header.deprecation_string);
-			add_normalized_field(result, path, "using_count", tprint("%", header.parameter_usings.count));
+			add_normalised_field(result, path, "foreign_name", header.foreign_function_name);
+			add_normalised_field(
+				result,
+				path,
+				"library",
+				ifx header.library_identifier
+					then header.library_identifier.name
+					else ""
+			);
+			add_normalised_field(result, path, "deprecated", header.deprecation_string);
+			add_normalised_field(result, path, "using_count", tprint("%", header.parameter_usings.count));
 			for header.parameter_usings {
 				using_path := tprint("%.using[%]", path, it_index);
-				add_normalized_field(result, using_path, "filter_type", tprint("%", it.filter_type));
-				add_normalized_field(result, using_path, "no_parameters", tprint("%", it.no_parameters));
-				normalize_parser_node(it.filter_expression, tprint("%.filter", using_path), layer, result);
+				add_normalised_field(result, using_path, "filter_type", tprint("%", it.filter_type));
+				add_normalised_field(result, using_path, "no_parameters", tprint("%", it.no_parameters));
+				normalise_parser_node(it.filter_expression, tprint("%.filter", using_path), layer, result);
 			}
 
-			add_normalized_field(result, path, "modify_count", tprint("%", header.modify_directives.count));
-			add_normalized_field(result, path, "argument_count", tprint("%", header.arguments.count));
-			add_normalized_field(result, path, "return_count", tprint("%", header.returns.count));
+			add_normalised_field(result, path, "modify_count", tprint("%", header.modify_directives.count));
+			add_normalised_field(result, path, "argument_count", tprint("%", header.arguments.count));
+			add_normalised_field(result, path, "return_count", tprint("%", header.returns.count));
 			for header.arguments {
 				argument_path := tprint("%.argument[%]", path, it_index);
 				if header.procedure_flags & .QUICK {
-					add_normalized_field(result, argument_path, "kind", tprint("%", it.kind));
-					add_normalized_field(result, argument_path, "name", it.name);
+					add_normalised_field(result, argument_path, "kind", tprint("%", it.kind));
+					add_normalised_field(result, argument_path, "name", it.name);
 				} else {
-					normalize_parser_node(it, argument_path, layer, result);
+					normalise_parser_node(it, argument_path, layer, result);
 				}
 			}
 
 			for header.returns {
-				normalize_parser_node(it, tprint("%.return[%]", path, it_index), layer, result);
+				normalise_parser_node(it, tprint("%.return[%]", path, it_index), layer, result);
 			}
 
 			for header.modify_directives {
-				normalize_parser_node(it, tprint("%.modify[%]", path, it_index), layer, result);
+				normalise_parser_node(it, tprint("%.modify[%]", path, it_index), layer, result);
 			}
 
 		case .PROCEDURE_BODY;
 			body := node.(*Parser.Parser_Procedure_Body);
-			normalize_parser_node(body.block, tprint("%.block", path), layer, result);
+			normalise_parser_node(body.block, tprint("%.block", path), layer, result);
 
 		case .STRUCT;
 			aggregate := node.(*Parser.Parser_Struct);
-			add_normalized_field(result, path, "flags", tprint("%", aggregate.textual_flags));
-			add_normalized_field(result, path, "note_count", tprint("%", aggregate.notes.count));
+			add_normalised_field(result, path, "flags", tprint("%", aggregate.textual_flags));
+			add_normalised_field(result, path, "note_count", tprint("%", aggregate.notes.count));
 			for aggregate.notes {
-				add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+				add_normalised_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
 			}
 
-			add_normalized_field(result, path, "modify_count", tprint("%", aggregate.modify_directives.count));
+			add_normalised_field(result, path, "modify_count", tprint("%", aggregate.modify_directives.count));
 			for aggregate.modify_directives {
-				normalize_parser_node(it, tprint("%.modify[%]", path, it_index), layer, result);
+				normalise_parser_node(it, tprint("%.modify[%]", path, it_index), layer, result);
 			}
 
-			normalize_parser_node(aggregate.block, tprint("%.block", path), layer, result);
+			normalise_parser_node(aggregate.block, tprint("%.block", path), layer, result);
 
 		case .ENUM;
 			aggregate := node.(*Parser.Parser_Enum);
-			add_normalized_field(result, path, "flags", tprint("%", aggregate.is_flags));
-			add_normalized_field(result, path, "complete", tprint("%", aggregate.marked_as_complete));
-			add_normalized_field(result, path, "specified", tprint("%", aggregate.marked_as_specified));
-			add_normalized_field(result, path, "note_count", tprint("%", aggregate.notes.count));
+			add_normalised_field(result, path, "flags", tprint("%", aggregate.is_flags));
+			add_normalised_field(result, path, "complete", tprint("%", aggregate.marked_as_complete));
+			add_normalised_field(result, path, "specified", tprint("%", aggregate.marked_as_specified));
+			add_normalised_field(result, path, "note_count", tprint("%", aggregate.notes.count));
 			for aggregate.notes {
-				add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+				add_normalised_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
 			}
 
-			normalize_parser_node(aggregate.internal_type_inst, tprint("%.internal_type", path), layer, result);
-			normalize_parser_node(aggregate.block, tprint("%.block", path), layer, result);
+			normalise_parser_node(aggregate.internal_type_inst, tprint("%.internal_type", path), layer, result);
+			normalise_parser_node(aggregate.block, tprint("%.block", path), layer, result);
 
 		case .DECLARATION;
 			declaration := node.(*Parser.Parser_Declaration);
-			normalize_parser_declaration(declaration, path, layer, result);
+			normalise_parser_declaration(declaration, path, layer, result);
 
 		case .COMPOUND_DECLARATION;
 			declaration := node.(*Parser.Parser_Compound_Declaration);
-			add_normalized_field(result, path, "argument_count", tprint("%", declaration.comma_separated_assignment.arguments.count));
+			add_normalised_field(result, path, "argument_count", tprint("%", declaration.comma_separated_assignment.arguments.count));
 			for declaration.comma_separated_assignment.arguments {
-				add_normalized_field(result, tprint("%.argument[%]", path, it_index), "modifier", tprint("%", it.modifier));
-				normalize_parser_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
+				add_normalised_field(result, tprint("%.argument[%]", path, it_index), "modifier", tprint("%", it.modifier));
+				normalise_parser_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
 			}
 
-			normalize_parser_declaration(declaration.declaration_properties, tprint("%.properties", path), layer, result);
-			normalize_parser_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
-			add_normalized_field(result, path, "note_count", tprint("%", declaration.notes.count));
+			normalise_parser_declaration(declaration.declaration_properties, tprint("%.properties", path), layer, result);
+			normalise_parser_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
+			add_normalised_field(result, path, "note_count", tprint("%", declaration.notes.count));
 			for declaration.notes {
-				add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+				add_normalised_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
 			}
 
 		case .COMMA_SEPARATED_ARGUMENTS;
 			arguments := node.(*Parser.Parser_Comma_Separated_Arguments);
-			add_normalized_field(result, path, "argument_count", tprint("%", arguments.arguments.count));
+			add_normalised_field(result, path, "argument_count", tprint("%", arguments.arguments.count));
 			for arguments.arguments {
-				normalize_parser_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
+				normalise_parser_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
 			}
 
 		case .NOTE;
-			add_normalized_field(result, path, "text", node.(*Parser.Parser_Note).text);
+			add_normalised_field(result, path, "text", node.(*Parser.Parser_Note).text);
 
 		case .BLOCK;
 			block := node.(*Parser.Parser_Block);
-			add_normalized_field(result, path, "block_type", tprint("%", block.block_type));
-			add_normalized_field(result, path, "statement_count", tprint("%", block.statements.count));
+			add_normalised_field(result, path, "block_type", tprint("%", block.block_type));
+			add_normalised_field(result, path, "statement_count", tprint("%", block.statements.count));
 			for block.statements {
-				normalize_parser_node(it, tprint("%.statement[%]", path, it_index), layer, result);
+				normalise_parser_node(it, tprint("%.statement[%]", path, it_index), layer, result);
 			}
 
 		case .RETURN;
 			return_node := node.(*Parser.Parser_Return);
-			add_normalized_field(result, path, "backticked", tprint("%", (return_node.return_flags & .IS_BACKTICKED) != 0));
-			add_normalized_field(result, path, "quick", tprint("%", (return_node.return_flags & .AUTO_INSERTED_FOR_QUICK_LAMBDA) != 0));
-			add_normalized_field(result, path, "argument_count", tprint("%", return_node.arguments_unsorted.count));
+			add_normalised_field(result, path, "backticked", tprint("%", (return_node.return_flags & .IS_BACKTICKED) != 0));
+			add_normalised_field(result, path, "quick", tprint("%", (return_node.return_flags & .AUTO_INSERTED_FOR_QUICK_LAMBDA) != 0));
+			add_normalised_field(result, path, "argument_count", tprint("%", return_node.arguments_unsorted.count));
 			for return_node.arguments_unsorted {
-				normalize_parser_node(it.expression, tprint("%.argument[%]", path, it_index), layer, result);
+				normalise_parser_node(it.expression, tprint("%.argument[%]", path, it_index), layer, result);
 			}
 
 		case .LOOP_CONTROL;
 			control := node.(*Parser.Parser_Loop_Control);
-			add_normalized_field(result, path, "control_type", tprint("%", control.control_type));
-			normalize_parser_node(control.target_ident, tprint("%.target", path), layer, result);
+			add_normalised_field(result, path, "control_type", tprint("%", control.control_type));
+			normalise_parser_node(control.target_ident, tprint("%.target", path), layer, result);
 
 		case .WHILE;
 			while_node := node.(*Parser.Parser_While);
-			normalize_parser_node(while_node.condition, tprint("%.condition", path), layer, result);
-			normalize_parser_node(while_node.block, tprint("%.block", path), layer, result);
+			normalise_parser_node(while_node.condition, tprint("%.condition", path), layer, result);
+			normalise_parser_node(while_node.block, tprint("%.block", path), layer, result);
 
 		case .FOR;
 			for_node := node.(*Parser.Parser_For);
-			add_normalized_field(result, path, "flags", tprint("%", for_node.for_flags));
-			normalize_parser_node(for_node.want_replacement_for_expansion, tprint("%.selector", path), layer, result);
-			normalize_parser_node(for_node.want_pointer_expression, tprint("%.pointer_flag", path), layer, result);
-			normalize_parser_node(for_node.want_reverse_expression, tprint("%.reverse_flag", path), layer, result);
-			normalize_parser_node(for_node.ident_it, tprint("%.iterator", path), layer, result);
-			normalize_parser_node(for_node.ident_it_index, tprint("%.index", path), layer, result);
-			normalize_parser_node(for_node.iteration_expression, tprint("%.iteration", path), layer, result);
-			normalize_parser_node(for_node.iteration_expression_right, tprint("%.iteration_right", path), layer, result);
-			normalize_parser_node(for_node.block, tprint("%.block", path), layer, result);
+			add_normalised_field(result, path, "flags", tprint("%", for_node.for_flags));
+			normalise_parser_node(for_node.want_replacement_for_expansion, tprint("%.selector", path), layer, result);
+			normalise_parser_node(for_node.want_pointer_expression, tprint("%.pointer_flag", path), layer, result);
+			normalise_parser_node(for_node.want_reverse_expression, tprint("%.reverse_flag", path), layer, result);
+			normalise_parser_node(for_node.ident_it, tprint("%.iterator", path), layer, result);
+			normalise_parser_node(for_node.ident_it_index, tprint("%.index", path), layer, result);
+			normalise_parser_node(for_node.iteration_expression, tprint("%.iteration", path), layer, result);
+			normalise_parser_node(for_node.iteration_expression_right, tprint("%.iteration_right", path), layer, result);
+			normalise_parser_node(for_node.block, tprint("%.block", path), layer, result);
 
 		case .IF;
 			if_node := node.(*Parser.Parser_If);
-			add_normalized_field(result, path, "switch", tprint("%", (if_node.if_flags & .IS_SWITCH_STATEMENT) != 0));
-			add_normalized_field(result, path, "ifx", tprint("%", (if_node.if_flags & .IS_IFX) != 0));
-			add_normalized_field(result, path, "static", tprint("%", (if_node.if_flags & .IS_STATIC) != 0));
-			add_normalized_field(result, path, "complete", tprint("%", (if_node.if_flags & .MARKED_AS_COMPLETE) != 0));
-			normalize_parser_node(if_node.condition, tprint("%.condition", path), layer, result);
-			normalize_parser_node(if_node.then_block, tprint("%.then", path), layer, result);
-			normalize_parser_node(if_node.else_block, tprint("%.else", path), layer, result);
+			add_normalised_field(result, path, "switch", tprint("%", (if_node.if_flags & .IS_SWITCH_STATEMENT) != 0));
+			add_normalised_field(result, path, "ifx", tprint("%", (if_node.if_flags & .IS_IFX) != 0));
+			add_normalised_field(result, path, "static", tprint("%", (if_node.if_flags & .IS_STATIC) != 0));
+			add_normalised_field(result, path, "complete", tprint("%", (if_node.if_flags & .MARKED_AS_COMPLETE) != 0));
+			normalise_parser_node(if_node.condition, tprint("%.condition", path), layer, result);
+			normalise_parser_node(if_node.then_block, tprint("%.then", path), layer, result);
+			normalise_parser_node(if_node.else_block, tprint("%.else", path), layer, result);
 
 		case .CASE;
 			case_node := node.(*Parser.Parser_Case);
-			add_normalized_field(result, path, "fallthrough", tprint("%", case_node.marked_as_fallthrough));
-			normalize_parser_node(case_node.condition, tprint("%.condition", path), layer, result);
-			normalize_parser_node(case_node.then_block, tprint("%.block", path), layer, result);
+			add_normalised_field(result, path, "fallthrough", tprint("%", case_node.marked_as_fallthrough));
+			normalise_parser_node(case_node.condition, tprint("%.condition", path), layer, result);
+			normalise_parser_node(case_node.then_block, tprint("%.block", path), layer, result);
 
 		case .DEFER;
 			defer_node := node.(*Parser.Parser_Defer);
-			add_normalized_field(result, path, "backticked", tprint("%", defer_node.is_backticked));
-			normalize_parser_node(defer_node.block, tprint("%.block", path), layer, result);
+			add_normalised_field(result, path, "backticked", tprint("%", defer_node.is_backticked));
+			normalise_parser_node(defer_node.block, tprint("%.block", path), layer, result);
 
 		case .USING;
 			using_node := node.(*Parser.Parser_Using);
-			add_normalized_field(result, path, "filter_type", tprint("%", using_node.filter_type));
-			add_normalized_field(result, path, "no_parameters", tprint("%", using_node.no_parameters));
-			normalize_parser_node(using_node.expression, tprint("%.expression", path), layer, result);
-			normalize_parser_node(using_node.filter_expression, tprint("%.filter", path), layer, result);
+			add_normalised_field(result, path, "filter_type", tprint("%", using_node.filter_type));
+			add_normalised_field(result, path, "no_parameters", tprint("%", using_node.no_parameters));
+			normalise_parser_node(using_node.expression, tprint("%.expression", path), layer, result);
+			normalise_parser_node(using_node.filter_expression, tprint("%.filter", path), layer, result);
 
 		case .PUSH_CONTEXT;
 			push := node.(*Parser.Parser_Push_Context);
-			add_normalized_field(result, path, "flags", tprint("%", push.push_context_flags));
-			normalize_parser_node(push.to_push, tprint("%.expression", path), layer, result);
-			normalize_parser_node(push.block, tprint("%.block", path), layer, result);
+			add_normalised_field(result, path, "flags", tprint("%", push.push_context_flags));
+			normalise_parser_node(push.to_push, tprint("%.expression", path), layer, result);
+			normalise_parser_node(push.block, tprint("%.block", path), layer, result);
 
 		case .CONTEXT;
 		case .DIRECTIVE_THIS;
@@ -1659,139 +1441,146 @@ normalize_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 		case .ASM;
 
 		case;
-			add_normalized_field(result, path, "unsupported", "true");
+			add_normalised_field(result, path, "unsupported", "true");
 	}
 }
 
-normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, result: *Normalized_Tree) {
+normalise_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, result: *Normalised_Tree) {
 	if !node {
-		add_normalized_field(result, path, "kind", "<null>");
+		add_normalised_field(result, path, "kind", "<null>");
 		return;
 	}
 
 
-	add_normalized_field(result, path, "kind", tprint("%", node.kind));
-	add_normalized_field(result, path, "parenthesized", tprint("%", (node.node_flags & .IS_PARENTHESIZED) != 0));
+	add_normalised_field(result, path, "kind", tprint("%", node.kind));
+	add_normalised_field(result, path, "parenthesized", tprint("%", (node.node_flags & .IS_PARENTHESIZED) != 0));
 
 	if layer == .SEMANTIC {
-		add_normalized_field(result, path, "has_type", tprint("%", node.type != null));
+		add_normalised_field(result, path, "has_type", tprint("%", node.type != null));
 	}
 
 	if node.kind == {
 		case .IDENT;
 			ident := node.(*Code_Ident);
-			add_normalized_field(result, path, "name", ident.name);
-			add_normalized_field(result, path, "has_scope_modifier", tprint("%", (ident.flags & .HAS_SCOPE_MODIFIER) != 0));
-			add_normalized_field(result, path, "do_not_resolve", tprint("%", (ident.flags & .DO_NOT_RESOLVE_DUE_TO_PARSER) != 0));
+			add_normalised_field(result, path, "name", ident.name);
+			add_normalised_field(result, path, "has_scope_modifier", tprint("%", (ident.flags & .HAS_SCOPE_MODIFIER) != 0));
+			add_normalised_field(result, path, "do_not_resolve", tprint("%", (ident.flags & .DO_NOT_RESOLVE_DUE_TO_PARSER) != 0));
 
 		case .LITERAL;
 			literal := node.(*Code_Literal);
-			add_normalized_field(result, path, "value_type", tprint("%", literal.value_type));
-			add_normalized_field(result, path, "value_flags", tprint("%", literal.value_flags));
+			add_normalised_field(result, path, "value_type", tprint("%", literal.value_type));
+			add_normalised_field(result, path, "value_flags", tprint("%", literal.value_flags));
 
 			if literal.value_type == {
 				case .NUMBER;
 					if literal.value_flags & .FLOAT {
-						add_normalized_field(result, path, "float64", tprint("%", literal._float64));
+						add_normalised_field(result, path, "float64", tprint("%", literal._float64));
 					} else {
-						add_normalized_field(result, path, "u64", tprint("%", literal._u64));
+						add_normalised_field(result, path, "u64", tprint("%", literal._u64));
 					}
 
 				case .STRING;
-					add_normalized_field(result, path, "string", literal._string);
+					add_normalised_field(result, path, "string", literal._string);
 
 				case .BOOLEAN;
-					add_normalized_field(result, path, "boolean", tprint("%", literal._u64));
+					add_normalised_field(result, path, "boolean", tprint("%", literal._u64));
 
 				case .POINTER;
 					if literal.pointer_literal_info {
-						add_normalized_field(result, path, "pointer_type", tprint("%", literal.pointer_literal_info.pointer_literal_type));
-						add_normalized_field(result, path, "pointer_offset", tprint("%", literal.pointer_literal_info.offset_from_symbol));
+						add_normalised_field(result, path, "pointer_type", tprint("%", literal.pointer_literal_info.pointer_literal_type));
+						add_normalised_field(result, path, "pointer_offset", tprint("%", literal.pointer_literal_info.offset_from_symbol));
 					} else {
-						add_normalized_field(result, path, "pointer_type", "<missing>");
+						add_normalised_field(result, path, "pointer_type", "<missing>");
 					}
 
 				case .ARRAY;
 					info := literal.array_literal_info;
-					add_normalized_field(result, path, "untyped", tprint("%", (info.array_literal_flags & .WAS_UNTYPED) != 0));
-					add_normalized_field(result, path, "member_count", tprint("%", info.array_members.count));
+					add_normalised_field(result, path, "untyped", tprint("%", (info.array_literal_flags & .WAS_UNTYPED) != 0));
+					add_normalised_field(result, path, "member_count", tprint("%", info.array_members.count));
 					if info.element_type {
-						normalize_node(info.element_type.type_valued_expression, tprint("%.element_type", path), layer, result);
+						normalise_node(info.element_type.type_valued_expression, tprint("%.element_type", path), layer, result);
 					}
 					for info.array_members {
-						normalize_node(it, tprint("%.member[%]", path, it_index), layer, result);
+						normalise_node(it, tprint("%.member[%]", path, it_index), layer, result);
 					}
 
 				case .STRUCT;
 					info := literal.struct_literal_info;
-					add_normalized_field(result, path, "argument_count", tprint("%", info.arguments.count));
+					add_normalised_field(result, path, "argument_count", tprint("%", info.arguments.count));
 					if info.type_expression {
-						normalize_node(info.type_expression.type_valued_expression, tprint("%.type_expression", path), layer, result);
+						normalise_node(info.type_expression.type_valued_expression, tprint("%.type_expression", path), layer, result);
 					}
 					for info.arguments {
-						normalize_node(it, tprint("%.argument[%]", path, it_index), layer, result);
+						normalise_node(it, tprint("%.argument[%]", path, it_index), layer, result);
 					}
 			}
 
 		case .UNARY_OPERATOR;
 			unary := node.(*Code_Unary_Operator);
-			add_normalized_field(result, path, "operator", tprint("%", unary.operator_type));
-			normalize_node(unary.subexpression, tprint("%.operand", path), layer, result);
+			add_normalised_field(result, path, "operator", tprint("%", unary.operator_type));
+			normalise_node(unary.subexpression, tprint("%.operand", path), layer, result);
 
 		case .BINARY_OPERATOR;
 			binary := node.(*Code_Binary_Operator);
-			add_normalized_field(result, path, "operator", tprint("%", binary.operator_type));
-			add_normalized_field(result, path, "operator_flags", tprint("%", binary.flags));
-			normalize_node(binary.left, tprint("%.left", path), layer, result);
-			normalize_node(binary.right, tprint("%.right", path), layer, result);
+			add_normalised_field(result, path, "operator", tprint("%", binary.operator_type));
+			add_normalised_field(result, path, "operator_flags", tprint("%", binary.flags));
+			normalise_node(binary.left, tprint("%.left", path), layer, result);
+			normalise_node(binary.right, tprint("%.right", path), layer, result);
 
 		case .PROCEDURE_CALL;
 			call := node.(*Code_Procedure_Call);
-			add_normalized_field(result, path, "flags", tprint("%", call.flags));
-			add_normalized_field(result, path, "argument_count", tprint("%", call.arguments_unsorted.count));
-			add_normalized_field(result, path, "has_context_modification", tprint("%", call.context_modification != null));
-			normalize_node(call.procedure_expression, tprint("%.procedure", path), layer, result);
+			add_normalised_field(result, path, "flags", tprint("%", call.flags));
+			add_normalised_field(result, path, "argument_count", tprint("%", call.arguments_unsorted.count));
+			add_normalised_field(result, path, "has_context_modification", tprint("%", call.context_modification != null));
+			normalise_node(call.procedure_expression, tprint("%.procedure", path), layer, result);
 			for call.arguments_unsorted {
 				argument_path := tprint("%.argument[%]", path, it_index);
-				add_normalized_field(result, argument_path, "name", ifx it.name then it.name.name else "<positional>");
-				normalize_node(it.expression, tprint("%.expression", argument_path), layer, result);
+				add_normalised_field(
+					result,
+					argument_path,
+					"name",
+					ifx it.name
+						then it.name.name
+						else "<positional>"
+				);
+				normalise_node(it.expression, tprint("%.expression", argument_path), layer, result);
 			}
 
 			if call.context_modification {
-				add_normalized_field(result, path, "context_count", tprint("%", call.context_modification.modification_expressions.count));
+				add_normalised_field(result, path, "context_count", tprint("%", call.context_modification.modification_expressions.count));
 				for call.context_modification.modification_expressions {
-					normalize_node(it, tprint("%.context[%]", path, it_index), layer, result);
+					normalise_node(it, tprint("%.context[%]", path, it_index), layer, result);
 				}
 			}
 
 		case .CAST;
 			cast_node := node.(*Code_Cast);
-			add_normalized_field(result, path, "cast_flags", tprint("%", cast_node.cast_flags));
+			add_normalised_field(result, path, "cast_flags", tprint("%", cast_node.cast_flags));
 			if cast_node.target_type {
-				normalize_node(cast_node.target_type.type_valued_expression, tprint("%.target_type", path), layer, result);
+				normalise_node(cast_node.target_type.type_valued_expression, tprint("%.target_type", path), layer, result);
 			}
 
-			normalize_node(cast_node.expression, tprint("%.expression", path), layer, result);
+			normalise_node(cast_node.expression, tprint("%.expression", path), layer, result);
 
 		case .EXPRESSION_QUERY;
 			query := node.(*Code_Expression_Query);
-			add_normalized_field(result, path, "query_kind", tprint("%", query.query_kind));
-			normalize_node(query.expression_to_query, tprint("%.expression", path), layer, result);
+			add_normalised_field(result, path, "query_kind", tprint("%", query.query_kind));
+			normalise_node(query.expression_to_query, tprint("%.expression", path), layer, result);
 
 		case .TYPE_QUERY;
 			query := node.(*Code_Type_Query);
-			add_normalized_field(result, path, "query_kind", tprint("%", query.query_kind));
-			normalize_node(query.type_to_query.type_valued_expression, tprint("%.type", path), layer, result);
+			add_normalised_field(result, path, "query_kind", tprint("%", query.query_kind));
+			normalise_node(query.type_to_query.type_valued_expression, tprint("%.type", path), layer, result);
 
 		case .DIRECTIVE_CODE;
 			directive := node.(*Code_Directive_Code);
-			add_normalized_field(result, path, "code_flags", tprint("%", directive.code_flags));
-			normalize_node(directive.expression, tprint("%.expression", path), layer, result);
+			add_normalised_field(result, path, "code_flags", tprint("%", directive.code_flags));
+			normalise_node(directive.expression, tprint("%.expression", path), layer, result);
 
 		case .DIRECTIVE_RUN;
 			directive := node.(*Code_Directive_Run);
-			add_normalized_field(result, path, "flags", tprint("%", directive.flags));
-			add_normalized_field(result, path, "assertion_string", directive.assertion_string);
+			add_normalised_field(result, path, "flags", tprint("%", directive.flags));
+			add_normalised_field(result, path, "assertion_string", directive.assertion_string);
 			expression: *Code_Node;
 			if directive.procedure && directive.procedure.body_or_null {
 				body := directive.procedure.body_or_null.block;
@@ -1802,314 +1591,340 @@ normalize_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 				}
 			}
 
-			normalize_node(expression, tprint("%.expression", path), layer, result);
+			normalise_node(expression, tprint("%.expression", path), layer, result);
 
 		case .DIRECTIVE_INSERT;
 			directive := node.(*Code_Directive_Insert);
-			normalize_node(directive.expression, tprint("%.expression", path), layer, result);
-			normalize_node(directive.scope_redirection, tprint("%.scope", path), layer, result);
-			normalize_node(directive.break_replacement, tprint("%.break", path), layer, result);
-			normalize_node(directive.continue_replacement, tprint("%.continue", path), layer, result);
-			normalize_node(directive.remove_replacement, tprint("%.remove", path), layer, result);
+			normalise_node(directive.expression, tprint("%.expression", path), layer, result);
+			normalise_node(directive.scope_redirection, tprint("%.scope", path), layer, result);
+			normalise_node(directive.break_replacement, tprint("%.break", path), layer, result);
+			normalise_node(directive.continue_replacement, tprint("%.continue", path), layer, result);
+			normalise_node(directive.remove_replacement, tprint("%.remove", path), layer, result);
 
 		case .DIRECTIVE_BAKE;
 			directive := node.(*Code_Directive_Bake);
-			add_normalized_field(result, path, "bake_type", tprint("%", directive.bake_type));
-			normalize_node(directive.procedure_call, tprint("%.call", path), layer, result);
+			add_normalised_field(result, path, "bake_type", tprint("%", directive.bake_type));
+			normalise_node(directive.procedure_call, tprint("%.call", path), layer, result);
 
 		case .DIRECTIVE_LOCATION;
 			directive := node.(*Code_Directive_Location);
-			add_normalized_field(result, path, "caller", tprint("%", directive.is_caller_location));
-			normalize_node(directive.expression, tprint("%.expression", path), layer, result);
+			add_normalised_field(result, path, "caller", tprint("%", directive.is_caller_location));
+			normalise_node(directive.expression, tprint("%.expression", path), layer, result);
 
 		case .DIRECTIVE_LIBRARY;
 			directive := node.(*Code_Directive_Library);
-			add_normalized_field(result, path, "name", directive.name);
-			add_normalized_field(result, path, "flags", tprint("%", directive.library_flags));
+			add_normalised_field(result, path, "name", directive.name);
+			add_normalised_field(result, path, "flags", tprint("%", directive.library_flags));
 
 		case .DIRECTIVE_LOAD;
-			add_normalized_field(result, path, "name", node.(*Code_Directive_Load).short_name);
+			add_normalised_field(result, path, "name", node.(*Code_Directive_Load).short_name);
 
 		case .DIRECTIVE_BYTES;
-			normalize_node(node.(*Code_Directive_Bytes).expression, tprint("%.expression", path), layer, result);
+			normalise_node(node.(*Code_Directive_Bytes).expression, tprint("%.expression", path), layer, result);
 
 		case .DIRECTIVE_PROCEDURE_NAME;
-			normalize_node(node.(*Code_Directive_Procedure_Name).argument, tprint("%.argument", path), layer, result);
+			normalise_node(node.(*Code_Directive_Procedure_Name).argument, tprint("%.argument", path), layer, result);
 
 		case .DIRECTIVE_WILDCARD;
 
 		case .DIRECTIVE_EXISTS;
 			directive := node.(*Code_Directive_Exists);
-			normalize_node(directive.query_expression, tprint("%.query", path), layer, result);
-			normalize_node(directive.sync_expression, tprint("%.sync", path), layer, result);
+			normalise_node(directive.query_expression, tprint("%.query", path), layer, result);
+			normalise_node(directive.sync_expression, tprint("%.sync", path), layer, result);
 
 		case .DIRECTIVE_IMPORT;
 			directive := node.(*Code_Directive_Import);
-			add_normalized_field(result, path, "name", directive.name);
-			add_normalized_field(result, path, "flags", tprint("%", directive.flags));
-			add_normalized_field(result, path, "import_type", tprint("%", directive.import_type));
-			add_normalized_field(result, path, "module_argument_count", tprint("%", ifx directive.module_parameters_call then directive.module_parameters_call.arguments_unsorted.count else 0));
-			add_normalized_field(result, path, "program_argument_count", tprint("%", ifx directive.program_parameters_call then directive.program_parameters_call.arguments_unsorted.count else 0));
+			add_normalised_field(result, path, "name", directive.name);
+			add_normalised_field(result, path, "flags", tprint("%", directive.flags));
+			add_normalised_field(result, path, "import_type", tprint("%", directive.import_type));
+			add_normalised_field(
+				result,
+				path,
+				"module_argument_count",
+				tprint(
+					"%",
+					ifx directive.module_parameters_call
+						then directive.module_parameters_call.arguments_unsorted.count
+				)
+			);
+			add_normalised_field(
+				result,
+				path,
+				"program_argument_count",
+				tprint(
+					"%",
+					ifx directive.program_parameters_call
+						then directive.program_parameters_call.arguments_unsorted.count
+				)
+			);
 
 		case .DIRECTIVE_POKE_NAME;
-			add_normalized_field(result, path, "name", node.(*Code_Directive_Poke_Name).name);
+			add_normalised_field(result, path, "name", node.(*Code_Directive_Poke_Name).name);
 
 		case .DIRECTIVE_THROUGH;
 
 		case .DIRECTIVE_OVERLAY;
 			directive := node.(*Code_Directive_Overlay);
-			normalize_node(directive.target_expression, tprint("%.target", path), layer, result);
-			normalize_node(directive.declaration_or_using, tprint("%.declaration", path), layer, result);
+			normalise_node(directive.target_expression, tprint("%.target", path), layer, result);
+			normalise_node(directive.declaration_or_using, tprint("%.declaration", path), layer, result);
 
 		case .DIRECTIVE_ADD_CONTEXT;
-			normalize_node(node.(*Code_Directive_Add_Context).expression, tprint("%.expression", path), layer, result);
+			normalise_node(node.(*Code_Directive_Add_Context).expression, tprint("%.expression", path), layer, result);
 
 		case .DIRECTIVE_CONTEXT_TYPE;
 
 		case .DIRECTIVE_SCOPE;
-			add_normalized_field(result, path, "scope_type", tprint("%", node.(*Code_Directive_Scope).scope_type));
+			add_normalised_field(result, path, "scope_type", tprint("%", node.(*Code_Directive_Scope).scope_type));
 
 		case .DIRECTIVE_MODULE_PARAMETERS;
 			directive := node.(*Code_Directive_Module_Parameters);
-			normalize_node(directive.module_parameters, tprint("%.module", path), layer, result);
-			normalize_node(directive.program_parameters, tprint("%.program", path), layer, result);
-			normalize_node(directive.common_code, tprint("%.common", path), layer, result);
+			normalise_node(directive.module_parameters, tprint("%.module", path), layer, result);
+			normalise_node(directive.program_parameters, tprint("%.program", path), layer, result);
+			normalise_node(directive.common_code, tprint("%.common", path), layer, result);
 
 		case .DIRECTIVE_MODIFY;
-			normalize_node(node.(*Code_Directive_Modify).block, tprint("%.block", path), layer, result);
+			normalise_node(node.(*Code_Directive_Modify).block, tprint("%.block", path), layer, result);
 
 		case .TYPE_INSTANTIATION;
 			type_inst := node.(*Code_Type_Instantiation);
-			add_normalized_field(result, path, "inst_flags", tprint("%", type_inst.inst_flags));
-			normalize_node(type_inst.type_valued_expression, tprint("%.expression", path), layer, result);
-			normalize_node(type_inst.must_implement, tprint("%.restriction", path), layer, result);
-			normalize_node(type_inst.pointer_to, tprint("%.pointer_to", path), layer, result);
-			normalize_node(type_inst.type_directive_target, tprint("%.directive_target", path), layer, result);
-			normalize_node(type_inst.array_element_type, tprint("%.element_type", path), layer, result);
-			normalize_node(type_inst.array_dimension, tprint("%.dimension", path), layer, result);
+			add_normalised_field(result, path, "inst_flags", tprint("%", type_inst.inst_flags));
+			normalise_node(type_inst.type_valued_expression, tprint("%.expression", path), layer, result);
+			normalise_node(type_inst.must_implement, tprint("%.restriction", path), layer, result);
+			normalise_node(type_inst.pointer_to, tprint("%.pointer_to", path), layer, result);
+			normalise_node(type_inst.type_directive_target, tprint("%.directive_target", path), layer, result);
+			normalise_node(type_inst.array_element_type, tprint("%.element_type", path), layer, result);
+			normalise_node(type_inst.array_dimension, tprint("%.dimension", path), layer, result);
 
 		case .PROCEDURE_HEADER;
 			header := node.(*Code_Procedure_Header);
-			add_normalized_field(result, path, "flags", tprint("%", procedure_syntax_flags(header.procedure_flags)));
+			add_normalised_field(result, path, "flags", tprint("%", procedure_syntax_flags(header.procedure_flags)));
 			if layer == .SEMANTIC {
-				add_normalized_field(result, path, "name", header.name);
+				add_normalised_field(result, path, "name", header.name);
 			}
 
-			add_normalized_field(result, path, "foreign_name", header.foreign_function_name);
-			add_normalized_field(result, path, "library", ifx header.library_identifier then header.library_identifier.name else "");
-			add_normalized_field(result, path, "deprecated", header.deprecation_string);
-			add_normalized_field(result, path, "using_count", tprint("%", header.parameter_usings.count));
+			add_normalised_field(result, path, "foreign_name", header.foreign_function_name);
+			add_normalised_field(
+				result,
+				path,
+				"library",
+				ifx header.library_identifier
+					then header.library_identifier.name
+					else ""
+			);
+			add_normalised_field(result, path, "deprecated", header.deprecation_string);
+			add_normalised_field(result, path, "using_count", tprint("%", header.parameter_usings.count));
 			for header.parameter_usings {
 				using_path := tprint("%.using[%]", path, it_index);
-				add_normalized_field(result, using_path, "filter_type", tprint("%", it.filter_type));
-				add_normalized_field(result, using_path, "no_parameters", tprint("%", it.no_parameters));
-				normalize_node(it.filter_expression, tprint("%.filter", using_path), layer, result);
+				add_normalised_field(result, using_path, "filter_type", tprint("%", it.filter_type));
+				add_normalised_field(result, using_path, "no_parameters", tprint("%", it.no_parameters));
+				normalise_node(it.filter_expression, tprint("%.filter", using_path), layer, result);
 			}
 
-			add_normalized_field(result, path, "modify_count", tprint("%", header.modify_directives.count));
-			add_normalized_field(result, path, "argument_count", tprint("%", header.arguments.count));
-			add_normalized_field(result, path, "return_count", tprint("%", header.returns.count));
+			add_normalised_field(result, path, "modify_count", tprint("%", header.modify_directives.count));
+			add_normalised_field(result, path, "argument_count", tprint("%", header.arguments.count));
+			add_normalised_field(result, path, "return_count", tprint("%", header.returns.count));
 			for header.arguments {
 				argument_path := tprint("%.argument[%]", path, it_index);
 				if header.procedure_flags & .QUICK {
-					add_normalized_field(result, argument_path, "kind", tprint("%", it.kind));
-					add_normalized_field(result, argument_path, "name", it.name);
+					add_normalised_field(result, argument_path, "kind", tprint("%", it.kind));
+					add_normalised_field(result, argument_path, "name", it.name);
 				} else {
-					normalize_node(it, argument_path, layer, result);
+					normalise_node(it, argument_path, layer, result);
 				}
 			}
 
 			for header.returns {
-				normalize_node(it, tprint("%.return[%]", path, it_index), layer, result);
+				normalise_node(it, tprint("%.return[%]", path, it_index), layer, result);
 			}
 
 			for header.modify_directives {
-				normalize_node(it, tprint("%.modify[%]", path, it_index), layer, result);
+				normalise_node(it, tprint("%.modify[%]", path, it_index), layer, result);
 			}
 
 		case .PROCEDURE_BODY;
 			body := node.(*Code_Procedure_Body);
-			normalize_node(body.block, tprint("%.block", path), layer, result);
+			normalise_node(body.block, tprint("%.block", path), layer, result);
 
 		case .STRUCT;
 			aggregate := node.(*Code_Struct);
-			add_normalized_field(result, path, "flags", tprint("%", aggregate.textual_flags));
-			add_normalized_field(result, path, "note_count", tprint("%", aggregate.notes.count));
+			add_normalised_field(result, path, "flags", tprint("%", aggregate.textual_flags));
+			add_normalised_field(result, path, "note_count", tprint("%", aggregate.notes.count));
 			for aggregate.notes {
-				add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+				add_normalised_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
 			}
 
-			add_normalized_field(result, path, "modify_count", tprint("%", aggregate.modify_directives.count));
+			add_normalised_field(result, path, "modify_count", tprint("%", aggregate.modify_directives.count));
 			for aggregate.modify_directives {
-				normalize_node(it, tprint("%.modify[%]", path, it_index), layer, result);
+				normalise_node(it, tprint("%.modify[%]", path, it_index), layer, result);
 			}
 
-			normalize_node(aggregate.block, tprint("%.block", path), layer, result);
+			normalise_node(aggregate.block, tprint("%.block", path), layer, result);
 
 		case .ENUM;
 			aggregate := node.(*Code_Enum);
-			add_normalized_field(result, path, "flags", tprint("%", aggregate.is_flags));
-			add_normalized_field(result, path, "complete", tprint("%", aggregate.marked_as_complete));
-			add_normalized_field(result, path, "specified", tprint("%", aggregate.marked_as_specified));
-			add_normalized_field(result, path, "note_count", tprint("%", aggregate.notes.count));
+			add_normalised_field(result, path, "flags", tprint("%", aggregate.is_flags));
+			add_normalised_field(result, path, "complete", tprint("%", aggregate.marked_as_complete));
+			add_normalised_field(result, path, "specified", tprint("%", aggregate.marked_as_specified));
+			add_normalised_field(result, path, "note_count", tprint("%", aggregate.notes.count));
 			for aggregate.notes {
-				add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+				add_normalised_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
 			}
 
-			normalize_node(aggregate.internal_type_inst, tprint("%.internal_type", path), layer, result);
-			normalize_node(aggregate.block, tprint("%.block", path), layer, result);
+			normalise_node(aggregate.internal_type_inst, tprint("%.internal_type", path), layer, result);
+			normalise_node(aggregate.block, tprint("%.block", path), layer, result);
 
 		case .DECLARATION;
 			declaration := node.(*Code_Declaration);
-			normalize_declaration(declaration, path, layer, result);
+			normalise_declaration(declaration, path, layer, result);
 
 		case .COMPOUND_DECLARATION;
 			declaration := node.(*Code_Compound_Declaration);
-			add_normalized_field(result, path, "argument_count", tprint("%", declaration.comma_separated_assignment.arguments.count));
+			add_normalised_field(result, path, "argument_count", tprint("%", declaration.comma_separated_assignment.arguments.count));
 			for declaration.comma_separated_assignment.arguments {
-				add_normalized_field(result, tprint("%.argument[%]", path, it_index), "modifier", tprint("%", it.modifier));
-				normalize_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
+				add_normalised_field(result, tprint("%.argument[%]", path, it_index), "modifier", tprint("%", it.modifier));
+				normalise_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
 			}
 
-			normalize_declaration(declaration.declaration_properties, tprint("%.properties", path), layer, result);
-			normalize_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
-			add_normalized_field(result, path, "note_count", tprint("%", declaration.notes.count));
+			normalise_declaration(declaration.declaration_properties, tprint("%.properties", path), layer, result);
+			normalise_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
+			add_normalised_field(result, path, "note_count", tprint("%", declaration.notes.count));
 			for declaration.notes {
-				add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+				add_normalised_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
 			}
 
 		case .COMMA_SEPARATED_ARGUMENTS;
 			arguments := node.(*Code_Comma_Separated_Arguments);
-			add_normalized_field(result, path, "argument_count", tprint("%", arguments.arguments.count));
+			add_normalised_field(result, path, "argument_count", tprint("%", arguments.arguments.count));
 			for arguments.arguments {
-				normalize_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
+				normalise_node(it.node, tprint("%.argument[%]", path, it_index), layer, result);
 			}
 
 		case .NOTE;
-			add_normalized_field(result, path, "text", node.(*Code_Note).text);
+			add_normalised_field(result, path, "text", node.(*Code_Note).text);
 
 		case .BLOCK;
 			block := node.(*Code_Block);
-			add_normalized_field(result, path, "block_type", tprint("%", block.block_type));
-			add_normalized_field(result, path, "statement_count", tprint("%", block.statements.count));
+			add_normalised_field(result, path, "block_type", tprint("%", block.block_type));
+			add_normalised_field(result, path, "statement_count", tprint("%", block.statements.count));
 			for block.statements {
-				normalize_node(it, tprint("%.statement[%]", path, it_index), layer, result);
+				normalise_node(it, tprint("%.statement[%]", path, it_index), layer, result);
 			}
 
 		case .RETURN;
 			return_node := node.(*Code_Return);
-			add_normalized_field(result, path, "backticked", tprint("%", (return_node.return_flags & .IS_BACKTICKED) != 0));
-			add_normalized_field(result, path, "quick", tprint("%", (return_node.return_flags & .AUTO_INSERTED_FOR_QUICK_LAMBDA) != 0));
-			add_normalized_field(result, path, "argument_count", tprint("%", return_node.arguments_unsorted.count));
+			add_normalised_field(result, path, "backticked", tprint("%", (return_node.return_flags & .IS_BACKTICKED) != 0));
+			add_normalised_field(result, path, "quick", tprint("%", (return_node.return_flags & .AUTO_INSERTED_FOR_QUICK_LAMBDA) != 0));
+			add_normalised_field(result, path, "argument_count", tprint("%", return_node.arguments_unsorted.count));
 			for return_node.arguments_unsorted {
-				normalize_node(it.expression, tprint("%.argument[%]", path, it_index), layer, result);
+				normalise_node(it.expression, tprint("%.argument[%]", path, it_index), layer, result);
 			}
 
 		case .LOOP_CONTROL;
 			control := node.(*Code_Loop_Control);
-			add_normalized_field(result, path, "control_type", tprint("%", control.control_type));
-			normalize_node(control.target_ident, tprint("%.target", path), layer, result);
+			add_normalised_field(result, path, "control_type", tprint("%", control.control_type));
+			normalise_node(control.target_ident, tprint("%.target", path), layer, result);
 
 		case .WHILE;
 			while_node := node.(*Code_While);
-			normalize_node(while_node.condition, tprint("%.condition", path), layer, result);
-			normalize_node(while_node.block, tprint("%.block", path), layer, result);
+			normalise_node(while_node.condition, tprint("%.condition", path), layer, result);
+			normalise_node(while_node.block, tprint("%.block", path), layer, result);
 
 		case .FOR;
 			for_node := node.(*Code_For);
-			add_normalized_field(result, path, "flags", tprint("%", for_node.for_flags));
-			normalize_node(for_node.want_replacement_for_expansion, tprint("%.selector", path), layer, result);
-			normalize_node(for_node.want_pointer_expression, tprint("%.pointer_flag", path), layer, result);
-			normalize_node(for_node.want_reverse_expression, tprint("%.reverse_flag", path), layer, result);
-			normalize_node(for_node.ident_it, tprint("%.iterator", path), layer, result);
-			normalize_node(for_node.ident_it_index, tprint("%.index", path), layer, result);
-			normalize_node(for_node.iteration_expression, tprint("%.iteration", path), layer, result);
-			normalize_node(for_node.iteration_expression_right, tprint("%.iteration_right", path), layer, result);
-			normalize_node(for_node.block, tprint("%.block", path), layer, result);
+			add_normalised_field(result, path, "flags", tprint("%", for_node.for_flags));
+			normalise_node(for_node.want_replacement_for_expansion, tprint("%.selector", path), layer, result);
+			normalise_node(for_node.want_pointer_expression, tprint("%.pointer_flag", path), layer, result);
+			normalise_node(for_node.want_reverse_expression, tprint("%.reverse_flag", path), layer, result);
+			normalise_node(for_node.ident_it, tprint("%.iterator", path), layer, result);
+			normalise_node(for_node.ident_it_index, tprint("%.index", path), layer, result);
+			normalise_node(for_node.iteration_expression, tprint("%.iteration", path), layer, result);
+			normalise_node(for_node.iteration_expression_right, tprint("%.iteration_right", path), layer, result);
+			normalise_node(for_node.block, tprint("%.block", path), layer, result);
 
 		case .IF;
 			if_node := node.(*Code_If);
-			add_normalized_field(result, path, "switch", tprint("%", (if_node.if_flags & .IS_SWITCH_STATEMENT) != 0));
-			add_normalized_field(result, path, "ifx", tprint("%", (if_node.if_flags & .IS_IFX) != 0));
-			add_normalized_field(result, path, "static", tprint("%", (if_node.if_flags & .IS_STATIC) != 0));
-			add_normalized_field(result, path, "complete", tprint("%", (if_node.if_flags & .MARKED_AS_COMPLETE) != 0));
-			normalize_node(if_node.condition, tprint("%.condition", path), layer, result);
-			normalize_node(if_node.then_block, tprint("%.then", path), layer, result);
-			normalize_node(if_node.else_block, tprint("%.else", path), layer, result);
+			add_normalised_field(result, path, "switch", tprint("%", (if_node.if_flags & .IS_SWITCH_STATEMENT) != 0));
+			add_normalised_field(result, path, "ifx", tprint("%", (if_node.if_flags & .IS_IFX) != 0));
+			add_normalised_field(result, path, "static", tprint("%", (if_node.if_flags & .IS_STATIC) != 0));
+			add_normalised_field(result, path, "complete", tprint("%", (if_node.if_flags & .MARKED_AS_COMPLETE) != 0));
+			normalise_node(if_node.condition, tprint("%.condition", path), layer, result);
+			normalise_node(if_node.then_block, tprint("%.then", path), layer, result);
+			normalise_node(if_node.else_block, tprint("%.else", path), layer, result);
 
 		case .CASE;
 			case_node := node.(*Code_Case);
-			add_normalized_field(result, path, "fallthrough", tprint("%", case_node.marked_as_fallthrough));
-			normalize_node(case_node.condition, tprint("%.condition", path), layer, result);
-			normalize_node(case_node.then_block, tprint("%.block", path), layer, result);
+			add_normalised_field(result, path, "fallthrough", tprint("%", case_node.marked_as_fallthrough));
+			normalise_node(case_node.condition, tprint("%.condition", path), layer, result);
+			normalise_node(case_node.then_block, tprint("%.block", path), layer, result);
 
 		case .DEFER;
 			defer_node := node.(*Code_Defer);
-			add_normalized_field(result, path, "backticked", tprint("%", defer_node.is_backticked));
-			normalize_node(defer_node.block, tprint("%.block", path), layer, result);
+			add_normalised_field(result, path, "backticked", tprint("%", defer_node.is_backticked));
+			normalise_node(defer_node.block, tprint("%.block", path), layer, result);
 
 		case .USING;
 			using_node := node.(*Code_Using);
-			add_normalized_field(result, path, "filter_type", tprint("%", using_node.filter_type));
-			add_normalized_field(result, path, "no_parameters", tprint("%", using_node.no_parameters));
-			normalize_node(using_node.expression, tprint("%.expression", path), layer, result);
-			normalize_node(using_node.filter_expression, tprint("%.filter", path), layer, result);
+			add_normalised_field(result, path, "filter_type", tprint("%", using_node.filter_type));
+			add_normalised_field(result, path, "no_parameters", tprint("%", using_node.no_parameters));
+			normalise_node(using_node.expression, tprint("%.expression", path), layer, result);
+			normalise_node(using_node.filter_expression, tprint("%.filter", path), layer, result);
 
 		case .PUSH_CONTEXT;
 			push := node.(*Code_Push_Context);
-			add_normalized_field(result, path, "flags", tprint("%", push.push_context_flags));
-			normalize_node(push.to_push, tprint("%.expression", path), layer, result);
-			normalize_node(push.block, tprint("%.block", path), layer, result);
+			add_normalised_field(result, path, "flags", tprint("%", push.push_context_flags));
+			normalise_node(push.to_push, tprint("%.expression", path), layer, result);
+			normalise_node(push.block, tprint("%.block", path), layer, result);
 
 		case .CONTEXT;
 		case .DIRECTIVE_THIS;
 		case .PLACEHOLDER;
 		case .ASM;
+			// NOP
 
 		case;
-			add_normalized_field(result, path, "unsupported", "true");
+			add_normalised_field(result, path, "unsupported", "true");
 	}
 }
 
-normalize_parser_declaration :: (declaration: *Parser.Parser_Declaration, path: string, layer: Comparison_Layer, result: *Normalized_Tree) {
-	add_normalized_field(result, path, "name", declaration.name);
-	add_normalized_field(result, path, "constant", tprint("%", (declaration.flags & .IS_CONSTANT) != 0));
-	add_normalized_field(result, path, "as", tprint("%", (declaration.flags & .IS_MARKED_AS_AS) != 0));
-	add_normalized_field(result, path, "uninitialized", tprint("%", (declaration.flags & .IS_UNINITIALIZED) != 0));
-	add_normalized_field(result, path, "auto_bake", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE) != 0));
-	add_normalized_field(result, path, "auto_bake_required", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE_IS_REQUIRED) != 0));
-	add_normalized_field(result, path, "scope_modifier", tprint("%", (declaration.flags & .HAS_SCOPE_MODIFIER) != 0));
-	normalize_parser_node(declaration.type_inst, tprint("%.type", path), layer, result);
-	normalize_parser_node(declaration.expression, tprint("%.expression", path), layer, result);
-	normalize_parser_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
-	add_normalized_field(result, path, "note_count", tprint("%", declaration.notes.count));
+normalise_parser_declaration :: (declaration: *Parser.Parser_Declaration, path: string, layer: Comparison_Layer, result: *Normalised_Tree) {
+	add_normalised_field(result, path, "name", declaration.name);
+	add_normalised_field(result, path, "constant", tprint("%", (declaration.flags & .IS_CONSTANT) != 0));
+	add_normalised_field(result, path, "as", tprint("%", (declaration.flags & .IS_MARKED_AS_AS) != 0));
+	add_normalised_field(result, path, "uninitialized", tprint("%", (declaration.flags & .IS_UNINITIALIZED) != 0));
+	add_normalised_field(result, path, "auto_bake", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE) != 0));
+	add_normalised_field(result, path, "auto_bake_required", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE_IS_REQUIRED) != 0));
+	add_normalised_field(result, path, "scope_modifier", tprint("%", (declaration.flags & .HAS_SCOPE_MODIFIER) != 0));
+	normalise_parser_node(declaration.type_inst, tprint("%.type", path), layer, result);
+	normalise_parser_node(declaration.expression, tprint("%.expression", path), layer, result);
+	normalise_parser_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
+	add_normalised_field(result, path, "note_count", tprint("%", declaration.notes.count));
 	for declaration.notes {
-		add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+		add_normalised_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
 	}
 }
 
-normalize_declaration :: (declaration: *Code_Declaration, path: string, layer: Comparison_Layer, result: *Normalized_Tree) {
-	add_normalized_field(result, path, "name", declaration.name);
-	add_normalized_field(result, path, "constant", tprint("%", (declaration.flags & .IS_CONSTANT) != 0));
-	add_normalized_field(result, path, "as", tprint("%", (declaration.flags & .IS_MARKED_AS_AS) != 0));
-	add_normalized_field(result, path, "uninitialized", tprint("%", (declaration.flags & .IS_UNINITIALIZED) != 0));
-	add_normalized_field(result, path, "auto_bake", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE) != 0));
-	add_normalized_field(result, path, "auto_bake_required", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE_IS_REQUIRED) != 0));
-	add_normalized_field(result, path, "scope_modifier", tprint("%", (declaration.flags & .HAS_SCOPE_MODIFIER) != 0));
-	normalize_node(declaration.type_inst, tprint("%.type", path), layer, result);
-	normalize_node(declaration.expression, tprint("%.expression", path), layer, result);
-	normalize_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
-	add_normalized_field(result, path, "note_count", tprint("%", declaration.notes.count));
+normalise_declaration :: (declaration: *Code_Declaration, path: string, layer: Comparison_Layer, result: *Normalised_Tree) {
+	add_normalised_field(result, path, "name", declaration.name);
+	add_normalised_field(result, path, "constant", tprint("%", (declaration.flags & .IS_CONSTANT) != 0));
+	add_normalised_field(result, path, "as", tprint("%", (declaration.flags & .IS_MARKED_AS_AS) != 0));
+	add_normalised_field(result, path, "uninitialized", tprint("%", (declaration.flags & .IS_UNINITIALIZED) != 0));
+	add_normalised_field(result, path, "auto_bake", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE) != 0));
+	add_normalised_field(result, path, "auto_bake_required", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE_IS_REQUIRED) != 0));
+	add_normalised_field(result, path, "scope_modifier", tprint("%", (declaration.flags & .HAS_SCOPE_MODIFIER) != 0));
+	normalise_node(declaration.type_inst, tprint("%.type", path), layer, result);
+	normalise_node(declaration.expression, tprint("%.expression", path), layer, result);
+	normalise_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
+	add_normalised_field(result, path, "note_count", tprint("%", declaration.notes.count));
 	for declaration.notes {
-		add_normalized_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
+		add_normalised_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
 	}
 }
 
-add_normalized_field :: (tree: *Normalized_Tree, path: string, name: string, value: string) {
+add_normalised_field :: (tree: *Normalised_Tree, path: string, name: string, value: string) {
 	array_add(*tree.fields, .{path=tprint("%.%", path, name), value=value});
 }
 
-find_normalized_field :: (fields: [] Normalized_Field, path: string) -> *Normalized_Field {
+find_normalised_field :: (fields: [] Normalised_Field, path: string) -> *Normalised_Field {
 	for * fields {
 		if it.path == path {
 			return it;
@@ -2120,11 +1935,11 @@ find_normalized_field :: (fields: [] Normalized_Field, path: string) -> *Normali
 	return null;
 }
 
-compare_normalized_trees :: (actual: Normalized_Tree, expected: Normalized_Tree) -> Differential_Result {
+compare_normalised_trees :: (actual: Normalised_Tree, expected: Normalised_Tree) -> Differential_Result {
 	result: Differential_Result;
 
 	for expected.fields {
-		actual_field := find_normalized_field(actual.fields, it.path);
+		actual_field := find_normalised_field(actual.fields, it.path);
 		if !actual_field {
 			array_add(*result.differences, .{path=it.path, expected=it.value, actual="<missing>"});
 		} else if actual_field.value != it.value {
@@ -2133,7 +1948,7 @@ compare_normalized_trees :: (actual: Normalized_Tree, expected: Normalized_Tree)
 	}
 
 	for actual.fields {
-		if !find_normalized_field(expected.fields, it.path) {
+		if !find_normalised_field(expected.fields, it.path) {
 			array_add(*result.differences, .{path=it.path, expected="<missing>", actual=it.value});
 		}
 	}
@@ -2164,13 +1979,13 @@ assert_expression_matches_code :: (source: string, expected_code: Code, layer :=
 
 	assert(parsed.status == .COMPLETE, "Parser did not complete fixture '%'.", source);
 
-	actual := normalize_parser_tree(parsed.root, layer);
+	actual := normalise_parser_tree(parsed.root, layer);
 	defer array_free(actual.fields);
 
-	expected := normalize_tree(compiler_get_nodes(expected_code), layer);
+	expected := normalise_tree(compiler_get_nodes(expected_code), layer);
 	defer array_free(expected.fields);
 
-	difference := compare_normalized_trees(actual, expected);
+	difference := compare_normalised_trees(actual, expected);
 	defer array_free(difference.differences);
 
 	assert(!difference.differences.count, "AST mismatch for '%':\n%", source, format_structural_differences(difference));
@@ -2204,13 +2019,13 @@ assert_statement_matches_code :: (source: string, expected_code: Code, file_scop
 	expected_block := expected_root.(*Code_Block);
 	assert(expected_block.statements.count == 1, "Compiler produced % statements for fixture '%'.", expected_block.statements.count, source);
 
-	actual := normalize_parser_tree(actual_block.statements[0]);
+	actual := normalise_parser_tree(actual_block.statements[0]);
 	defer array_free(actual.fields);
 
-	expected := normalize_tree(expected_block.statements[0]);
+	expected := normalise_tree(expected_block.statements[0]);
 	defer array_free(expected.fields);
 
-	difference := compare_normalized_trees(actual, expected);
+	difference := compare_normalised_trees(actual, expected);
 	defer array_free(difference.differences);
 
 	assert(!difference.differences.count, "Statement AST mismatch for '%':\n%", source, format_structural_differences(difference));
@@ -2333,18 +2148,22 @@ assert_trivia_round_trip :: (source: string) {
 }
 
 run_typechecked_workspace_fixture :: (source: string, expected_declaration: string) -> Workspace_Fixture_Result {
+	auto_release_fixture_temp();
 	begin_differential_test();
 	differential_progress.fixture_source = source;
 	result: Workspace_Fixture_Result;
-	profile_workspace_memory("before_create");
 	workspace := compiler_create_workspace("Jai_Parser differential fixture");
 	assert(cast(bool) workspace, "Unable to create differential fixture workspace.");
-	profile_workspace_memory("after_create");
 
 	options := get_build_options(workspace);
 	copy_commonly_propagated_fields(get_build_options(), *options);
 	options.output_type = .NO_OUTPUT;
 	options.write_added_strings = false;
+	if COMPILED_RUN_DIRECTORY {
+		options.output_path = tprint("%/", COMPILED_RUN_DIRECTORY);
+		options.intermediate_path = tprint("%/.build/", COMPILED_RUN_DIRECTORY);
+	}
+
 	set_build_options(options, workspace);
 
 	compiler_begin_intercept(workspace);
@@ -2376,11 +2195,8 @@ run_typechecked_workspace_fixture :: (source: string, expected_declaration: stri
 		}
 	}
 
-	profile_workspace_memory("complete");
 	compiler_end_intercept(workspace);
-	profile_workspace_memory("after_end_intercept");
 	compiler_destroy_workspace(workspace);
-	profile_workspace_memory("after_destroy");
 	finish_differential_test();
 	return result;
 }
@@ -2766,26 +2582,20 @@ JAI;
 		assert_file_workspace_fixture(tprint(DEFAULTED_MEMBER_SOURCE, declaration_name, argument), declaration_name);
 	}
 
-	missing_overload_argument := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 Child :: struct { Clear: s64; }
 make :: (input: s64, required: string) -> Child { return .{Clear=1}; }
 main :: () { return make(input=1).Clear; }
 JAI
 	);
-	defer release_compiler_diagnostic_result(*missing_overload_argument);
-
-	assert(missing_overload_argument.diagnostics.count > 0);
-	unresolved_default := capture_compiler_error(
+	assert_compiler_rejected(
 		#string JAI
 Child :: struct { Clear: s64; }
 make :: (input: s64, enabled: bool = Missing) -> Child { return .{Clear=1}; }
 main :: () { return make(1).Clear; }
 JAI
 	);
-	defer release_compiler_diagnostic_result(*unresolved_default);
-
-	assert(unresolved_default.diagnostics.count > 0);
 	assert_overload_workspace_fixture("value: s64", "value: string", "make(1).Clear", 0, "fixture_primitive_overload");
 	assert_overload_workspace_fixture("value: float64", "value: s64", "make(1).Clear", 1, "fixture_exact_rank");
 	assert_overload_workspace_fixture("value: float64", "value: string", "make(1).Clear", 0, "fixture_converted_rank");
@@ -2810,7 +2620,9 @@ test_floating_literal_fixtures :: () {
 			assert_compiler_rejected(tprint(UNARY_OVERLOAD_SOURCE, "float32", "string", fixture.value));
 		}
 
-		preferred_index := ifx fixture.preferred_type == "float32" then 0 else 1;
+		preferred_index := ifx fixture.preferred_type == "float32"
+			then 0
+			else 1;
 		assert_overload_workspace_fixture("value: float32", "value: float64", expression, preferred_index, "fixture_float_preference");
 		assert_overload_workspace_fixture("value: float64", "value: float32", expression, 1 - preferred_index, "fixture_float_reverse_preference");
 	}
@@ -3089,8 +2901,13 @@ test_aggregate_member_fixtures :: () {
 
 			if fixture.compiler_accepts {
 				assert_overload_workspace_fixture(
-					tprint("value: %", first), tprint("value: %", second), "make(value).Clear", order, "fixture_multihop_conversion",
-					setup="value: Wrapper;", globals=fixture.globals
+					tprint("value: %", first),
+					tprint("value: %", second),
+					"make(value).Clear",
+					order,
+					"fixture_multihop_conversion",
+					setup="value: Wrapper;",
+					globals=fixture.globals
 				);
 			} else {
 				rejected := capture_compiler_error(
@@ -3727,16 +3544,19 @@ assert_declaration_workspace_fixture :: (source: string) {
 	defer Parser.release_parser_tree(*parsed);
 
 	assert(parsed.status == .COMPLETE, "Parser did not complete declaration fixture '%'.", source);
-	actual := normalize_parser_tree(parsed.root);
+	actual := normalise_parser_tree(parsed.root);
 	defer array_free(actual.fields);
 
-	profile_workspace_memory("before_create");
 	workspace := compiler_create_workspace("Jai_Parser declaration fixture");
-	profile_workspace_memory("after_create");
 	options := get_build_options(workspace);
 	copy_commonly_propagated_fields(get_build_options(), *options);
 	options.output_type = .NO_OUTPUT;
 	options.write_added_strings = false;
+	if COMPILED_RUN_DIRECTORY {
+		options.output_path = tprint("%/", COMPILED_RUN_DIRECTORY);
+		options.intermediate_path = tprint("%/.build/", COMPILED_RUN_DIRECTORY);
+	}
+
 	set_build_options(options, workspace);
 	compiler_begin_intercept(workspace);
 	add_build_string(fixture_source, workspace);
@@ -3768,10 +3588,10 @@ assert_declaration_workspace_fixture :: (source: string) {
 						}
 
 
-						expected := normalize_tree(statement);
+						expected := normalise_tree(statement);
 						defer array_free(expected.fields);
 
-						difference := compare_normalized_trees(actual, expected);
+						difference := compare_normalised_trees(actual, expected);
 						defer array_free(difference.differences);
 
 						assert(!difference.differences.count, "Declaration AST mismatch for '%':\n%", source, format_structural_differences(difference));
@@ -3786,11 +3606,8 @@ assert_declaration_workspace_fixture :: (source: string) {
 		}
 	}
 
-	profile_workspace_memory("complete");
 	compiler_end_intercept(workspace);
-	profile_workspace_memory("after_end_intercept");
 	compiler_destroy_workspace(workspace);
-	profile_workspace_memory("after_destroy");
 	assert(found, "Compiler did not expose declaration fixture '%'.", source);
 	finish_differential_test();
 }
@@ -3808,16 +3625,19 @@ assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude
 	assert(parsed.status == .COMPLETE, "Parser did not complete assignment fixture '%'.", source);
 	actual_block := parsed.root.(*Parser.Parser_Block);
 	assert(actual_block.statements.count == 1);
-	actual := normalize_parser_tree(actual_block.statements[0]);
+	actual := normalise_parser_tree(actual_block.statements[0]);
 	defer array_free(actual.fields);
 
-	profile_workspace_memory("before_create");
 	workspace := compiler_create_workspace("Jai_Parser assignment fixture");
-	profile_workspace_memory("after_create");
 	options := get_build_options(workspace);
 	copy_commonly_propagated_fields(get_build_options(), *options);
 	options.output_type = .NO_OUTPUT;
 	options.write_added_strings = false;
+	if COMPILED_RUN_DIRECTORY {
+		options.output_path = tprint("%/", COMPILED_RUN_DIRECTORY);
+		options.intermediate_path = tprint("%/.build/", COMPILED_RUN_DIRECTORY);
+	}
+
 	set_build_options(options, workspace);
 	compiler_begin_intercept(workspace);
 	add_build_string(fixture_source, workspace);
@@ -3838,15 +3658,17 @@ assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude
 					if statements.count != 2 || statements[0].kind != .DECLARATION {
 						continue;
 					}
+
+
 					if statements[0].(*Code_Declaration).name != prelude_name {
 						continue;
 					}
 
 
-					expected := normalize_tree(statements[1]);
+					expected := normalise_tree(statements[1]);
 					defer array_free(expected.fields);
 
-					difference := compare_normalized_trees(actual, expected);
+					difference := compare_normalised_trees(actual, expected);
 					defer array_free(difference.differences);
 
 					assert(!difference.differences.count, "Assignment AST mismatch for '%':\n%", source, format_structural_differences(difference));
@@ -3860,11 +3682,8 @@ assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude
 		}
 	}
 
-	profile_workspace_memory("complete");
 	compiler_end_intercept(workspace);
-	profile_workspace_memory("after_end_intercept");
 	compiler_destroy_workspace(workspace);
-	profile_workspace_memory("after_destroy");
 	assert(found, "Compiler did not expose assignment fixture '%'.", source);
 	finish_differential_test();
 }
@@ -3991,14 +3810,7 @@ test_syntax_fixtures :: () {
 	assert_statement_fixture("#asm { nop; }");
 	assert_asm_compiler_shape("{ #asm { nop; } }", #code { #asm { nop; } });
 	assert_asm_compiler_shape("{ #asm AVX, AVX2 {} }", #code { #asm AVX, AVX2 {} });
-	assert_asm_compiler_shape(#string JAI
-{
-    #asm { nop; }
-}
-JAI
-	, #code {
-    #asm { nop; }
-});
+	assert_asm_compiler_shape("{ #asm { nop; } }", #code { #asm { nop; } });
 	assert_nested_asm_compiler_shape("{ if true { #asm { nop; } } else { #asm { nop; } } }", #code { if true { #asm { nop; } } else { #asm { nop; } } });
 	assert_all_operator_fixtures();
 	assert_all_precedence_pairs();
@@ -4026,14 +3838,18 @@ JAI
 	assert_statement_fixture("return {};");
 	assert_statement_fixture("if value == {} { return {}; }");
 	assert_statement_fixture("if values[{1, 2}] { return {}; }");
-	assert_statement_matches_code(#string JAI
+	assert_statement_matches_code(
+		#string JAI
 if fruit == {
     // no cases
 }
-JAI
-	, #code { if fruit == {
-    // no cases
-} });
+JAI,
+		#code {
+			if fruit == {
+				// no cases
+			}
+		}
+	);
 	assert_statement_matches_code(
 		#string JAI
 if fruit == { /* case other; */ } if fruit == { /* case 1; */ } if fruit == { /* case 2; */ } trailing();
@@ -4042,7 +3858,8 @@ JAI,
 		#code { if fruit == { /* case other; */ } if fruit == { /* case 1; */ } if fruit == { /* case 2; */ } trailing(); }
 	);
 	assert_expression_fixture(".member");
-	assert_expression_fixture(#string JAI
+	assert_expression_fixture(
+		#string JAI
 #string END
 body
 END
@@ -4124,7 +3941,8 @@ JAI
 	assert_expression_fixture("#import,file \"../module.jai\"");
 	assert_expression_fixture("#import,dir \"../module\"");
 	assert_expression_fixture("#import,string \"fixture_value :: 1;\"");
-	assert_statement_fixture(#string JAI
+	assert_statement_fixture(
+		#string JAI
 #import,string #string END
 VALUE :: 1;
 END
@@ -4297,7 +4115,8 @@ JAI
 	assert_statement_fixture("using state;");
 	assert_statement_fixture("using enum u16 { CHOCOLATE :: 0; VANILLA; }");
 	assert_statement_fixture("using enum u16 { VANILLA; };");
-	assert_statement_fixture(#string JAI
+	assert_statement_fixture(
+		#string JAI
 text :: #string END
 body
 END
@@ -4342,54 +4161,42 @@ run_compile_time_sections :: () {
 		begin_differential_test();
 		test_context_modification_compiler_shape();
 		finish_differential_test();
-		profile_completed_differential_section();
 	}
 
 	if begin_differential_section("Syntax fixtures", SYNTAX_TEST_TOTAL) {
 		test_syntax_fixtures();
-		profile_completed_differential_section();
 	}
 
-	run_differential_section(test_typechecked_workspace_fixture);
-	run_differential_section(test_file_workspace_fixtures);
-	run_differential_section(test_typed_integer_fixtures);
-	run_differential_section(test_assembly_context_fixtures);
-	run_differential_section(test_pair_member_fixtures);
-	run_differential_section(test_member_query_fixtures);
-	run_differential_section(test_member_access_fixtures);
-	run_differential_section(test_default_overload_fixtures);
-	run_differential_section(test_floating_literal_fixtures);
-	run_differential_section(test_integer_float32_fixtures);
-	run_differential_section(test_integer_rounding_fixture);
-	run_differential_section(test_numeric_rank_fixtures);
-	run_differential_section(test_candidate_permutation_fixtures);
-	run_differential_section(test_invalid_integer_fixtures);
-	run_differential_section(test_unsigned_boundary_fixtures);
-	run_differential_section(test_signed_boundary_fixtures);
-	run_differential_section(test_aggregate_member_fixtures);
-	run_differential_section(test_declaration_workspace_fixtures);
-	run_differential_section(test_directive_workspace_fixtures);
-	run_differential_section(test_assignment_workspace_fixtures);
-	run_differential_section(test_typed_float_fixtures);
+	test_typechecked_workspace_fixture();
+	test_file_workspace_fixtures();
+	test_typed_integer_fixtures();
+	test_assembly_context_fixtures();
+	test_pair_member_fixtures();
+	test_member_query_fixtures();
+	test_member_access_fixtures();
+	test_default_overload_fixtures();
+	test_floating_literal_fixtures();
+	test_integer_float32_fixtures();
+	test_integer_rounding_fixture();
+	test_numeric_rank_fixtures();
+	test_candidate_permutation_fixtures();
+	test_invalid_integer_fixtures();
+	test_unsigned_boundary_fixtures();
+	test_signed_boundary_fixtures();
+	test_aggregate_member_fixtures();
+	test_declaration_workspace_fixtures();
+	test_directive_workspace_fixtures();
+	test_assignment_workspace_fixtures();
+	test_typed_float_fixtures();
 	finish_differential_section();
 	assert(differential_progress.section_index == DIFFERENTIAL_SECTION_TOTAL - 1);
 }
 
-profile_completed_differential_section :: () {
-	#if PROFILE_DIFFERENTIAL_MEMORY {
-		if !differential_progress.planning && differential_progress.section_enabled {
-			cleanup_differential_fixture();
-			profile_differential_memory();
-		}
-	}
-}
-
-run_differential_section :: (test: () -> ()) {
-	test();
-	profile_completed_differential_section();
-}
-
 #run,stallable {
+	if COMPILED_RUN_DIRECTORY {
+		set_build_options_dc(.{output_path=tprint("%/", COMPILED_RUN_DIRECTORY), write_added_strings=false});
+	}
+
 	previous_assertion_handler = context.assertion_failed;
 	context.assertion_failed = differential_assertion_failed;
 	defer context.assertion_failed = previous_assertion_handler;

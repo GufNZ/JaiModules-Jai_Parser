@@ -461,7 +461,11 @@ resolve_struct_instantiation :: (expression: *Parser_Node, root_scope: *Parser_L
 
 
 	structure := declaration.expression.(*Parser_Struct);
-	if structure.modify_directives.count != 0 || structure.constants_block && structure.constants_block.statements.count != 0 || !structure.arguments_block || structure.arguments_block.statements.count != call.arguments_unsorted.count {
+	if (structure.modify_directives.count != 0
+		|| structure.constants_block && structure.constants_block.statements.count != 0
+		|| !structure.arguments_block
+		|| structure.arguments_block.statements.count != call.arguments_unsorted.count
+	) {
 		return null;
 	}
 

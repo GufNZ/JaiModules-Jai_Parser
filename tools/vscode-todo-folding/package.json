@@ -1,0 +1,49 @@
+{
+	"name": "todo-folding",
+	"displayName": "Todo Folding",
+	"description": "Fold a Markdown task list so only open tasks and their ancestors are expanded.",
+	"version": "0.0.1",
+	"publisher": "local",
+	"private": true,
+	"engines": {
+		"vscode": "^1.80.0"
+	},
+	"main": "./extension.js",
+	"activationEvents": [
+		"onLanguage:markdown"
+	],
+	"contributes": {
+		"commands": [
+			{
+				"command": "todoFolding.showOpenTasks",
+				"title": "Todo: Show Open Tasks"
+			},
+			{
+				"command": "todoFolding.nextOpenLeafTask",
+				"title": "Todo: Next Open Leaf Task"
+			}
+		],
+		"keybindings": [
+			{
+				"command": "todoFolding.showOpenTasks",
+				"key": "ctrl+alt+t",
+				"when": "editorTextFocus && editorLangId == markdown"
+			},
+			{
+				"command": "todoFolding.nextOpenLeafTask",
+				"key": "ctrl+alt+shift+t",
+				"when": "editorTextFocus && editorLangId == markdown"
+			}
+		],
+		"configuration": {
+			"title": "Todo Folding",
+			"properties": {
+				"todoFolding.foldOnSave": {
+					"type": "boolean",
+					"default": true,
+					"description": "Run 'Todo: Show Open Tasks' when a file named todo.md is saved in the active editor."
+				}
+			}
+		}
+	}
+}

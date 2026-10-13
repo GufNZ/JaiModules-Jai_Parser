@@ -1573,7 +1573,10 @@ make_string_constant :: (lexer: *Lexer) -> *Token {
 							middle := get_decimal_digit(lexer);
 							if middle >= 0 {
 								low := get_decimal_digit(lexer);
-								if low < 0  low = 0;
+								if low < 0 {
+									low = 0;
+								}
+
 								c = (high * 100 + middle * 10 + low).(s16);
 								if c > 255 {
 									l0 := lexer.current_line_number;

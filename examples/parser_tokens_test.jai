@@ -1342,6 +1342,7 @@ test_recovered_snapshot_ast_reuse_fallback :: () {
 	parser_fresh := Extended.parse_file(parser_repaired_source);
 	assert(parser_repaired_ok && parser_recovery.status != .COMPLETE && parser_repaired.status == .COMPLETE && parser_fresh.status == .COMPLETE);
 	parser_probe_tokens := Extended.materialise_tokens(parser_repaired_source);
+
 	parser_probe := Extended.Parser.{
 		parsed=*parser_probe_tokens,
 		edit_source=*parser_recovery,
@@ -1394,6 +1395,7 @@ test_recovered_snapshot_ast_reuse_fallback :: () {
 	assert(use.resolved_declaration == statements[1].(*Extended.Parser_Declaration));
 	assert(fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(updated.restart_points.count == fresh.restart_points.count && updated.recovery_records.count == fresh.recovery_records.count);
+
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -1419,6 +1421,7 @@ test_recovered_snapshot_ast_reuse_fallback :: () {
 	set_allocators(*lexer_probe_tokens.node_pool, context.default_allocator);
 	lexer_probe.current_scope = Extended.push_lexical_scope(*lexer_probe);
 	assert(Extended.reuse_simple_declaration(*lexer_probe) == null);
+
 	Extended.release_parser_tree(*lexer_probe_tokens);
 	Extended.release_parser_names(*lexer_probe_tokens);
 	assert(lexer_statements[1].(*Extended.Parser_Declaration).name == "stable");
@@ -1428,6 +1431,7 @@ test_recovered_snapshot_ast_reuse_fallback :: () {
 	assert(lexer_use.resolved_declaration == lexer_statements[1].(*Extended.Parser_Declaration));
 	assert(lexer_fresh_statements[2].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == lexer_fresh_statements[1].(*Extended.Parser_Declaration));
 	assert(lexer_updated.restart_points.count == lexer_fresh.restart_points.count && lexer_updated.recovery_records.count == lexer_fresh.recovery_records.count);
+
 	Extended.release_parser_tree(*lexer_old);
 	Extended.release_parser_names(*lexer_old);
 	free(lexer_old_source);
@@ -1521,6 +1525,7 @@ check_semicolon_candidate_edit :: (before: string, after: string, edit_start: s6
 	set_allocators(*probe_tokens.node_pool, context.default_allocator);
 	probe.current_scope = Extended.push_lexical_scope(*probe);
 	assert(Extended.reuse_simple_declaration(*probe) == null);
+
 	Extended.release_parser_tree(*probe_tokens);
 	Extended.release_parser_names(*probe_tokens);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -5050,8 +5055,14 @@ test_imperative_body_fallback :: () {
 	assert(inner_body.first_token == inner_fresh_body.first_token && inner_body.one_past_last_token == inner_fresh_body.one_past_last_token);
 	inner_if := inner_body.statements[1].(*Extended.Parser_If);
 	inner_fresh_if := inner_fresh_body.statements[1].(*Extended.Parser_If);
-	assert(inner_if.then_block.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inner_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration));
-	assert(inner_fresh_if.then_block.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == inner_fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration));
+	assert(
+		inner_if.then_block.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration
+		== inner_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration)
+	);
+	assert(
+		inner_fresh_if.then_block.statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration
+		== inner_fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration)
+	);
 	assert(inner_if.then_block.statements[2].(*Extended.Parser_While).condition.(*Extended.Parser_Ident).resolved_declaration == inner_if.then_block.statements[0].(*Extended.Parser_Declaration));
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.restart_points.count == fresh.restart_points.count);
 	assert(inner_updated.diagnostics.count == inner_fresh.diagnostics.count && inner_updated.restart_points.count == inner_fresh.restart_points.count);
@@ -9464,7 +9475,11 @@ JAI;
 	ambiguous_type := Extended.parse_file(AMBIGUOUS_TYPE_SOURCE, filename);
 	ambiguous_type_imports := Extended.resolve_file_imports(*ambiguous_type, map_names=test_using_map_fields);
 	assert(ambiguous_type.status == .COMPLETE && ambiguous_type_imports.mapped_names.count == 0 && ambiguous_type_imports.unsupported_using_filters.count == 1);
-	ambiguous_type_call := ambiguous_type.root.(*Extended.Parser_Block).statements[3].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block.statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident);
+	ambiguous_type_call := ambiguous_type.root.(*Extended.Parser_Block)
+		.statements[3].(*Extended.Parser_Declaration)
+		.expression.(*Extended.Parser_Procedure_Header)
+		.body_or_null.block.statements[1].(*Extended.Parser_Declaration)
+		.expression.(*Extended.Parser_Ident);
 	assert(ambiguous_type_call.resolved_declaration == null);
 	Extended.release_file_imports(*ambiguous_type_imports);
 	Extended.release_parser_tree(*ambiguous_type);
@@ -13611,45 +13626,45 @@ test_operator_declarations :: () {
 	assert(compound.root.(*Extended.Parser_Declaration).name == "+=");
 
 	fixtures := Operator_Declaration_Fixture.[
-		.{source="operator + :: (left: s64, right: s64) -> s64 {}", name="+"},
-		.{source="operator - :: (left: s64, right: s64) -> s64 {}", name="-"},
-		.{source="operator * :: (left: s64, right: s64) -> s64 {}", name="*"},
-		.{source="operator / :: (left: s64, right: s64) -> s64 {}", name="/"},
-		.{source="operator % :: (left: s64, right: s64) -> s64 {}", name="%"},
-		.{source="operator < :: (left: s64, right: s64) -> bool {}", name="<"},
-		.{source="operator > :: (left: s64, right: s64) -> bool {}", name=">"},
-		.{source="operator ! :: (value: s64) -> bool {}", name="!"},
-		.{source="operator ~ :: (value: s64) -> s64 {}", name="~"},
-		.{source="operator & :: (left: s64, right: s64) -> s64 {}", name="&"},
-		.{source="operator | :: (left: s64, right: s64) -> s64 {}", name="|"},
-		.{source="operator ^ :: (left: s64, right: s64) -> s64 {}", name="^"},
-		.{source="operator == :: (left: s64, right: s64) -> bool {}", name="=="},
-		.{source="operator != :: (left: s64, right: s64) -> bool {}", name="!="},
-		.{source="operator <= :: (left: s64, right: s64) -> bool {}", name="<="},
-		.{source="operator >= :: (left: s64, right: s64) -> bool {}", name=">="},
-		.{source="operator && :: (left: s64, right: s64) -> bool {}", name="&&"},
-		.{source="operator || :: (left: s64, right: s64) -> bool {}", name="||"},
-		.{source="operator << :: (left: s64, right: s64) -> s64 {}", name="<<"},
-		.{source="operator >> :: (left: s64, right: s64) -> s64 {}", name=">>"},
-		.{source="operator <<< :: (left: s64, right: s64) -> s64 {}", name="<<<"},
-		.{source="operator >>> :: (left: s64, right: s64) -> s64 {}", name=">>>"},
-		.{source="operator += :: (left: *s64, right: s64) {}", name="+="},
-		.{source="operator -= :: (left: *s64, right: s64) {}", name="-="},
-		.{source="operator *= :: (left: *s64, right: s64) {}", name="*="},
-		.{source="operator /= :: (left: *s64, right: s64) {}", name="/="},
-		.{source="operator %= :: (left: *s64, right: s64) {}", name="%="},
-		.{source="operator <<= :: (left: *s64, right: s64) {}", name="<<="},
-		.{source="operator >>= :: (left: *s64, right: s64) {}", name=">>="},
-		.{source="operator <<<= :: (left: *s64, right: s64) {}", name="<<<="},
-		.{source="operator >>>= :: (left: *s64, right: s64) {}", name=">>>="},
-		.{source="operator &= :: (left: *s64, right: s64) {}", name="&="},
-		.{source="operator |= :: (left: *s64, right: s64) {}", name="|="},
-		.{source="operator ^= :: (left: *s64, right: s64) {}", name="^="},
-		.{source="operator &&= :: (left: *s64, right: s64) {}", name="&&="},
-		.{source="operator ||= :: (left: *s64, right: s64) {}", name="||="},
-		.{source="operator [] :: (value: s64, index: s64) -> s64 {}", name="[]"},
-		.{source="operator []= :: (value: *s64, index: s64, replacement: s64) {}", name="[]="},
-		.{source="operator *[] :: (value: *s64, index: s64) -> *s64 {}", name="*[]"},
+		.{source="operator + :: (left: s64, right: s64) -> s64 {}",					name="+"},
+		.{source="operator - :: (left: s64, right: s64) -> s64 {}",					name="-"},
+		.{source="operator * :: (left: s64, right: s64) -> s64 {}",					name="*"},
+		.{source="operator / :: (left: s64, right: s64) -> s64 {}",					name="/"},
+		.{source="operator % :: (left: s64, right: s64) -> s64 {}",					name="%"},
+		.{source="operator < :: (left: s64, right: s64) -> bool {}",				name="<"},
+		.{source="operator > :: (left: s64, right: s64) -> bool {}",				name=">"},
+		.{source="operator ! :: (value: s64) -> bool {}",							name="!"},
+		.{source="operator ~ :: (value: s64) -> s64 {}",							name="~"},
+		.{source="operator & :: (left: s64, right: s64) -> s64 {}",					name="&"},
+		.{source="operator | :: (left: s64, right: s64) -> s64 {}",					name="|"},
+		.{source="operator ^ :: (left: s64, right: s64) -> s64 {}",					name="^"},
+		.{source="operator == :: (left: s64, right: s64) -> bool {}",				name="=="},
+		.{source="operator != :: (left: s64, right: s64) -> bool {}",				name="!="},
+		.{source="operator <= :: (left: s64, right: s64) -> bool {}",				name="<="},
+		.{source="operator >= :: (left: s64, right: s64) -> bool {}",				name=">="},
+		.{source="operator && :: (left: s64, right: s64) -> bool {}",				name="&&"},
+		.{source="operator || :: (left: s64, right: s64) -> bool {}",				name="||"},
+		.{source="operator << :: (left: s64, right: s64) -> s64 {}",				name="<<"},
+		.{source="operator >> :: (left: s64, right: s64) -> s64 {}",				name=">>"},
+		.{source="operator <<< :: (left: s64, right: s64) -> s64 {}",				name="<<<"},
+		.{source="operator >>> :: (left: s64, right: s64) -> s64 {}",				name=">>>"},
+		.{source="operator += :: (left: *s64, right: s64) {}",						name="+="},
+		.{source="operator -= :: (left: *s64, right: s64) {}",						name="-="},
+		.{source="operator *= :: (left: *s64, right: s64) {}",						name="*="},
+		.{source="operator /= :: (left: *s64, right: s64) {}",						name="/="},
+		.{source="operator %= :: (left: *s64, right: s64) {}",						name="%="},
+		.{source="operator <<= :: (left: *s64, right: s64) {}",						name="<<="},
+		.{source="operator >>= :: (left: *s64, right: s64) {}",						name=">>="},
+		.{source="operator <<<= :: (left: *s64, right: s64) {}",					name="<<<="},
+		.{source="operator >>>= :: (left: *s64, right: s64) {}",					name=">>>="},
+		.{source="operator &= :: (left: *s64, right: s64) {}",						name="&="},
+		.{source="operator |= :: (left: *s64, right: s64) {}",						name="|="},
+		.{source="operator ^= :: (left: *s64, right: s64) {}",						name="^="},
+		.{source="operator &&= :: (left: *s64, right: s64) {}",						name="&&="},
+		.{source="operator ||= :: (left: *s64, right: s64) {}",						name="||="},
+		.{source="operator [] :: (value: s64, index: s64) -> s64 {}",				name="[]"},
+		.{source="operator []= :: (value: *s64, index: s64, replacement: s64) {}",	name="[]="},
+		.{source="operator *[] :: (value: *s64, index: s64) -> *s64 {}",			name="*[]"},
 	];
 
 	assert(fixtures.count == 39);

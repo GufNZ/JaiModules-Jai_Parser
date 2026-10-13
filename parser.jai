@@ -1029,6 +1029,7 @@ reuse_simple_declaration :: (parser: *Parser) -> *Parser_Node {
 				properties.expression = ifx compound.declaration_properties.expression
 					then copy_reusable_expression(parser, compound.declaration_properties.expression, start - first)
 					else null;
+
 				declaration := new_parser_node(parser, Parser_Compound_Declaration);
 				declaration.* = compound.*;
 				declaration.comma_separated_assignment = arguments;
@@ -1196,6 +1197,7 @@ copy_reusable_type_instantiation :: (parser: *Parser, original: *Parser_Type_Ins
 			if original.array_dimension {
 				wrapper.array_dimension = copy_reusable_expression(parser, original.array_dimension, token_delta);
 			}
+
 			wrapper.array_element_type = copy_reusable_type_instantiation(parser, original.array_element_type, token_delta);
 		}
 
@@ -5787,13 +5789,11 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 				result._u64 = token.integer_value;
 			}
 
-			if token.value_flags & .HEX						result.value_flags |= .HEX;
-			if token.value_flags & .BINARY					result.value_flags |= .BINARY;
-			if token.value_flags & .DEFAULTS_TO_FLOAT64		result.value_flags |= .DEFAULTS_TO_FLOAT64;
-			if token.value_flags & .REQUIRES_FLOAT64		result.value_flags |= .REQUIRES_FLOAT64;
-			if token.value_flags & .REQUIRES_FLOAT64_DUE_TO_SIGNIFICANT_DIGITS {
-				result.value_flags |= xx Code_Literal_Value_Flags_SIGNIFICANT_DIGITS;
-			}
+			if token.value_flags & .HEX											result.value_flags |= .HEX;
+			if token.value_flags & .BINARY										result.value_flags |= .BINARY;
+			if token.value_flags & .DEFAULTS_TO_FLOAT64							result.value_flags |= .DEFAULTS_TO_FLOAT64;
+			if token.value_flags & .REQUIRES_FLOAT64							result.value_flags |= .REQUIRES_FLOAT64;
+			if token.value_flags & .REQUIRES_FLOAT64_DUE_TO_SIGNIFICANT_DIGITS	result.value_flags |= xx Code_Literal_Value_Flags_SIGNIFICANT_DIGITS;
 
 			finish_node(parser, result, first);
 			return result;

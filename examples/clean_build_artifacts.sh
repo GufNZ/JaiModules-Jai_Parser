@@ -2,11 +2,11 @@
 set -euo pipefail
 
 usage() {
+	printf '\033[96mUsage\033[0m: clean_build_artifacts.sh [\033[93m--dry-run\033[0m] [\033[93m--resolved FIXTURE ...\033[0m]\n'
 	printf '%s\n' \
-		'Usage: bash clean_build_artifacts.sh [--dry-run] [--resolved FIXTURE ...]' \
 		'Clean untracked build outputs in the parser examples directory.' \
-		'Preserve retained differential fixtures and their outputs unless marked resolved.' \
-		'FIXTURE is a jai_parser_differential_<section>_<test>_<serial>[.jai] name.'
+		'Preserve retained differential fixtures and their outputs unless marked resolved.'
+	printf '\033[93mFIXTURE\033[0m is a \033[96mjai_parser_differential_<section>_<test>_<serial>[.jai]\033[0m name.\n'
 }
 
 dry_run=false
@@ -26,7 +26,7 @@ while (( $# )); do
 
 			stem=${2%.jai}
 			if [[ ! $stem =~ ^jai_parser_differential_[0-9]+_[0-9]+_[0-9]+$ ]]; then
-				printf 'Invalid resolved fixture name: %s\n' "$2" >&2
+				printf '\033[91mInvalid resolved fixture name\033[0m: \033[96m%s\033[0m\n' "$2" >&2
 				exit 2
 			fi
 
@@ -40,7 +40,7 @@ while (( $# )); do
 			;;
 
 		*)
-			printf 'Unknown argument: %s\n' "$1" >&2
+			printf '\033[91mUnknown argument\033[0m: \033[93m%s\033[0m\n' "$1" >&2
 			usage >&2
 			exit 2
 			;;
@@ -50,6 +50,15 @@ done
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
 git rev-parse --is-inside-work-tree >/dev/null
+
+declare -A tracked=()
+exec {tracked_fd}< <(git ls-files -z -- .)
+tracked_pid=$!
+while IFS= read -r -d '' path; do
+	tracked["$path"]=true
+done <&"$tracked_fd"
+exec {tracked_fd}<&-
+wait "$tracked_pid"
 
 is_resolved() {
 	local stem
@@ -84,10 +93,28 @@ is_retained_output() {
 	return 1
 }
 
+pending=()
+pending_length=0
+remove_pending() {
+	if (( ${#pending[@]} == 0 )); then
+		return 0
+	fi
+
+
+	rm -- "${pending[@]}"
+	local entry
+	for entry in "${pending[@]}"; do
+		printf '\033[92mRemoved\033[0m: \033[96m%s\033[0m\n' "${entry#./}"
+	done
+
+	pending=()
+	pending_length=0
+}
+
 count=0
 while IFS= read -r -d '' entry; do
 	path=${entry#./}
-	if git ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+	if [[ ${tracked["$path"]+present} ]]; then
 		continue
 	fi
 
@@ -129,17 +156,22 @@ while IFS= read -r -d '' entry; do
 
 
 	if $dry_run; then
-		printf 'Would remove: %s\n' "$path"
+		printf '\033[93mWould remove\033[0m: \033[96m%s\033[0m\n' "$path"
 	else
-		rm -- "$entry"
-		printf 'Removed: %s\n' "$path"
+		if (( ${#pending[@]} > 0 && (${#pending[@]} >= 128 || pending_length + ${#entry} + 1 > 8192) )); then
+			remove_pending
+		fi
+
+		pending+=("$entry")
+		pending_length=$((pending_length + ${#entry} + 1))
 	fi
 
 	count=$((count + 1))
 done < <(find . -type d -name .git -prune -o -type f -print0)
 
 if $dry_run; then
-	printf 'Would remove %s generated files.\n' "$count"
+	printf '\033[93mWould remove\033[0m \033[97m%s\033[0m generated files.\n' "$count"
 else
-	printf 'Removed %s generated files.\n' "$count"
+	remove_pending
+	printf '\033[92mRemoved\033[0m \033[97m%s\033[0m generated files.\n' "$count"
 fi

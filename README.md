@@ -348,18 +348,41 @@ Release an old snapshot's resources independently of its replacement.
 `examples/differential_test.jai` normalises parser and compiler ASTs into path-keyed syntax fields and reports every structural mismatch.
 Its `assert_expression_fixture` macro accepts source text once and generates the matching `#code` argument with `#insert`, preventing the parser input and compiler oracle from drifting apart.
 The harness keeps syntax and semantic normalisation separate, provides trivia round-trip fixtures, and includes intercepted child-workspace fixtures for typechecked declarations and file-level constructs.
-Compiling the suite runs its compile-time AST and workspace fixtures; running the resulting executable is also required to verify structural-diff and compiler-diagnostic assertions.
-Both checks pass after the diagnostic-location fixture correction; earlier compile-time fixture results alone did not establish runtime coverage.
 
-By default, the differential suite runs every section.  Pass one section number or exact, quoted section name after the compiler's `-` separator to rerun only that section.  The executable keeps the same selection, so unselected runtime checks are skipped too.  `list` prints section numbers, names, and test totals without running fixtures or producing an executable; `all` explicitly selects the full suite.
+On Windows, use the Jai-only parallel runner.  It runs batches in fresh compiler processes to avoid suite-wide memory buildup.  Do not run the whole `differential_test.jai` harness directly: that unbounded invocation can exhaust RAM.  No PowerShell is required.  Have `jai` on `PATH`; workers use the checkout's `bin/jai.exe`, and diagnostic fixtures invoke `jai`.
 
-Run these from `modules/Jai_Parser/examples`:
+From `modules/Jai_Parser/examples`, build and run the full suite in Bash:
 
 ```bash
-jai differential_test.jai -x64 -quiet - list
-jai differential_test.jai -x64 -quiet - 5 && ./differential_test.exe
-jai differential_test.jai -x64 -quiet - "Runtime checks" && ./differential_test.exe
+jai differential_runner.jai -x64
+./differential_runner.exe --all
 ```
+
+`--all` includes both compile-time fixtures and all eight runtime checks; no separate runtime command is needed.  The runner requires an explicit mode or section, not an implicit full-suite default.
+
+For section discovery, focused runs, or runner self-tests:
+
+```bash
+./differential_runner.exe --list
+./differential_runner.exe 5
+./differential_runner.exe "Numeric rankings"
+./differential_runner.exe "Numeric rankings" --first 17 --last 48
+./differential_runner.exe --self-test
+```
+
+Select a section by number or exact, quoted name.  Fixture ranges are inclusive and supported only for batchable sections.  Selecting `"Runtime checks"` compiles and executes that section automatically.
+
+- `--workers` accepts 1..4 (default 2); use `--workers 1` for serial scheduling.
+- `--batch-size` accepts 1..16 (default 16) for the nine batchable sections; other sections run whole.  Worker count and batch size are the normal memory controls.
+- `--memory-mib` defaults to 2048: a 2 GiB commit safety limit per process tree.  Hitting the cap is a failure, not a successful batch boundary.
+- `--timeout` defaults to 30 seconds per compile/runtime phase or idle admission wait, not per full suite.
+- `--reserve-mib` defaults to 2048 for physical/commit headroom.  Low headroom can reduce concurrency.
+
+The first failure or Ctrl+C stops scheduling and terminates active worker trees.  Exit codes are 0 for success, 1 for test or runner failures, 64 for invalid arguments, 75 for insufficient headroom, 124 for timeouts, and 130 for cancellation.
+
+Logs are saved under `examples/.build/differential_runs` in a fresh directory per run.  Each job has isolated working, build, fixture, and `TEMP`/`TMP` directories, plus `job.tsv`, `compile.log`, and, when applicable, `runtime.log`.  Failed fixtures and build files are preserved; successful build/temp artifacts are removed.  `summary.tsv` records coverage, elapsed time, job commit peaks, and sampled system headroom.
+
+Verified locally on 2026-10-13 with the defaults: all 24 sections / 4,175 fixtures passed in 252 jobs in **5 minutes 12 seconds**, with no timeouts or cap failures.  The largest job commit peak was 1.75 GiB, minimum sampled available RAM was 5.14 GiB, and runtime checks retained zero allocations/bytes.  The identical 594-fixture `Numeric rankings` workload took 63.4 seconds serially versus 39.6 seconds with two workers (about 1.60x faster).  These are local measurements, not universal guarantees.
 
 ANSI-coloured progress shows the original section number, the current test within that section, and the cumulative test count for the selected run.  A shared inventory supplies totals across compile-time and runtime checks; nested compiler calls count only once within their parent test.
 
