@@ -3,17 +3,19 @@ set -Eeuo pipefail
 
 usage() {
 	printf '%s\n' \
-		'Usage: bash collect_simd_timings.sh [--rounds N] [--output-dir DIRECTORY] [--] [CORPUS ...]' \
-		'Collect scalar-relative SSE2, AVX2, and AVX-512 timings on Windows Bash.' \
+		'Usage: bash collect_simd_timings.sh [--workloads] [--rounds N] [--output-dir DIRECTORY] [--] [CORPUS ...]' \
+		'Collect scalar versus automatic widest-SIMD timings on Windows Bash.' \
+		'--workloads adds five deterministic workloads with streaming/materialised and fresh/reused pool phases.' \
 		'Defaults: three rounds; Invaders and how_to from the Jai distribution.' \
 		'Requires jai on PATH (or JAI=/path/to/jai.exe).  N must be 1..30.' \
-		'Each mode performs token parity, two warmups, and nine trials of 25 scans.' \
+		'Each round performs token parity, two warmups, and nine trials of 25 scans.' \
 		'Output: a timestamped directory under examples/.build, or --output-dir.'
 }
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 compiler=${JAI:-jai}
 rounds=3
+include_workloads=false
 output_root="$script_dir/.build"
 corpora=()
 while (( $# )); do
@@ -21,6 +23,11 @@ while (( $# )); do
 		-h|--help)
 			usage
 			exit 0
+			;;
+
+		--workloads)
+			include_workloads=true
+			shift
 			;;
 
 		--rounds|--output-dir)
@@ -154,8 +161,9 @@ run_logged() {
 	printf '\n=== Corpora ===\n'
 	printf '%s\n' "${corpora[@]}"
 	printf '\nTimings exclude I/O, compiler startup, and AST parsing; include token allocation/cleanup.\n'
-	printf 'Each mode compares against its own scalar baseline; compare relative speedups, not separate absolute times.\n'
-	printf 'Mode order rotates each round.  Unsupported AVX-512 timings are fallback measurements.\n'
+	printf 'USE_SIMD selects the widest CPU/OS-supported path; the benchmark reports the selected path.\n'
+	printf 'Scalar and SIMD trial order alternates within each round.\n'
+	printf 'Synthetic workloads enabled: %s. Allocation counters run outside timing.\n' "$include_workloads"
 	printf 'Keep machine power settings consistent and avoid other CPU-heavy work.\n'
 } 2>&1 | tee "$report"
 
@@ -165,14 +173,12 @@ run_logged "$compiler" layout_test.jai -o -llvm -quiet -no_color -output_path "$
 run_logged "$run_dir/layout_llvm.exe"
 run_logged "$compiler" lex_all_files.jai -o -llvm -quiet -no_color -output_path "$compiler_output" -exe lex_benchmark
 
-modes=(SSE2 AVX2 AVX-512)
-flags=(--benchmark --benchmark-avx2 --benchmark-avx512)
 for (( round=0; round<rounds; round++ )); do
-	for (( slot=0; slot<${#modes[@]}; slot++ )); do
-		index=$(( (round + slot) % ${#modes[@]} ))
-		printf '\n=== Round %s/%s: %s ===\n' "$((round + 1))" "$rounds" "${modes[index]}" | tee -a "$report"
-		run_logged "$run_dir/lex_benchmark.exe" "${flags[index]}" "${corpora[@]}"
-	done
+	printf '\n=== Round %s/%s: automatic SIMD ===\n' "$((round + 1))" "$rounds" | tee -a "$report"
+	run_logged "$run_dir/lex_benchmark.exe" --benchmark "${corpora[@]}"
+	if [[ $include_workloads == true ]]; then
+		run_logged "$run_dir/lex_benchmark.exe" --benchmark-workloads
+	fi
 done
 
 printf '\nCollection COMPLETE. Report: %s\n' "$report" | tee -a "$report"

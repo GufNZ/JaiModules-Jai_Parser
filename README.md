@@ -15,15 +15,25 @@ For scalar/SIMD lexer and token-materialisation timing on Windows, run from the 
 ```bash
 jai lex_all_files.jai -o -llvm
 ./lex_all_files.exe --benchmark ../../../examples/invaders ../../../how_to
-./lex_all_files.exe --benchmark-avx2 ../../../examples/invaders ../../../how_to
-./lex_all_files.exe --benchmark-avx512 ../../../examples/invaders ../../../how_to
 ```
 
 The benchmark preloads source files, verifies token parity outside timing, and alternates nine trials of 25 corpus scans after two warmups per mode.
 Timing includes token allocation and cleanup, but excludes file I/O, compiler startup, and AST parsing.
 It reports median and range; small changes within that variability are not established speedups.
-`--benchmark` compares scalar with SSE2; `--benchmark-avx2` compares scalar with CPU-guarded AVX2 and checks both SSE2 and AVX2 token parity before timing.
-`--benchmark-avx512` enables guarded AVX-512 with AVX2/SSE2 fallbacks and checks the selected import's complete tokens before timing.  It prints AVX-512 CPU/OS availability; when unavailable, its timings measure fallback, not AVX-512.
+`--benchmark` compares scalar with `USE_SIMD=true`, checks complete-token parity, and reports the widest CPU/OS-supported path selected automatically.
+
+For deterministic workload and allocation comparisons, use the same LLVM build:
+
+```bash
+./lex_all_files.exe --benchmark-workloads
+bash collect_simd_timings.sh --workloads
+```
+
+The five workloads repeat 4,096 ordinary-token records: short identifiers, long identifiers, long line comments, plain strings, and escaped strings.  Sources are generated before timing.  Each workload verifies complete scalar/SIMD materialised-token parity, then checks equal token counts in four phases: streaming or materialised tokens, each with fresh or reused pools.  Streaming still copies names and decodes strings but omits retained token arrays; contextual here strings remain covered by the real-corpus materialisation benchmark rather than this streaming comparison.
+
+Fresh pools include backing allocation and release per source.  Reused pools are primed outside each timed trial, reset after every source, and released after timing.  `Pool.reset` retains ordinary buckets but frees oversized allocations, so large token arrays still require heap allocations.  Both modes preserve copied payloads and the same lexer settings.  The reported differences isolate storage and pool-lifecycle sensitivity, not exact additive percentages of pure scan and allocation time; cache state, copying, and reset work also differ.
+
+Output includes median/range, MiB/s, and millions of tokens/s.  Separate untimed forwarding allocator counters report cumulative allocation/resize requests and requested bytes at both token and backing-heap levels, not live or peak retained memory.  Scalar/SIMD token-level counts and bytes must agree.  The collector's `--workloads` option includes these phases alongside both real corpora in each of its default three rounds, with compiler/host/source provenance.  Use repeated like-for-like LLVM runs; the SIMD default remains unchanged by these measurements.
 
 On an AVX-512F/BW machine, run the focused tests under both backends before timing:
 
@@ -31,12 +41,12 @@ On an AVX-512F/BW machine, run the focused tests under both backends before timi
 jai layout_test.jai -x64 -quiet && ./layout_test.exe
 jai layout_test.jai -o -llvm -quiet && ./layout_test.exe
 jai lex_all_files.jai -o -llvm -quiet
-./lex_all_files.exe --benchmark-avx512 ../../../examples/invaders ../../../how_to
+./lex_all_files.exe --benchmark ../../../examples/invaders ../../../how_to
 ```
 
-The layout executable tests each supported backend separately.
-For AVX-512 it covers all 256 byte values in each of 64 lanes at 64 alignments, identifier token parity at vector/scratch boundaries, and comment cursor/location parity through newline, NUL, logical EOF, and vector tails.
-Confirm the AVX-512 checks report `PASS`, not `SKIPPED`; the benchmark currently requires Windows.
+The layout executable checks each supported identifier classifier directly, then compares scalar tokens and comment state against automatic SIMD dispatch at vector/scratch boundaries, newline, NUL, logical EOF, and tails.
+For AVX-512, classifier checks cover all 256 byte values in each of 64 lanes at 64 alignments; unsupported widths report `SKIPPED` without executing those instructions.
+On an AVX-512 machine, confirm width 64 reports `PASS` and the benchmark reports `Widest SIMD path: AVX-512`; timing currently requires Windows.
 
 To collect a single report for comparing another Windows machine, run in Cygwin, MSYS, or Git Bash from `examples`:
 
@@ -45,10 +55,10 @@ bash collect_simd_timings.sh
 ```
 
 The script also works when invoked by path from another directory.
-It builds isolated executables, runs fast/LLVM layout validation first, and collects three rounds of SSE2, AVX2, and AVX-512 corpus timings with rotating mode order.
-Each mode retains its own scalar baseline.
+It builds isolated executables, runs fast/LLVM layout validation first, and collects three rounds of scalar versus automatic-SIMD corpus timings.
+Scalar and SIMD trial order alternates within each round.
 The report includes compiler version, host/CPU details, feature availability, source commit/status/hashes, exact commands, medians/ranges, relative speedups, and parity results.
-AVX-512-unavailable runs remain clearly labelled as fallback measurements.
+The benchmark reports the widest selected path, so a machine without AVX-512 is clearly identified as using AVX2 or SSE2 instead.
 
 Results are printed and stored in `examples/.build/simd_timings_<UTC>_<PID>/report.txt`, alongside the executables.
 Provide that report for analysis; successful runs end with `Collection COMPLETE`, while failed validation stops collection and preserves a partial report.
@@ -74,43 +84,46 @@ The default import retains the original `Token` layout:
 #import "Jai_Parser";
 ```
 
-`ENABLE_SIMD=true` opts into experimental SSE2 identifier and line-comment scanning on x64, with scalar handling for short inputs, tails, continuations, and identifier-length errors.
+`USE_SIMD` defaults to `true`, enabling identifier and line-comment scanning using the widest CPU/OS-supported path on x64: AVX-512F/BW (64 bytes), AVX2 (32 bytes), then baseline SSE2 (16 bytes).
+Each scan uses the widest supported width that fits the remaining source and identifier scratch capacity, falling back through narrower widths and scalar tails.
 Comment scanning stops before newline and NUL, preserving trivia and location accounting.
 Other CPU targets remain scalar.
-The default remains `false`: initial corpus timings show small gains on `how_to`, but no consistent Invaders improvement.
-
-Adding `ENABLE_AVX2=true` enables experimental 32-byte identifier and line-comment scans.
-It also requires `ENABLE_SIMD=true`.
-Runtime dispatch checks CPUID XSAVE, OSXSAVE, AVX, and AVX2, then verifies XCR0 enables both XMM and YMM state before executing AVX instructions.
-The result is atomically cached per module instance and retained per lexer; unsupported machines fall back to SSE2, then scalar tails.
-Loads remain bounded by source length and identifier scratch capacity.
-Neither path requires BMI1.
+Use `USE_SIMD=false` to select scalar scanning explicitly.  Benchmarks and parity tests keep their scalar reference imports disabled independently of the default.
 
 ```jai
-#import "Jai_Parser"(ENABLE_SIMD=true, ENABLE_AVX2=true);
+#import "Jai_Parser"(USE_SIMD=false);
 ```
 
-Adding `ENABLE_AVX512=true` enables experimental 64-byte identifier and line-comment scans and requires `ENABLE_SIMD=true`.
-Runtime dispatch requires XSAVE, OSXSAVE, AVX, AVX-512F, and AVX-512BW, plus XCR0 mask `0xE6`: XMM, YMM, opmask, upper ZMM, and high ZMM register state.
+Runtime detection checks XSAVE, OSXSAVE, and AVX before reading XCR0.
+AVX2 requires its CPUID bit and XCR0 mask `0x6` (XMM/YMM state); AVX-512 requires F/BW and XCR0 mask `0xE6` (XMM/YMM/opmask/ZMM state).
 AVX-512VL and AVX-512DQ are not required.
-The no-inline helpers use 64-bit byte-stop masks, bounded unaligned loads, nonzero-mask `bsf`, and `zeroupper` before returning.
-Dispatch prefers 64-byte chunks, then AVX2 when separately enabled, SSE2, and scalar tails.
-Availability is atomically cached per module instance and retained per lexer, and `ENABLE_AVX512` defaults to `false` independently of the other options.
-
-```jai
-#import "Jai_Parser"(ENABLE_SIMD=true, ENABLE_AVX2=true, ENABLE_AVX512=true);
-```
+Supported features are atomically cached per module instance and retained in one per-lexer feature mask.
+Loads are bounded, `bsf` runs only on nonzero stop masks, and BMI1 is not required.
+The wider no-inline helpers end with `zeroupper`; keeping the identifier classifiers out-of-line prevents LLVM from interleaving legacy SSE spills/shuffles with wide vector instructions.
 
 AVX-512 compiles under both the fast and LLVM backends, and unsupported-host corpus fallback passes full-token parity.
-Its emitted ZMM/mask instruction sequences have been inspected, but AVX-512 execution and performance remain unverified until the hardware-gated checks run on a capable machine.
+Its emitted ZMM/mask instruction sequences have been inspected.
+A user-provided three-round collection on Ryzen 5 7600X / Windows 10 / Cygwin (2026-10-14, Jai beta 0.2.030) confirms AVX-512 CPU/OS availability, fast and LLVM classifier/token/comment parity, and complete corpus token parity for all modes.
+
+Historical forced-width measurements, before consolidating the options: median of the three rounds' elapsed reductions versus each mode's own scalar baseline:
+
+| Mode | Invaders | how_to |
+| --- | ---: | ---: |
+| SSE2 | 2.51% | 1.66% |
+| AVX2 | 0.38% | 1.24% |
+| AVX-512 | 0.80% | 2.26% |
+
+The reported trial ranges overlap, and scalar baselines vary by mode; do not interpret separate absolute timings as a controlled backend ranking.
+These results validate AVX-512 execution but do not establish a worthwhile advantage over SSE2; gains remain workload-dependent even though automatic SIMD dispatch is now enabled by default.
+The remote Invaders corpus matches the earlier counts (8 files, 75,331 bytes, 11,344 tokens); its `how_to` corpus differs (84 files, 823,387 bytes, 46,576 tokens), so cross-machine comparisons are not identical-corpus measurements.
+Actual clock-frequency effects were not measured.
 
 The tested Core Ultra 5 135H supports AVX2 with OS vector-state support, but not AVX-512F/BW.
-Fast and LLVM builds pass forced SSE2/AVX2 parity tests.
+Fast and LLVM builds pass direct SSE2/AVX2 classifier and automatic SIMD token/comment parity tests.
 An initial large regression was traced to LLVM auto-inlining the identifier classifier and inserting legacy SSE spills/shuffles between YMM instructions, before `zeroupper`.
 Function-scoped `no_inline` prevents that interleaving without disabling other inlining.
 A subsequent optimised run measured scalar/AVX2 medians of 3.984/3.881 ms for Invaders and 18.459/17.742 ms for `how_to` (2.6% and 3.9% less elapsed time).
 Ranges overlap, and a separate SSE2 run also shows small gains; an AVX2 advantage over SSE2 is not established.
-`ENABLE_AVX2` remains independently default-off pending controlled measurements.
 
 Lossless source text and trivia are opt-in:
 

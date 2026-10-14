@@ -6,12 +6,8 @@
 #import "Sort";
 #import "String";
 
-Parser_Lexer :: #import "Jai_Parser"(ENABLE_TRIVIA=true);
-Simd_Lexer :: #import "Jai_Parser"(ENABLE_TRIVIA=true, ENABLE_SIMD=true);
-Avx2_Lexer :: #import "Jai_Parser"(ENABLE_TRIVIA=true, ENABLE_SIMD=true, ENABLE_AVX2=true);
-Avx512_Lexer :: #import "Jai_Parser"(ENABLE_TRIVIA=true, ENABLE_SIMD=true, ENABLE_AVX2=true, ENABLE_AVX512=true);
-benchmark_avx2: bool;
-benchmark_avx512: bool;
+Parser_Lexer :: #import "Jai_Parser"(ENABLE_TRIVIA=true, USE_SIMD=false);
+Simd_Lexer :: #import "Jai_Parser"(ENABLE_TRIVIA=true, USE_SIMD=true);
 
 #if OS == .WINDOWS {
 	Windows :: #import "Windows";
@@ -19,29 +15,27 @@ benchmark_avx512: bool;
 
 main :: () {
 	arguments := get_command_line_arguments();
-	if (
-		arguments.count > 1
-		&& (
-			arguments[1] == "--benchmark"
-			|| arguments[1] == "--benchmark-avx2"
-			|| arguments[1] == "--benchmark-avx512"
-		)
-	) {
-		benchmark_avx2 = arguments[1] == "--benchmark-avx2";
-		benchmark_avx512 = arguments[1] == "--benchmark-avx512";
-		assert(arguments.count > 2, "Provide at least one source directory.");
-		if benchmark_avx512 {
-			#if Avx512_Lexer.USE_SIMD {
-				available := Avx512_Lexer.avx512_is_available();
-				print("AVX-512F/BW usable with OS vector state: %\n", available);
-				if !available {
-					print("AVX-512 unavailable: timings measure guarded fallback, not AVX-512.\n");
-				}
-			} else {
-				print("AVX-512 unavailable: timings measure scalar fallback on this target.\n");
-			}
+	if arguments.count > 1 && (arguments[1] == "--benchmark" || arguments[1] == "--benchmark-workloads") {
+		#if Simd_Lexer.SIMD_AVAILABLE {
+			features := Simd_Lexer.get_simd_features();
+			backend := ifx features & .AVX512
+				then "AVX-512"
+				else ifx features & .AVX2
+					then "AVX2"
+					else "SSE2";
+
+			print("Widest SIMD path: %\n", backend);
+		} else {
+			print("SIMD unavailable: using scalar fallback on this target.\n");
 		}
 
+		if arguments[1] == "--benchmark-workloads" {
+			benchmark_workloads();
+			return;
+		}
+
+
+		assert(arguments.count > 2, "Provide at least one source directory.");
 		for index: 2..arguments.count-1 {
 			benchmark_corpus(arguments[index]);
 		}
@@ -115,45 +109,95 @@ benchmark_ticks :: () -> s64 {
 	}
 }
 
-benchmark_scan :: (sources: [] string, $simd: bool) -> s64 {
-	tokens: s64;
-	for source: sources {
-		push_benchmark_allocator();
+benchmark_source_scan :: (source: string, $simd: bool, $materialise: bool) -> s64 {
+	#if materialise {
 		#if simd {
-			if benchmark_avx512 {
-				parsed := Avx512_Lexer.materialise_tokens(source);
-				assert(parsed.status == .COMPLETE && parsed.diagnostics.count == 0);
-				tokens += parsed.tokens.count;
-			} else if benchmark_avx2 {
-				parsed := Avx2_Lexer.materialise_tokens(source);
-				assert(parsed.status == .COMPLETE && parsed.diagnostics.count == 0);
-				tokens += parsed.tokens.count;
-			} else {
-				parsed := Simd_Lexer.materialise_tokens(source);
-				assert(parsed.status == .COMPLETE && parsed.diagnostics.count == 0);
-				tokens += parsed.tokens.count;
-			}
+			parsed := Simd_Lexer.materialise_tokens(source);
+			assert(parsed.status == .COMPLETE && parsed.diagnostics.count == 0);
+			return parsed.tokens.count;
 		} else {
 			parsed := Parser_Lexer.materialise_tokens(source);
 			assert(parsed.status == .COMPLETE && parsed.diagnostics.count == 0);
-			tokens += parsed.tokens.count;
+			return parsed.tokens.count;
 		}
+	} else {
+		tokens: s64;
+		#if simd {
+			lexer: Simd_Lexer.Lexer;
+			Simd_Lexer.set_input_from_string(*lexer, source);
+			while true {
+				token := Simd_Lexer.peek_next_token(*lexer);
+				tokens += 1;
+				if token.type == .END_OF_INPUT {
+					break;
+				}
+
+
+				Simd_Lexer.eat_token(*lexer);
+			}
+			assert(!lexer.reported_error);
+		} else {
+			lexer: Parser_Lexer.Lexer;
+			Parser_Lexer.set_input_from_string(*lexer, source);
+			while true {
+				token := Parser_Lexer.peek_next_token(*lexer);
+				tokens += 1;
+				if token.type == .END_OF_INPUT {
+					break;
+				}
+
+
+				Parser_Lexer.eat_token(*lexer);
+			}
+			assert(!lexer.reported_error);
+		}
+
+		return tokens;
+	}
+}
+
+benchmark_scan :: (sources: [] string, $simd: bool, $materialise: bool = true, storage: *Pool = null) -> s64 {
+	tokens: s64;
+	for source: sources {
+		fresh: Pool;
+		set_allocators(*fresh);
+		active := ifx storage then storage else *fresh;
+		defer {
+			if storage {
+				reset(storage);
+			} else {
+				release(*fresh);
+			}
+		}
+
+		push_allocator(.{proc=pool_allocator_proc, data=active});
+		tokens += benchmark_source_scan(source, simd, materialise);
 	}
 
 	return tokens;
 }
 
-benchmark_trial :: (sources: [] string, $simd: bool, expected_tokens: s64, frequency: s64) -> float64 {
+benchmark_trial :: (sources: [] string, $simd: bool, expected_tokens: s64, frequency: s64, $materialise: bool, $reuse: bool) -> float64 {
 	REPETITIONS :: 25;
+	storage: Pool;
+	set_allocators(*storage);
+	defer release(*storage);
+
+	active: *Pool;
+	#if reuse {
+		active = *storage;
+		assert(benchmark_scan(sources, simd, materialise, active) == expected_tokens);
+	}
+
 	start := benchmark_ticks();
 	for 1..REPETITIONS {
-		assert(benchmark_scan(sources, simd) == expected_tokens);
+		assert(benchmark_scan(sources, simd, materialise, active) == expected_tokens);
 	}
 
 	return (benchmark_ticks() - start).(float64) * 1000 / frequency.(float64) / REPETITIONS;
 }
 
-assert_benchmark_token_parity :: (actual: $Actual, expected: Parser_Lexer.Parser_Token, filename: string) {
+assert_benchmark_token_parity :: (actual: Simd_Lexer.Parser_Token, expected: Parser_Lexer.Parser_Token, filename: string) {
 	assert(actual.type.(s64) == expected.type.(s64));
 	assert(actual.value_flags.(u32) == expected.value_flags.(u32));
 	assert(actual.ident_is_backticked == expected.ident_is_backticked);
@@ -202,12 +246,45 @@ benchmark_corpus :: (directory: string) {
 		array_free(sources);
 	}
 
-	bytes: s64;
-	token_count: s64;
 	for filename: filenames {
 		source, success := read_entire_file(filename);
 		assert(success);
 		array_add(*sources, source);
+	}
+
+	benchmark_sources(directory, sources);
+}
+
+benchmark_workloads :: () {
+	records := string.[
+		"value := other + delta; value = other + delta;\n",
+		"long_identifier_with_repeated_ascii_letters_abcdefghijklmnopqrstuvwxyz_0123456789 := another_long_identifier_with_repeated_ascii_letters_abcdefghijklmnopqrstuvwxyz_0123456789;\n",
+		"value := 1; // A long line comment with ASCII words, punctuation, and spaces. abcdefghijklmnopqrstuvwxyz 0123456789 abcdefghijklmnopqrstuvwxyz 0123456789 abcdefghijklmnopqrstuvwxyz 0123456789\n",
+		"value := \"A long plain string with ASCII words abcdefghijklmnopqrstuvwxyz 0123456789 abcdefghijklmnopqrstuvwxyz 0123456789\";\n",
+		"value := \"An escaped string with newline\\n tab\\t quote\\\" slash\\\\ and hex\\x41 repeated payload abcdefghijklmnopqrstuvwxyz\";\n"
+	];
+
+	names := string.["short-identifiers", "long-identifiers", "line-comments", "plain-strings", "escaped-strings"];
+
+	for record, index: records {
+		source: string;
+		source.count = record.count * 4096;
+		source.data = xx alloc(source.count);
+		defer free(source);
+
+		for block: 0..4095 {
+			memcpy(source.data + block * record.count, record.data, record.count);
+		}
+
+		benchmark_sources(names[index], string.[source], true);
+	}
+}
+
+benchmark_sources :: (name: string, sources: [] string, isolate_allocations: bool = false) {
+	bytes: s64;
+	token_count: s64;
+
+	for source: sources {
 		bytes += source.count;
 		push_benchmark_allocator();
 		scalar := Parser_Lexer.materialise_tokens(source);
@@ -218,25 +295,7 @@ benchmark_corpus :: (directory: string) {
 
 		for expected, index: scalar.tokens {
 			actual := vectorised.tokens[index];
-			assert_benchmark_token_parity(actual, expected, filename);
-		}
-
-		if benchmark_avx2 {
-			wider := Avx2_Lexer.materialise_tokens(source);
-			assert(wider.status == .COMPLETE && wider.diagnostics.count == 0);
-			assert(wider.tokens.count == scalar.tokens.count);
-			for expected, index: scalar.tokens {
-				assert_benchmark_token_parity(wider.tokens[index], expected, filename);
-			}
-		}
-
-		if benchmark_avx512 {
-			widest := Avx512_Lexer.materialise_tokens(source);
-			assert(widest.status == .COMPLETE && widest.diagnostics.count == 0);
-			assert(widest.tokens.count == scalar.tokens.count);
-			for expected, index: scalar.tokens {
-				assert_benchmark_token_parity(widest.tokens[index], expected, filename);
-			}
+			assert_benchmark_token_parity(actual, expected, name);
 		}
 
 		token_count += scalar.tokens.count;
@@ -250,20 +309,35 @@ benchmark_corpus :: (directory: string) {
 	}
 
 	assert(frequency > 0, "This benchmark requires Windows.");
+	print("%: % files, % bytes, % tokens (including EOF); 9 trials x 25 scans, 2 warmups\n", name, sources.count, bytes, token_count);
+	if isolate_allocations {
+		benchmark_measure(sources, bytes, token_count, frequency, false, false);
+		benchmark_measure(sources, bytes, token_count, frequency, false, true);
+		benchmark_measure(sources, bytes, token_count, frequency, true, false);
+		benchmark_measure(sources, bytes, token_count, frequency, true, true);
+	} else {
+		benchmark_measure(sources, bytes, token_count, frequency, true, false);
+	}
+}
+
+benchmark_measure :: (sources: [] string, bytes: s64, token_count: s64, frequency: s64, $materialise: bool, $reuse: bool) {
+	phase := ifx materialise then "materialised" else "streaming";
+	allocator := ifx reuse then "reused-pool" else "fresh-pool";
+	print("  Phase: % / %\n", phase, allocator);
 	for 1..2 {
-		assert(benchmark_scan(sources, false) == token_count);
-		assert(benchmark_scan(sources, true) == token_count);
+		assert(benchmark_scan(sources, false, materialise) == token_count);
+		assert(benchmark_scan(sources, true, materialise) == token_count);
 	}
 
 	scalar_samples: [9] float64;
 	simd_samples: [9] float64;
 	for trial: 0..scalar_samples.count-1 {
 		if trial % 2 == 0 {
-			scalar_samples[trial] = benchmark_trial(sources, false, token_count, frequency);
-			simd_samples[trial] = benchmark_trial(sources, true, token_count, frequency);
+			scalar_samples[trial] = benchmark_trial(sources, false, token_count, frequency, materialise, reuse);
+			simd_samples[trial] = benchmark_trial(sources, true, token_count, frequency, materialise, reuse);
 		} else {
-			simd_samples[trial] = benchmark_trial(sources, true, token_count, frequency);
-			scalar_samples[trial] = benchmark_trial(sources, false, token_count, frequency);
+			simd_samples[trial] = benchmark_trial(sources, true, token_count, frequency, materialise, reuse);
+			scalar_samples[trial] = benchmark_trial(sources, false, token_count, frequency, materialise, reuse);
 		}
 	}
 
@@ -271,10 +345,57 @@ benchmark_corpus :: (directory: string) {
 	quick_sort(simd_samples, (value: float64) -> float64 { return value; });
 	scalar_median := scalar_samples[4];
 	simd_median := simd_samples[4];
-	print("%: % files, % bytes, % tokens (including EOF); 9 trials x 25 scans, 2 warmups\n", directory, sources.count, bytes, token_count);
 	print("  Scalar ms/scan median=% range=%..%\n", scalar_median, scalar_samples[0], scalar_samples[8]);
 	print("  SIMD   ms/scan median=% range=%..%\n", simd_median, simd_samples[0], simd_samples[8]);
+	print("  Scalar MiB/s=% Mtokens/s=%; SIMD MiB/s=% Mtokens/s=%\n", bytes.(float64) * 1000 / scalar_median / 1048576, token_count.(float64) / scalar_median / 1000, bytes.(float64) * 1000 / simd_median / 1048576, token_count.(float64) / simd_median / 1000);
 	print("  Speedup=% x, elapsed reduction=% percent; token parity PASS\n", scalar_median / simd_median, 100 * (1 - simd_median / scalar_median));
+	if sources.count == 1 {
+		scalar_requests, scalar_bytes := benchmark_allocation_profile(sources[0], false, token_count, materialise, reuse);
+		simd_requests, simd_bytes := benchmark_allocation_profile(sources[0], true, token_count, materialise, reuse);
+		assert(scalar_requests == simd_requests && scalar_bytes == simd_bytes);
+	}
+}
+
+Benchmark_Allocations :: struct {
+	delegate: Allocator;
+	requests: s64;
+	bytes: s64;
+}
+
+benchmark_count_allocator :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+	counts := cast(*Benchmark_Allocations) data;
+	if mode == .ALLOCATE || mode == .RESIZE {
+		counts.requests += 1;
+		counts.bytes += size;
+	}
+
+	return counts.delegate.proc(mode, size, old_size, old_memory, counts.delegate.data);
+}
+
+benchmark_allocation_profile :: (source: string, $simd: bool, expected_tokens: s64, $materialise: bool, $reuse: bool) -> (s64, s64) {
+	backing: Benchmark_Allocations;
+	backing.delegate = context.allocator;
+	storage: Pool;
+	set_allocators(*storage, .{proc=benchmark_count_allocator, data=*backing});
+	defer release(*storage);
+
+	#if reuse {
+		assert(benchmark_scan(string.[source], simd, materialise, *storage) == expected_tokens);
+		backing.requests = 0;
+		backing.bytes = 0;
+	}
+
+	requests: Benchmark_Allocations;
+	requests.delegate = .{proc=pool_allocator_proc, data=*storage};
+
+	{
+		push_allocator(.{proc=benchmark_count_allocator, data=*requests});
+		assert(benchmark_source_scan(source, simd, materialise) == expected_tokens);
+	}
+
+	mode := ifx simd then "SIMD" else "Scalar";
+	print("  % untimed allocation profile: requests=% requested_bytes=% backing_requests=% backing_bytes=%\n", mode, requests.requests, requests.bytes, backing.requests, backing.bytes);
+	return requests.requests, requests.bytes;
 }
 
 consume_here_string :: (lexer: *Parser_Lexer.Lexer, source_cursor: *s64, total_tokens: *s64) {

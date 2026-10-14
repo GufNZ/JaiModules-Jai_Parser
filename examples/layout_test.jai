@@ -1,15 +1,16 @@
 // Compare default token layout with Jai_Lexer, then assert token and trivia behaviour using focused inputs under default, trivia-enabled, and raw-string imports.
 #import "Basic";
 #import "String";
+#import "Pool";
 
 #load "test_fixtures.jai";
 
 Original :: #import "Jai_Lexer";
 
 Default		:: #import "Jai_Parser";
-Extended	:: #import "Jai_Parser"(ENABLE_TRIVIA=true);
+Extended	:: #import "Jai_Parser"(ENABLE_TRIVIA=true, USE_SIMD=false);
 Raw_Strings	:: #import "Jai_Parser"(ENABLE_TRIVIA=true, EVALUATE_STRING_ESCAPES=false);
-Simd		:: #import "Jai_Parser"(ENABLE_TRIVIA=true, ENABLE_SIMD=true, ENABLE_AVX2=true, ENABLE_AVX512=true);
+Simd		:: #import "Jai_Parser"(ENABLE_TRIVIA=true, USE_SIMD=true);
 for_expansion	:: Extended.for_expansion;
 
 #assert(size_of(Default.Token) == size_of(Original.Token));
@@ -72,40 +73,170 @@ main :: () {
 	test_directive_trivia_round_trip();
 	test_raw_string_tokens();
 	test_keyword_table_completeness();
-	test_simd_identifier_masks();
-	test_simd_identifier_masks(true);
-	test_simd_identifier_masks(false, true);
+	test_simd_identifier_masks(16);
+	test_simd_identifier_masks(32);
+	test_simd_identifier_masks(64);
 	test_simd_identifier_tokens();
-	test_simd_identifier_tokens(true);
-	test_simd_identifier_tokens(false, true);
 	test_simd_line_comments();
-	test_simd_line_comments(true);
-	test_simd_line_comments(false, true);
-	#if Simd.USE_SIMD {
-		cpu := Simd.Machine_X64.get_cpu_info();
-		for feature: Simd.Machine_X64.x86_Feature_Flag.[.SSE2, .AVX, .AVX2, .AVX512F, .AVX512BW, .OSXSAVE] {
-			print("CPU %: %\n", feature, Simd.Machine_X64.check_feature(cpu.feature_leaves, feature));
-		}
-		print("AVX2 usable with OS vector state: %\n", Simd.avx2_is_available());
-		print("AVX-512 usable with OS vector state: %\n", Simd.avx512_is_available());
-		if Simd.avx512_is_available() {
-			print("AVX-512 classifier, token, and comment parity checks PASS.\n");
-		} else {
-			print("AVX-512 execution checks SKIPPED: CPU/OS support unavailable.\n");
-		}
-	}
+	test_simd_diagnostics_and_truncations();
+	print("Scalar/SIMD token and comment parity PASS.\n");
 }
 
-test_simd_line_comments :: ($avx2 := false, $avx512 := false) {
-	#if Simd.USE_SIMD {
-		if (avx2 && !Simd.avx2_is_available()) || (avx512 && !Simd.avx512_is_available()) {
-			return;
+Simd_Diagnostic :: struct {
+	message: string;
+	line: s32;
+	column: s32;
+	is_detail: bool;
+}
+
+test_simd_diagnostics_and_truncations :: () {
+	comparisons: s64;
+	diagnostics: s64;
+	for suffix: string.[
+		" := \"line\\n\\x41\"; next := 1.23456789;",
+		" := \"bad\\q\"; next := 1;",
+		" := \"bad\\xG0\"; next := 1;",
+		" := \"unterminated\nnext := 1;",
+		" /* outer /* inner */ unfinished",
+		" // comment with \xE2\x80\x8B bytes\r\nnext := 1;",
+		" := 0x; next := 1e+;",
+		"\xFF next := 1;",
+		"\x00next := 1;",
+		"\\  tail := \"value\";",
+		" :: #string END\nbody\nEND\nnext := 1;",
+		" :: () { value := \"text\"; if true { return; } }",
+	] {
+		for length: s64.[15, 16, 17, 31, 32, 33, 63, 64, 65, 511, 512, 513] {
+			input := make_long_identifier_source(length, suffix);
+			defer free(input);
+
+			for end: 0..input.count {
+				diagnostics += assert_simd_lexer_parity(slice(input, 0, end));
+				comparisons += 1;
+			}
 		}
 	}
 
-	alignments := #ifx avx512 then 64 else 32;
+	assert(diagnostics > 0);
+	print("Scalar/SIMD diagnostic and truncation parity PASS: % inputs, % diagnostics.\n", comparisons, diagnostics);
+}
+
+assert_simd_lexer_parity :: (input: string) -> s64 {
+	storage: Pool;
+	set_allocators(*storage);
+	defer release(*storage);
+
+	push_allocator(.{proc=pool_allocator_proc, data=*storage});
+
+	expected_diagnostics: [..] Simd_Diagnostic;
+	actual_diagnostics: [..] Simd_Diagnostic;
+	scalar: Extended.Lexer;
+	vectorised: Simd.Lexer;
+	scalar.user_data = *expected_diagnostics;
+	vectorised.user_data = *actual_diagnostics;
+	scalar.error_callback = (lexer: *Extended.Lexer, message: string, line: s32, column: s32) {
+		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message=copy_string(message), line=line, column=column});
+	};
+	vectorised.error_callback = (lexer: *Simd.Lexer, message: string, line: s32, column: s32) {
+		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message=copy_string(message), line=line, column=column});
+	};
+	scalar.detail_callback = (lexer: *Extended.Lexer, message: string) {
+		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message=copy_string(message), line=lexer.current_line_number, column=lexer.current_character_index, is_detail=true});
+	};
+	vectorised.detail_callback = (lexer: *Simd.Lexer, message: string) {
+		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message=copy_string(message), line=lexer.current_line_number, column=lexer.current_character_index, is_detail=true});
+	};
+	Extended.set_input_from_string(*scalar, input);
+	Simd.set_input_from_string(*vectorised, input);
+
+	while true {
+		expected := Extended.peek_next_token(*scalar);
+		actual := Simd.peek_next_token(*vectorised);
+		assert(actual.type.(s64) == expected.type.(s64));
+		assert(actual.value_flags.(u32) == expected.value_flags.(u32));
+		assert(actual.ident_is_backticked == expected.ident_is_backticked);
+		assert(actual.l0 == expected.l0 && actual.c0 == expected.c0);
+		assert(actual.l1 == expected.l1 && actual.c1 == expected.c1);
+		assert(actual.original_text == expected.original_text);
+		assert(actual.preceding_trivia == expected.preceding_trivia);
+		assert(actual.trailing_trivia == expected.trailing_trivia);
+
+		if expected.type == {
+			case .IDENT;
+				assert(actual.ident_value.name == expected.ident_value.name);
+				assert(actual.ident_value.hash == expected.ident_value.hash);
+			case .STRING;
+				assert(actual.string_value == expected.string_value);
+			case .NUMBER;
+				assert(actual.integer_value == expected.integer_value);
+		}
+
+		if expected.type == .END_OF_INPUT {
+			break;
+		}
+
+
+		Extended.eat_token(*scalar);
+		Simd.eat_token(*vectorised);
+	}
+	assert(vectorised.reported_error == scalar.reported_error);
+	assert(actual_diagnostics.count == expected_diagnostics.count);
+	for expected, index: expected_diagnostics {
+		actual := actual_diagnostics[index];
+		assert(actual.message == expected.message);
+		assert(actual.line == expected.line && actual.column == expected.column);
+		assert(actual.is_detail == expected.is_detail);
+	}
+
+	expected_parse := Extended.parse_file(input);
+	defer Extended.release_parser_tree(*expected_parse);
+
+	actual_parse := Simd.parse_file(input);
+	defer Simd.release_parser_tree(*actual_parse);
+
+	assert(actual_parse.status.(s64) == expected_parse.status.(s64));
+	assert(actual_parse.tokens.count == expected_parse.tokens.count);
+	assert(actual_parse.diagnostics.count == expected_parse.diagnostics.count);
+
+	for expected, index: expected_parse.diagnostics {
+		actual := actual_parse.diagnostics[index];
+		assert(actual.kind.(s64) == expected.kind.(s64));
+		assert(actual.severity.(s64) == expected.severity.(s64));
+		assert(actual.span.first.(s64) == expected.span.first.(s64));
+		assert(actual.span.one_past_last.(s64) == expected.span.one_past_last.(s64));
+		assert(actual.message == expected.message);
+		assert(actual.lexer_line == expected.lexer_line && actual.lexer_column == expected.lexer_column);
+		assert(actual.expected_token.(s64) == expected.expected_token.(s64));
+		assert(actual.actual_token.(s64) == expected.actual_token.(s64));
+		assert(actual.recovery_action.(s64) == expected.recovery_action.(s64));
+		assert(actual.related_information.count == expected.related_information.count);
+
+		for expected_info, info_index: expected.related_information {
+			actual_info := actual.related_information[info_index];
+			assert(actual_info.span.first.(s64) == expected_info.span.first.(s64));
+			assert(actual_info.span.one_past_last.(s64) == expected_info.span.one_past_last.(s64));
+			assert(actual_info.message == expected_info.message);
+		}
+	}
+
+	assert(actual_parse.recovery_records.count == expected_parse.recovery_records.count);
+
+	for expected, index: expected_parse.recovery_records {
+		actual := actual_parse.recovery_records[index];
+		assert(actual.kind.(s64) == expected.kind.(s64));
+		assert(actual.span.first.(s64) == expected.span.first.(s64));
+		assert(actual.span.one_past_last.(s64) == expected.span.one_past_last.(s64));
+		assert(actual.diagnostic_index == expected.diagnostic_index);
+		assert(actual.synthetic_token_index == expected.synthetic_token_index);
+	}
+
+	assert(actual_parse.synthetic_tokens.count == expected_parse.synthetic_tokens.count);
+	return expected_diagnostics.count;
+}
+
+test_simd_line_comments :: () {
 	input: [192] u8;
-	for offset: 0..alignments-1 {
+	for offset: 0..63 {
 		for length: s64.[0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129] {
 			for stop: -1..length-1 {
 				for terminator: u8.[0, #char "\n"] {
@@ -122,12 +253,6 @@ test_simd_line_comments :: ($avx2 := false, $avx512 := false) {
 					vectorised: Simd.Lexer;
 					Extended.set_input_from_string(*scalar, source);
 					Simd.set_input_from_string(*vectorised, source);
-					#if Simd.USE_SIMD {
-						vectorised.simd_features_checked = true;
-						vectorised.use_avx2 = avx2;
-						vectorised.avx512_features_checked = true;
-						vectorised.use_avx512 = avx512;
-					}
 					scalar.input_cursor = offset;
 					vectorised.input_cursor = offset;
 					scalar.current_character_index = xx (offset + 1);
@@ -144,14 +269,7 @@ test_simd_line_comments :: ($avx2 := false, $avx512 := false) {
 	}
 }
 
-test_simd_identifier_tokens :: ($avx2 := false, $avx512 := false) {
-	#if Simd.USE_SIMD {
-		if (avx2 && !Simd.avx2_is_available()) || (avx512 && !Simd.avx512_is_available()) {
-			return;
-		}
-	}
-
-
+test_simd_identifier_tokens :: () {
 	for length: s64.[1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 447, 448, 449, 495, 496, 497, 510, 511, 512, 513, 520] {
 		for suffix: string.["", "; next", "\\  tail next", "\xE2\x80\x8B next", "// tail\nnext", "1_9Z next"] {
 			input := make_long_identifier_source(length, suffix);
@@ -164,12 +282,6 @@ test_simd_identifier_tokens :: ($avx2 := false, $avx512 := false) {
 
 			Extended.set_input_from_string(*scalar, input);
 			Simd.set_input_from_string(*vectorised, input);
-			#if Simd.USE_SIMD {
-				vectorised.simd_features_checked = true;
-				vectorised.use_avx2 = avx2;
-				vectorised.avx512_features_checked = true;
-				vectorised.use_avx512 = avx512;
-			}
 
 			while true {
 				expected := Extended.peek_next_token(*scalar);
@@ -201,20 +313,20 @@ test_simd_identifier_tokens :: ($avx2 := false, $avx512 := false) {
 	}
 }
 
-test_simd_identifier_masks :: ($avx2 := false, $avx512 := false) {
-	#if Simd.USE_SIMD {
-		if (avx2 && !Simd.avx2_is_available()) || (avx512 && !Simd.avx512_is_available()) {
+test_simd_identifier_masks :: ($width: s64) {
+	#assert(width == 16 || width == 32 || width == 64);
+	#if Simd.SIMD_AVAILABLE {
+		features := Simd.get_simd_features();
+		if (
+			(width == 32 && (features & .AVX2) == .NONE)
+			|| (width == 64 && (features & .AVX512) == .NONE)
+		) {
+			print("SIMD classifier width % SKIPPED: CPU/OS support unavailable.\n", width);
 			return;
 		}
 
 
-		width := #ifx avx512
-			then 64
-			else #ifx avx2
-				then 32
-				else 16;
-
-		alignments := #ifx avx512
+		alignments := #ifx width == 64
 			then 64
 			else 32;
 
@@ -233,9 +345,9 @@ test_simd_identifier_masks :: ($avx2 := false, $avx512 := false) {
 					}
 
 					actual: u64;
-					#if avx512 {
+					#if width == 64 {
 						actual = Simd.identifier_avx512_stop_mask(input.data + offset);
-					} else #if avx2 {
+					} else #if width == 32 {
 						actual = Simd.identifier_avx2_stop_mask(input.data + offset);
 					} else {
 						actual = Simd.identifier_simd_stop_mask(input.data + offset);
@@ -247,6 +359,7 @@ test_simd_identifier_masks :: ($avx2 := false, $avx512 := false) {
 				input[offset + position] = #char "a";
 			}
 		}
+		print("SIMD classifier width % parity PASS.\n", width);
 	}
 }
 

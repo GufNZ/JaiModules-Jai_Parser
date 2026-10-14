@@ -8,7 +8,7 @@
 #import "Unicode";
 #import "Hash_Table";
 
-USE_SIMD :: ENABLE_SIMD && CPU == .X64;
+SIMD_AVAILABLE :: USE_SIMD && CPU == .X64;
 LEXER_SIMD_WIDTH :: 16;
 
 EOF :: -1;
@@ -366,11 +366,8 @@ Lexer :: struct {
 
 	input: string;
 	input_cursor: s64;
-	#if USE_SIMD {
-		simd_features_checked: bool;
-		use_avx2: bool;
-		avx512_features_checked: bool;
-		use_avx512: bool;
+	#if SIMD_AVAILABLE {
+		simd_features: SIMD_Features;
 	}
 
 	should_free_input := false;
@@ -633,72 +630,42 @@ get_unused_token :: (lexer: *Lexer) -> *Token {
 	}
 }
 
-#if USE_SIMD {
+#if SIMD_AVAILABLE {
 	Machine_X64 :: #import "Machine_X64";
-	avx2_capability: s32;
-	avx512_capability: s32;
-
-	lexer_uses_avx512 :: inline (lexer: *Lexer) -> bool {
-		#if ENABLE_AVX512 {
-			if !lexer.avx512_features_checked {
-				lexer.use_avx512 = avx512_is_available();
-				lexer.avx512_features_checked = true;
-			}
-
-			return lexer.use_avx512;
-		} else {
-			return false;
-		}
+	SIMD_Features :: enum_flags u32 {
+		NONE        :: 0;
+		INITIALISED :: 1;
+		AVX2        :: 2;
+		AVX512      :: 4;
 	}
+	available_simd_features: SIMD_Features;
 
-	avx512_is_available :: () -> bool {
-		cached := atomic_load(*avx512_capability);
-		if cached != 0 {
-			return cached == 2;
+	lexer_simd_features :: inline (lexer: *Lexer) -> SIMD_Features {
+		if lexer.simd_features == .NONE {
+			lexer.simd_features = get_simd_features();
 		}
 
-
-		available := query_simd_availability(Machine_X64.x86_Feature_Flag.[.XSAVE, .OSXSAVE, .AVX, .AVX512F, .AVX512BW], 0xE6);
-		state: s32 = xx (ifx available then 2 else 1);
-		compare_and_swap(*avx512_capability, 0, state);
-		return available;
+		return lexer.simd_features;
 	}
 
-	lexer_uses_avx2 :: inline (lexer: *Lexer) -> bool {
-		#if ENABLE_AVX2 {
-			if !lexer.simd_features_checked {
-				lexer.use_avx2 = avx2_is_available();
-				lexer.simd_features_checked = true;
-			}
-
-			return lexer.use_avx2;
-		} else {
-			return false;
-		}
-	}
-
-	avx2_is_available :: () -> bool {
-		cached := atomic_load(*avx2_capability);
-		if cached != 0 {
-			return cached == 2;
+	get_simd_features :: () -> SIMD_Features {
+		cached := atomic_load(*available_simd_features);
+		if cached != .NONE {
+			return cached;
 		}
 
 
-		available := query_avx2_availability();
-		state: s32 = xx (ifx available then 2 else 1);
-		compare_and_swap(*avx2_capability, 0, state);
-		return available;
+		features := query_simd_features();
+		compare_and_swap(*available_simd_features, .NONE, features);
+		return features;
 	}
 
-	query_avx2_availability :: () -> bool {
-		return query_simd_availability(Machine_X64.x86_Feature_Flag.[.XSAVE, .OSXSAVE, .AVX, .AVX2], 0x6);
-	}
-
-	query_simd_availability :: (features: [] Machine_X64.x86_Feature_Flag, xcr0_mask: u32) -> bool {
+	query_simd_features :: () -> SIMD_Features {
+		features: SIMD_Features = .INITIALISED;
 		cpu := Machine_X64.get_cpu_info();
-		for feature: features {
+		for feature: Machine_X64.x86_Feature_Flag.[.XSAVE, .OSXSAVE, .AVX] {
 			if !Machine_X64.check_feature(cpu.feature_leaves, feature) {
-				return false;
+				return features;
 			}
 		}
 
@@ -710,7 +677,18 @@ get_unused_token :: (lexer: *Lexer) -> *Token {
 			mov.d xcr0, lower;
 		}
 
-		return (xcr0 & xcr0_mask) == xcr0_mask;
+		if (xcr0 & 0x6) == 0x6 && Machine_X64.check_feature(cpu.feature_leaves, .AVX2) {
+			features |= .AVX2;
+		}
+		if (
+			(xcr0 & 0xE6) == 0xE6
+			&& Machine_X64.check_feature(cpu.feature_leaves, .AVX512F)
+			&& Machine_X64.check_feature(cpu.feature_leaves, .AVX512BW)
+		) {
+			features |= .AVX512;
+		}
+
+		return features;
 	}
 
 	line_comment_avx512_stop_mask :: no_inline (data: *u8) -> u64 {
@@ -849,7 +827,7 @@ parse_ident :: (lexer: *Lexer, result: *Token) -> string {
 	scratch_pos := buffer;
 
 	mask: u64;
-	#if USE_SIMD {
+	#if SIMD_AVAILABLE {
 		while (
 			lexer.input.count - lexer.input_cursor >= LEXER_SIMD_WIDTH
 			&& MAX_IDENTIFIER_LENGTH - 1 - (scratch_pos - buffer) >= LEXER_SIMD_WIDTH
@@ -858,14 +836,14 @@ parse_ident :: (lexer: *Lexer, result: *Token) -> string {
 			if (
 				lexer.input.count - lexer.input_cursor >= 64
 				&& MAX_IDENTIFIER_LENGTH - 1 - (scratch_pos - buffer) >= 64
-				&& lexer_uses_avx512(lexer)
+				&& (lexer_simd_features(lexer) & .AVX512) != .NONE
 			) {
 				mask = identifier_avx512_stop_mask(lexer.input.data + lexer.input_cursor);
 				advance = 64;
 			} else if (
 				lexer.input.count - lexer.input_cursor >= 32
 				&& MAX_IDENTIFIER_LENGTH - 1 - (scratch_pos - buffer) >= 32
-				&& lexer_uses_avx2(lexer)
+				&& (lexer_simd_features(lexer) & .AVX2) != .NONE
 			) {
 				mask = identifier_avx2_stop_mask(lexer.input.data + lexer.input_cursor);
 				advance = 32;
@@ -1747,6 +1725,11 @@ make_string_constant :: (lexer: *Lexer) -> *Token {
 
 				next := peek_next_character(lexer);
 				if next == {
+					case EOF;
+						source_end = lexer.input.count;
+						report_parse_error(lexer, "End of file during escape sequence in string constant!\n");
+						break;
+
 					case #char "n";		c = #char "\n";		eat_character(lexer);
 					case #char "r";		c = #char "\r";		eat_character(lexer);
 					case #char "t";		c = #char "\t";		eat_character(lexer);
@@ -1970,8 +1953,8 @@ eat_input_due_to_block_comment :: (lexer: *Lexer) {
 
 eat_until_newline :: (lexer: *Lexer) {
 	// Eat until newline or end-of-input or zero.
-	#if USE_SIMD {
-		while lexer.input.count - lexer.input_cursor >= 64 && lexer_uses_avx512(lexer) {
+	#if SIMD_AVAILABLE {
+		while lexer.input.count - lexer.input_cursor >= 64 && (lexer_simd_features(lexer) & .AVX512) != .NONE {
 			mask := line_comment_avx512_stop_mask(lexer.input.data + lexer.input_cursor);
 			advance: s64 = 64;
 			if mask {
@@ -1989,7 +1972,7 @@ eat_until_newline :: (lexer: *Lexer) {
 
 
 		newline: u32 = 0x0A0A0A0A;
-		while lexer.input.count - lexer.input_cursor >= 32 && lexer_uses_avx2(lexer) {
+		while lexer.input.count - lexer.input_cursor >= 32 && (lexer_simd_features(lexer) & .AVX2) != .NONE {
 			data := lexer.input.data + lexer.input_cursor;
 			mask: u32;
 			#asm AVX, AVX2 {
@@ -2033,7 +2016,7 @@ eat_until_newline :: (lexer: *Lexer) {
 				pmovmskb.x mask, newlines;
 			}
 
-			advance: u32 = LEXER_SIMD_WIDTH;
+			advance: u32 = xx LEXER_SIMD_WIDTH;
 			if mask {
 				#asm {
 					bsf.d advance, mask;

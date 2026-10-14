@@ -2,9 +2,7 @@
 	ENABLE_TRIVIA := false,
 	EVALUATE_STRING_ESCAPES := true,
 	INTERN_IDENTIFIERS := false,
-	ENABLE_SIMD := false,
-	ENABLE_AVX2 := false,
-	ENABLE_AVX512 := false
+	USE_SIMD := true
 );
 
 #load "lexer.jai";

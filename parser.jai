@@ -4773,7 +4773,13 @@ parse_declaration_directive :: (parser: *Parser) -> *Parser_Node {
 }
 
 parser_peek :: inline (parser: *Parser, lookahead: s64 = 0) -> *Parser_Token {
-	return *parser.parsed.tokens[parser.cursor + lookahead];
+	index := parser.cursor + lookahead;
+	if index >= parser.parsed.tokens.count {
+		return *parser.parsed.tokens[parser.parsed.tokens.count - 1];
+	}
+
+
+	return *parser.parsed.tokens[index];
 }
 
 parser_eat :: inline (parser: *Parser, count: s64 = 1) -> *Parser_Token {
