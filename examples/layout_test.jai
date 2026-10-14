@@ -9,6 +9,7 @@ Original :: #import "Jai_Lexer";
 Default		:: #import "Jai_Parser";
 Extended	:: #import "Jai_Parser"(ENABLE_TRIVIA=true);
 Raw_Strings	:: #import "Jai_Parser"(ENABLE_TRIVIA=true, EVALUATE_STRING_ESCAPES=false);
+Simd		:: #import "Jai_Parser"(ENABLE_TRIVIA=true, ENABLE_SIMD=true, ENABLE_AVX2=true, ENABLE_AVX512=true);
 for_expansion	:: Extended.for_expansion;
 
 #assert(size_of(Default.Token) == size_of(Original.Token));
@@ -71,6 +72,182 @@ main :: () {
 	test_directive_trivia_round_trip();
 	test_raw_string_tokens();
 	test_keyword_table_completeness();
+	test_simd_identifier_masks();
+	test_simd_identifier_masks(true);
+	test_simd_identifier_masks(false, true);
+	test_simd_identifier_tokens();
+	test_simd_identifier_tokens(true);
+	test_simd_identifier_tokens(false, true);
+	test_simd_line_comments();
+	test_simd_line_comments(true);
+	test_simd_line_comments(false, true);
+	#if Simd.USE_SIMD {
+		cpu := Simd.Machine_X64.get_cpu_info();
+		for feature: Simd.Machine_X64.x86_Feature_Flag.[.SSE2, .AVX, .AVX2, .AVX512F, .AVX512BW, .OSXSAVE] {
+			print("CPU %: %\n", feature, Simd.Machine_X64.check_feature(cpu.feature_leaves, feature));
+		}
+		print("AVX2 usable with OS vector state: %\n", Simd.avx2_is_available());
+		print("AVX-512 usable with OS vector state: %\n", Simd.avx512_is_available());
+		if Simd.avx512_is_available() {
+			print("AVX-512 classifier, token, and comment parity checks PASS.\n");
+		} else {
+			print("AVX-512 execution checks SKIPPED: CPU/OS support unavailable.\n");
+		}
+	}
+}
+
+test_simd_line_comments :: ($avx2 := false, $avx512 := false) {
+	#if Simd.USE_SIMD {
+		if (avx2 && !Simd.avx2_is_available()) || (avx512 && !Simd.avx512_is_available()) {
+			return;
+		}
+	}
+
+	alignments := #ifx avx512 then 64 else 32;
+	input: [192] u8;
+	for offset: 0..alignments-1 {
+		for length: s64.[0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129] {
+			for stop: -1..length-1 {
+				for terminator: u8.[0, #char "\n"] {
+					for *input {
+						it.* = #char "x";
+					}
+
+					if stop >= 0 {
+						input[offset + stop] = terminator;
+					}
+
+					source := string.{data=input.data, count=offset + length};
+					scalar: Extended.Lexer;
+					vectorised: Simd.Lexer;
+					Extended.set_input_from_string(*scalar, source);
+					Simd.set_input_from_string(*vectorised, source);
+					#if Simd.USE_SIMD {
+						vectorised.simd_features_checked = true;
+						vectorised.use_avx2 = avx2;
+						vectorised.avx512_features_checked = true;
+						vectorised.use_avx512 = avx512;
+					}
+					scalar.input_cursor = offset;
+					vectorised.input_cursor = offset;
+					scalar.current_character_index = xx (offset + 1);
+					vectorised.current_character_index = xx (offset + 1);
+					Extended.eat_until_newline(*scalar);
+					Simd.eat_until_newline(*vectorised);
+					assert(vectorised.input_cursor == scalar.input_cursor);
+					assert(vectorised.current_character_index == scalar.current_character_index);
+					assert(vectorised.current_line_number == scalar.current_line_number);
+					assert(vectorised.total_lines_processed == scalar.total_lines_processed);
+				}
+			}
+		}
+	}
+}
+
+test_simd_identifier_tokens :: ($avx2 := false, $avx512 := false) {
+	#if Simd.USE_SIMD {
+		if (avx2 && !Simd.avx2_is_available()) || (avx512 && !Simd.avx512_is_available()) {
+			return;
+		}
+	}
+
+
+	for length: s64.[1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 447, 448, 449, 495, 496, 497, 510, 511, 512, 513, 520] {
+		for suffix: string.["", "; next", "\\  tail next", "\xE2\x80\x8B next", "// tail\nnext", "1_9Z next"] {
+			input := make_long_identifier_source(length, suffix);
+			defer free(input);
+
+			scalar: Extended.Lexer;
+			vectorised: Simd.Lexer;
+			scalar.error_callback = (lexer: *Extended.Lexer, message: string, line: s32, column: s32) {};
+			vectorised.error_callback = (lexer: *Simd.Lexer, message: string, line: s32, column: s32) {};
+
+			Extended.set_input_from_string(*scalar, input);
+			Simd.set_input_from_string(*vectorised, input);
+			#if Simd.USE_SIMD {
+				vectorised.simd_features_checked = true;
+				vectorised.use_avx2 = avx2;
+				vectorised.avx512_features_checked = true;
+				vectorised.use_avx512 = avx512;
+			}
+
+			while true {
+				expected := Extended.peek_next_token(*scalar);
+				actual := Simd.peek_next_token(*vectorised);
+				assert(actual.type.(s64) == expected.type.(s64));
+				assert(actual.value_flags.(u32) == expected.value_flags.(u32));
+				assert(actual.ident_is_backticked == expected.ident_is_backticked);
+				assert(actual.l0 == expected.l0 && actual.c0 == expected.c0);
+				assert(actual.l1 == expected.l1 && actual.c1 == expected.c1);
+				assert(actual.original_text == expected.original_text);
+				assert(actual.preceding_trivia == expected.preceding_trivia);
+				assert(actual.trailing_trivia == expected.trailing_trivia);
+				if expected.type == .IDENT {
+					assert(actual.ident_value.name == expected.ident_value.name);
+					assert(actual.ident_value.hash == expected.ident_value.hash);
+				}
+
+				if expected.type == .END_OF_INPUT {
+					break;
+				}
+
+
+				Extended.eat_token(*scalar);
+				Simd.eat_token(*vectorised);
+			}
+
+			assert(vectorised.reported_error == scalar.reported_error);
+		}
+	}
+}
+
+test_simd_identifier_masks :: ($avx2 := false, $avx512 := false) {
+	#if Simd.USE_SIMD {
+		if (avx2 && !Simd.avx2_is_available()) || (avx512 && !Simd.avx512_is_available()) {
+			return;
+		}
+
+
+		width := #ifx avx512
+			then 64
+			else #ifx avx2
+				then 32
+				else 16;
+
+		alignments := #ifx avx512
+			then 64
+			else 32;
+
+		input: [128] u8;
+		for *input {
+			it.* = #char "a";
+		}
+
+		for offset: 0..alignments-1 {
+			for position: 0..width-1 {
+				for byte: 0..255 {
+					input[offset + position] = xx byte;
+					expected: u64 = 0;
+					if !Extended.continues_identifier(xx byte) {
+						expected = cast(u64, 1) << position;
+					}
+
+					actual: u64;
+					#if avx512 {
+						actual = Simd.identifier_avx512_stop_mask(input.data + offset);
+					} else #if avx2 {
+						actual = Simd.identifier_avx2_stop_mask(input.data + offset);
+					} else {
+						actual = Simd.identifier_simd_stop_mask(input.data + offset);
+					}
+
+					assert(actual == expected, "SIMD identifier classification differs at width %, offset %, position %, byte %.", width, offset, position, byte);
+				}
+
+				input[offset + position] = #char "a";
+			}
+		}
+	}
 }
 
 test_raw_string_tokens :: () {

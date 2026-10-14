@@ -1,8 +1,6 @@
 // @Cleanup: Explicitly check against end-of-input for all sub-lexers.
 // @Cleanup: We have all these no_checks in here because end-of-input is EOF.  We probably want to be cleaner about that in some way.
 
-//LATER: transcribe the C++ SIMD stuff and turn it on if available.
-
 #import "Basic";
 #import "Pool";
 #import "File";
@@ -10,7 +8,7 @@
 #import "Unicode";
 #import "Hash_Table";
 
-USE_SIMD :: false;
+USE_SIMD :: ENABLE_SIMD && CPU == .X64;
 LEXER_SIMD_WIDTH :: 16;
 
 EOF :: -1;
@@ -368,6 +366,12 @@ Lexer :: struct {
 
 	input: string;
 	input_cursor: s64;
+	#if USE_SIMD {
+		simd_features_checked: bool;
+		use_avx2: bool;
+		avx512_features_checked: bool;
+		use_avx512: bool;
+	}
 
 	should_free_input := false;
 	total_lines_processed:    s64;
@@ -629,69 +633,261 @@ get_unused_token :: (lexer: *Lexer) -> *Token {
 	}
 }
 
+#if USE_SIMD {
+	Machine_X64 :: #import "Machine_X64";
+	avx2_capability: s32;
+	avx512_capability: s32;
+
+	lexer_uses_avx512 :: inline (lexer: *Lexer) -> bool {
+		#if ENABLE_AVX512 {
+			if !lexer.avx512_features_checked {
+				lexer.use_avx512 = avx512_is_available();
+				lexer.avx512_features_checked = true;
+			}
+
+			return lexer.use_avx512;
+		} else {
+			return false;
+		}
+	}
+
+	avx512_is_available :: () -> bool {
+		cached := atomic_load(*avx512_capability);
+		if cached != 0 {
+			return cached == 2;
+		}
+
+
+		available := query_simd_availability(Machine_X64.x86_Feature_Flag.[.XSAVE, .OSXSAVE, .AVX, .AVX512F, .AVX512BW], 0xE6);
+		state: s32 = xx (ifx available then 2 else 1);
+		compare_and_swap(*avx512_capability, 0, state);
+		return available;
+	}
+
+	lexer_uses_avx2 :: inline (lexer: *Lexer) -> bool {
+		#if ENABLE_AVX2 {
+			if !lexer.simd_features_checked {
+				lexer.use_avx2 = avx2_is_available();
+				lexer.simd_features_checked = true;
+			}
+
+			return lexer.use_avx2;
+		} else {
+			return false;
+		}
+	}
+
+	avx2_is_available :: () -> bool {
+		cached := atomic_load(*avx2_capability);
+		if cached != 0 {
+			return cached == 2;
+		}
+
+
+		available := query_avx2_availability();
+		state: s32 = xx (ifx available then 2 else 1);
+		compare_and_swap(*avx2_capability, 0, state);
+		return available;
+	}
+
+	query_avx2_availability :: () -> bool {
+		return query_simd_availability(Machine_X64.x86_Feature_Flag.[.XSAVE, .OSXSAVE, .AVX, .AVX2], 0x6);
+	}
+
+	query_simd_availability :: (features: [] Machine_X64.x86_Feature_Flag, xcr0_mask: u32) -> bool {
+		cpu := Machine_X64.get_cpu_info();
+		for feature: features {
+			if !Machine_X64.check_feature(cpu.feature_leaves, feature) {
+				return false;
+			}
+		}
+
+
+		xcr0: u32;
+		#asm XSAVE {
+			xor.d selector: gpr === c, selector;
+			xgetbv upper: gpr === d, lower: gpr === a, selector;
+			mov.d xcr0, lower;
+		}
+
+		return (xcr0 & xcr0_mask) == xcr0_mask;
+	}
+
+	line_comment_avx512_stop_mask :: no_inline (data: *u8) -> u64 {
+		newline: u32 = 0x0A0A0A0A;
+		mask: u64;
+		#asm AVX, AVX512F, AVX512BW {
+			pbroadcastd.z newlines:, newline;
+			movdqu.z characters:, [data];
+			pcmpeqb.z newline_matches: omr, newlines, characters;
+			pxor.z zeroes:, zeroes, zeroes;
+			pcmpeqb.z zero_matches: omr, zeroes, characters;
+			korq newline_matches, newline_matches, zero_matches;
+			kmovq mask, newline_matches;
+			zeroupper;
+		}
+
+		return mask;
+	}
+
+	identifier_simd_stop_mask :: inline (data: *u8) -> u32 {
+		digit_lower:	u32 = 0x2F2F2F2F;
+		digit_upper:	u32 = 0x3A3A3A3A;
+		underscore:		u32 = 0x5F5F5F5F;
+		alpha_lower:	u32 = 0x40404040;
+		alpha_upper:	u32 = 0x5B5B5B5B;
+		uppercase_mask:	u32 = 0xDFDFDFDF;
+		mask: u32;
+		#asm {
+			movd lower_digits:, digit_lower;
+			pshufd.x lower_digits, lower_digits, 0;
+			movd upper_digits:, digit_upper;
+			pshufd.x upper_digits, upper_digits, 0;
+			movd underscores:, underscore;
+			pshufd.x underscores, underscores, 0;
+			movd lower_alpha:, alpha_lower;
+			pshufd.x lower_alpha, lower_alpha, 0;
+			movd upper_alpha:, alpha_upper;
+			pshufd.x upper_alpha, upper_alpha, 0;
+			movd case_mask:, uppercase_mask;
+			pshufd.x case_mask, case_mask, 0;
+			movdqu.x characters:, [data];
+			movdqa.x uppercase:, characters;
+			pand.x uppercase, case_mask;
+			movdqa.x alphabetic:, uppercase;
+			pcmpgtb.x alphabetic, lower_alpha;
+			pcmpgtb.x upper_alpha, uppercase;
+			pand.x alphabetic, upper_alpha;
+			movdqa.x numeric:, characters;
+			pcmpgtb.x numeric, lower_digits;
+			pcmpgtb.x upper_digits, characters;
+			pand.x numeric, upper_digits;
+			pcmpeqb.x underscores, characters;
+			por.x alphabetic, numeric;
+			por.x alphabetic, underscores;
+			pmovmskb.x mask, alphabetic;
+		}
+
+		return mask ^ 0xFFFF;
+	}
+
+	identifier_avx512_stop_mask :: no_inline (data: *u8) -> u64 {
+		digit_lower:	u32 = 0x2F2F2F2F;
+		digit_upper:	u32 = 0x3A3A3A3A;
+		underscore:		u32 = 0x5F5F5F5F;
+		alpha_lower:	u32 = 0x40404040;
+		alpha_upper:	u32 = 0x5B5B5B5B;
+		uppercase_mask:	u32 = 0xDFDFDFDF;
+		mask: u64;
+		#asm AVX, AVX512F, AVX512BW {
+			pbroadcastd.z lower_digits:, digit_lower;
+			pbroadcastd.z upper_digits:, digit_upper;
+			pbroadcastd.z underscores:, underscore;
+			pbroadcastd.z lower_alpha:, alpha_lower;
+			pbroadcastd.z upper_alpha:, alpha_upper;
+			pbroadcastd.z case_mask:, uppercase_mask;
+			movdqu.z characters:, [data];
+			pand.z uppercase:, characters, case_mask;
+			pcmpgtb.z alphabetic: omr, uppercase, lower_alpha;
+			pcmpgtb.z below_alpha: omr, upper_alpha, uppercase;
+			kandq alphabetic, alphabetic, below_alpha;
+			pcmpgtb.z numeric: omr, characters, lower_digits;
+			pcmpgtb.z below_digits: omr, upper_digits, characters;
+			kandq numeric, numeric, below_digits;
+			pcmpeqb.z underscore_matches: omr, underscores, characters;
+			korq alphabetic, alphabetic, numeric;
+			korq alphabetic, alphabetic, underscore_matches;
+			kmovq mask, alphabetic;
+			zeroupper;
+		}
+
+		return ~mask;
+	}
+
+	identifier_avx2_stop_mask :: no_inline (data: *u8) -> u32 {
+		digit_lower:	u32 = 0x2F2F2F2F;
+		digit_upper:	u32 = 0x3A3A3A3A;
+		underscore:		u32 = 0x5F5F5F5F;
+		alpha_lower:	u32 = 0x40404040;
+		alpha_upper:	u32 = 0x5B5B5B5B;
+		uppercase_mask:	u32 = 0xDFDFDFDF;
+		mask: u32;
+		#asm AVX, AVX2 {
+			movd lower_digits:, digit_lower;
+			pbroadcastd.y lower_digits, lower_digits;
+			movd upper_digits:, digit_upper;
+			pbroadcastd.y upper_digits, upper_digits;
+			movd underscores:, underscore;
+			pbroadcastd.y underscores, underscores;
+			movd lower_alpha:, alpha_lower;
+			pbroadcastd.y lower_alpha, lower_alpha;
+			movd upper_alpha:, alpha_upper;
+			pbroadcastd.y upper_alpha, upper_alpha;
+			movd case_mask:, uppercase_mask;
+			pbroadcastd.y case_mask, case_mask;
+			movdqu.y characters:, [data];
+			pand.y uppercase:, characters, case_mask;
+			pcmpgtb.y alphabetic:, uppercase, lower_alpha;
+			pcmpgtb.y upper_alpha, upper_alpha, uppercase;
+			pand.y alphabetic, alphabetic, upper_alpha;
+			pcmpgtb.y numeric:, characters, lower_digits;
+			pcmpgtb.y upper_digits, upper_digits, characters;
+			pand.y numeric, numeric, upper_digits;
+			pcmpeqb.y underscores, underscores, characters;
+			por.y alphabetic, alphabetic, numeric;
+			por.y alphabetic, alphabetic, underscores;
+			pmovmskb.y mask, alphabetic;
+			zeroupper;
+		}
+
+		return ~mask;
+	}
+}
+
 parse_ident :: (lexer: *Lexer, result: *Token) -> string {
 	buffer := lexer.scratch_buffer.data;
 	scratch_pos := buffer;
 
-	mask: s32;
+	mask: u64;
+	#if USE_SIMD {
+		while (
+			lexer.input.count - lexer.input_cursor >= LEXER_SIMD_WIDTH
+			&& MAX_IDENTIFIER_LENGTH - 1 - (scratch_pos - buffer) >= LEXER_SIMD_WIDTH
+		) {
+			advance: s64 = LEXER_SIMD_WIDTH;
+			if (
+				lexer.input.count - lexer.input_cursor >= 64
+				&& MAX_IDENTIFIER_LENGTH - 1 - (scratch_pos - buffer) >= 64
+				&& lexer_uses_avx512(lexer)
+			) {
+				mask = identifier_avx512_stop_mask(lexer.input.data + lexer.input_cursor);
+				advance = 64;
+			} else if (
+				lexer.input.count - lexer.input_cursor >= 32
+				&& MAX_IDENTIFIER_LENGTH - 1 - (scratch_pos - buffer) >= 32
+				&& lexer_uses_avx2(lexer)
+			) {
+				mask = identifier_avx2_stop_mask(lexer.input.data + lexer.input_cursor);
+				advance = 32;
+			} else {
+				mask = identifier_simd_stop_mask(lexer.input.data + lexer.input_cursor);
+			}
 
-	/*
-#if USE_SIMD
-	__m128i zero	= _mm_set1_epi8("0"-1);		// Because we don"t have le and ge in SSE2?  We just have lt and gt??
-	__m128i nine	= _mm_set1_epi8("9"+1);
-	__m128i under	= _mm_set1_epi8("_");
-	__m128i a		= _mm_set1_epi8("A"-1);
-	__m128i z		= _mm_set1_epi8("Z"+1); 	// See above.
-	__m128i not32	= _mm_set1_epi8((char)(255-32));
+			if mask {
+				#asm {
+					bsf advance, mask;
+				}
+			}
 
-	while (lexer.input.count - lexer.input_cursor >= LEXER_SIMD_WIDTH) {
-		__m128i characters	= _mm_loadu_si128((__m128i *)(lexer.input.data + lexer.input_cursor));
-		__m128i toupper		= _mm_and_si128(characters, not32);
-
-		// In AVX-512 we can compare into 16-bit masks and do booleans on those, but, not in SSE.
-
-		__m128i geq_A		= _mm_cmpgt_epi8(toupper, a);
-		__m128i leq_Z		= _mm_cmplt_epi8(toupper, z);
-		__m128i _isalpha	= _mm_and_si128(geq_A, leq_Z);
-		__m128i geq_0		= _mm_cmpgt_epi8(characters, zero);
-		__m128i leq_9		= _mm_cmplt_epi8(characters, nine);
-		__m128i _isnum		= _mm_and_si128(geq_0, leq_9);
-		__m128i _isunder	= _mm_cmpeq_epi8(characters, under);
-
-		__m128i _isalnum	= _mm_or_si128(_isalpha, _isnum);
-		__m128i is_ident	= _mm_or_si128(_isalnum, _isunder);
-
-		mask				= _mm_movemask_epi8(is_ident);
-
-		// This mask xor is probably wasteful.
-		// We can DeMorgan all this later, or something.
-		// We"re doing this because we detected what *is* in an identifier, rather than what is not.
-		mask ^= 0xFFFF;
-
-		s64 advance;
-		if (mask) {
-			advance = _tzcnt_u32(mask);
-		} else {
-			advance = 16;
-		}
-
-		advance = Min(advance, MAX_TOKEN_LENGTH - (scratch_pos - buffer));	// :IdentTooLong  @Robustness: Report an error here about ident too long.
-		assert(advance >= 0);
-
-		// @Speed: Instead of this memcpy, can we just do a move into the scratch buffer?
-		// (Don"t even need a partial move if we give the scratch buffer LEXER_SIMD_WIDTH extra padding.)
-		memcpy(scratch_pos, lexer.input.data + lexer.input_cursor, advance);
-		scratch_pos  += advance;
-		lexer.input_cursor += advance;
-		lexer.current_character_index += temporary_truncate_to_s32(advance);
-
-		// If mask != 0, we found a non-identifier character.
-		if (mask) {
-			break;
+			memcpy(scratch_pos, lexer.input.data + lexer.input_cursor, advance);
+			scratch_pos += advance;
+			lexer.input_cursor += advance;
+			lexer.current_character_index += advance.(s32);
+			if mask {
+				break;
+			}
 		}
 	}
-#endif
-*/
 
 	// For now we punt and go into slow mode on a backslash:
 	reported_identifier_too_long := false;
@@ -1774,32 +1970,84 @@ eat_input_due_to_block_comment :: (lexer: *Lexer) {
 
 eat_until_newline :: (lexer: *Lexer) {
 	// Eat until newline or end-of-input or zero.
-/*
-#if USE_SIMD
-	__m128i newline = _mm_set1_epi8('\n";
-	while (lexer.input.count - lexer.input_cursor >= LEXER_SIMD_WIDTH) {
-		__m128i	characters	= _mm_loadu_si128((__m128i *)(lexer.input.data + lexer.input_cursor));
-		__m128i	test		= _mm_cmpeq_epi8(characters, newline);
-		int		mask		= _mm_movemask_epi8(test);
-		if (mask) {
-			// We found a newline.
-			auto advance = _tzcnt_u32(mask) + 1;	// +1 for the newline.
+	#if USE_SIMD {
+		while lexer.input.count - lexer.input_cursor >= 64 && lexer_uses_avx512(lexer) {
+			mask := line_comment_avx512_stop_mask(lexer.input.data + lexer.input_cursor);
+			advance: s64 = 64;
+			if mask {
+				#asm {
+					bsf advance, mask;
+				}
+			}
+
 			lexer.input_cursor += advance;
-			lexer.current_character_index = 1;
-			lexer.current_line_number += 1;
-			lexer.total_lines_processed += 1;
-			return;
-		} else {
-			lexer.input_cursor				+= 16;
-			lexer.current_character_index	+= 16;
+			lexer.current_character_index += advance.(s32);
+			if mask {
+				return;
+			}
+		}
+
+
+		newline: u32 = 0x0A0A0A0A;
+		while lexer.input.count - lexer.input_cursor >= 32 && lexer_uses_avx2(lexer) {
+			data := lexer.input.data + lexer.input_cursor;
+			mask: u32;
+			#asm AVX, AVX2 {
+				movd newlines:, newline;
+				pbroadcastd.y newlines, newlines;
+				movdqu.y characters:, [data];
+				pcmpeqb.y newlines, newlines, characters;
+				pxor.y zeroes:, zeroes, zeroes;
+				pcmpeqb.y zeroes, zeroes, characters;
+				por.y newlines, newlines, zeroes;
+				pmovmskb.y mask, newlines;
+				zeroupper;
+			}
+
+			advance: u32 = 32;
+			if mask {
+				#asm {
+					bsf.d advance, mask;
+				}
+			}
+
+			lexer.input_cursor += advance;
+			lexer.current_character_index += advance.(s32);
+			if mask {
+				return;
+			}
+		}
+
+
+		while lexer.input.count - lexer.input_cursor >= LEXER_SIMD_WIDTH {
+			data := lexer.input.data + lexer.input_cursor;
+			mask: u32;
+			#asm {
+				movd newlines:, newline;
+				pshufd.x newlines, newlines, 0;
+				movdqu.x characters:, [data];
+				pcmpeqb.x newlines, characters;
+				pxor.x zeroes:, zeroes;
+				pcmpeqb.x zeroes, characters;
+				por.x newlines, zeroes;
+				pmovmskb.x mask, newlines;
+			}
+
+			advance: u32 = LEXER_SIMD_WIDTH;
+			if mask {
+				#asm {
+					bsf.d advance, mask;
+				}
+			}
+
+			lexer.input_cursor += advance;
+			lexer.current_character_index += advance.(s32);
+			if mask {
+				return;
+			}
 		}
 	}
 
-	if (lexer.input_cursor == lexer.input.count) {
-		return;
-	}
-#endif // USE_SIMD
-*/
 
 	c: s32;
 	while 1 {

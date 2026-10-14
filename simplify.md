@@ -65,7 +65,7 @@ Keeping only the body span and the instruction/statement spans would save about 
 
 ## 2. lexer.jai
 
-- Two commented-out blocks of SIMD C intrinsics, [L639-L694](lexer.jai#L639-L694) and around [L1777-L1802](lexer.jai#L1777-L1802), about 80 lines.  They are dead code inherited from Jai_Lexer.  However, we are keeping them as we have a task later to translate them to jai so the lexer can be faster.
+- Both SIMD C reference blocks have been transcribed into opt-in Jai SSE2 identifier and line-comment scans and removed from [lexer.jai](lexer.jai).  Scalar fallbacks remain; initial corpus timings do not justify enabling SIMD by default.  Further parity and performance work is tracked in [todo.md](todo.md).
 - The lexer keeps an 8-slot ring buffer (`MAX_CONCURRENT_TOKENS`), and then `materialise_tokens` copies every token into an array anyway.
   - Appending directly to the array would remove the ring indexing plus the `consume_materialised_token` / `append_materialised_token` glue, about 100 lines.
   - The cost is more divergence from Jai_Lexer.
@@ -138,12 +138,13 @@ The one 3,775-line `test_file_import_resolution` should at least be split into p
 | Repeated idioms and block merge (§1b-c) | -430 | - |
 | Smaller `#asm` model (§1d) | -450 | -400 |
 | Drop interning (§1e) | -100 | -640 |
-| Lexer dead code and ring buffer (§2) | -180 | - |
+| Lexer ring buffer (§2; C references already removed) | -100 | - |
 | Resolution tidy-ups (§3, not extracting it) | -100 | - |
 | Single normaliser (§4a) | - | -420 |
 | Memory investigation cleanup (§4b, completed) | - | Already removed; ownership checks retained |
 | Release and navigation helpers (§5) | - | -850 |
 
-The remaining low-risk changes, which keep every feature (§1b-c, §2, §4a, §5 and the §1a test oracle), could save about 600 production lines and about 6,300 test lines.  Removing AST reuse and the `#asm` operand model and moving resolution out of the module would roughly halve both the parser and the tests.
+The remaining low-risk changes, which keep every feature (§1b-c, §2, §4a, §5 and the §1a test oracle), could save about 530 production lines and about 6,300 test lines.  Removing AST reuse and the `#asm` operand model and moving resolution out of the module would roughly halve both the parser and the tests.
 
-The remaining savings are estimates from the original line counts and greps.  Only the memory-investigation cleanup in §4b has been completed here; the opening counts predate it.
+The remaining savings are estimates from the original line counts and greps.
+The memory-investigation cleanup in §4b and SIMD transcription/reference removal in §2 have been completed; the opening counts predate them.
