@@ -280,6 +280,9 @@ Parsed_Source :: struct {
 	root_scope: *Parser_Lexical_Scope;
 	node_pool: Pool;
 	identifier_storage: Identifier_Storage;
+	#if TRACK_AST_REUSE {
+		reused_declarations: s64;
+	}
 }
 
 
@@ -1041,6 +1044,10 @@ reuse_simple_declaration :: (parser: *Parser) -> *Parser_Node {
 					}
 				}
 
+				#if TRACK_AST_REUSE {
+					parser.parsed.reused_declarations += 1;
+				}
+
 				return declaration;
 			}
 
@@ -1060,6 +1067,10 @@ reuse_simple_declaration :: (parser: *Parser) -> *Parser_Node {
 			declaration.type_inst = type_inst;
 			declaration.expression = expression;
 			finish_node(parser, declaration, start);
+			#if TRACK_AST_REUSE {
+				parser.parsed.reused_declarations += 1;
+			}
+
 			return declaration;
 		}
 	}
@@ -1549,6 +1560,10 @@ copy_reusable_expression :: (parser: *Parser, original: *Parser_Node, token_delt
 				old_binary := original.(*Parser_Binary_Operator);
 				binary.left = copy_reusable_expression(parser, old_binary.left, token_delta);
 				binary.right = copy_reusable_expression(parser, old_binary.right, token_delta);
+				if binary.operator_type == #char "." && parser.current_scope {
+					array_add(*parser.current_scope.member_accesses, binary);
+				}
+
 				result = binary;
 
 			// Any newly approved expression kind needs an explicit copy rule first.

@@ -15,6 +15,19 @@ Simd_Lexer :: #import "Jai_Parser"(ENABLE_TRIVIA=true, USE_SIMD=true);
 
 main :: () {
 	arguments := get_command_line_arguments();
+	if arguments.count > 1 && arguments[1] == "--clock-probe" {
+		assert(arguments.count == 4, "Usage: --clock-probe scalar|simd CORPUS_DIRECTORY");
+		assert(arguments[2] == "scalar" || arguments[2] == "simd");
+		#if Simd_Lexer.SIMD_AVAILABLE {
+			features := Simd_Lexer.get_simd_features();
+			print("Clock probe CPU/OS features: %; AVX-512 available: %\n", features, (features & .AVX512) != 0);
+		}
+
+		benchmark_corpus(arguments[3], arguments[2]);
+		return;
+	}
+
+
 	if arguments.count > 1 && (arguments[1] == "--benchmark" || arguments[1] == "--benchmark-workloads") {
 		#if Simd_Lexer.SIMD_AVAILABLE {
 			features := Simd_Lexer.get_simd_features();
@@ -224,7 +237,7 @@ assert_benchmark_token_parity :: (actual: Simd_Lexer.Parser_Token, expected: Par
 	}
 }
 
-benchmark_corpus :: (directory: string) {
+benchmark_corpus :: (directory: string, clock_mode: string = "") {
 	filenames: [..] string;
 	visit_files(directory, true, *filenames, visit, visit_symlinks=false);
 	defer {
@@ -252,7 +265,7 @@ benchmark_corpus :: (directory: string) {
 		array_add(*sources, source);
 	}
 
-	benchmark_sources(directory, sources);
+	benchmark_sources(directory, sources, clock_mode=clock_mode);
 }
 
 benchmark_workloads :: () {
@@ -280,7 +293,7 @@ benchmark_workloads :: () {
 	}
 }
 
-benchmark_sources :: (name: string, sources: [] string, isolate_allocations: bool = false) {
+benchmark_sources :: (name: string, sources: [] string, isolate_allocations: bool = false, clock_mode: string = "") {
 	bytes: s64;
 	token_count: s64;
 
@@ -309,6 +322,18 @@ benchmark_sources :: (name: string, sources: [] string, isolate_allocations: boo
 	}
 
 	assert(frequency > 0, "This benchmark requires Windows.");
+	if clock_mode != "" {
+		print("Clock probe: %; % files, % bytes, % tokens; token parity PASS\n", clock_mode, sources.count, bytes, token_count);
+		if clock_mode == "simd" {
+			benchmark_clock_probe(sources, true, token_count, frequency);
+		} else {
+			benchmark_clock_probe(sources, false, token_count, frequency);
+		}
+
+		return;
+	}
+
+
 	print("%: % files, % bytes, % tokens (including EOF); 9 trials x 25 scans, 2 warmups\n", name, sources.count, bytes, token_count);
 	if isolate_allocations {
 		benchmark_measure(sources, bytes, token_count, frequency, false, false);
@@ -318,6 +343,22 @@ benchmark_sources :: (name: string, sources: [] string, isolate_allocations: boo
 	} else {
 		benchmark_measure(sources, bytes, token_count, frequency, true, false);
 	}
+}
+
+benchmark_clock_probe :: (sources: [] string, $simd: bool, token_count: s64, frequency: s64) {
+	for 1..2 {
+		assert(benchmark_scan(sources, simd) == token_count);
+	}
+
+	start := benchmark_ticks();
+	scans: s64;
+	while benchmark_ticks() - start < 30 * frequency {
+		assert(benchmark_scan(sources, simd) == token_count);
+		scans += 1;
+	}
+
+	elapsed := (benchmark_ticks() - start).(float64) / frequency.(float64);
+	print("Clock probe COMPLETE: % scans in % seconds; % ms/scan. Frequency requires external telemetry.\n", scans, elapsed, elapsed * 1000 / scans.(float64));
 }
 
 benchmark_measure :: (sources: [] string, bytes: s64, token_count: s64, frequency: s64, $materialise: bool, $reuse: bool) {

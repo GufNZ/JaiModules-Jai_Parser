@@ -29,11 +29,22 @@ For deterministic workload and allocation comparisons, use the same LLVM build:
 bash collect_simd_timings.sh --workloads
 ```
 
-The five workloads repeat 4,096 ordinary-token records: short identifiers, long identifiers, long line comments, plain strings, and escaped strings.  Sources are generated before timing.  Each workload verifies complete scalar/SIMD materialised-token parity, then checks equal token counts in four phases: streaming or materialised tokens, each with fresh or reused pools.  Streaming still copies names and decodes strings but omits retained token arrays; contextual here strings remain covered by the real-corpus materialisation benchmark rather than this streaming comparison.
+The five workloads repeat 4,096 ordinary-token records: short identifiers, long identifiers, long line comments, plain strings, and escaped strings.
+Sources are generated before timing.
+Each workload verifies complete scalar/SIMD materialised-token parity, then checks equal token counts in four phases: streaming or materialised tokens, each with fresh or reused pools.
+Streaming still copies names and decodes strings but omits retained token arrays; contextual here strings remain covered by the real-corpus materialisation benchmark rather than this streaming comparison.
 
-Fresh pools include backing allocation and release per source.  Reused pools are primed outside each timed trial, reset after every source, and released after timing.  `Pool.reset` retains ordinary buckets but frees oversized allocations, so large token arrays still require heap allocations.  Both modes preserve copied payloads and the same lexer settings.  The reported differences isolate storage and pool-lifecycle sensitivity, not exact additive percentages of pure scan and allocation time; cache state, copying, and reset work also differ.
+Fresh pools include backing allocation and release per source.
+Reused pools are primed outside each timed trial, reset after every source, and released after timing.
+`Pool.reset` retains ordinary buckets but frees oversized allocations, so large token arrays still require heap allocations.
+Both modes preserve copied payloads and the same lexer settings.
+The reported differences isolate storage and pool-lifecycle sensitivity, not exact additive percentages of pure scan and allocation time; cache state, copying, and reset work also differ.
 
-Output includes median/range, MiB/s, and millions of tokens/s.  Separate untimed forwarding allocator counters report cumulative allocation/resize requests and requested bytes at both token and backing-heap levels, not live or peak retained memory.  Scalar/SIMD token-level counts and bytes must agree.  The collector's `--workloads` option includes these phases alongside both real corpora in each of its default three rounds, with compiler/host/source provenance.  Use repeated like-for-like LLVM runs; the SIMD default remains unchanged by these measurements.
+Output includes median/range, MiB/s, and millions of tokens/s.
+Separate untimed forwarding allocator counters report cumulative allocation/resize requests and requested bytes at both token and backing-heap levels, not live or peak retained memory.
+Scalar/SIMD token-level counts and bytes must agree.
+The collector's `--workloads` option includes these phases alongside both real corpora in each of its default three rounds, with compiler/host/source provenance.
+Use repeated like-for-like LLVM runs; the SIMD default remains unchanged by these measurements.
 
 On an AVX-512F/BW machine, run the focused tests under both backends before timing:
 
@@ -69,6 +80,92 @@ Use `--rounds 1` for a quick check, `--output-dir DIRECTORY` to select another o
 Relative arguments resolve against the invoking directory.
 Set `JAI=/path/to/jai.exe` when the compiler is not on `PATH`; `--help` lists the options.
 
+For the separate AVX-512 frequency investigation, follow [the clock measurement handoff](examples/SIMD_CLOCKS.md).
+`lex_all_files --clock-probe scalar|simd DIRECTORY` verifies token parity and runs one mode for 30 seconds for external effective-clock logging; elapsed timing alone is not a frequency measurement.
+
+The real-file AST-reuse benchmark runs independently of that hardware collection:
+
+```bash
+jai benchmark_ast_reuse.jai -o -llvm -output_path .build -exe benchmark_ast_reuse
+./.build/benchmark_ast_reuse.exe ../../../examples/invaders > .build/ast_reuse_workloads.log
+```
+
+It inventories bytes, line positions (one plus LF bytes per nonempty file), tokens including EOF, parse status, diagnostics, and exact reconstruction for each independent source file.
+It then reports full-lex, AST-plus-binding, and end-to-end parse/cleanup times with two warmups and 21 trials per file; p95 is the nearest-rank 20th sorted sample.
+Inputs are loaded outside timing, snapshots use fresh scoped pools, and trivia/default-SIMD/copied-name/binding settings match ordinary parser imports.
+It also compares three modes on the same chained prefix-comment insertion, replacement, and deletion: `FULL` re-lexes/reparses, `TOKENS` materialises incrementally but constructs the AST without an old-tree template, and `AST` additionally supplies the previous tree to the existing copier.
+Real-code workloads insert a declaration, replace its initialiser, and delete it at root and procedure-body boundaries nearest 5%, 50%, and 95% of each file.
+The report prints actual byte positions; available syntax boundaries need not coincide with those targets, and missing constructs are explicitly skipped.
+Additional sequences edit an existing braced declaration block, wrap adjacent simple declarations in a static scope and move its closing brace across one declaration, and remove an initialiser before repairing the malformed revision by deleting the inserted declaration.
+Edits are in-memory revisions of independent real files; corpus files are not modified or concatenated.
+Reports separate potentially eligible declaration contexts, recovered baselines, procedure-body reparsing, scope/boundary reparsing, malformed/repair chains, and the trivia control.
+These labels describe workloads, not observed copy counts: unaffected declarations may still copy during body or boundary edits, and a malformed/repair chain mixes clean and recovered snapshots.
+The separate verification build below reports actual successful declaration-copy events per revision.
+All modes use the same module instance, source revisions, settings, fresh independent backing pools, independently copied source buffers, and lexical binding; only token materialisation and AST-template selection differ.
+Each edited snapshot becomes the next old snapshot, and the old snapshot is released after construction in every mode.
+The owned lifecycle timer spans new-pool setup, acquiring an owned copy of the prebuilt revision, token materialisation, AST construction/binding, and old-source/tree/name/pool release.
+Separate distributions report token materialisation (including the incremental path's internal edit validation), AST/binding, construction, new-pool/source acquisition, and old-snapshot disposal.
+Initial owned-snapshot construction and final-snapshot disposal are measured separately, outside the update distribution, rather than hidden or amortised into each edit.
+File I/O, compiler startup, generating the common revision strings, correctness checks, allocation profiling, and reporting are outside timed regions.
+Phase timings include counter-call overhead; sub-microsecond differences should not be treated as precise savings.
+Two warmup sequences precede 21 measured sequences, with trial order rotating across modes.
+Each mode reports median, nearest-rank p95, and range over 63 individual edits, not three-edit sequence averages; p95 is the 60th sorted sample.
+Per-edit-position lifecycle distributions also report 21 trials each (20th sorted sample for p95), so insertion, replacement/malformed, and deletion/repair tails remain visible.
+Absolute and relative median/p95 lifecycle savings compare both incremental modes with full parsing and AST copying with token-only parsing; construction-only AST-versus-token savings remain separate.
+Untimed checks compare status, token kinds/flags/text/trivia/byte locations, root kind and statement count, diagnostic/recovery/restart counts, and exact reconstruction, including after releasing the old snapshot.
+Valid edits of clean baselines must remain diagnostic-free, malformed revisions must add a diagnostic, and final repairs must restore baseline status and diagnostic count.
+The timed runner specialises on a compile-time verification flag, with those checks excluded using `#if`; declaration-copy instrumentation is also disabled.
+
+After timing each workload, a separate untimed pass repeats all three modes with the same revisions and source ownership.
+It reports allocation/resize requests and cumulative requested bytes at the caller allocator boundary, including the AST pool's backing requests, plus outer-pool backing requests and bytes.
+These layers must not be added together or interpreted as one request per AST node.
+A pointer-size ledger tracks outstanding backing bytes even when frees omit their size.
+Its own hash-table storage and reconstruction-check pools use the independent original allocator and are excluded.
+Per-edit reports include old-only retention, new retention, simultaneous old/new retention and peak, source-buffer lengths, and retention after old release; final release must leave every snapshot's ledger empty with zero outstanding bytes.
+The backing counts include source copies, pool metadata/slack, and retained snapshot storage, but not the corpus/revision/anchor buffers, temporary allocator storage, ledger bookkeeping, native allocator metadata/caches, or process working set.
+Peak means outstanding requested backing bytes observed at allocator returns, not transient native `realloc` memory or physical RAM.
+An allocate/resize/size-less-free self-check validates the ledger before any workloads run.
+
+Two local optimised LLVM runs on 2026-10-15 each completed all 88 workloads and 264 snapshot-release ledger checks.
+The largest file's prefix-comment workload measured:
+
+| Mode | Run 1 Lifecycle Median / p95 (ms) | Run 2 Lifecycle Median / p95 (ms) |
+| --- | --- | --- |
+| FULL | 1.3218 / 1.5366 | 1.2646 / 1.4964 |
+| TOKENS | 1.1127 / 1.3980 | 1.0763 / 1.3724 |
+| AST | 1.1409 / 1.2946 | 1.0811 / 1.3409 |
+
+Here AST-versus-token-only median savings are -0.0282 ms (-2.53%) and -0.0048 ms (-0.45%); p95 savings are 0.1034 ms (7.40%) and 0.0315 ms (2.30%).
+Ranges overlap, and these local rounds do not establish a reliable AST-copy advantage.
+For the first revision, token-only and AST modes each make 1,774 caller requests totalling 2,823,866 bytes and retain 2,854,463 backing bytes; the old snapshot retains 2,854,433 bytes, giving 5,708,896 bytes of overlap.
+Both modes have identical cumulative requested and retained bytes across all 264 profiled revisions, not just this example.
+The same example's AST source-acquisition medians are 0.0119/0.0116 ms and old-release medians 0.2073/0.2076 ms; initial construction costs 1.1390/1.0844 ms and final disposal 0.2487/0.2406 ms, separately from updates.
+Component medians need not sum to the lifecycle median.
+Full reports: [run 1](examples/.build/ast_reuse_measurements.log) and [run 2](examples/.build/ast_reuse_measurements_round2.log).
+The fast-backend measurement/profile run and both deep-verification backends also pass all 88 workloads.
+The fast run is a harness check, not optimised performance evidence.
+
+For deep correctness and actual reuse counts, compile a separate verification-only executable:
+
+```bash
+jai benchmark_ast_reuse.jai -o -llvm -output_path .build -exe verify_ast_reuse - verify-only
+./.build/verify_ast_reuse.exe ../../../examples/invaders > .build/ast_reuse_verified.log
+```
+
+Repeat with `-x64` instead of `-o -llvm` for the fast backend.
+This build skips timing trials and enables `TRACK_AST_REUSE=true`; the default module parameter is false, so both the count field and increments are compiled out of timing builds.
+One successful simple or compound declaration copy is one event, including eligible children of matched declaration blocks, not every copied expression or compound target.
+The [snapshot oracle](examples/snapshot_oracle.jai) compares concrete tree shape, all reflected node fields/flags/token spans/locations, active literal payloads, complete token metadata/payload bits, diagnostics and related information, synthetic tokens, recovery/restart records, scopes, bindings, ownership links, and exact reconstruction.
+A bidirectional object mapping compares snapshot-independent target identities and rejects shared owned objects; allocator capacity/backing storage and generated padding are not compared.
+Pointed-to objects are processed through a work queue, avoiding call depth proportional to the program's binding graph; unhandled non-null pointer types, node kinds, and union variants fail explicitly.
+Every revision in every mode is compared before and after poisoning the independently owned old source and releasing its tree, names, and pool.
+Negative self-checks deliberately alter same-name binding targets, ownership/sharing, child order, flags, spans, locations, literals/tokens, diagnostics/related information, and recovery/restart/synthetic records; a small fixture also verifies an exact simple/compound/nested copy count.
+Local LLVM and fast verification both pass 88 sequences (792 edited snapshots and 1,584 before/after-release comparisons per backend), observing 3,705 declaration-copy events in 126 of 264 AST-mode revisions.
+Full/token-only modes and recovered old snapshots assert zero copies.
+These results cover the selected corpus, settings, and edits, not every possible AST shape or lifetime arrangement.
+The worthwhile latency/memory threshold and keep/drop decision remain pending; neither these local measurements nor the correctness counts alone are a decision gate.
+Recovered source snapshots must be reported separately because they disable AST copying.
+
 Run `bash clean_build_artifacts.sh` from `examples` after testing to remove generated build outputs.
 The script preserves tracked files, symlinks, and retained differential fixtures with their matching outputs.
 Use `--dry-run` to preview deletion, or repeat `--resolved jai_parser_differential_<section>_<test>_<serial>.jai` to also remove specific dealt-with fixtures and their outputs.
@@ -88,7 +185,8 @@ The default import retains the original `Token` layout:
 Each scan uses the widest supported width that fits the remaining source and identifier scratch capacity, falling back through narrower widths and scalar tails.
 Comment scanning stops before newline and NUL, preserving trivia and location accounting.
 Other CPU targets remain scalar.
-Use `USE_SIMD=false` to select scalar scanning explicitly.  Benchmarks and parity tests keep their scalar reference imports disabled independently of the default.
+Use `USE_SIMD=false` to select scalar scanning explicitly.
+Benchmarks and parity tests keep their scalar reference imports disabled independently of the default.
 
 ```jai
 #import "Jai_Parser"(USE_SIMD=false);
@@ -219,7 +317,8 @@ Expression directives are described in the dedicated directive section below.
 The resulting parser-owned node is returned in `Parsed_Source.root`.
 Empty or truncated input returns `INCOMPLETE`; unsupported or trailing syntax returns `RECOVERED` with a structured diagnostic.
 
-The compiler exports `value := ---` with a null declaration expression and `IS_UNINITIALIZED`.  Standalone `---` is retained as a parser-owned `Parser_Literal` with `value_type == .UNINITIALIZED`; it has parser-shape tests but no direct `compiler_get_nodes` expression comparison.
+The compiler exports `value := ---` with a null declaration expression and `IS_UNINITIALIZED`.
+Standalone `---` is retained as a parser-owned `Parser_Literal` with `value_type == .UNINITIALIZED`; it has parser-shape tests but no direct `compiler_get_nodes` expression comparison.
 
 Binary parsing uses the precedence classes derived by `../../print_precedences.jai`.
 The expression parser preserves assignment-operator trees for compiler AST comparison and recovery; later statement parsing will own their statement-level semantics.
@@ -241,7 +340,8 @@ A missing right-hand expression leaves a recovered compound node and allows the 
 
 Supported types include named types, pointers, fixed arrays, array views, resizable arrays, procedure types, polymorphic variables with restrictions, and `#type` with `distinct` or `isa`.
 Procedure types accept unnamed parameter types (including nested procedure, pointer and array types), empty `-> ()` return lists, and the source-spelled `#Context` type directive.
-Procedure headers retain the source-spelled `#dump` modifier as `DEBUG_DUMP`.  The compiler emits a procedure's bytecode when compiling it; the parser only records the syntax flag.
+Procedure headers retain the source-spelled `#dump` modifier as `DEBUG_DUMP`.
+The compiler emits a procedure's bytecode when compiling it; the parser only records the syntax flag.
 Declaration metadata includes `$` and `$$` auto-bake flags, backticked scope modifiers, `#align` expressions, do-not-initialise flags, and trailing notes.
 Source-spelled `#no_reset` is a declaration attribute, not a scope directive: the parser records it as the compiler-matching `NO_RESET` flag.
 For global variables, it retains compile-time values at runtime.
@@ -291,7 +391,8 @@ Both `#as using field: Struct_Type` and `using #as field: Struct_Type` mark that
 `using enum u16 { ... }` ends at its closing brace or an explicit semicolon before the next statement; ordinary `using` expressions still require a semicolon.
 Parenthesised name lists become arrays of string literals, while array literals, named arrays, and `#run` expressions remain source-spelled filter expressions.
 `using,map(expression)` retains its parenthesised expression as a `.MAP` filter.
-The advanced-using guide parses completely with zero syntax diagnostics.  `resolve_file_imports` applies mappings when the caller supplies `map_names`; it does not execute Jai map procedures.
+The advanced-using guide parses completely with zero syntax diagnostics.
+`resolve_file_imports` applies mappings when the caller supplies `map_names`; it does not execute Jai map procedures.
 For aggregate values whose fields cannot be recovered from parsed syntax, the optional `aggregate_fields` callback can supply a complete list of `Parser_Binding` records, including generated fields.
 Return `true` only for a complete list; returning `false` discards the list and tries parsed struct fields.
 Each binding needs a nonempty name and a declaration pointer that the caller keeps alive through `release_file_imports`.
@@ -314,16 +415,35 @@ The parser has a parser-owned counterpart for each of the 20 public `Code_Direct
 Source parsing covers:
 
 - `#char "x"` as the compiler-compatible numeric `Parser_Literal`, using the lexer's evaluated string byte; `#filepath` as a string literal containing the directory of `fully_pathed_filename`; and payload-free `#this` as the compiler's `DIRECTIVE_THIS` node kind.
-- `#caller_code` as `Parser_Directive_Code` with the compiler's unnamed caller-code flag and a null expression.  It is accepted as a primary expression, so legal macro default arguments retain the compiler AST shape.
+- `#caller_code` as `Parser_Directive_Code` with the compiler's unnamed caller-code flag and a null expression.
+It is accepted as a primary expression, so legal macro default arguments retain the compiler AST shape.
 - `#if` in imperative, file, and aggregate declaration contexts, represented by `Parser_If` with `IS_STATIC`; its branch blocks retain the surrounding block mode, including enum member grammar.
-- `#placeholder Name` file declarations, represented by `Parser_Placeholder` with the source-spelled name.  This is distinct from the `---` do-not-initialise indicator.
+- `#placeholder Name` file declarations, represented by `Parser_Placeholder` with the source-spelled name.
+This is distinct from the `---` do-not-initialise indicator.
 - Prefix `#as using name: Type` aggregate fields and the equivalent `using #as name: Type` spelling, represented by `Parser_Using` around a declaration marked `IS_MARKED_AS_AS` for implicit casting.
-- `#asm` statement blocks with optional feature names.  `Parser_Asm` stores ordered parser-owned `Parser_Asm_Feature` records, a balanced body token span, and ordered `Parser_Asm_Statement` nodes without overlaying the compiler's opaque payload fields.  Each feature retains a `Parser_Ident` and an exact token span; bare blocks retain an empty feature list.  `enclosing_scope` points to the surrounding high-level `Parser_Block`, so sibling assembly blocks share one scope while assembly braces do not create a lexical scope; register binding remains deferred to semantic analysis.  Generic statement dispatch accepts `#asm` directly in single-statement control-flow branches, including `#if ... #asm { ... } else #asm { ... }`, while retaining that surrounding scope.  Identifier-led instruction statements retain an open-ended mnemonic, optional fixed or polymorphic `Parser_Asm_Mnemonic_Size`, and top-level comma-separated operand spans; operand internals remain `UNPARSED`.  Missing terminal semicolons are diagnosed at the closing brace.  Parser-owned register declaration, register pinning, memory operand, value, and source-spelled modifier records preserve exact token spans.  The ordinary lexer stream is lossless for the assembly grammar: `===` is one token; fixed mnemonic suffixes such as `.8` and `.64` are leading-dot `NUMBER` tokens; polymorphic suffixes such as `?BITS` and `?T` are `?` plus `IDENT`; signs, `!`, `&`, `&*`, brackets, and declaration colons remain ordinary tokens; comments remain trivia.  No contextual assembly tokens are introduced, so ordinary member access and query tokenisation remain unchanged.
+- `#asm` statement blocks with optional feature names.
+`Parser_Asm` stores ordered parser-owned `Parser_Asm_Feature` records, a balanced body token span, and ordered `Parser_Asm_Statement` nodes without overlaying the compiler's opaque payload fields.
+Each feature retains a `Parser_Ident` and an exact token span; bare blocks retain an empty feature list.
+`enclosing_scope` points to the surrounding high-level `Parser_Block`, so sibling assembly blocks share one scope while assembly braces do not create a lexical scope; register binding remains deferred to semantic analysis.
+Generic statement dispatch accepts `#asm` directly in single-statement control-flow branches, including `#if ... #asm { ... } else #asm { ... }`, while retaining that surrounding scope.
+Identifier-led instruction statements retain an open-ended mnemonic, optional fixed or polymorphic `Parser_Asm_Mnemonic_Size`, and top-level comma-separated operand spans; operand internals remain `UNPARSED`.
+Missing terminal semicolons are diagnosed at the closing brace.
+Parser-owned register declaration, register pinning, memory operand, value, and source-spelled modifier records preserve exact token spans.
+The ordinary lexer stream is lossless for the assembly grammar: `===` is one token; fixed mnemonic suffixes such as `.8` and `.64` are leading-dot `NUMBER` tokens; polymorphic suffixes such as `?BITS` and `?T` are `?` plus `IDENT`; signs, `!`, `&`, `&*`, brackets, and declaration colons remain ordinary tokens; comments remain trivia.
+No contextual assembly tokens are introduced, so ordinary member access and query tokenisation remain unchanged.
 - `#code`, `#code,null`, and `#code,typed`, preserving expression, declaration, and block payload node kinds.
-- `#run`, `#run,stallable`, and `#run,host`, with expression or block payloads, including `-> Return_Type { ... }` bodies.  Expression payloads set `HAS_IMPLICIT_RETURN_TYPES`; block payloads do not.  Typed blocks retain their procedure header and return declaration.  A block-form `#run` ends at its closing brace in a statement or declaration; a semicolon is optional there but remains required for expression-form `#run` statements.  `host` uses the compiler's unnamed `0x10` run flag and is mutually exclusive with `stallable`.
-- `#assert condition` with an optional quoted message, lowered to `Parser_Directive_Run` with `ASSERTION` and `HAS_IMPLICIT_RETURN_TYPES`; the condition remains its expression and the message is retained in `assertion_string`.  This works in procedures, static branches, expansions, and module scope without executing assertions in the parser.
-- `#insert`, optional scope and loop-control replacements, and `-> Return_Type { ... }` implicit-run bodies.  An empty `scope()` retains a null scope redirection; `scope(expression)` retains the expression.  Block-bodied short-form inserts terminate at the closing brace without a required semicolon; expression-form inserts still require one as statements.
-- `#import` with `file`, `dir`, or `string`, plus module and program parameter calls.  `#import,string` accepts a quoted string or a `#string` here-string body; a standalone import requires a following semicolon, including after a here-string delimiter.
+- `#run`, `#run,stallable`, and `#run,host`, with expression or block payloads, including `-> Return_Type { ... }` bodies.
+Expression payloads set `HAS_IMPLICIT_RETURN_TYPES`; block payloads do not.
+Typed blocks retain their procedure header and return declaration.
+A block-form `#run` ends at its closing brace in a statement or declaration; a semicolon is optional there but remains required for expression-form `#run` statements.
+`host` uses the compiler's unnamed `0x10` run flag and is mutually exclusive with `stallable`.
+- `#assert condition` with an optional quoted message, lowered to `Parser_Directive_Run` with `ASSERTION` and `HAS_IMPLICIT_RETURN_TYPES`; the condition remains its expression and the message is retained in `assertion_string`.
+This works in procedures, static branches, expansions, and module scope without executing assertions in the parser.
+- `#insert`, optional scope and loop-control replacements, and `-> Return_Type { ... }` implicit-run bodies.
+An empty `scope()` retains a null scope redirection; `scope(expression)` retains the expression.
+Block-bodied short-form inserts terminate at the closing brace without a required semicolon; expression-form inserts still require one as statements.
+- `#import` with `file`, `dir`, or `string`, plus module and program parameter calls.
+`#import,string` accepts a quoted string or a `#string` here-string body; a standalone import requires a following semicolon, including after a here-string delimiter.
 - `#library` with `system`, `no_static_library`, and `link_always`.
 - `#load`, `#bytes`, `#procedure_name`, `#exists`, location and caller-location queries, and poke-name forms.
 - `#procedure_of_call target(arguments)` as a `Parser_Procedure_Call` marked `RETURNS_PROCEDURE_POINTER_ONLY`, matching the compiler for ordinary and type-valued arguments.
@@ -414,7 +534,8 @@ The same eligible declarations can be copied inside matched nested declaration b
 Declarations with a one-identifier or single-pointer-to-identifier type annotation and eligible value, or with no initialiser, can also be copied; their type wrappers and references are rebuilt in the new pool.
 Explicit `---` initialisers still fall back.
 Exact constant compound declarations with two or more unmodified names and an eligible value are copied with new argument storage and shared binding properties.
-Typed compounds with a one-identifier or single-pointer-to-identifier annotation reuse their type wrapper and bindings with an eligible value or no initialiser.  Exact compound reassignments with unmodified identifier targets and an eligible RHS reuse without declaring new bindings; explicit `---` initialisers, mixed or non-identifier targets, metadata-bearing, and richer typed compounds still parse normally.
+Typed compounds with a one-identifier or single-pointer-to-identifier annotation reuse their type wrapper and bindings with an eligible value or no initialiser.
+Exact compound reassignments with unmodified identifier targets and an eligible RHS reuse without declaring new bindings; explicit `---` initialisers, mixed or non-identifier targets, metadata-bearing, and richer typed compounds still parse normally.
 More complex type annotations and other declaration shapes still parse normally.
 For file edits, `parse_file_edit(*old, start, end, new_source, warn_unnecessary_semicolons=false)` returns `(Parsed_Source, bool)`.
 `[start, end)` is a half-open byte range in `old.source`; `new_source` is the caller-owned, complete replacement buffer.
@@ -449,7 +570,11 @@ Release an old snapshot's resources independently of its replacement.
 Its `assert_expression_fixture` macro accepts source text once and generates the matching `#code` argument with `#insert`, preventing the parser input and compiler oracle from drifting apart.
 The harness keeps syntax and semantic normalisation separate, provides trivia round-trip fixtures, and includes intercepted child-workspace fixtures for typechecked declarations and file-level constructs.
 
-On Windows, use the Jai-only parallel runner.  It runs batches in fresh compiler processes to avoid suite-wide memory buildup.  Do not run the whole `differential_test.jai` harness directly: that unbounded invocation can exhaust RAM.  No PowerShell is required.  Have `jai` on `PATH`; workers use the checkout's `bin/jai.exe`, and diagnostic fixtures invoke `jai`.
+On Windows, use the Jai-only parallel runner.
+It runs batches in fresh compiler processes to avoid suite-wide memory buildup.
+Do not run the whole `differential_test.jai` harness directly: that unbounded invocation can exhaust RAM.
+No PowerShell is required.
+Have `jai` on `PATH`; workers use the checkout's `bin/jai.exe`, and diagnostic fixtures invoke `jai`.
 
 From `modules/Jai_Parser/examples`, build and run the full suite in Bash:
 
@@ -458,7 +583,8 @@ jai differential_runner.jai -x64
 ./differential_runner.exe --all
 ```
 
-`--all` includes both compile-time fixtures and all eight runtime checks; no separate runtime command is needed.  The runner requires an explicit mode or section, not an implicit full-suite default.
+`--all` includes both compile-time fixtures and all eight runtime checks; no separate runtime command is needed.
+The runner requires an explicit mode or section, not an implicit full-suite default.
 
 For section discovery, focused runs, or runner self-tests:
 
@@ -470,23 +596,40 @@ For section discovery, focused runs, or runner self-tests:
 ./differential_runner.exe --self-test
 ```
 
-Select a section by number or exact, quoted name.  Fixture ranges are inclusive and supported only for batchable sections.  Selecting `"Runtime checks"` compiles and executes that section automatically.
+Select a section by number or exact, quoted name.
+Fixture ranges are inclusive and supported only for batchable sections.
+Selecting `"Runtime checks"` compiles and executes that section automatically.
 
 - `--workers` accepts 1..4 (default 2); use `--workers 1` for serial scheduling.
-- `--batch-size` accepts 1..16 (default 16) for the nine batchable sections; other sections run whole.  Worker count and batch size are the normal memory controls.
-- `--memory-mib` defaults to 2048: a 2 GiB commit safety limit per process tree.  Hitting the cap is a failure, not a successful batch boundary.
+- `--batch-size` accepts 1..16 (default 16) for the nine batchable sections; other sections run whole.
+Worker count and batch size are the normal memory controls.
+- `--memory-mib` defaults to 2048: a 2 GiB commit safety limit per process tree.
+Hitting the cap is a failure, not a successful batch boundary.
 - `--timeout` defaults to 30 seconds per compile/runtime phase or idle admission wait, not per full suite.
-- `--reserve-mib` defaults to 2048 for physical/commit headroom.  Low headroom can reduce concurrency.
+- `--reserve-mib` defaults to 2048 for physical/commit headroom.
+Low headroom can reduce concurrency.
 
-The first failure or Ctrl+C stops scheduling and terminates active worker trees.  Exit codes are 0 for success, 1 for test or runner failures, 64 for invalid arguments, 75 for insufficient headroom, 124 for timeouts, and 130 for cancellation.
+The first failure or Ctrl+C stops scheduling and terminates active worker trees.
+Exit codes are 0 for success, 1 for test or runner failures, 64 for invalid arguments, 75 for insufficient headroom, 124 for timeouts, and 130 for cancellation.
 
-Logs are saved under `examples/.build/differential_runs` in a fresh directory per run.  Each job has isolated working, build, fixture, and `TEMP`/`TMP` directories, plus `job.tsv`, `compile.log`, and, when applicable, `runtime.log`.  Failed fixtures and build files are preserved; successful build/temp artifacts are removed.  `summary.tsv` records coverage, elapsed time, job commit peaks, and sampled system headroom.
+Logs are saved under `examples/.build/differential_runs` in a fresh directory per run.
+Each job has isolated working, build, fixture, and `TEMP`/`TMP` directories, plus `job.tsv`, `compile.log`, and, when applicable, `runtime.log`.
+Failed fixtures and build files are preserved; successful build/temp artifacts are removed.
+`summary.tsv` records coverage, elapsed time, job commit peaks, and sampled system headroom.
 
-Verified locally on 2026-10-13 with the defaults: all 24 sections / 4,175 fixtures passed in 252 jobs in **5 minutes 12 seconds**, with no timeouts or cap failures.  The largest job commit peak was 1.75 GiB, minimum sampled available RAM was 5.14 GiB, and runtime checks retained zero allocations/bytes.  The identical 594-fixture `Numeric rankings` workload took 63.4 seconds serially versus 39.6 seconds with two workers (about 1.60x faster).  These are local measurements, not universal guarantees.
+Verified locally on 2026-10-13 with the defaults: all 24 sections / 4,175 fixtures passed in 252 jobs in **5 minutes 12 seconds**, with no timeouts or cap failures.
+The largest job commit peak was 1.75 GiB, minimum sampled available RAM was 5.14 GiB, and runtime checks retained zero allocations/bytes.
+The identical 594-fixture `Numeric rankings` workload took 63.4 seconds serially versus 39.6 seconds with two workers (about 1.60x faster).
+These are local measurements, not universal guarantees.
 
-ANSI-coloured progress shows the original section number, the current test within that section, and the cumulative test count for the selected run.  A shared inventory supplies totals across compile-time and runtime checks; nested compiler calls count only once within their parent test.
+ANSI-coloured progress shows the original section number, the current test within that section, and the cumulative test count for the selected run.
+A shared inventory supplies totals across compile-time and runtime checks; nested compiler calls count only once within their parent test.
 
-On assertion failure, the harness prints the retained fixture path.  Diagnostic fixture files remain available until the next test starts, so a failure in the caller also preserves the compiler input.  In-memory workspace and syntax fixtures are saved on failure.  Retained files use `jai_parser_differential_<section>_<test>_<serial>.jai` in the working directory; retries choose an unused serial rather than overwriting an earlier failure.  Successful fixtures are cleaned up.
+On assertion failure, the harness prints the retained fixture path.
+Diagnostic fixture files remain available until the next test starts, so a failure in the caller also preserves the compiler input.
+In-memory workspace and syntax fixtures are saved on failure.
+Retained files use `jai_parser_differential_<section>_<test>_<serial>.jai` in the working directory; retries choose an unused serial rather than overwriting an earlier failure.
+Successful fixtures are cleaned up.
 
 For invalid-source fixtures, `capture_compiler_error` writes the supplied code to a temporary fixture, invokes `jai -x64`, and returns structured primary diagnostics with their related information.
 `assert_compiler_error_message` and `assert_invalid_expression_compiler_message` provide concise assertions for common cases; pass `log_output=true` to `capture_compiler_error` when the complete compiler rendering is useful.

@@ -6922,6 +6922,8 @@ test_member_ast_reuse :: () {
 	assert(access.right.(*Extended.Parser_Ident).resolved_declaration == null);
 	assert(fresh_access.right.(*Extended.Parser_Ident).resolved_declaration == null);
 	assert((access.right.(*Extended.Parser_Ident).flags & .IS_RHS_OF_DOT_DEREFERENCE) != 0);
+	assert(updated.root_scope.member_accesses.count == 1 && fresh.root_scope.member_accesses.count == 1);
+	assert(updated.root_scope.member_accesses[0] == access && fresh.root_scope.member_accesses[0] == fresh_access);
 	Extended.release_parser_tree(*old);
 	Extended.release_parser_names(*old);
 	free(old_source);
@@ -6968,6 +6970,9 @@ test_member_ast_reuse :: () {
 	assert(chain_inner.right.(*Extended.Parser_Ident).name == "field" && !chain_inner.right.(*Extended.Parser_Ident).resolved_declaration);
 	assert(!chain_fresh_inner.right.(*Extended.Parser_Ident).resolved_declaration);
 	assert(chain_updated.diagnostics.count == chain_fresh.diagnostics.count && chain_updated.restart_points.count == chain_fresh.restart_points.count);
+	assert(chain_updated.root_scope.member_accesses.count == 2 && chain_fresh.root_scope.member_accesses.count == 2);
+	assert(chain_updated.root_scope.member_accesses[0] == chain_inner && chain_updated.root_scope.member_accesses[1] == chain_outer);
+	assert(chain_fresh.root_scope.member_accesses[0] == chain_fresh_inner && chain_fresh.root_scope.member_accesses[1] == chain_fresh_outer);
 	Extended.release_parser_tree(*chain_old);
 	Extended.release_parser_names(*chain_old);
 	free(chain_old_source);
