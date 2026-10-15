@@ -58,13 +58,13 @@ Combining them into one universal hash would obscure invalidation and make ordin
 
 | Identity | Meaning |
 | --- | --- |
-| `DocumentId` | A resolved source-document identity, including its absolute path and filesystem identity policy. |
+| `DocumentID` | A resolved source-document identity, including its absolute path and filesystem identity policy. |
 | `SourceRevision` | Exact source bytes plus their content digest.  An unsaved editor buffer is a revision even if disk contents differ. |
 | `SyntaxKey` | Document identity, source digest, syntax configuration, and parser/schema version. |
-| `ModuleInstanceId` | Resolved module entrypoint identity plus canonical module-parameter values and entrypoint program-parameter values. |
-| `SemanticContextId` | Module instance, target/type environment, resolution configuration, evaluator policy/version, and relevant language configuration. |
-| `DeclarationId` | A declaration within its owning module instance and revision mapping; not just its name or syntax hash. |
-| `TypeId` | Nominal semantic identity rooted in the defining declaration, with canonical instantiation arguments where applicable. |
+| `ModuleInstanceID` | Resolved module entrypoint identity plus canonical module-parameter values and entrypoint program-parameter values. |
+| `SemanticContextID` | Module instance, target/type environment, resolution configuration, evaluator policy/version, and relevant language configuration. |
+| `DeclarationID` | A declaration within its owning module instance and revision mapping; not just its name or syntax hash. |
+| `TypeID` | Nominal semantic identity rooted in the defining declaration, with canonical instantiation arguments where applicable. |
 | `QueryKey` | The semantic operation, subject identity, explicit arguments, context, and query implementation version. |
 | `ArtifactKey` | A validated query or syntax result together with the versioned input/dependency fingerprints needed to reuse it. |
 
@@ -144,14 +144,21 @@ Results from an older revision must not be presented as current merely because a
 
 ## 5. A Pipeline, Implemented as a Dependency Graph
 
-Separate stages are valuable, but Jai cannot be modelled as one irreversible sequence of whole-program passes.
-`#if`, type queries, polymorphism, `#run`, `#insert`, generated declarations, and imports can create new work or require information from another stage.
+The pipeline operates per declaration, not over the AST as a whole.
+Each declaration advances through applicable stages, publishing results as individual milestones become available.
+If a stage needs another declaration's result, it records that dependency, yields, and waits for the required milestone; the scheduler can advance other ready work meanwhile.
+Once that prerequisite is available, the waiting work becomes eligible to resume.
+
+The dependency graph describes these relationships between declaration stages; it is the scheduling model behind the pipeline, not an alternative to it.
+Declarations can be at different stages simultaneously, without whole-AST pass barriers or a requirement that a dependency finish all its stages first.
+Stage requirements differ by declaration kind: a procedure signature can be available before its body is analysed, while a struct layout may wait for a field type's layout.
+`#if`, type queries, polymorphism, `#run`, `#insert`, generated declarations, and imports can introduce additional work or prerequisites as a declaration progresses.
 
 The [typechecking guide](../../how_to/090_how_typechecking_works.jai) explains bottom-up expression inference grounded by declarations.
 It is not a specification of the official compiler's complete internal scheduling order.
 This design intentionally does not claim that compiler uses the exact stages below or that type resolution always precedes sizing.
 
-Proposed conceptual flow:
+Overall source-to-editor flow, within which declaration pipelines run:
 
 ```text
 Source provider and editor overlays
@@ -170,7 +177,8 @@ Source provider and editor overlays
 
 These are logical boundaries, not dedicated threads or mandatory materialised intermediate files.
 Semantic queries request their prerequisites; generated syntax re-enters parsing and dependency discovery.
-A scheduler records edges, shares identical in-flight work, handles cancellation, and detects cycles.
+A scheduler tracks declaration-stage readiness and dependency edges, shares identical in-flight work, resumes eligible waiters, handles cancellation, and detects cycles.
+Yielding is a logical suspension, not a requirement to block a worker thread or use a particular coroutine implementation.
 
 Use explicit result states: ready/complete, ready-with-diagnostics, incomplete/unknown, unsupported, blocked-on-dependency, cancelled, and failed.
 A deterministic error can be cached with valid dependencies.
@@ -181,12 +189,33 @@ Mutually referring declarations can be indexed together; recursive pointers can 
 A generic recursion guard that labels every cycle unsupported would prevent full coverage.
 Query readiness, interface fingerprints, and strongly connected groups should allow legitimate recursion without inventing an unbounded global fixed-point solver.
 
+As for cycle detection, if we reach a point where there are things waiting in pipelines, but we don't make forward progress, then we should stop with an error and do work to identify and report on the cycle, including suggestions for breaking it (e.g. use a pointer rather than an instance directly etc.).
+
 ## 6. Cache Boundaries
 
 ### 6.1 Modules: Strong Context and Lifetime Boundaries
 
-Cache the configured module's file membership, declaration/export index, and query results.
+Cache the configured module's file membership, full declaration index across all visibilities, derived export/lookup views, and query results.
 Standard libraries, vendored modules, and unchanged project modules all use the same correctness rules; edit frequency may affect residency and scheduling, not validity.
+
+Cache retention is distinct from language visibility.
+Retain each declaration's visibility, defining module/file, source location, and scope provenance; do not discard non-exported declarations when constructing a module artifact.
+This does not require eagerly completing semantic analysis of every retained declaration.
+
+For a top-level bare `#import "Basic";`, exported members become directly visible in the global scope.
+For `Basic :: #import "Basic";`, members are accessed through `Basic.` rather than injected as bare names.
+The reported Jai behaviour also allows qualified access to non-public members; whether that includes `#scope_file` declarations as well as `#scope_module` declarations still needs compiler verification.
+Do not encode the unverified distinction as an export-only cache boundary.
+
+Also verify nested-scope imports against the compiler: the working hypothesis is that a bare import still contributes exported names to the global namespace, whereas a named import introduces only a locally scoped namespace binding.
+Check access from the importing scope, outside it, and from sibling scopes for both forms; do not assume the import's lexical location is necessarily the scope receiving its members.
+Keep this distinction unconfirmed until tested, and use the verified rules when recording lookup dependencies and invalidating cached results.
+
+Resolve names through an explicit access context: importing scope, bare versus qualified access, module instance, and originating file where relevant.
+Derived lookup views and their cached results must depend on that context and the applicable visibility rules, including visibility changes and previous lookup misses.
+Keep a separate tooling query that can inspect otherwise inaccessible candidates without silently treating them as valid bindings or ordinary completion candidates.
+This supports a future unresolved-identifier hint that a matching declaration exists but is not at `#scope_export`, and an explicit fix action to make it exported where appropriate.
+Such an action must validate the current source, target the intended declaration/scope, and account for the export or ambiguity impact rather than blindly changing a scope directive affecting unrelated declarations.
 
 A source change does not necessarily require discarding every module result.
 A first correct implementation may invalidate the module's semantics conservatively, while retaining all unchanged file syntax.
@@ -308,9 +337,22 @@ Use owned roots and stable handles instead of an implicit caller allocator lifet
 | Cache store | Owns resident artifact records, persistence bookkeeping, and eviction decisions; it does not override live client leases. |
 | Editor request | Holds a lease to its world and requested results until completion or explicit release. |
 
-Arena allocation still fits this model.
-The change is who owns each arena and when it becomes immutable/releasable, not a requirement to allocate every node separately.
-Keep addresses stable while live handles or allocator data refer to an arena.
+Allocation strategy is separate from logical ownership: a revision/artifact can own records allocated from a longer-lived cache service's pools without owning those pools outright.
+Keep allocator state and live object addresses stable while handles or allocator data refer to them.
+
+Consider typed pools/slabs, one per record type or suitable size class, alongside arenas.
+For independently reclaimable nodes, semantic results, dependency records, and cache control records, individual frees and freelist reuse can reduce allocation churn and support partial eviction without discarding unrelated records.
+Select or verify an allocator that actually supports individual frees; the name `Pool` alone does not establish its reclamation behaviour.
+Variable-sized arrays, strings, and other owned payloads still need an explicit allocation and release strategy.
+
+A hybrid is appropriate: typed pools for independently lived fixed-size records, arenas for scratch work and immutable groups normally released together, and separately owned variable-sized payloads where necessary.
+Pool allocation does not itself prove that an object is safe to free: dependency ownership and request leases still govern reclamation, including records reachable from surviving snapshots.
+Recycled pool slots also need allocation-generation validation to prevent an old handle from accepting a different object at the same address; this generation is distinct from semantic revision stamps and does not replace reader lifetime protection; the dependency handle concept described below can mitigate that.
+Define synchronisation or sharding for pools accessed by concurrent tasks.
+
+Returning an object to a freelist makes its slot reusable but may not reduce resident/backing memory.
+Releasing backing pages generally requires empty slabs or allocator-specific trimming; measure retained capacity, fragmentation, reuse, and actual memory release as well as allocation counts.
+Choose pool/slab granularity with those eviction goals in mind, rather than assuming per-object frees necessarily return memory to the operating system.
 
 Do not require every query result to retain an entire project world indefinitely.
 Use appropriately scoped retained artifact groups/handles and explicit world roots; measure whether a tiny result pins an unexpectedly large graph.
@@ -321,6 +363,66 @@ Changed files create new revisions.
 Old revisions remain valid while any request uses them, then become reclaimable.
 A configurable memory budget and emergency pressure policy are necessary even if normal behaviour favours keeping everything resident.
 Eviction must never invalidate a leased snapshot, and retention should not grow without bound during long editing sessions.
+
+### Residency and Eviction Priority
+
+Retaining declarations across all visibilities means preserving their discoverability and reloadable identity/metadata, not requiring every declaration's syntax and semantic payload to stay in RAM.
+A bare import does not by itself demand full analysis or residency of all exports, still less all internals; materialise results according to actual query demand.
+Under memory pressure, prefer evicting cold, unreferenced internal payloads before actively used results, provided they are not pinned by live requests or required resident dependencies.
+Unused exported payloads can also be evicted; visibility is a useful preference, not proof of liveness.
+
+An internal declaration can be needed by a used export through types, constants, layout, inlining, compile-time evaluation, or reflection, even if no external call names it.
+Track those dependencies rather than equating 'not externally called' with 'unused'.
+Keep compact indices or reloadable index references for all visibilities so qualified lookup and inaccessible-candidate hints still work after payload eviction.
+Persisted dependency edges need not pin every dependency's full payload in RAM when validated handles permit safe rehydration or recomputation.
+
+Actual reclamation is limited by allocation granularity: individual declarations cannot be freed from a still-leased whole-file arena.
+Reclaim independently owned pool records where their lifetime permits, separately owned semantic artifacts, and unleased file snapshots; finer syntax reclamation requires suitable pool/chunk ownership and remains an optional measured optimisation.
+Do not claim per-declaration syntax memory savings merely because semantic work is demand-driven.
+
+### Implementation Option: Sentinel Dependency Slots
+
+A dependency needs to be linked via a handle that can encode if a dependency:
+
+- does not exist (last we checked - see `checked_parent_revision` below)
+- we don't know yet - go find out and generate the result
+- does exist, but is not loaded
+- is being worked on by something (with a mechanism/ID to wait on if this needs to be a blocking read)
+- is failed/unsupported etc.
+
+Each dependency handle can carry both revision stamps:
+
+- `checked_parent_revision`: the parent revision against which this relationship was last validated.
+- `observed_dependency_revision`: the dependency result revision last validated/consumed through this handle.
+
+The parent carries its own revision.
+If it differs from `checked_parent_revision`, recheck whether the relationship still exists, still targets the same declaration/query, and still has the same arguments/context.
+If unchanged, retain the result and advance the stamp; otherwise remove, replace, or regenerate as appropriate.
+Perform this check before accepting even a `null` slot as a current statement of absence.
+
+Independently, validate the dependency for the requesting world and compare its result revision with `observed_dependency_revision`.
+A mismatch requires revalidating the parent's affected result, even when the parent source has not changed.
+It need not force regeneration if the observed interface/value fingerprint is unchanged; conversely, a matching stamp is insufficient if the dependency has not yet been validated against its own possibly changed inputs.
+Thus parent changes check the relationship, while dependency changes check the referenced result and its effect on the consumer.
+
+These are per-link validation stamps, separate from the target's shared residency slot: different parents can have observed different revisions of the same target.
+Scope stamps by owner/target identity and semantic world; bare revision numbers alone do not establish identity or persistent validity.
+Compare against the version selected by the requesting world, not unconditionally the newest version, and keep mutable validation bookkeeping outside published immutable payloads.
+Neither stamp replaces dependency tracking or reader lifetime protection.
+
+All access goes through the helper: recognise the state before dereferencing, validate the target and dependencies, share existing in-flight work, and schedule computation or rehydration as needed.
+The helper may yield through the declaration pipeline; an inline fast path does not imply that a cold access is cheap, synchronous, or allowed to execute compiler code without the established opt-in/host permission.
+Return a protected result/lease or an explicit pending/error state, not an unprotected pointer that eviction can invalidate immediately after lookup.
+
+Keep mutable residency slots in cache control records or side tables, outside immutable syntax and published semantic payloads; immutable dependency handles can refer to those slots.
+Prefer one authoritative slot per cached target over independently cached raw-pointer aliases, unless an explicit alias-invalidation scheme is provided.
+Publication and eviction must synchronise slot transitions with reader lifetime protection; an atomic pointer load/store alone does not prevent use-after-free.
+An existing snapshot must continue to select its own version even when another world computes a newer target.
+
+Never persist these pointer values or sentinel bit patterns as the artifact format; serialise explicit states/keys and reconstruct runtime slots.
+Reserve and verify the proposed sentinel representations on supported Jai backends/platforms, and centralise their definitions and checks.
+An explicit state-plus-pointer wrapper remains the fallback if it is clearer or safer without a demonstrated space/performance disadvantage.
+A later metaprogram can enforce accessor-only use; until then, keep the slots encapsulated and their access rules explicit.
 
 ### Persistent Representation
 
@@ -334,6 +436,9 @@ Start with a simple safe format; measure deserialisation against reparsing.
 Cached semantic edges must refer to persisted artifact/declaration identities and validated dependency manifests, not raw pointers that happened to be valid when the editor exited.
 Cross-version or missing dependencies cause a miss, not a best-effort pointer repair.
 
+Also, at least initially, make it a text-based format so we can more easily debug it - leverage the `Text_File_Handler` module.
+Later we can consider moving to a binary format for speed.
+
 ## 9. Persistence and Editor Operation
 
 Proposed setup capabilities, not final option names:
@@ -341,8 +446,8 @@ Proposed setup capabilities, not final option names:
 - Persistence enabled by default; explicitly disabling it retains the same in-memory semantics.
 - Saved and unsaved revisions persist, with separate current-disk/active-overlay metadata, private storage, and explicit recovery/discard/cleanup behaviour.
 - Optional cache-directory override, with a documented per-user default outside source repositories.  The concrete platform default needs a later API decision.
-- Configurable memory/disk budgets and retention policy, preferring resident validated data under ordinary conditions.
-- Clear/invalidate operations, format/version inspection, cache-hit/miss reasons, and a way to recover from a damaged store.
+- Configurable memory/disk budgets (with unlimited (= all available space) as an option for disk) and retention policy, preferring resident validated data under ordinary conditions.
+- Clear/invalidate operations, format/version inspection, cache-hit/miss reasons, and a way to recover from a damaged/outdated store, probably via reparse rather than a migration or similar.
 - Independent workspace-trust and external-evaluation policy.  Enabling persistence is not permission to execute source code.
 
 On restart, load a lightweight manifest, validate relevant revisions/configuration, and lazily rehydrate results needed for visible files or queries.
@@ -358,9 +463,9 @@ Generated source and unsaved buffers can contain private code.
 Persistence must disclose that scope, provide deletion/retention controls, and remove obsolete recovery references when the host reports discard/reset; historical unreferenced blobs then follow the garbage-collection policy.
 Discard is not a promise of secure erasure from storage or backups.
 
-Disk garbage collection removes unreachable or over-budget historical artifacts, not live leased data.
+Disk garbage collection removes unreachable or over-budget historical artifacts, not live leased data; can be triggered manually as well as being run automatically.
 Per-artifact demand loading can remain lazy while eviction remains rare; those are compatible goals.
-A read-only or unwritable cache directory must degrade to correct in-memory operation rather than prevent editor features from working.
+A read-only or unwritable cache directory must degrade to correct in-memory operation rather than prevent editor features from working - we need a mechanism to report systematic errors/warnings of this nature for something to surface them to the user.
 
 ## 10. Compile-Time Execution and the Official Compiler
 
@@ -368,7 +473,7 @@ Provide an evaluator boundary whose input is a semantic/evaluation request, reso
 Its output is structured values or generated syntax, diagnostics, provenance/source maps, observed dependencies, and an explicit support/completeness state.
 
 Initially the evaluator may be unavailable.
-Later a subprocess backend can wrap supported snippets and use the official compiler; eventually a bootstrapped language-service backend may interpret the corresponding AST.
+Later a subprocess backend can wrap supported snippets and use the official compiler (on generated source with build options including do_output=false and an `#insert` in it, then reading back the `.build/.added_strings_w#.jai` file(s)); eventually a bootstrapped language-service backend may interpret the corresponding AST.
 Keep frontend query/ownership contracts independent of that choice.
 
 Snippet extraction is not generically semantics-preserving.
@@ -406,7 +511,32 @@ Publish results atomically only with that identity; the editor can discard late 
 A semantic cache hit can still require current source-location mapping before displaying diagnostics or performing a rename.
 
 Cross-file refactoring needs a coherent world and fresh validation before applying edits, not independent 'latest' artifacts collected at different times.
-Query cancellation must leave persistent entries either complete and valid or absent.  Parallel queries cannot write binding/type fields into a shared syntax snapshot.
+Query cancellation must leave persistent entries either complete and valid or absent.
+Parallel queries cannot write binding/type fields into a shared syntax snapshot.
+
+### Lower-Level World APIs
+
+Provide two complementary API surfaces before higher-level editor features; the following describes their contracts, not final names or signatures.
+
+**Change notification:** accept a document/source-provider change with revision identity (and a base revision for ranged edits), then schedule background world-model updates, including parsing and affected dependency invalidation.
+Use partial reparsing where supported and worthwhile, with whole-file parsing as the baseline/fallback.
+Return an operation/update ticket identifying the submitted revision, with a mechanism to observe completion or wait for it; an explicit wait option can be a convenience over the same mechanism.
+Define completion milestones, such as syntax/index publication or specified semantic work, rather than promising that all possible demand-driven analysis is finished.
+If rapid edits coalesce or supersede work, report that outcome explicitly instead of claiming the original revision completed.
+
+**Information request:** ask a selected world for a particular result and receive an immediate response: an available result with its world/revision and completeness, a terminal unavailable/unsupported/error state, or a pending handle that can be awaited or observed.
+If the result needs computation or rehydration, schedule it or join existing in-flight work and return the corresponding pending handle rather than blocking indefinitely.
+Completion produces the result or an explicit terminal outcome; requesting information does not implicitly opt into a newer world or grant compiler-execution permission.
+Callers wanting information after a notified edit can wait for the relevant update milestone, select its published world, then query it and wait again only if needed.
+
+Define cancellation, result/handle lifetimes, and notification delivery without requiring a particular threading, coroutine, or event-loop API.
+Cancelling one waiter must not discard shared work still needed by other requests.
+
+### Later Editor-Feature APIs
+
+Build completion suggestions from a context/starting position or prefix, identifier-definition lookup, and later navigation/refactoring operations on top of the world update/query APIs.
+These convenience APIs should share the same revision, pending-result, cancellation, and lifetime contracts rather than inventing separate update mechanisms.
+They are a higher and later API layer, not prerequisites for defining the lower-level world model.
 
 ## 12. Trade-Offs and Alternatives
 
@@ -435,7 +565,9 @@ Correctness gates should compare cached and uncached execution over the same wor
 - Equivalent syntax, diagnostics, bindings, type identities/values/layouts, generated results, and editor locations where supported.
 - Correct misses for parameter, target, resolver, dependency, version, file-creation/deletion, and external-input changes.
 - No cross-module nominal-type conflation or stale overload/name-lookup results.
+- Compiler-verified bare/qualified import behaviour across `#scope_export`, `#scope_module`, and `#scope_file`, including nested-scope bare versus named imports, visibility edits, cached misses, and inaccessible-candidate hints that do not create false bindings.
 - Independent surviving worlds after old-world release, eviction, restart, and cancellation.
+- Correct update-ticket and pending-query completion, revision selection, superseded-update reporting, and independent cancellation of waiters sharing work.
 - Correct incomplete/unsupported states without converting unknowns into errors or stale successful results.
 - Corruption recovery, bounded deserialisation, multi-process publication, and safe handling of untrusted evaluation.
 
@@ -457,6 +589,7 @@ These should be resolved as the model is refined, not silently encoded as implem
 - How much parameter canonicalisation and compiler-backed evaluation is available before full semantics exists.
 - The explicit evaluation opt-in parameter and host-authorisation contract, including how an embedding editor supplies its external workspace-trust decision.
 - The representation and matching policy for declaration identity across edits, moves, and restarts; uncertainty must remain a valid cache miss.
+- Verify whether qualified module access includes `#scope_file` declarations as well as `#scope_module` declarations; preserve both in the cache regardless of the result.
 - Whether a syntax chunk store is worth maintaining after whole-file/query caching is measured.
 - Numerical acceptance criteria for warm restart, steady editor edits, memory retention, and persistent-storage overhead.
 
@@ -468,13 +601,15 @@ No production changes are authorised by this checklist alone.
 - [ ] Agree the remaining identity, persistence/privacy, workspace-trust, residency-budget, and performance policies in section 14.
 - [ ] Define owned immutable syntax snapshots and syntax diagnostics that do not depend on semantic mutation or caller allocator lifetime.
 - [ ] Define coherent semantic worlds, declaration/type identities, versioned handles, and query-result states through full Jai coverage.
-- [ ] Define module-instance composition and canonical parameter/context keys, including entrypoint program parameters and loaded-file membership/visibility.
+- [ ] Define module-instance composition and canonical parameter/context keys, including entrypoint program parameters, loaded-file membership, all-visibility declaration retention, and access-context lookup views.
 - [ ] Define dependency recording and invalidation for successful/failed lookup, overload sets, constants, conditions, layout, generics, generated declarations, and cycles.
 - [ ] Define explicit ownership and reclamation for source/syntax, semantic artifacts, dependency groups, request leases, task scratch storage, and superseded worlds.
 - [ ] Specify a safe versioned persistent format and store: validation, pointer-free records, manifests, crash recovery, concurrent writers, lazy rehydration, and garbage collection.
 - [ ] Define independent cache-backed source/syntax and semantic-query capabilities, retaining full changed-file parsing as the initial baseline.
+- [ ] Define change-notification/update tickets and immediate-result-or-pending world queries, including completion milestones, waiting, supersession, cancellation, and a separate later editor-feature API layer.
 - [ ] Define an optional evaluator contract with context reproduction, provenance, dependency/effect tracking, unsupported states, trust controls, and bounded subprocess execution.
-- [ ] Define cache-equivalence, invalidation, lifetime, restart, cancellation, corruption, and incomplete-code test matrices.
+- [ ] Define cache-equivalence, invalidation, lifetime, restart, cancellation, corruption, and incomplete-code test matrices, including compiler verification of import/visibility rules.
+- [ ] Define inaccessible-candidate diagnostics and explicit export fix actions, separate from ordinary identifier resolution and validated against current source and export impact.
 - [ ] Benchmark the complete editor workflows in section 13 and agree acceptance thresholds before choosing chunk-level syntax reuse or finer cache granularity.
 - [ ] Revisit the existing AST-copier decision independently of the future architecture, using its measured benefit and preserved correctness contracts.
 - [ ] After the target model is agreed, write a separate migration/implementation plan from the current parser; do not treat this report as that plan.
