@@ -61,7 +61,7 @@ Combining them into one universal hash would obscure invalidation and make ordin
 | `DocumentID` | A resolved source-document identity, including its absolute path and filesystem identity policy. |
 | `SourceRevision` | Exact source bytes plus their content digest.  An unsaved editor buffer is a revision even if disk contents differ. |
 | `SyntaxKey` | Document identity, source digest, syntax configuration, and parser/schema version. |
-| `ModuleInstanceID` | Resolved module entrypoint identity plus canonical module-parameter values and entrypoint program-parameter values. |
+| `ModuleInstanceID` | Resolved module source plus compiler-compatible import-request identity, ordered explicitly supplied typed module arguments, and that module's effective program settings.  E2 shows that canonical filepath plus effective values alone is insufficient. |
 | `SemanticContextID` | Module instance, target/type environment, resolution configuration, evaluator policy/version, and relevant language configuration. |
 | `DeclarationID` | A declaration within its owning module instance and revision mapping; not just its name or syntax hash. |
 | `TypeID` | Nominal semantic identity rooted in the defining declaration, with canonical instantiation arguments where applicable. |
@@ -100,11 +100,16 @@ Editor backups and parser artifacts have different responsibilities and need not
 
 ### Module Parameters and Program Parameters
 
-Canonicalise values by type and semantic value, not expression spelling, pointer address, iteration order, or locale-dependent printing.
+Canonicalise individual argument values by type and semantic value, not expression spelling, pointer address, or locale-dependent printing.
+Preserve the explicit argument list's membership and order separately: E2 finds that omission versus explicit defaults, partial versus full argument lists, and reordered named arguments can produce distinct nominal module instances despite equal effective values.
+It also finds distinct instances for import-mode/path-spelling aliases of the same source; a canonical physical document identity cannot alone establish module identity.
+Use a versioned compiler-compatibility policy for these request-level distinctions, while still sharing suitable source/syntax backing.
 For values with identity or effects that cannot yet be serialised canonically, mark the instance non-persistable or use a conservative session-local identity.
 Include dependencies of default expressions and parameter evaluation.
 
-Program parameters originate at the entrypoint and propagate consistently to imports; they are not independently overridden per imported file.
+Program settings are configured by imports in the main program, per module, and apply to its instances and transitive imports; an imported module cannot supply its own override for a child.
+They are not a flat namespace inherited by every module with a same-named parameter: setting `MODE` on one module does not set `MODE` on a different module.
+Supplying program parameters twice for the same module is rejected even if both supplied settings are identical; preserve configuration-site validation independently of instance cache hits.
 A change may conservatively invalidate the program's semantic contexts initially.
 Later queries may depend only on the parameters they actually read, without weakening the module-instance ownership model.
 
@@ -204,12 +209,15 @@ This does not require eagerly completing semantic analysis of every retained dec
 
 For a top-level bare `#import "Basic";`, exported members become directly visible in the global scope.
 For `Basic :: #import "Basic";`, members are accessed through `Basic.` rather than injected as bare names.
-The reported Jai behaviour also allows qualified access to non-public members; whether that includes `#scope_file` declarations as well as `#scope_module` declarations still needs compiler verification.
-Do not encode the unverified distinction as an export-only cache boundary.
+E1 verifies qualified access to `#scope_module` members, but not `#scope_file` members, on the tested compiler/configuration (see section 14).
+Do not encode an export-only cache boundary: module-visible declarations are valid qualified lookup candidates, and file-visible declarations remain relevant to internal analysis and tooling diagnostics.
 
-Also verify nested-scope imports against the compiler: the working hypothesis is that a bare import still contributes exported names to the global namespace, whereas a named import introduces only a locally scoped namespace binding.
-Check access from the importing scope, outside it, and from sibling scopes for both forms; do not assume the import's lexical location is necessarily the scope receiving its members.
-Keep this distinction unconfirmed until tested, and use the verified rules when recording lookup dependencies and invalidating cached results.
+E1 also verifies that bare imports in procedures, nested blocks, and structs expose exported names in the importing program's global scope, including to another loaded file.
+The reverse direction is verified too: a bare import originating in a loaded file exposes exported names to the file doing the loading, at all four tested import scopes.
+Named imports do not inject unqualified names, and their namespace binding does not escape its lexical scope as a bare name.
+Top-level named bindings are accessible from other procedures and loaded files; bindings nested in procedures/blocks/structs are not directly visible there.
+With normal loaded-file scope, a top-level named binding in a loaded file is likewise accessible to its loading file, but a nested named binding is not directly accessible there.
+Use these observed distinctions when recording lookup dependencies and invalidating cached results; E1's result scope and remaining limitations are recorded below.
 
 Resolve names through an explicit access context: importing scope, bare versus qualified access, module instance, and originating file where relevant.
 Derived lookup views and their cached results must depend on that context and the applicable visibility rules, including visibility changes and previous lookup misses.
@@ -439,6 +447,15 @@ Cross-version or missing dependencies cause a miss, not a best-effort pointer re
 Also, at least initially, make it a text-based format so we can more easily debug it - leverage the `Text_File_Handler` module.
 Later we can consider moving to a binary format for speed.
 
+Proposed storage layout: under the configured cache directory, keep a directory per canonical source-file/context identity, with separate filenames/artifacts for declarations belonging to that source file.
+A module instantiated with different parameters must have a distinct directory identity; include other required program/semantic context discriminators rather than keying semantic storage by filepath alone.
+E2 additionally requires preserving compiler-observed import-request distinctions when mapping semantic instances to directories; physical-source deduplication must not merge their nominal declarations.
+Use safe encoded names or identity digests with a readable manifest mapping back to paths/parameters, not unescaped absolute paths as directory names.
+Preserve artifact revisions within that layout so a new write does not overwrite data still selected by an older world.
+Evaluate whether declaration files cover only top-level declarations, independently addressable nested declarations, or declarations externally reachable through supported lookup rules; externally reachable must not be equated with exported only.
+Regardless of payload granularity, retain discoverability for all visibilities, ownership of non-split nested content, and complete reloadable dependencies.
+This is a layout proposal to test against E10/E11, including small-file overhead and partial loading/eviction; it does not prevent sharing context-independent syntax backing across instance directories.
+
 ## 9. Persistence and Editor Operation
 
 Proposed setup capabilities, not final option names:
@@ -589,9 +606,171 @@ These should be resolved as the model is refined, not silently encoded as implem
 - How much parameter canonicalisation and compiler-backed evaluation is available before full semantics exists.
 - The explicit evaluation opt-in parameter and host-authorisation contract, including how an embedding editor supplies its external workspace-trust decision.
 - The representation and matching policy for declaration identity across edits, moves, and restarts; uncertainty must remain a valid cache miss.
-- Verify whether qualified module access includes `#scope_file` declarations as well as `#scope_module` declarations; preserve both in the cache regardless of the result.
 - Whether a syntax chunk store is worth maintaining after whole-file/query caching is measured.
 - Numerical acceptance criteria for warm restart, steady editor edits, memory retention, and persistent-storage overhead.
+
+### What a Completed Specification Must Define
+
+The direction is established, but a completed specification must turn the following into explicit contracts, state transitions, and acceptance tests.
+Full future semantic coverage does not mean implementing or fully specifying every Jai rule before the first migration; define the architectural contracts, a supported initial slice, and an extension/unsupported-state contract.
+
+| Area | Definition needed before migration planning |
+| --- | --- |
+| Scope and coverage | Initial supported platforms/compiler versions, syntax and semantic operations, malformed-code behaviour, explicit exclusions, and the route to full coverage.  Separate initial requirements from later capabilities. |
+| Identity | Document/path/alias rules, module and program parameter canonicalisation, declaration/type identity, edit matching, target context, and persisted versus session-local IDs.  Specify conservative misses for uncertain matches. |
+| Source and worlds | Source-provider interface, edit coordinate units/base revision, disk/overlay precedence, save/reset/rename/delete/recovery events, world capture/publication, and how newly discovered files enter a coherent world. |
+| Syntax and semantic records | Owned record schemas, syntax/semantic boundary, spans/source maps, diagnostics, derived indices, versioned references, and compatibility policy for existing compiler-shaped nodes. |
+| Module composition | Verified bare/named import and loaded-file scope rules, visibility, duplicate/cyclic imports, parameter propagation, and all-visibility indices versus access-filtered lookup. |
+| Declaration pipeline | Initial stage/query catalogue, prerequisites and readiness milestones by declaration kind, generated-work discovery, provisional results, legal recursion, and failure/unsupported states. |
+| Dependency validity | What each query observes, negative lookup/candidate-set dependencies, parent/dependency revision semantics, dirty propagation, fingerprint equality, and validation after restart. |
+| Handles and ownership | Handle/state layout, per-link versus shared-target metadata, allocation generations, leases, pool/arena ownership, cycle reclamation, eviction transitions, and safe rehydration. |
+| Scheduling and API | Change/update tickets, immediate-result-or-pending queries, completion milestones, supersession, cancellation, wait/notification delivery, threading/reentrancy, priorities, and shutdown. |
+| Persistence | Initial text schema using `Text_File_Handler`, keys/manifests, validation/version rejection, publication/locking, corrupt-store recovery, unsaved metadata, GC, budgets, and cache/system diagnostics.  Binary encoding is not an initial requirement. |
+| Evaluation boundary | Disabled/unsupported behaviour initially, opt-in parameter and host permission, request/result/provenance contract, tracked inputs/effects, and limits of compiler snippet equivalence.  Implementation may remain deferred. |
+| Acceptance | Cached-versus-fresh oracles, supported-language cases, race/lifetime/restart/failure tests, representative workloads, and agreed latency/memory/disk targets. |
+
+Some choices require product decisions rather than measurement: initial coverage, host integration style, cache defaults/budgets, recovery retention, and which performance trade-offs are acceptable.
+Experiments should inform these choices, not quietly choose them.
+
+### Experiments to Run First
+
+Use small isolated fixtures/prototypes, not a parallel implementation of the new parser.
+Record the hypothesis, exact compiler/build configuration, commands, observed output, limitations, and resulting decision for each experiment.
+Language probes use the official compiler as the oracle, including separate expected-failure cases; prototype cache tests compare against fresh computation.
+These are proposed manual probes on authored trusted fixtures; listing them does not authorise their execution or automatic evaluation of arbitrary workspace code.
+E1 and E2 have been completed as recorded below; E3-E12 remain proposed and have not yet been run.
+
+| ID | Experiment and discriminating check | Decision it informs |
+| --- | --- | --- |
+| E1 | Completed: import/visibility matrix using bare and named imports at file, procedure, nested-block, and struct scopes; export/module/file visibility; access inside, outside, from siblings, and from another loaded file.  Each access compiled separately. | Verified scope receiving imported names, lexical namespace binding, and qualified module/file visibility; see results below. |
+| E2 | Completed: repeated/aliased imports, omitted/explicit defaults, argument order/types/values, nominal assignment compatibility, two-hop imports, and program-setting constraints; 32 isolated probes and evaluation-count audit. | Canonical source plus effective parameter values is insufficient for compatible nominal identity; program configuration is per module and main-program controlled.  See results below. |
+| E3 | Loaded-file composition: one file loaded through several paths/parents and module instances; vary order, scope directives, duplicate loads, and load cycles.  Compare binding, visibility, relative paths, and diagnostics. | File membership/deduplication rules, composition dependencies, and syntax reuse across distinct semantic contexts. |
+| E4 | Path/source context: compare path casing, relative aliases, supported symlinks, relocation, and identical bytes at different paths; observe relative imports and `#filepath`/location-sensitive constructs.  Record filesystem limits and skip unsupported link creation rather than requiring elevated privileges. | Canonical versus source-visible paths and which context-sensitive results cannot share byte-only keys. |
+| E5 | Compiler-evaluation feasibility: on authored trusted fixtures, try `do_output=false` plus `#insert` and inspect `.build/.added_strings_w#.jai` production, multiplicity, freshness, extraction boundaries, diagnostics, and failures.  Include one `using,map` callback and a context-dependent case.  Measure startup cost separately. | Whether the proposed output channel works, its limitations, and whether evaluator support can remain deferred.  This is not evidence that arbitrary snippets are equivalent or safe. |
+| E6 | Syntax independence probe: construct a small owned syntax-only representation covering declarations, spans, recovery, and decoded payloads; attach two different semantic contexts and release the original input/builder storage.  Verify neither binding nor release mutates the other's view. | The minimum syntax/semantic split, ownership contract, and whether current node overlays can be adapted or should be replaced.  Do not implement a second full AST. |
+| E7 | Dependency/revision model: a tiny query graph with a parent-only edit, dependency-only edit, unchanged interface/body change, new overload, previous missing name, transitive constant/layout change, and simultaneous old/new worlds.  Compare every result to fresh evaluation and assert expected reuse. | Exact dual-stamp validation, negative dependencies, world selection, and safe conservative module invalidation. |
+| E8 | Pipeline/scheduler model: advance declarations through signature/body/layout milestones, include valid pointer recursion and invalid by-value recursion, and simulate a slow external task, cancellation, shared waiters, and a genuinely cyclic wait. | Stage readiness, pending API semantics, cycle diagnostics, and shutdown.  No forward progress alone is not proof of a cycle while work can still complete externally. |
+| E9 | Allocation/eviction benchmark: verify the actual candidate Jai pool APIs, then compare arenas, typed pools, and a hybrid under repeated edits, sparse eviction, retained old snapshots, and slot reuse.  Track allocation generations, payload cleanup, freelist reuse, backing bytes, and fragmentation. | Initial allocation units, ownership/lease mechanism, and whether partial frees deliver useful memory or churn reductions. |
+| E10 | Text artifact round trip: use `Text_File_Handler` on representative node/query records, IDs, exact strings/numbers, diagnostics, and dependencies.  Decode into fresh storage after producer teardown; compare with originals.  Include Unicode, malformed/truncated records, schema mismatch, and bounds limits. | Concrete initial schema, exact-value fidelity, validation strategy, and text decoding cost relative to parsing. |
+| E11 | Store/restart/overlay prototype: publish small immutable artifacts and manifests; interrupt writes, run competing publishers, corrupt an entry, make the store unwritable, and exercise unsaved restore/save/reset, external file changes, deletion, and GC.  Hash actual source rather than trusting timestamps. | Atomic publication/shared-store policy, recovery handshake, fail-open in-memory operation, system diagnostics, and durable metadata requirements. |
+| E12 | Representative project baseline: measure fresh parse, unchanged-file reuse, and text reload with validation across many small files and large active files, transitive imports, malformed edits, body/interface changes, and repeated updates.  Include hashing/I/O, tail latency, retained worlds, and disk size; distinguish process restart from OS-cold filesystem cache. | Workload selection, numerical acceptance targets, initial cache granularity, and whether syntax persistence earns its overhead.  Reuse existing benchmark/oracle infrastructure where applicable. |
+
+#### E1 Results: Import Scope and Visibility
+
+Completed 2026-10-16 on Windows with Jai beta 0.2.030, built 2 July 2026, using the fast x64 backend.
+Reproducible runner: [experiment_import_visibility.jai](examples/experiment_import_visibility.jai).
+From the parser's examples directory:
+
+```bash
+jai experiment_import_visibility.jai -x64 -quiet -no_color
+```
+
+The runner executes at compile time and sets `do_output=false` and `write_added_strings=false` for itself and generated probes; it does not link/run target executables or require `+Autorun`.
+Each child invocation uses `jai -x64 probe.jai -quiet -no_color -import_dir ..` in its own case directory, resolving an ordinary `#import "Visibility_Probe";` or `Probe :: #import "Visibility_Probe";`.
+The synthetic module declares distinct export/module/file markers in both its entrypoint and a loaded file.
+Accepted accesses assert exact marker values; procedure/block checks are forced through stallable compile-time calls.
+There are 8 import-placement controls and 288 lookup probes: 296 assertions passed, with 80 compilations accepted and 216 rejected.
+A separate audit of every rejected probe's log found exactly one expected diagnostic: 202 undeclared identifiers and 14 missing members, with no masked parse/scheduling errors.
+This includes 48 reverse-load probes: imports originate in a loaded file, and the corresponding marker assertions are in the loading file.
+
+| Observed case | Result |
+| --- | --- |
+| Bare import at file/procedure/block/struct scope | Exported markers accessible inside and at all tested outside sites, including another loaded file; module/file-visible markers not accessible as bare names. |
+| Named import, binding in scope | Qualified export/module-visible markers accessible; file-visible markers rejected.  Same result for markers from the imported module's entrypoint and its loaded file. |
+| Named import, unqualified member access | Rejected even inside the importing scope; no bare-name injection. |
+| Named import at top level | Namespace binding accessible in another procedure and another loaded file. |
+| Import originating in a loaded file | Bare-import exports accessible to its loading file, even when the import is nested; a named binding is accessible there only when top-level, with qualified export/module access but not file-visible access. |
+| Named import in procedure/block/struct | Namespace binding not directly accessible by its bare name outside that lexical scope; block-after/block-sibling and struct-sibling probes also reject it. |
+
+Generated sources, individual `compile.log` files, and `summary.tsv` are retained under `examples/.build/import_visibility/` and can be regenerated; normal build cleanup may remove them.
+The runner asserts the observed outcomes on rerun; a compiler behaviour change should fail the relevant assertion rather than silently replace the recorded rule.
+An initial fixture used non-stallable compile-time calls, which masked some negative checks with scheduling diagnostics; the final results use stallable calls and have been fully re-audited.
+
+These results are scoped to this compiler/version, backend, ordinary module-name imports, and the tested unconditional contexts.
+Reverse-load probes use normal loaded-file scope; applying an explicit `#scope_file` directive to the importing file's own declarations/binding is not covered by this extension.
+They do not establish behaviour for every directive/import modifier, transitive re-export, overload collision, disabled conditional branch, or other backend/platform.
+For a struct-local named import, rejection of a bare `Probe` outside the struct does not establish whether an explicitly aggregate-qualified path such as `Container.Probe` is usable; that was not tested.
+Module identity/parameter results are recorded in E2 below; broader loaded-file order/deduplication/cycle behaviour remains E3.
+Architectural consequence: distinguish lexical binding from the scope receiving bare-import exports, and retain module/file-visible records while applying context-specific access filters.
+
+#### E2 Results: Module Identity and Program Configuration
+
+Completed 2026-10-16 on Windows with Jai beta 0.2.030, built 2 July 2026, using the fast x64 backend.
+Reproducible runner: [experiment_module_identity.jai](examples/experiment_module_identity.jai).
+From the parser's examples directory:
+
+```bash
+jai experiment_module_identity.jai -x64 -quiet -no_color
+```
+
+The runner and all generated entrypoints disable executable output and added-string output.
+Child compilations use `jai -x64 probe.jai -quiet -no_color -import_dir ..` in isolated named case directories.
+The authored module has integer/string/bool module parameters, integer/bool program parameters, an otherwise identical nominal struct, exported effective values, and a compile-time `E2_INSTANCE` print marker.
+Bridge and grandparent modules create a two-hop import chain; another bridge deliberately attempts a forbidden program-setting override.
+Type equalities/inequalities, positive assignment compatibility, parameter values, and graph observations are asserted in accepted fixtures.
+
+All 32 expected outcomes passed: 27 accepted compilations and five expected rejections.
+The complete log audit matched all 40 expected module-instance evaluation markers in accepted compilations; each shared nominal instance printed once and each tested distinct pair printed twice.
+Rejected compilations were not used to infer evaluation counts because compilation may stop before their `#run` directives execute.
+The five rejections were two incompatible-struct assignments, one program-setting override from an imported module, and two duplicate program-setting sites (equal and unequal values).
+Each negative log contained exactly its expected compiler error class; no parse/setup failure was counted as an identity result.
+
+| Probe family | Observed result |
+| --- | --- |
+| Repeated same import | Same nominal type and one evaluation, including repeated imports within a procedure or another loaded file. |
+| Omitted versus empty module argument list | Same instance. |
+| Omitted versus explicit default arguments | Distinct instances even though the tested effective values and integer value type match.  Assignment between omitted/default-explicit struct types is rejected. |
+| Repeated same explicit argument list | Same instance, for both partial and full lists. |
+| Partial versus full default list; reordered named arguments | Distinct instances despite equal effective parameter values. |
+| Integer `3` versus `1+2`, in otherwise identical explicit lists | Same instance: raw expression spelling alone is not the identity. |
+| Integer `3` versus `(3).(s32)`; changed integer/string/bool values | Distinct instances.  Preserve typed supplied arguments, not just printed values. |
+| Repeated identical file/dir imports | Same instance within each tested import form. |
+| Module-name versus file/dir import; file spelling with redundant `../` traversal | Distinct instances of the same physical source.  Do not unify nominal types through physical-path normalisation alone. |
+| Byte-identical source in another module directory | Distinct instance/type. |
+| One explicit program-setting site plus ordinary imports | All imports of that module share the configured settings and the same nominal instance for identical module arguments, including when the ordinary import appears first in source.  Explicit program defaults do not create the omitted-versus-explicit split seen with module arguments. |
+| Different module-argument instances under one program setting | Distinct nominal types, but both observe the one configured program setting. |
+| Two program-setting sites for the same module | Rejected even for identical values. |
+| Program-setting site inside an imported module | Rejected: settings may only be supplied from the main program. |
+
+The graph prints fields in this order: grandparent mode, bridge mode, child mode, direct-child-import mode, shared child nominal identity, child trace flag.
+
+```text
+Default configuration:                   7  7  7  7 true false
+Configure only the grandparent module:  11  7  7  7 true false
+Configure the child from the main file:  7  7 19 19 true true
+```
+
+Thus, same-named parameters on different modules are independent, while a main-program setting for the child is observed at every import of that child through the two-hop graph.
+The probe named `graph_entry_defaults` configures the top imported module, not a `#module_parameters` directive in the entrypoint; an exploratory attempt at the latter was rejected and was corrected before the final run.
+
+Generated sources, `compile.log` files, and `summary.tsv` are retained under `examples/.build/module_identity/` and may be removed by normal build cleanup.
+The summary includes expected acceptance, diagnostic substring, and successful evaluation counts; compare those with the corresponding logs when auditing a rerun.
+The final fixtures assert the observed nominal/graph results, not the initial hypothesis that equal effective values always imply equal instance identity.
+No executable/object outputs were produced in the fixture directory.
+
+These are compiler-observable results, not a claim to know its internal cache algorithm or that all distinctions are intentional language guarantees.
+The user confirms that different filesystem traversals reaching the same file are a known compiler deduplication hole, with a fix on the compiler roadmap but probably not soon.
+Treat E2's redundant-traversal result as a current compiler limitation to accommodate, not an intended permanent module-identity rule; this roadmap clarification does not establish the status of every other import/argument distinction above.
+Coverage is limited to this version/backend/platform, these primitive parameters, unconditional imports, and the explicit alias forms shown; generic/type/procedure-valued arguments, default-expression dependencies, symlinks/casing, and wider resolver configurations remain unproven.
+E4 remains responsible for broader path/source-context behaviour; do not generalise the tested `../` alias result into an exact universal path-key algorithm.
+Architectural consequence: separate physical-source/syntax reuse from nominal module-instance identity; preserve observed import form/spelling and explicit typed argument-list distinctions, and model program configuration as validated per-module settings established by the main program.
+Version the relevant compatibility rules and rerun the alias probes when the compiler fixes traversal deduplication; do not bake the hole into permanent identity semantics.
+Until then, merging currently distinct nominal instances requires an explicit compatibility decision rather than being presented as a transparent cache optimisation.
+
+Suggested order is E1-E5 for language/toolchain facts, then E6-E8 for correctness contracts, then E9-E11 for representation/storage, with E12's baseline captured early and comparisons added as prototypes become available.
+E5 is a bounded feasibility probe, not a prerequisite to implementing the syntax-first service if evaluation remains explicitly unsupported.
+Do not block the initial specification on optional syntax-chunk reuse, binary formats, mmap, packed sentinel optimisation, or full compiler-backed evaluation; retain a simple supported baseline and explicit extension boundaries.
+
+### From Evidence to a Completed Migration Plan
+
+The specification is ready when each initial requirement has a defined owner, identity/version rule, state transition, failure behaviour, and executable acceptance criterion; remaining open items must be explicitly deferred rather than accidental gaps.
+Include representative traces: notify-edit then await/query, parent/dependency changes, old-world retention, evict/reload, unsaved reset/restart, and a blocked/cancelled/unsupported query.
+Approve the coverage/defaults and performance criteria after reviewing the experimental evidence and before judging adoption of competing optimisations.
+
+Only then complete the migration plan by mapping current code, tests, and public operations to the approved contracts.
+That plan must identify replacement/reuse/removal boundaries, dependency-ordered buildable steps, temporary adapters or deliberate API breaks, test/oracle preservation, persistence rollout/version rejection, cutover criteria, and cleanup.
+Audit the current implementation again at that point: the present inventory is a starting point, not a promise that every migration task is already known.
+The AST-copier keep/drop decision remains an independent measured decision, not an automatic consequence of the new model.
 
 ## 15. High-Level TODO
 
@@ -599,6 +778,10 @@ These are design/capability goals derived from this report, not an ordered migra
 No production changes are authorised by this checklist alone.
 
 - [ ] Agree the remaining identity, persistence/privacy, workspace-trust, residency-budget, and performance policies in section 14.
+- [x] Run and record E1's bounded compiler import/visibility matrix, including auditing expected-failure diagnostics.
+- [x] Run and record E2's bounded module identity/parameter probes, including nominal compatibility, transitive configuration, expected diagnostics, and evaluation counts.
+- [ ] Run and record the remaining bounded experiments E3-E12 in section 14, distinguishing initial specification blockers from explicitly deferred capabilities.
+- [ ] Turn the evidence into approved initial contracts and acceptance criteria using the specification-completion gate in section 14, before writing the migration plan.
 - [ ] Define owned immutable syntax snapshots and syntax diagnostics that do not depend on semantic mutation or caller allocator lifetime.
 - [ ] Define coherent semantic worlds, declaration/type identities, versioned handles, and query-result states through full Jai coverage.
 - [ ] Define module-instance composition and canonical parameter/context keys, including entrypoint program parameters, loaded-file membership, all-visibility declaration retention, and access-context lookup views.
