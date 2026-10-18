@@ -63,7 +63,7 @@ Combining them into one universal hash would obscure invalidation and make ordin
 | `SyntaxKey` | Document identity, source digest, syntax configuration, and parser/schema version. |
 | `ModuleInstanceID` | Resolved module source plus compiler-compatible import-request identity, ordered explicitly supplied typed module arguments, and that module's effective program settings.  E2 shows that canonical filepath plus effective values alone is insufficient. |
 | `SemanticContextID` | Module instance, target/type environment, resolution configuration, evaluator policy/version, and relevant language configuration. |
-| `DeclarationID` | A declaration within its owning module instance and revision mapping; not just its name or syntax hash. |
+| `DeclarationID` | A declaration within its owning module instance, load occurrence where applicable, and revision mapping; not just its name, physical filepath, or syntax hash. |
 | `TypeID` | Nominal semantic identity rooted in the defining declaration, with canonical instantiation arguments where applicable. |
 | `QueryKey` | The semantic operation, subject identity, explicit arguments, context, and query implementation version. |
 | `ArtifactKey` | A validated query or syntax result together with the versioned input/dependency fingerprints needed to reuse it. |
@@ -78,6 +78,10 @@ An absolute path is necessary, but a raw path string is not sufficient: Windows 
 Define canonical document identity and retain the source-visible path spelling separately.
 Location/path-sensitive constructs such as `#filepath`, relative loads, and diagnostics can observe the document context; identical bytes in different files are not automatically interchangeable results.
 Do not merge module identities across symlinks until the language/path policy is explicit.
+E4 below verifies that source-visible paths can retain dot/parent segments, directory casing, and link aliases; separator handling also differs between the tested load and file-import paths.
+`#filepath` supplies a directory, while `#location` can distinguish filenames within that directory.
+Retain the effective source-visible filename/directory and relative-resolution context per file/load occurrence in relevant query inputs or dependencies, independently of the canonical physical-document key.
+Neither filesystem equivalence nor a syntax/content cache hit permits rewriting these observed values or suppressing request validation.
 
 Use exact content digests to establish reusable revisions.
 Modification time, size, and file watchers can schedule validation, but are not proof that bytes match.
@@ -244,6 +248,9 @@ It may participate in different module instances, program configurations, visibl
 
 `#load` membership, relative path resolution, scope directives, visibility, and any order-sensitive language rules belong to module composition.
 A loader should preserve those rules rather than sort/deduplicate declarations by hash.
+E3 verifies repeated inclusion even for identical load paths: preserve ordered load occurrences and their scope provenance separately from shared document/syntax identity.
+Repeated public declarations can collide, while repeated file-private declarations can belong to separate occurrence-local scopes; file-local ownership cannot be keyed solely by physical filename.
+The current resolver's traversal-local filename suppression is therefore not a compiler-faithful general composition rule and must not be carried into the cache architecture unchanged.
 Missing files and failed resolution are dependencies too: creating the missing file must invalidate the previous result.
 
 An unchanged loaded file can still reuse semantic queries when their complete module-context dependencies validate.
@@ -638,14 +645,14 @@ Use small isolated fixtures/prototypes, not a parallel implementation of the new
 Record the hypothesis, exact compiler/build configuration, commands, observed output, limitations, and resulting decision for each experiment.
 Language probes use the official compiler as the oracle, including separate expected-failure cases; prototype cache tests compare against fresh computation.
 These are proposed manual probes on authored trusted fixtures; listing them does not authorise their execution or automatic evaluation of arbitrary workspace code.
-E1 and E2 have been completed as recorded below; E3-E12 remain proposed and have not yet been run.
+E1-E4 have been completed as recorded below; E5-E12 remain proposed and have not yet been run.
 
 | ID | Experiment and discriminating check | Decision it informs |
 | --- | --- | --- |
 | E1 | Completed: import/visibility matrix using bare and named imports at file, procedure, nested-block, and struct scopes; export/module/file visibility; access inside, outside, from siblings, and from another loaded file.  Each access compiled separately. | Verified scope receiving imported names, lexical namespace binding, and qualified module/file visibility; see results below. |
 | E2 | Completed: repeated/aliased imports, omitted/explicit defaults, argument order/types/values, nominal assignment compatibility, two-hop imports, and program-setting constraints; 32 isolated probes and evaluation-count audit. | Canonical source plus effective parameter values is insufficient for compatible nominal identity; program configuration is per module and main-program controlled.  See results below. |
-| E3 | Loaded-file composition: one file loaded through several paths/parents and module instances; vary order, scope directives, duplicate loads, and load cycles.  Compare binding, visibility, relative paths, and diagnostics. | File membership/deduplication rules, composition dependencies, and syntax reuse across distinct semantic contexts. |
-| E4 | Path/source context: compare path casing, relative aliases, supported symlinks, relocation, and identical bytes at different paths; observe relative imports and `#filepath`/location-sensitive constructs.  Record filesystem limits and skip unsupported link creation rather than requiring elevated privileges. | Canonical versus source-visible paths and which context-sensitive results cannot share byte-only keys. |
+| E3 | Completed: 28 isolated loaded-file composition probes for repeated/diamond/aliased loads, order, relative paths, file scopes, module instances, collisions, missing files, and cycles; diagnostic and execution-marker audit. | Preserve load occurrences rather than deduplicating membership; share syntax without sharing contextual bindings or nominal declarations. See results below. |
+| E4 | Completed: 35 isolated path/source-context probes covering casing, dot/parent/separator/absolute aliases, copied and relocated bytes, relative loads/imports, working-directory changes, junctions, and native directory/file symlinks; exact location/path, nominal identity, diagnostic, and execution-marker audit. | Keep physical document identity, source-visible path context, and compiler-compatible module identity distinct; request validation can differ even when the filesystem reaches the same source. See results below. |
 | E5 | Compiler-evaluation feasibility: on authored trusted fixtures, try `do_output=false` plus `#insert` and inspect `.build/.added_strings_w#.jai` production, multiplicity, freshness, extraction boundaries, diagnostics, and failures.  Include one `using,map` callback and a context-dependent case.  Measure startup cost separately. | Whether the proposed output channel works, its limitations, and whether evaluator support can remain deferred.  This is not evidence that arbitrary snippets are equivalent or safe. |
 | E6 | Syntax independence probe: construct a small owned syntax-only representation covering declarations, spans, recovery, and decoded payloads; attach two different semantic contexts and release the original input/builder storage.  Verify neither binding nor release mutates the other's view. | The minimum syntax/semantic split, ownership contract, and whether current node overlays can be adapted or should be replaced.  Do not implement a second full AST. |
 | E7 | Dependency/revision model: a tiny query graph with a parent-only edit, dependency-only edit, unchanged interface/body change, new overload, previous missing name, transitive constant/layout change, and simultaneous old/new worlds.  Compare every result to fresh evaluation and assert expected reuse. | Exact dual-stamp validation, negative dependencies, world selection, and safe conservative module invalidation. |
@@ -687,10 +694,10 @@ The runner asserts the observed outcomes on rerun; a compiler behaviour change s
 An initial fixture used non-stallable compile-time calls, which masked some negative checks with scheduling diagnostics; the final results use stallable calls and have been fully re-audited.
 
 These results are scoped to this compiler/version, backend, ordinary module-name imports, and the tested unconditional contexts.
-Reverse-load probes use normal loaded-file scope; applying an explicit `#scope_file` directive to the importing file's own declarations/binding is not covered by this extension.
+E1's reverse-load probes use normal loaded-file scope; E3 below additionally tests an explicit `#scope_file` directive on the loaded file containing a named or bare import.
 They do not establish behaviour for every directive/import modifier, transitive re-export, overload collision, disabled conditional branch, or other backend/platform.
 For a struct-local named import, rejection of a bare `Probe` outside the struct does not establish whether an explicitly aggregate-qualified path such as `Container.Probe` is usable; that was not tested.
-Module identity/parameter results are recorded in E2 below; broader loaded-file order/deduplication/cycle behaviour remains E3.
+Module identity/parameter results are recorded in E2 below; loaded-file order/inclusion/cycle results are recorded in E3.
 Architectural consequence: distinguish lexical binding from the scope receiving bare-import exports, and retain module/file-visible records while applying context-specific access filters.
 
 #### E2 Results: Module Identity and Program Configuration
@@ -752,10 +759,130 @@ These are compiler-observable results, not a claim to know its internal cache al
 The user confirms that different filesystem traversals reaching the same file are a known compiler deduplication hole, with a fix on the compiler roadmap but probably not soon.
 Treat E2's redundant-traversal result as a current compiler limitation to accommodate, not an intended permanent module-identity rule; this roadmap clarification does not establish the status of every other import/argument distinction above.
 Coverage is limited to this version/backend/platform, these primitive parameters, unconditional imports, and the explicit alias forms shown; generic/type/procedure-valued arguments, default-expression dependencies, symlinks/casing, and wider resolver configurations remain unproven.
-E4 remains responsible for broader path/source-context behaviour; do not generalise the tested `../` alias result into an exact universal path-key algorithm.
+Broader path/source-context results are recorded in E4 below; neither experiment establishes an exact universal path-key algorithm.
 Architectural consequence: separate physical-source/syntax reuse from nominal module-instance identity; preserve observed import form/spelling and explicit typed argument-list distinctions, and model program configuration as validated per-module settings established by the main program.
 Version the relevant compatibility rules and rerun the alias probes when the compiler fixes traversal deduplication; do not bake the hole into permanent identity semantics.
 Until then, merging currently distinct nominal instances requires an explicit compatibility decision rather than being presented as a transparent cache optimisation.
+
+#### E3 Results: Loaded-File Composition
+
+Completed 2026-10-19 on Windows with Jai beta 0.2.030, built 2 July 2026, using the fast x64 backend.
+Reproducible runner: [experiment_load_composition.jai](examples/experiment_load_composition.jai).
+From the parser's examples directory:
+
+```bash
+jai experiment_load_composition.jai -x64 -quiet -no_color
+```
+
+The runner and generated entrypoints disable executable and added-string output.
+Each child compiles `probe.jai` in an isolated case directory with `-x64 -quiet -no_color` and a 30-second timeout; no target executable is linked/run.
+Authored loaded files assert declaration values, file-local binding resolution, and module-dependent values/type identities; selected files print `E3_SHARED` at compile time to expose repeated inclusion.
+
+All 28 expected outcomes passed: 17 accepted compilations and 11 expected rejections.
+The log audit verified all 17 expected markers in accepted compilations and all 21 expected diagnostic lines across rejected cases, including repeated diagnostics emitted by this compiler build.
+Every negative diagnostic matched its case's expected class/count: 14 redeclaration errors, four undeclared identifiers, two nested-load-limit errors, and one missing-file error.
+Failed compilations were not used to infer stable execution counts; the declaration-free positive controls establish repeated execution independently.
+No timeout, parser/setup error, or native process failure was accepted as a semantic result.
+
+| Probe family | Observed result |
+| --- | --- |
+| Repeated identical load; diamond load through two parents | Public declarations are included again and produce redeclaration errors. Declaration-free controls succeed and print twice. |
+| Same source through a redundant traversal | Likewise included twice: public declarations collide; the marker-only control prints twice. This does not establish import-style deduplication semantics for `#load`. |
+| Same file loaded twice with file-private declarations | Compiles, with each occurrence resolving its own file-private name and printing once; two prints total. |
+| Same private name in two different files | Compiles; each exported accessor resolves its own file's value, not its sibling's. |
+| File-private names across a load boundary | Hidden from loader, sibling loaded file, and in the reverse direction from a loaded file to a file-private loader declaration. |
+| Relative load inside another file | Resolves relative to the containing loaded file. A different same-named file beside the entrypoint was deliberately supplied as a discriminator. |
+| Forward reference before `#load`; either order of two interdependent declaration files | All tested pure declaration cases compile with the same values. This does not establish an order for arbitrary compile-time effects. |
+| Scope directive in a loaded file | Does not change the loader's subsequent declaration visibility; the loader's `#scope_file` also does not make an otherwise default-visible child's declarations file-private. |
+| Named import in a loaded file under `#scope_file` | Its binding is hidden from the loading file. The corresponding `#scope_module` binding is visible there. |
+| Bare import in a loaded file under `#scope_file` | Its exported members remain visible to the loading file, unlike the named-binding case. |
+| Repeated imports of one module instance containing a load | Same nominal loaded type and one loaded-file execution. |
+| Different parameters of one module, or two different modules, loading the same source | Separate nominal loaded types and two executions. Loaded values and private accessors observe their own module's parameters. |
+| Distinct files with identical public declarations | Redeclaration errors, not successful deduplication or first/last-wins lookup. |
+| Direct self-load and two-file load cycle | Rejected at the compiler's maximum of 100 nested loads; neither is silently deduplicated or accepted as legal recursion. |
+| Missing loaded file | Explicit unable-to-open-file diagnostic. |
+
+For hidden file-local names/bindings, compiler diagnostics also identified a matching file-scoped declaration and suggested `#scope_export`, consistent with the proposed tooling-candidate separation.
+Generated sources, individual `compile.log` files, and `summary.tsv` remain under `examples/.build/load_composition/` and can be regenerated after cleanup.
+The runner asserts every expected acceptance/rejection; the summary records exact marker and diagnostic expectations for auditing the logs.
+No executable/object outputs were found in the fixture directory.
+
+These results are limited to this compiler/version/backend/platform and the tested unconditional declaration/load graphs.
+Conditional/generated loads, overload merging, dynamic filesystem changes, all path-alias forms, and arbitrary compile-time effect ordering are not established; E4 below adds bounded path-context coverage.
+The 100-load limit is an observed compiler diagnostic, not a recommendation for the service's scheduler or a substitute for precise occurrence/cycle diagnostics.
+Architectural consequence: cache source/syntax by document revision, but compose semantics using module instance plus load occurrence and file-local scope; do not turn a syntax cache hit into permission to suppress a language-level inclusion.
+
+#### E4 Results: Paths and Source Context
+
+Completed 2026-10-19 on Windows/ReFS with Jai beta 0.2.030, built 2 July 2026, using the fast x64 backend.
+Reproducible runner: [experiment_source_context.jai](examples/experiment_source_context.jai).
+From the parser's examples directory:
+
+```bash
+jai experiment_source_context.jai -x64 -quiet -no_color
+```
+
+Hypothesis: byte-identical files and filesystem-equivalent paths need not have interchangeable resolved meaning, source-location values, or nominal module identity.
+The runner creates isolated cases with identical module bytes in `Original/module.jai`, `Original/copy.jai`, `Copy/module.jai`, and `Isolated/module.jai`.
+The original and relocated directories have different neighbouring loaded/imported values, while the case root deliberately supplies decoy neighbours with value 99.
+Authored assertions and compile-time reports expose relative lookup, `#filepath`, `#location(anchor)`, nominal type equality, and `E4_UNIT` execution counts.
+The runner and generated entrypoints disable executable/added-string output; children use `-x64 -quiet -no_color` with a 30-second timeout.
+
+All 35 final cases matched their assertions: 27 accepted compilations and eight expected rejections, with no skips after user-assisted symlink setup.
+The full audit verified 38 successful execution markers, 15 nominal comparisons, 42 exact source-visible path/location pairs, expected relative-lookup values, and all eight error lines.
+Path comparisons were case-sensitive and did not normalise separators or dot segments before comparison.
+SHA-256 checks confirmed all four module copies were byte-identical in every case.
+Seven rejections report `Non-matching Windows file case`; one reports an unable-to-open-file error for the missing relative neighbour.
+No native process failure, timeout, or unrelated error was accepted as a semantic outcome; no executable/object outputs were found.
+
+| Probe family | Observed result |
+| --- | --- |
+| `#filepath` and `#location(anchor)` | The former returns the containing directory, including its trailing separator; the latter reports a full filename plus line/column. Module anchor locations were line 6, column 11; entrypoint anchors were line 4, column 11. |
+| Dot and parent aliases in loads/file imports/directory imports | Accepted; the observed source-visible filename/directory retains `./` or `Branch/../`. Paired imports produce distinct nominal types and two executions. |
+| Relative versus absolute file import | The tested pair shares one nominal instance and one execution, with identical reported paths. Different textual requests are not universally distinct. |
+| Repeated exact file/directory imports | One nominal instance and one execution. |
+| Backslash load path | Accepted; reported paths use forward slashes in this load case. |
+| Backslash versus forward-slash file imports | Distinct nominal instances and two executions; the backslash spelling remains in that import's reported filename/directory. Do not infer one universal separator-normalisation stage. |
+| Wrong filename case in a load/file import; wrong final directory case in a directory import | Rejected with the Windows file-case portability diagnostic even though the filesystem can reach the existing source. |
+| Lowercase containing directory in a load/file import, with exact filename case | Accepted; reports retain `original/`. Paired file imports using `Original/` and `original/` have distinct nominal types and two executions. The observed validation is not uniform full-path case enforcement. |
+| Byte-identical modules relocated beside different neighbors | Distinct nominal types and values 11 versus 22 for both the relative load and the relative file import. Content equality does not establish dependency or result equality. |
+| Byte-identical files with different filenames in the same directory | Same `#filepath`, different filenames in `#location`, distinct nominal types, and two executions. Directory context alone is insufficient. |
+| Compile `../probe.jai` with the child process working in `Branch` | Entrypoint reports its normalised source path and still finds the source-relative `Original` module, not an unrelated directory under the process working directory. |
+| Missing source-relative neighbor | Explicit missing-file error naming `Isolated/neighbor.jai`; the root decoy is not substituted. |
+| Directory junction or native directory symlink, through load/file import | Accepted; reports retain `Alias/`. Paired file imports through original and alias paths have distinct nominal types and two executions, while both relative lookups yield 11. |
+| Directory import through junction/symlink named `Alias` targeting `Original` | Rejected with the same file-case diagnostic, naming `Original` as the almost-matching basename. This is an observed alias validation result, not proof that all directory links are unsupported. |
+| Junction named `Branch/Original` targeting `Original` | Directory import succeeds; paired with the original it has a distinct nominal type and two executions. This control discriminates the basename-dependent rejection above. |
+| Native file symlink named `module_alias.jai` targeting `Original/module.jai` | Both load and file import reject it with the file-case diagnostic, naming `module.jai`. Its relative-lookup semantics therefore remain unobserved. |
+
+Native directory/file symlink creation initially failed with `Administrator privilege required for this operation`; those cases were recorded as setup skips, not compiler rejections.
+The user ran a narrowly scoped self-elevating PowerShell setup script, with transcript and JSON results written to the fixture directory, and all five native symlink cases then ran unelevated.
+Junction creation worked unelevated on this ReFS volume.
+The runner never auto-elevates; it records `link.log` and skips a case if the required link cannot be prepared.
+Fixture setup permission does not authorise an editor service or evaluator to elevate arbitrary work.
+
+For a full rerun after cleanup, first run the runner to create targets; if native symlink setup is denied, the user can prepare these five links in an elevated PowerShell opened in the examples directory, then rerun the compiler command normally:
+
+```powershell
+$root = Join-Path $PWD '.build/source_context'
+foreach ($name in 'symlink_load', 'symlink_file_pair', 'symlink_dir_pair') {
+    New-Item -ItemType SymbolicLink -Path "$root/$name/Alias" -Target "$root/$name/Original"
+}
+foreach ($name in 'file_symlink_load', 'file_symlink_pair') {
+    New-Item -ItemType SymbolicLink -Path "$root/$name/module_alias.jai" -Target "$root/$name/Original/module.jai"
+}
+```
+
+Generated sources, `compile.log`/`link.log`, expected-observation `summary.tsv`, setup evidence, and `audit_summary.json` remain under `examples/.build/source_context/`; cleanup may remove them.
+The summary records exact expected directory/filename spellings, line numbers, relative values, evaluation counts, nominal equality, and error classes/counts for log auditing; failed compilations do not establish stable evaluation counts.
+The runner asserts acceptance and supported nominal/value results; exact printed observations and rejection diagnostics were separately audited against the summary.
+
+These are compiler-observable facts for this version/backend/platform/filesystem, not a universal path canonicalisation algorithm or permanent language guarantees.
+E2's user-confirmed traversal-deduplication hole remains a compatibility limitation, not a cache design to preserve forever; E4 adds both further alias distinctions and a relative/absolute sharing counterexample.
+Directory-link results establish visible spelling, nominal duplication, and successful relative lookups, not the compiler's unique internal path-resolution algorithm.
+Relocation was tested with independent copied fixtures, not live rename/replacement while caches remain resident.
+Hardlinks, UNC/network paths, drive-letter aliases, case-sensitive volumes, other platforms, link chains/retargeting, generated source maps, and arbitrary location-sensitive constructs remain unproven.
+Architectural consequence: physical-source/content reuse, source-visible location/resolution context, and compiler-compatible request/nominal identity need separate validation rules.
+Do not canonicalise away observable location strings, bypass case/link request diagnostics on a cache hit, or key contextual relative lookup solely by source bytes.
 
 Suggested order is E1-E5 for language/toolchain facts, then E6-E8 for correctness contracts, then E9-E11 for representation/storage, with E12's baseline captured early and comparisons added as prototypes become available.
 E5 is a bounded feasibility probe, not a prerequisite to implementing the syntax-first service if evaluation remains explicitly unsupported.
@@ -780,7 +907,9 @@ No production changes are authorised by this checklist alone.
 - [ ] Agree the remaining identity, persistence/privacy, workspace-trust, residency-budget, and performance policies in section 14.
 - [x] Run and record E1's bounded compiler import/visibility matrix, including auditing expected-failure diagnostics.
 - [x] Run and record E2's bounded module identity/parameter probes, including nominal compatibility, transitive configuration, expected diagnostics, and evaluation counts.
-- [ ] Run and record the remaining bounded experiments E3-E12 in section 14, distinguishing initial specification blockers from explicitly deferred capabilities.
+- [x] Run and record E3's bounded loaded-file composition probes, including occurrence multiplicity, scope, relative paths, contextual module values/types, cycles, and diagnostic/marker audits.
+- [x] Run and record E4's bounded path/source-context probes, including case/alias validation, relative lookup, exact locations, nominal identity, native links, byte equality, and complete diagnostic/marker audits.
+- [ ] Run and record the remaining bounded experiments E5-E12 in section 14, distinguishing initial specification blockers from explicitly deferred capabilities.
 - [ ] Turn the evidence into approved initial contracts and acceptance criteria using the specification-completion gate in section 14, before writing the migration plan.
 - [ ] Define owned immutable syntax snapshots and syntax diagnostics that do not depend on semantic mutation or caller allocator lifetime.
 - [ ] Define coherent semantic worlds, declaration/type identities, versioned handles, and query-result states through full Jai coverage.

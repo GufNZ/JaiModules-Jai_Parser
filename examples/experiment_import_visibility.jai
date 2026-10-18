@@ -5,13 +5,16 @@
 #import "Process";
 #import "String";
 
-Scope :: enum { FILE; PROCEDURE; BLOCK; STRUCT; }
-Site :: enum { INSIDE; AFTER; SIBLING; OTHER_PROCEDURE; GLOBAL; LOADED_FILE; LOADING_FILE; }
 
-SCOPES :: Scope.[.FILE, .PROCEDURE, .BLOCK, .STRUCT];
-SITES :: Site.[.INSIDE, .AFTER, .SIBLING, .OTHER_PROCEDURE, .GLOBAL, .LOADED_FILE, .LOADING_FILE];
+Scope :: enum {	FILE;	PROCEDURE;	BLOCK;	STRUCT; }
+SCOPES :: Scope.[.FILE,	.PROCEDURE,	.BLOCK,	.STRUCT];
+
+Site :: enum { INSIDE;	AFTER;	SIBLING;	OTHER_PROCEDURE;	GLOBAL;		LOADED_FILE;	LOADING_FILE; }
+SITES :: Site.[.INSIDE,	.AFTER,	.SIBLING,	.OTHER_PROCEDURE,	.GLOBAL,	.LOADED_FILE,	.LOADING_FILE];
+
 SCOPE_NAMES :: string.["file", "procedure", "block", "struct"];
 SITE_NAMES :: string.["inside", "after", "sibling", "other_procedure", "global", "loaded_file", "loading_file"];
+
 OUTPUT_DIRECTORY :: ".build/import_visibility";
 TIMEOUT_MS :: 30_000;
 
@@ -25,10 +28,29 @@ MARKERS :: Marker.[
 	.{"e1_loaded_file", 1203},
 ];
 
-//TODO: herestrings:
-PREAMBLE :: "#import \"Compiler\";\n#run set_build_options_dc(.{do_output=false, write_added_strings=false});\n";
-MODULE_SOURCE :: "#scope_export\n#load \"module_loaded.jai\";\ne1_exported :: 1101;\n#scope_module\ne1_module :: 1102;\n#scope_file\ne1_file :: 1103;\n";
-LOADED_SOURCE :: "#scope_export\ne1_loaded_exported :: 1201;\n#scope_module\ne1_loaded_module :: 1202;\n#scope_file\ne1_loaded_file :: 1203;\n";
+PREAMBLE :: #string JAI
+#import "Compiler";
+#run set_build_options_dc(.{do_output=false, write_added_strings=false});
+JAI
+
+MODULE_SOURCE :: #string JAI
+#scope_export
+#load "module_loaded.jai";
+e1_exported :: 1101;
+#scope_module
+e1_module :: 1102;
+#scope_file
+e1_file :: 1103;
+JAI
+
+LOADED_SOURCE :: #string JAI
+#scope_export
+e1_loaded_exported :: 1201;
+#scope_module
+e1_loaded_module :: 1202;
+#scope_file
+e1_loaded_file :: 1203;
+JAI
 
 site_applies :: (scope: Scope, site: Site) -> bool {
 	if scope == .FILE {

@@ -60,6 +60,7 @@ main :: () {
 	test_aggregate_literals();
 	test_operator_declarations();
 	test_uninitialized_indicator_and_here_string();
+	test_here_string_semicolon_boundaries();
 	test_token_navigation();
 	test_parser_node_pool();
 	test_identifier_storage_lifetime();
@@ -675,6 +676,53 @@ JAI;
 
 	reconstructed := Extended.reconstruct_source(*parsed);
 	assert(reconstructed == SOURCE);
+}
+
+test_here_string_semicolon_boundaries :: () {
+	SOURCE :: #string JAI
+first :: #string END
+first
+END
+
+second := #string END
+second
+END
+
+third: string = #string END
+third
+END
+following :: 42;
+JAI
+	plain := Default.parse_file(SOURCE, warn_unnecessary_semicolons=true, resolve_identifiers=false);
+	assert(plain.status == .COMPLETE && plain.diagnostics.count == 0);
+	assert(plain.root.(*Default.Parser_Block).statements.count == 4);
+	Default.release_parser_tree(*plain);
+	Default.release_parser_names(*plain);
+
+	parsed := Extended.parse_file(SOURCE, warn_unnecessary_semicolons=true, resolve_identifiers=false);
+	assert(parsed.status == .COMPLETE && parsed.diagnostics.count == 0);
+	statements := parsed.root.(*Extended.Parser_Block).statements;
+	assert(statements.count == 4);
+
+	expected := string.["first\n", "second\n", "third\n"];
+	for body: expected {
+		assert(statements[it_index].kind == .DECLARATION);
+		expression := statements[it_index].(*Extended.Parser_Declaration).expression;
+		assert(expression.kind == .LITERAL);
+		literal := expression.(*Extended.Parser_Literal);
+		assert(literal.value_type == .STRING && literal.value_flags & .HERE_STRING);
+		assert(literal._string == body);
+	}
+
+	assert(statements[3].kind == .DECLARATION);
+	assert(Extended.reconstruct_source(*parsed) == SOURCE);
+	Extended.release_parser_tree(*parsed);
+	Extended.release_parser_names(*parsed);
+
+	ordinary := Extended.parse_file("value :: \"body\"\nfollowing :: 42;", resolve_identifiers=false);
+	assert(ordinary.status != .COMPLETE && ordinary.diagnostics.count > 0);
+	Extended.release_parser_tree(*ordinary);
+	Extended.release_parser_names(*ordinary);
 }
 
 test_token_navigation :: () {
@@ -10565,13 +10613,13 @@ JAI;
 	assert_overload_selection(tprint(MULTI_ARGUMENT_RANK_SOURCE, "first: s64, second: float64", "first: float64, second: s64", "1, 1"), -1);
 
 	for fixture: UNSIGNED_BOUNDARY_CASES {
-		for value, index: string.["0", "-0", fixture.upper, "-1", fixture.above] {
-			if index == 4 && !fixture.above_is_representable {
+		for value: string.["0", "-0", fixture.upper, "-1", fixture.above] {
+			if it_index == 4 && !fixture.above_is_representable {
 				continue;
 			}
 
 
-			assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", value), ifx index < 3 then 0 else -1);
+			assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", value), ifx it_index < 3 then 0 else -1);
 		}
 
 		for value: string.["-0", "1", fixture.upper] {
@@ -10589,13 +10637,13 @@ JAI;
 	}
 
 	for fixture: SIGNED_BOUNDARY_CASES {
-		for value, index: string.[fixture.lower, fixture.upper, fixture.below, fixture.above] {
-			if index == 2 && !fixture.below_is_negatable {
+		for value: string.[fixture.lower, fixture.upper, fixture.below, fixture.above] {
+			if it_index == 2 && !fixture.below_is_negatable {
 				continue;
 			}
 
 
-			assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", value), ifx index < 2 || index == 3 && fixture.above_matches then 0 else -1);
+			assert_overload_selection(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", value), ifx it_index < 2 || it_index == 3 && fixture.above_matches then 0 else -1);
 		}
 
 		if fixture.parameter_type == "s64" {
