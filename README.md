@@ -57,7 +57,8 @@ jai lex_all_files.jai -o -llvm -quiet
 
 The layout executable checks each supported identifier classifier directly, then compares scalar tokens and comment state against automatic SIMD dispatch at vector/scratch boundaries, newline, NUL, logical EOF, and tails.
 For AVX-512, classifier checks cover all 256 byte values in each of 64 lanes at 64 alignments; unsupported widths report `SKIPPED` without executing those instructions.
-On an AVX-512 machine, confirm width 64 reports `PASS` and the benchmark reports `Widest SIMD path: AVX-512`; timing currently requires Windows.
+On an AVX-512 machine, confirm width 64 reports `PASS` and the benchmark reports `Widest SIMD path: AVX-512`.
+Benchmark timing uses `Basic.current_time_monotonic()` and does not require a direct Windows API import; the collector script below still targets Windows Bash.
 
 To collect a single report for comparing another Windows machine, run in Cygwin, MSYS, or Git Bash from `examples`:
 

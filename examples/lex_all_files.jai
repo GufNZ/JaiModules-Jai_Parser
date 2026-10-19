@@ -9,10 +9,6 @@
 Parser_Lexer :: #import "Jai_Parser"(ENABLE_TRIVIA = true, USE_SIMD = false);
 Simd_Lexer :: #import "Jai_Parser"(ENABLE_TRIVIA = true, USE_SIMD = true);
 
-#if OS == .WINDOWS {
-	Windows :: #import "Windows";
-}
-
 main :: () {
 	arguments := get_command_line_arguments();
 	if arguments.count > 1 && arguments[1] == "--clock-probe" {
@@ -111,15 +107,8 @@ push_benchmark_allocator :: () #expand {
 	`defer context.allocator = previous_allocator;
 }
 
-benchmark_ticks :: () -> s64 {
-	#if OS == .WINDOWS {
-		counter: Windows.LARGE_INTEGER;
-		assert(!!Windows.QueryPerformanceCounter(*counter));
-		return counter.QuadPart;
-	} else {
-		assert(false, "This benchmark currently requires Windows.");
-		return 0;
-	}
+benchmark_ticks :: () -> Apollo_Time {
+	return current_time_monotonic();
 }
 
 benchmark_source_scan :: (source: string, $simd: bool, $materialise: bool) -> s64 {
@@ -207,7 +196,9 @@ benchmark_trial :: (sources: [] string, $simd: bool, expected_tokens: s64, frequ
 		assert(benchmark_scan(sources, simd, materialise, active) == expected_tokens);
 	}
 
-	return (benchmark_ticks() - start).(float64) * 1000 / frequency.(float64) / REPETITIONS;
+	elapsed, ok := to_nanoseconds(benchmark_ticks() - start);
+	assert(ok);
+	return elapsed.(float64) * 1000 / frequency.(float64) / REPETITIONS;
 }
 
 assert_benchmark_token_parity :: (actual: Simd_Lexer.Parser_Token, expected: Parser_Lexer.Parser_Token, filename: string) {
@@ -314,14 +305,7 @@ benchmark_sources :: (name: string, sources: [] string, isolate_allocations: boo
 		token_count += scalar.tokens.count;
 	}
 
-	frequency: s64;
-	#if OS == .WINDOWS {
-		counter: Windows.LARGE_INTEGER;
-		assert(Windows.QueryPerformanceFrequency(*counter) != 0);
-		frequency = counter.QuadPart;
-	}
-
-	assert(frequency > 0, "This benchmark requires Windows.");
+	frequency :: 1000000000;
 	if clock_mode != "" {
 		print("Clock probe: %; % files, % bytes, % tokens; token parity PASS\n", clock_mode, sources.count, bytes, token_count);
 		if clock_mode == "simd" {
@@ -351,13 +335,16 @@ benchmark_clock_probe :: (sources: [] string, $simd: bool, token_count: s64, fre
 	}
 
 	start := benchmark_ticks();
+	duration := seconds_to_apollo(30);
 	scans: s64;
-	while benchmark_ticks() - start < 30 * frequency {
+	while benchmark_ticks() - start < duration {
 		assert(benchmark_scan(sources, simd) == token_count);
 		scans += 1;
 	}
 
-	elapsed := (benchmark_ticks() - start).(float64) / frequency.(float64);
+	elapsed_nanoseconds, ok := to_nanoseconds(benchmark_ticks() - start);
+	assert(ok);
+	elapsed := elapsed_nanoseconds.(float64) / frequency.(float64);
 	print("Clock probe COMPLETE: % scans in % seconds; % ms/scan. Frequency requires external telemetry.\n", scans, elapsed, elapsed * 1000 / scans.(float64));
 }
 

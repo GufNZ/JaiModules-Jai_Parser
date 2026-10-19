@@ -6,7 +6,6 @@
 #import "Pool";
 #import "Sort";
 #import "String";
-#import "Windows";
 
 WARMUP_COUNT :: 2;
 TRIAL_COUNT :: 21;
@@ -28,10 +27,14 @@ VERIFY_ONLY :: #run -> bool {
 Parser :: #import "Jai_Parser"(ENABLE_TRIVIA = true, TRACK_AST_REUSE = VERIFY_ONLY);
 #load "snapshot_oracle.jai";
 
-ticks :: () -> s64 {
-	counter: LARGE_INTEGER;
-	assert(!!QueryPerformanceCounter(*counter));
-	return counter.QuadPart;
+ticks :: () -> Apollo_Time {
+	return current_time_monotonic();
+}
+
+elapsed_ticks :: (duration: Apollo_Time) -> s64 {
+	nanoseconds, ok := to_nanoseconds(duration);
+	assert(ok);
+	return nanoseconds;
 }
 
 parse_tokens :: (parsed: *Parser.Parsed_Source, old: *Parser.Parsed_Source = null, edit_start: s64 = 0, edit_end: s64 = 0) {
@@ -68,9 +71,9 @@ measure_baseline :: (source: string, filename: string, frequency: s64) {
 		context.allocator = previous_allocator;
 		if trial >= WARMUP_COUNT {
 			index := trial - WARMUP_COUNT;
-			lex_samples[index] = (lex_end - start).(float64) * MILLISECONDS_PER_SECOND / frequency.(float64);
-			ast_samples[index] = (ast_end - lex_end).(float64) * MILLISECONDS_PER_SECOND / frequency.(float64);
-			total_samples[index] = (end - start).(float64) * MILLISECONDS_PER_SECOND / frequency.(float64);
+			lex_samples[index] = elapsed_ticks(lex_end - start).(float64) * MILLISECONDS_PER_SECOND / frequency.(float64);
+			ast_samples[index] = elapsed_ticks(ast_end - lex_end).(float64) * MILLISECONDS_PER_SECOND / frequency.(float64);
+			total_samples[index] = elapsed_ticks(end - start).(float64) * MILLISECONDS_PER_SECOND / frequency.(float64);
 		}
 	}
 
@@ -175,7 +178,7 @@ run_sequence :: (source: string, filename: string, edits: []Update_Edit, mode: U
 
 	snapshots[0].owned_source = copy_string(source);
 	snapshots[0].parsed = Parser.parse_file(snapshots[0].owned_source, filename);
-	measurements.initial = (ticks() - initial_start).(float64) * scale;
+	measurements.initial = elapsed_ticks(ticks() - initial_start).(float64) * scale;
 	baseline_status := snapshots[0].parsed.status;
 	baseline_diagnostics := snapshots[0].parsed.diagnostics.count;
 
@@ -228,12 +231,12 @@ run_sequence :: (source: string, filename: string, edits: []Update_Edit, mode: U
 
 		update_end := ticks();
 		measurements.edits[index] = .{
-			acquire = (start - update_start).(float64) * scale,
-			lex = (lex_end - start).(float64) * scale,
-			ast = (ast_end - lex_end).(float64) * scale,
-			construction = (ast_end - start).(float64) * scale,
-			release_old = (update_end - ast_end).(float64) * scale,
-			lifecycle = (update_end - update_start).(float64) * scale
+			acquire = elapsed_ticks(start - update_start).(float64) * scale,
+			lex = elapsed_ticks(lex_end - start).(float64) * scale,
+			ast = elapsed_ticks(ast_end - lex_end).(float64) * scale,
+			construction = elapsed_ticks(ast_end - start).(float64) * scale,
+			release_old = elapsed_ticks(update_end - ast_end).(float64) * scale,
+			lifecycle = elapsed_ticks(update_end - update_start).(float64) * scale
 		};
 
 		#if verify {
@@ -243,7 +246,7 @@ run_sequence :: (source: string, filename: string, edits: []Update_Edit, mode: U
 
 	final_start := ticks();
 	release_snapshot(*snapshots[edits.count].parsed, *snapshots[edits.count].storage);
-	measurements.release_final = (ticks() - final_start).(float64) * scale;
+	measurements.release_final = elapsed_ticks(ticks() - final_start).(float64) * scale;
 	return measurements;
 }
 
@@ -791,9 +794,7 @@ main :: () {
 
 	assert(!!filenames.count);
 	print("File order: filesystem visitation order.\n");
-	counter: LARGE_INTEGER;
-	assert(QueryPerformanceFrequency(*counter) != 0);
-	frequency := counter.QuadPart;
+	frequency :: 1000000000;
 	bytes: s64;
 	lines: s64;
 	tokens: s64;

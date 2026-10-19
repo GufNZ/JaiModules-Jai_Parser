@@ -73,7 +73,7 @@ fi
 case "$(uname -s)" in
 	CYGWIN*|MINGW*|MSYS*) ;;
 	*)
-		printf '%s\n' 'The Jai timing benchmark currently requires Windows.  Run this script in Cygwin, MSYS, or Git Bash.' >&2
+		printf '%s\n' 'This collector script currently supports Windows only.  Run it in Cygwin, MSYS, or Git Bash.' >&2
 		exit 2
 		;;
 esac

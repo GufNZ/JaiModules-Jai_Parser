@@ -657,7 +657,8 @@ Use small isolated fixtures/prototypes, not a parallel implementation of the new
 Record the hypothesis, exact compiler/build configuration, commands, observed output, limitations, and resulting decision for each experiment.
 Language probes use the official compiler as the oracle, including separate expected-failure cases; prototype cache tests compare against fresh computation.
 These are proposed manual probes on authored trusted fixtures; listing them does not authorise their execution or automatic evaluation of arbitrary workspace code.
-E1-E6 have been completed as recorded below; E7-E12 remain proposed and have not yet been run.
+E1-E11 have been completed as recorded below.
+E12's bounded real-source baseline and same-layout owned AST text-reload comparison are recorded below; performance-policy approval and complete semantic editor-workflow measurements remain open.
 
 | ID | Experiment and discriminating check | Decision it informs |
 | --- | --- | --- |
@@ -667,11 +668,11 @@ E1-E6 have been completed as recorded below; E7-E12 remain proposed and have not
 | E4 | Completed: 35 isolated path/source-context probes covering casing, dot/parent/separator/absolute aliases, copied and relocated bytes, relative loads/imports, working-directory changes, junctions, and native directory/file symlinks; exact location/path, nominal identity, diagnostic, and execution-marker audit. | Keep physical document identity, source-visible path context, and compiler-compatible module identity distinct; request validation can differ even when the filesystem reaches the same source. See results below. |
 | E5 | Completed: 32 compiler-evaluation compilations and five separate startup samples covering `do_output=false`, insert dumps, multiplicity, expression boundaries, context, `using,map`, multiple workspaces, stale artifacts, diagnostics, failures, and flattened-dump replay; complete artifact/log audit. | The text channel works for bounded trusted generators, but is not a fresh, self-contained semantic-result protocol.  Evaluator support remains deferrable; see results below. |
 | E6 | Completed: eight syntax fixtures across 32 producer/context lifetime permutations, 32 fresh-parse oracles, 248 exact syntax checks, 96 independently owned semantic-context lifetimes, decoded-payload mutations, span/recovery validation, and a real-resolver shallow-alias control. | Owned syntax and external semantic tables survive independent teardown; current in-node bindings alias across shallow snapshots.  This establishes a bounded ownership contract, not a full overlay-replacement decision; see results below. |
-| E7 | Dependency/revision model: a tiny query graph with a parent-only edit, dependency-only edit, unchanged interface/body change, new overload, previous missing name, transitive constant/layout change, and simultaneous old/new worlds.  Compare every result to fresh evaluation and assert expected reuse. | Exact dual-stamp validation, negative dependencies, world selection, and safe conservative module invalidation. |
-| E8 | Pipeline/scheduler model: advance declarations through signature/body/layout milestones, include valid pointer recursion and invalid by-value recursion, and simulate a slow external task, cancellation, shared waiters, and a genuinely cyclic wait. | Stage readiness, pending API semantics, cycle diagnostics, and shutdown.  No forward progress alone is not proof of a cycle while work can still complete externally. |
-| E9 | Allocation/eviction benchmark: verify the actual candidate Jai pool APIs, then compare arenas, typed pools, and a hybrid under repeated edits, sparse eviction, retained old snapshots, and slot reuse.  Track allocation generations, payload cleanup, freelist reuse, backing bytes, and fragmentation. | Initial allocation units, ownership/lease mechanism, and whether partial frees deliver useful memory or churn reductions. |
-| E10 | Text artifact round trip: use `Text_File_Handler` on representative node/query records, IDs, exact strings/numbers, diagnostics, and dependencies.  Decode into fresh storage after producer teardown; compare with originals.  Include Unicode, malformed/truncated records, schema mismatch, and bounds limits. | Concrete initial schema, exact-value fidelity, validation strategy, and text decoding cost relative to parsing. |
-| E11 | Store/restart/overlay prototype: publish small immutable artifacts and manifests; interrupt writes, run competing publishers, corrupt an entry, make the store unwritable, and exercise unsaved restore/save/reset, external file changes, deletion, and GC.  Hash actual source rather than trusting timestamps. | Atomic publication/shared-store policy, recovery handshake, fail-open in-memory operation, system diagnostics, and durable metadata requirements. |
+| E7 | Completed: 23 edits of an 11-query model under tracked and conservative-module policies; 2,530 fresh comparisons, 1,600 link-stamp checks, exact recomputation expectations, retained old worlds, and 11 broken-policy controls. | Parent relationships and target revisions need independent validation; missing names and candidate sets are dependencies; equal observable results can stop propagation; world selection and identity/context guards are mandatory.  Conservative module invalidation is correct but recomputes more in this model; see results below. |
+| E8 | Completed: 17 scheduler scenarios in both forward and reverse order, 844 authored expectation checks, 17 completion-equivalence checks, and eight broken-policy controls; independent audit of task, request, and dependency traces. | Publish individual milestones, deduplicate world-keyed work, cancel waiters independently, diagnose actual unresolved graph cycles rather than idleness, and reject duplicate/late completion after terminal states.  See results below. |
+| E9 | Completed: direct `Pool`/`Bucket_Array` API probes; three allocation strategies across 54 memory phases, 5,232 handle/payload checks, 264 cleanups, three stale-generation controls, and 63 optimised rotating-order timing samples. | Typed slots enable individual record reuse, but payload ownership and bucket/group reclamation determine backing retention.  Arenas were faster in this small workload; separately freed payloads reduced sparse-eviction backing.  See results below. |
+| E10 | Completed: five pointer-free text fixtures using `Text_File_Handler`; 153 exact record comparisons after producer/input teardown, 41 invalid cases, 2,872 rejected truncations, and 126 optimised decode/parse timing samples with independent wire-format/value/statistics audit. | An explicit bounded schema preserves exact bytes and numeric bits; the handler supplies line/version handling, not serialisation or validation.  Payload-heavy text can cost more than fresh parsing.  See results below. |
+| E11 | Completed: filesystem store/restart/overlay model with 911 parent-process checks, 32 worker processes, five killed publishers, competing publication/retry, twelve corruption cases, real cache-directory write denial, save/reset/deletion/reappearance, lease-aware GC, four broken-policy controls, and an independent saved-evidence audit. | Immutable digest-addressed blobs plus locked manifest replacement preserve complete selected states under the tested interruptions.  Recovery is host-confirmed, exact source hashing defeats stale timestamps, and cache failures must preserve source operations and surface diagnostics.  See results below. |
 | E12 | Representative project baseline: measure fresh parse, unchanged-file reuse, and text reload with validation across many small files and large active files, transitive imports, malformed edits, body/interface changes, and repeated updates.  Include hashing/I/O, tail latency, retained worlds, and disk size; distinguish process restart from OS-cold filesystem cache. | Workload selection, numerical acceptance targets, initial cache granularity, and whether syntax persistence earns its overhead.  Reuse existing benchmark/oracle infrastructure where applicable. |
 
 #### E1 Results: Import Scope and Visibility
@@ -811,7 +812,7 @@ No timeout, parser/setup error, or native process failure was accepted as a sema
 | Repeated imports of one module instance containing a load | Same nominal loaded type and one loaded-file execution. |
 | Different parameters of one module, or two different modules, loading the same source | Separate nominal loaded types and two executions. Loaded values and private accessors observe their own module's parameters. |
 | Distinct files with identical public declarations | Redeclaration errors, not successful deduplication or first/last-wins lookup. |
-| Direct self-load and two-file load cycle | Rejected at the compiler's maximum of 100 nested loads; neither is silently deduplicated or accepted as legal recursion. |
+| Direct self-load and two-file load cycle | Rejected at the compiler's maximum of 100 nested loads; neither is silently deduplicated nor accepted as legal recursion. |
 | Missing loaded file | Explicit unable-to-open-file diagnostic. |
 
 For hidden file-local names/bindings, compiler diagnostics also identified a matching file-scoped declaration and suggested `#scope_export`, consistent with the proposed tooling-candidate separation.
@@ -1022,7 +1023,596 @@ No production syntax/cache implementation or migration plan was added.
 The prototype does not provide full syntax coverage, a real semantic typechecker, dependency tracking, lease enforcement, concurrent readers, cancellation, persistence, allocation benchmarks, or cross-backend/platform guarantees.
 It deliberately does not release syntax while live semantic contexts still refer to it; enforcing that lifetime rule belongs to the owner/lease contract.
 No claim of complete diagnostic-related-information variants or synthetic literal-payload coverage follows from these fixtures.
-E7-E12 retain their separate dependency, scheduling, allocation, persistence, and performance questions.
+E7-E11 test the separate dependency/revision, scheduling, allocation, text-representation, and store/restart contracts below; E12 retains the representative-performance question.
+
+#### E7 Results: Dependency and Revision Validation
+
+Completed 2026-10-19 on Windows with Jai beta 0.2.030, built 2 July 2026, using the fast x64 backend.
+Reproducible runner: [experiment_dependency_revisions.jai](examples/experiment_dependency_revisions.jai).
+From `examples/`:
+
+```bash
+jai experiment_dependency_revisions.jai -x64 -quiet -no_color -output_path .build -exe experiment_dependency_revisions
+./.build/experiment_dependency_revisions.exe
+```
+
+Hypothesis: validating the parent's current relationship and independently validating its target in the requesting world permits safe reuse, including when a changed target revision has an unchanged observable value.
+Parent stamps alone, unvalidated target stamps, omitted negative dependencies, or a latest-world shortcut must produce stale results on discriminating fixtures.
+Conservative module invalidation should agree with fresh evaluation when the module revision covers every modelled edit, at the cost of additional recomputation.
+
+The authored graph has 11 queries: constant, signature, body, candidate membership, scope membership, derived value, call, body analysis, lookup, layout, and layout consumer.
+Queries return an integer plus `COMPLETE`, `MISSING`, or `AMBIGUOUS` status.
+The uncached evaluator recursively traverses the graph without reading cached records; it shares the pure arithmetic/status evaluator with the cached path.
+Separately authored expected focus results and exact per-query recomputation sets check both correctness and reuse rather than relying only on that shared evaluator.
+
+Each scenario retains an initial world and a distinct edited world.
+Input source revision, owner identity, and context key gate a full comparison of the parent's definition, arguments, and target list.
+The target is recursively validated in the requesting world before its result revision is compared with the link's observed revision.
+Changed target identity/context forces direct consumer recomputation even when its numeric value is unchanged; an unchanged numeric result at that consumer can then stop further propagation.
+Every published world-specific record contains `checked_parent_revision`, `observed_dependency_revision`, target identity/context, and the observed value.
+The checked-parent stamp is verified against the record's input revision; the prototype uses that input metadata to decide when to recheck the relationship, rather than maintaining a separate mutable per-link validation cache.
+
+The 23 scenarios cover unchanged input, parent-only revision changes, retargeting, argument changes, dependency-only changes, body-only changes, equal signature/body/constant values at new source revisions, added/ambiguous/removed overloads, missing names appearing and disappearing, absent links appearing, parent links disappearing, identity/context changes with colliding source revisions, simultaneous parent/dependency changes, and transitive constant/layout changes.
+The edited focus is queried before the complete world, exposing stale transitive reuse without first refreshing unrelated leaves.
+Retained old and edited worlds are then queried alternately without further computation.
+The tracked cache's retained initial records are also serialised before and after edited-world publication and compared for immutability.
+
+Observed results:
+
+- All 23 scenarios passed under both policies, with 2,530 cached-versus-fresh comparisons and 1,600 link-stamp checks.
+- The edited worlds required 50 tracked recomputations versus 242 conservative-module recomputations.  These exclude the 506 initial computations across both policies and all scenarios; they are counts, not timing measurements.
+- Body-only edits recomputed body and analysis, not call/signature consumers.  New source revisions with equal signature/body/constant values required no computations, while advancing leaf result revisions and refreshing dependency observations.
+- A changed constant identity with the same numeric value recomputed constant and value, but retained layout and layout-consumer computations after value validation.
+- Missing and ambiguous outcomes agreed with fresh evaluation; scope/candidate dependencies invalidated them when membership changed.
+- There were 46 retained-old-world requery passes across the two policies, with no extra computations and no mutation of the tracked initial records.
+
+Eleven negative controls use deliberately broken branches in the same cache evaluator, enabled only after a correct baseline is populated.
+They expose parent-only validation; trusting dependency revisions without validating their inputs; omitting candidate, missing-name, or body dependencies; ignoring owner identity or context; skipping parent retarget, absent-link, or removed-link rechecks; and returning the latest record when an older world was requested.
+Every control returns a status/value different from the fresh oracle, not merely a different bookkeeping field.
+
+Saved evidence is under `examples/.build/dependency_revisions/`: `summary.tsv`, `results.tsv`, `links.tsv`, `negative_controls.tsv`, `audit_summary.json`, and `compiler_version.txt`.
+The independent PowerShell audit parses the TSV/JSON records, verifies all 1,012 unique query records and 640 dependency links, checks complete world/query membership, reconciles parent/target identity/context and both stamps, compares policy results and recomputation totals, and confirms all 11 control mismatches.
+It also reconciles the runtime comparison/stamp and old-world counters
+The complete executable exits successfully, including cleanup.
+
+Architectural consequence: retain both relationship validation and recursively validated dependency observations; record unsuccessful lookup and candidate membership as dependencies; key records to the requested world and owner/context; preserve immutable published old results; and propagate changes according to the consumer's actual observable result.
+Conservative module invalidation remains a viable correctness baseline only if its revision incorporates every relevant change; the additional modelled recomputations do not establish a production latency trade-off.
+
+This is an authored acyclic integer-query model, not real Jai overload resolution, type identity, layout, dynamic dependency discovery, or a semantic typechecker.
+It assumes immutable uniquely identified worlds, truthful source/module revisions, complete predeclared dependency lists, and cache-local monotonic result revisions.
+The equal-value comparison is exact status/integer equality, not a hash; no collision handling or general semantic fingerprint contract was tested.
+The experiment covers isolated two-world edits, not a long edit stream, concurrency, cycles, scheduling, cancellation, leases, eviction, persistence/reload, memory bounds, or performance.
+No production cache implementation or migration plan was added; E8-E11 test the separate scheduling, allocation, text-representation, and store/restart contracts below, while E12 remains a separate experiment.
+
+#### E8 Results: Pipeline Milestones and Scheduler Outcomes
+
+Completed 2026-10-19 on Windows with Jai beta 0.2.030, built 2 July 2026, using the fast x64 backend.
+Reproducible runner: [experiment_pipeline_scheduler.jai](examples/experiment_pipeline_scheduler.jai).
+From `examples/`:
+
+```bash
+jai experiment_pipeline_scheduler.jai -x64 -quiet -no_color -output_path .build -exe experiment_pipeline_scheduler
+./.build/experiment_pipeline_scheduler.exe
+```
+
+Hypothesis: world-keyed declaration milestones can publish independently and share one computation among multiple pending requests; legal recursion depends on which milestone is required, not merely whether declarations refer to one another.
+An idle scheduler must remain pending for an unfinished external task, while an actual cycle of unresolved prerequisites must be diagnosed even when unrelated external work also exists.
+Cancellation and shutdown must deliver explicit terminal outcomes without corrupting shared work, completed payloads, or world selection.
+
+The bounded deterministic model represents signature, body, layout, and externally completed tasks with authored integer payloads.
+Each task key is `(world, declaration, milestone)`; requests join that existing task and return either its immediate outcome or a pending handle.
+All configured tasks are scheduled; this is not a demand-discovery implementation.
+One scheduling step publishes ready work or propagates an explicit failed prerequisite, then notifies pending requests.
+At quiescence, transitive reachability over unresolved prerequisite edges identifies cyclic members; mutually reachable members receive the same canonical diagnostic group, while downstream dependents receive `FAILED` with a blocking-task ID.
+External tasks have no fabricated completion edge and remain pending until a simulated callback supplies a terminal result.
+
+The 17 scenarios run under both forward and reverse task traversal:
+
+- Signature/layout readiness before a body waiting on external work; immediate available queries and terminal unknown-milestone queries.
+- Self and mutual pointer-layout references requiring signatures, and mutually recursive procedure bodies requiring signatures rather than each other's completed bodies.
+- Self and mutual by-value layout cycles, with downstream failure distinct from cycle membership and unrelated external work still pending.
+- Three additional idle drains while an external result is outstanding, followed by successful completion and resumption.
+- Shared pending handles, cancellation of one waiter without cancelling another's work, repeat cancellation, and attempted cancellation after publication.
+- Cancellation of all waiters followed by shutdown; this model deliberately retains the computation until shutdown rather than selecting a last-waiter eviction policy.
+- External failure and unsupported outcomes, transitive failure propagation, and independent successful work.
+- Simultaneous old/new worlds, old completion arriving after the current world changes, retained old results, and independent current-world completion.
+- Idempotent shutdown, new requests after shutdown, rejected wrong-token and duplicate completions, and rejected external completion after shutdown.
+
+All 34 scheduling runs passed, 844 authored expectation/invariant checks.
+Seventeen normalised completion snapshots agreed across the two orders, including task identity, terminal/pending outcome, payload, run count, cycle group, failure provenance, dependency list, request world, and notification count.
+Logical publication ticks are deliberately excluded from order equivalence because different traversal orders legitimately change readiness timing.
+Successful tasks ran once; available tasks had available prerequisites; pending-on-return requests received exactly one notification upon becoming terminal, while immediate responses received none.
+Cancelled waiters retained their cancellation result even if the shared task subsequently completed or shut down.
+
+Eight negative controls deliberately treat all stalled work as cyclic, cancel shared work with one waiter, ignore the requested world, impose a declaration-wide completion barrier, notify a completed waiter repeatedly, accept completion after shutdown, omit cycle detection, or require a recursively referenced pointer's layout rather than its signature.
+Each differs from an authored expected outcome or notification/value measure.
+The pointer-layout control changes a prerequisite edge; the other controls select broken branches in the same scheduler operations.
+These controls establish fixture discrimination, not exhaustive scheduler correctness.
+
+Saved evidence is under `examples/.build/pipeline_scheduler/`: `summary.tsv`, `tasks.tsv`, `requests.tsv`, `dependencies.tsv`, `negative_controls.tsv`, `audit_summary.json`, and `compiler_version.txt`.
+The independent PowerShell audit parses all records and reconciles 244 task records, 50 request records, and 190 dependency edges.
+It checks unique task IDs and world/declaration/milestone keys, request/world agreement, exact notification and computation counts, prerequisite readiness and publication ordering, failed-prerequisite provenance, cycle membership and canonical groups derived from the saved graph, equivalence across traversal orders, all eight control mismatches, compiler identity, and the source's final newline.
+The complete executable exits successfully, including cleanup.
+
+Architectural consequence: schedule and publish individual declaration milestones rather than waiting for a declaration or whole program to finish all work.
+Use actual prerequisite edges to distinguish legal signature/pointer recursion from impossible by-value layout dependencies.
+Keep request cancellation separate from shared computation ownership, make pending and terminal outcomes explicit, and preserve the captured world through completion and display filtering.
+Diagnose cycles from the unresolved wait graph, not lack of forward progress; unrelated externally resumable work neither proves nor disproves a particular internal cycle.
+On shutdown, stop accepting work, terminally resolve pending handles, preserve already published results, and reject late completions.
+
+This is a fixed-capacity, single-threaded event model with at most 16 tasks, 16 requests, and four prerequisites per task, not a production scheduler, semantic engine, or compiler scheduling oracle.
+Integer arithmetic and manually authored prerequisite lists stand in for semantic computation; no source-language recursion rules or real layout sizes were compiler-verified here.
+The graph assumes fixed mandatory prerequisites, no dependency alternatives, and external leaf tasks; dynamic/generated work discovery, actual asynchronous processes, reentrant callbacks, concurrency/races, priorities/fairness, leases/reclamation, cancellation of a running worker, update tickets/coalescing, and persistent publication are untested.
+The small transitive-closure cycle detector establishes classification only, not a scalable algorithm or complete user-facing cycle diagnostic.
+No latency, allocation, or throughput claims follow, and no production API, cache, or migration plan was added.
+E9-E11 test allocation/reclamation, text representation, and store/restart below; E12's bounded baseline follows them.
+The separate explicit `using,map` wrapper probe remains unrun.
+
+#### E9 Results: Allocation, Eviction, and Retained Snapshots
+
+Completed 2026-10-19 on Windows with Jai beta 0.2.030, built 2 July 2026.
+Reproducible runner: [experiment_allocation_eviction.jai](examples/experiment_allocation_eviction.jai).
+Both the fast x64 build and optimised LLVM build passed all lifetime checks; the saved timing evidence below is from the optimised LLVM run.
+From `examples/`:
+
+```bash
+jai experiment_allocation_eviction.jai -x64 -quiet -no_color -output_path .build -exe experiment_allocation_eviction
+./.build/experiment_allocation_eviction.exe
+jai experiment_allocation_eviction.jai -o -llvm -quiet -no_color -output_path .build -exe experiment_allocation_eviction_llvm
+./.build/experiment_allocation_eviction_llvm.exe
+```
+
+Hypothesis: independently reclaimable typed records can reuse slots during sparse eviction, but reducing retained backing additionally depends on owned-payload cleanup and the allocator's bucket/group release policy.
+Live snapshot leases must prevent reclamation; after reclamation, allocation-generation checks must reject handles whose logical slots now identify different records.
+Individual slot reuse, upstream allocation churn, and actual backing release are distinct measurements rather than interchangeable benefits.
+
+Direct SDK API probes established:
+
+- `Pool` ignores individual frees.  Reset retains its normal blocks and reuses their storage; release returns those blocks to the configured upstream allocator.
+- `Bucket_Array` removes individual records and reuses their stable slots through an occupied-slot map/search, not a linked freelist.  Removal alone does not release bucket backing or clean owned payloads.
+- `bucket_array_reset` releases both the buckets and its dynamic index arrays.  The SDK's `array_reset` frees storage; `array_reset_keeping_memory` is the separate retaining operation.
+- The probe observed the same typed record address/locator after removal and replacement, with a different allocation generation.
+
+`Flat_Pool` was source-inspected but not benchmarked: its virtual reserve/commit model requires different backing instrumentation and also ignores individual frees.
+The arena candidate here is the actual SDK `Pool`, not a claimed comparison of every available arena implementation.
+
+The three measured strategies use identical 32-byte records and deterministic owned payloads of 32, 128, 224, 320, or 416 bytes:
+
+| Strategy | Fixed records | Owned payloads | Reclamation unit |
+| --- | --- | --- | --- |
+| Arena | Per-revision `Pool` | Same per-revision pool | Release the revision group after its last record lease ends. |
+| Typed | Eight-slot `Bucket_Array` buckets | Individual upstream heap allocations | Reuse each record slot and free its payload independently; reset the typed pool at final teardown. |
+| Hybrid | Same typed buckets | Per-revision `Pool` | Reuse record slots independently, but release payload backing only when the revision group is empty. |
+
+All arena groups use 4,096-byte blocks and a 1,024-byte oversized threshold; no workload allocation reaches that threshold.
+The workload creates 32 records, sparsely evicts every fourth record, refills the eight holes, and performs six eight-record edits while retaining two preceding snapshots.
+Each edit briefly retains an additional snapshot before releasing the oldest one.
+It then drops the current snapshot, checks the retained-only state, releases the remaining snapshots, records empty allocator capacity, and destroys the allocators.
+Each strategy creates and logically cleans 88 payloads exactly once; payload bytes are poisoned only after the last lease ends, and every live snapshot's identities/generations and payload bytes are checked after each phase.
+Stable control slots use monotonic allocation generations independent of semantic revisions; three controls deliberately bypass that check and observe a different live record through a stale handle.
+Metadata-slot reuse is distinct from actual record-address reuse: all strategies reused 32 control slots, while the two typed strategies also reused 32 record addresses in this run.
+
+The untimed profile wraps the upstream allocator with a pointer-size ledger, including bucket/index-array allocations, and requires zero tracked live allocations after teardown.
+It records useful live record/payload bytes, retained upstream bytes, peak requested-live bytes, nonlive/overhead bytes, dead allocations pinned inside nonempty arenas, reusable typed capacity, empty buckets, requests/frees, deferred evictions, cleanup, and reuse counts.
+Backing minus useful bytes includes metadata, unused slots, alignment/block slack, and dead arena allocations; it is not a claim to isolate heap-external fragmentation.
+
+Observed optimised results:
+
+| Strategy | Peak Backing Bytes | Upstream Requests | Record Address Reuses | Median Lifecycle (us) | Batch p95 (us/lifecycle) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Arena | 32,768 | 9 | 0 | 5.214 | 6.961 |
+| Typed | 14,920 | 97 | 32 | 15.808 | 23.328 |
+| Hybrid | 34,856 | 18 | 32 | 9.689 | 14.553 |
+
+Sparse eviction reduced live records from 32 to 24 in every strategy.
+Arena backing stayed at 8,192 bytes with 1,952 logically dead user bytes pinned by the remaining records.
+Typed backing fell from 8,320 to 6,624 bytes as 1,696 payload bytes were individually freed; eight record slots became reusable, but every bucket still contained live records.
+Hybrid backing stayed at 9,440 bytes: its eight record slots were reusable, but 1,696 dead payload bytes remained in the nonempty revision arena.
+At the empty phase, arena backing was zero, while both typed strategies retained 2,088 bytes across seven empty buckets and their index arrays, with 56 reusable slots.
+Explicit typed-pool reset then reduced tracked backing to zero for all three strategies.
+Thus even completely empty SDK typed buckets do not trim themselves on individual removal.
+
+Timing is separate from the profile: the upstream ledger and deep handle/payload verification are compiled out of the timed path.
+Each strategy has three warmup batches and 21 measured batches of 64 full lifecycles, with rotating mode order; all paths still perform the same record/payload writes, lease management, eviction, cleanup, and normal invariant assertions.
+Timing includes control-state setup, snapshot-handle copying, payload poisoning, allocation, and complete teardown; it is not a pure allocator-call microbenchmark.
+The recorded measurements in this section saved `QueryPerformanceCounter` ticks and frequency for every batch; the reported p95 is the nearest-rank p95 of batch averages, not an individual edit/request tail latency.
+The current runner instead uses `Basic.current_time_monotonic()`, subtracts Apollo timestamps before converting the elapsed duration with `to_nanoseconds()`, and saves nanosecond ticks with a fixed frequency of 1,000,000,000 ticks per second.
+Portable-clock smoke runs are kept separate from the original optimised evidence; the original timing table is not a measurement of the changed clock implementation.
+This is one optimised local timing round, not a statistically established production speed ratio.
+
+Saved evidence is under `examples/.build/allocation_eviction/`: `phases.tsv`, `profiles.tsv`, `generation_controls.tsv`, `timing_samples.tsv`, `timing_stats.tsv`, `audit_summary.json`, and `compiler_version.txt`.
+The independent PowerShell audit reconstructs the logical current/retained record sets and their exact payload sizes without using allocator internals, then checks all 54 phases against those expected live/created/cleaned counts.
+It reconciles 5,232 handle/payload or stale-handle checks, 264 logical payload cleanups, backing/useful/overhead accounting, reusable capacity, complete teardown request/free balance, profile totals, three generation-control mismatches, all 63 timing samples and rotating positions, and recomputed median/p95/min/max values from raw ticks.
+Compiler identity and the source's final newline were also checked; both executables exit successfully.
+
+Architectural consequence: keep arenas for genuinely co-lived revision/artifact groups; consider typed slots for independently lived fixed-size records, but specify payload ownership and empty-bucket trimming separately.
+A hybrid is not automatically lower-retention: small per-revision payload arenas plus persistent typed buckets had the highest peak here despite slot reuse.
+Freeing individual payloads improved sparse backing retention at the cost of more upstream requests and higher measured lifecycle time.
+Leases and allocation-generation validation remain required regardless of allocator choice; allocator reuse alone provides neither safe lifetime nor semantic freshness.
+The evidence supports measuring concrete ownership/group sizes, not selecting one universal allocation scheme or changing the existing AST-copier decision.
+
+Limits: this is a bounded synthetic, single-threaded ownership workload, not parser/query production data or a general graph collector.
+It covers one fixed record size, one bucket size, one arena block size, small payloads, six edits, and a two-snapshot retention window; it does not test size-class tuning, oversized/aligned allocations, allocator failure, concurrent access, graph-cycle reclamation, explicit slab trimming, OS working-set reduction, or long-running fragmentation.
+Tracked backing is requested bytes retained from the upstream allocator, excluding allocator-private metadata/rounding, temporary internal resize overlap, control/ledger storage, and operating-system residency; returning memory upstream does not prove pages were returned to the OS.
+No production cache, allocator API, or migration plan was added.
+E10 and E11 test text representation and store/restart below; E12's bounded baseline follows them.
+The explicit `using,map` wrapper probe remains unrun.
+
+#### E10 Results: Bounded Text Artifact Round Trip
+
+Completed on Windows with Jai beta 0.2.030, built 2 July 2026, using the fast x64 backend for correctness and optimised LLVM for the final timings.
+Reproducible runner: [experiment_text_artifacts.jai](examples/experiment_text_artifacts.jai).
+From the parser's examples directory:
+
+```bash
+jai experiment_text_artifacts.jai -x64 -quiet -no_color -output_path .build -exe experiment_text_artifacts && ./.build/experiment_text_artifacts.exe
+jai experiment_text_artifacts.jai -o -llvm -quiet -no_color -output_path .build -exe experiment_text_artifacts_llvm && ./.build/experiment_text_artifacts_llvm.exe
+pwsh -NoProfile -File .build/text_artifacts/audit.ps1
+```
+
+Hypothesis: a small explicit pointer-free text schema can preserve exact source/payload bytes, numeric values, diagnostic spans, and local dependency stamps independently of producer storage; bounded validation can reject malformed artifacts before publishing any records.
+The discriminating checks release and poison producer storage before decoding, poison/free encoded input before comparing independently rebuilt fixtures, compare all active records including floating-point bits, reject every proper prefix of the numeric fixture, and independently decode the saved evidence with PowerShell.
+This tests a concrete initial representation, not a generic serialised or a complete persisted AST/query engine.
+
+The SDK API probe confirms that `Text_File_Handler.start_from_memory` borrows its input and that `deinit` does not free that borrowed buffer.
+The handler supplies version and line processing; the application must implement its own row grammar, escaping, type conversion, limits, and reference validation.
+Its defaults trim whitespace and strip comments; the prototype disables inline comment stripping and encodes every payload byte as hexadecimal, so literal spaces, `#`, brackets, CR/LF, tabs, NUL, and UTF-8 cannot be interpreted as row syntax.
+Blank lines and whole-line comments are still skipped by the handler: accepted input is not restricted to a single canonical byte sequence.
+An explicit header preflight rejects trailing text after `[version]`, which the handler's own version parser does not reject.
+
+The version-1 wire schema is:
+
+```text
+[1]
+artifact IDENTITY WORLD
+source BYTE_COUNT HEX_BYTES_OR_DASH
+node ID KIND PARENT BEGIN END BYTE_COUNT HEX_BYTES_OR_DASH
+query ID NODE STATUS REVISION SIGNED_BITS UNSIGNED_BITS FLOAT_BITS BYTE_COUNT HEX_BYTES_OR_DASH
+diagnostic ID NODE SEVERITY BEGIN END BYTE_COUNT HEX_BYTES_OR_DASH
+dependency PARENT_QUERY TARGET_QUERY ARTIFACT CHECKED_PARENT_REVISION OBSERVED_TARGET_REVISION
+end NODE_COUNT QUERY_COUNT DIAGNOSTIC_COUNT DEPENDENCY_COUNT
+```
+
+Identities, revisions, and numeric bit patterns use exactly 16 uppercase hexadecimal digits; other numeric fields are bounded nonnegative decimal tokens.
+Strings are length-prefixed byte sequences with two uppercase hexadecimal digits per byte; empty strings use `0 -`.
+Nodes/queries/diagnostics have contiguous one-based IDs; a node's parent is zero or an earlier node, and spans are half-open source-byte offsets.
+Dependencies are explicitly local to the current artifact, with valid query references and exact checked-parent/observed-target revision matches.
+The reader rejects a foreign artifact identity rather than pretending to resolve cross-artifact dependencies.
+No pointer, allocator, pool, `Type_Info`, or native struct layout is serialised.
+
+| Fixture | Artifact Bytes | Source Bytes | Records Per Category | Exact Record Comparisons |
+| --- | ---: | ---: | ---: | ---: |
+| Empty | 70 | 0 | 0 | 1 |
+| Strings | 5,783 | 112 | 8 | 33 |
+| Numbers | 2,872 | 140 | 10 | 41 |
+| Recovery | 1,057 | 16 | 3 | 13 |
+| Limits | 52,986 | 236 | 16 | 65 |
+
+All five fixtures pass 153 grouped record comparisons, plus byte-identical re-encoding against the saved artifact after the independent oracle has also been torn down.
+The string matrix includes empty and whitespace-sensitive strings, comment/header-like text, quotes/backslashes, embedded control bytes, UTF-8 for accented/CJK/supplementary characters, all 256 byte values, and 512-byte payloads.
+Numeric records preserve signed 64-bit minimum/maximum, unsigned maximum/high-bit values, integers beyond exact double precision, positive/negative zero, ordinary values, a subnormal, maximum finite double, both infinities, and quiet/signalling NaN bit patterns with payloads.
+The five query states and incomplete-source recovery records are authored representative records, not outputs of a semantic evaluator or a full syntax reconstruction.
+
+The 41 invalid fixtures cover malformed/unsupported headers, missing termination, unknown/duplicate rows, extra fields/trailing rows, bad terminal counts, invalid numeric/hex/blob fields, invalid enum tags/severity, IDs/parents/references/spans, zero identity/world/revision, foreign dependencies, and stale parent/target stamps.
+Resource checks reject strings over 512 bytes, more than 16 records in each of the four categories, files over 65,536 bytes, lines over 2,048 bytes including LF, and more than 80 lines.
+The maximum-record/payload fixture succeeds; these limits are prototype constants, not proposed production defaults.
+All 2,872 proper byte prefixes of the numeric artifact are rejected in memory, including cuts inside headers, rows, numbers, and encoded strings.
+Every failure leaves the destination unpublished/zeroed; decoding uses a caller-owned pool which is reset after rejected inputs and released after successful lifetimes.
+This is transactional publication, not allocator rollback: allocations made before a rejection remain in that pool until the caller resets/releases it.
+Saved malformed fixtures and trace files retain final newlines; truncated buffers are not saved as separate newline-less files.
+
+Timing compares decode plus fresh pool setup/release against `parse_file` plus `release_parser_tree` with trivia enabled on exactly the artifact's referenced source bytes.
+Input artifacts/source are already in memory; encoding, file I/O, hashing, producer construction, deep comparisons, and independent auditing are outside the timed region.
+Each fixture/mode has a 16-operation warmup and 21 measured batches of 64 operations, with decode/parse order alternating per batch; ordinary completion assertions remain enabled.
+The p95 is the nearest-rank p95 of batch-average operation times, not individual request tail latency.
+
+| Fixture | Decode Median (us) | Decode p95 Batch (us) | Fresh Parse Median (us) | Fresh Parse p95 Batch (us) |
+| --- | ---: | ---: | ---: | ---: |
+| Strings | 17.203 | 19.791 | 17.886 | 21.059 |
+| Numbers | 11.931 | 17.923 | 17.673 | 26.539 |
+| Limits | 125.608 | 170.105 | 25.128 | 38.492 |
+z
+These are one local optimised timing round, not equivalent-work speed ratios: decoding restores synthetic node/query/diagnostic/dependency records and deliberately large payloads, whereas parsing constructs a real syntax tree without those semantic records.
+The limits artifact is about 224.5 times its tiny source size; its slower decode demonstrates payload/hex-volume cost, not a representative cache regression.
+Neither the small-fixture decode wins nor that large-fixture loss decides whether real syntax persistence is worthwhile.
+E12 below captures real-source inventories with I/O/validation costs and a separate owned graph-text decoder comparison; the latter is a same-layout read-only experiment, not a production syntax codec.
+
+Saved evidence is under `examples/.build/text_artifacts/`: the five artifacts, invalid artifacts, truncation source, parser-source files, `rejections.tsv`, `truncations.tsv`, `timings.tsv`, `timing_summary.tsv`, `compiler_version.txt`, and `audit_summary.json`.
+The independent ignored `audit.ps1` implements a separate wire reader, reconstructs fixture source/payload bytes and numeric bit patterns, reclassifies all 41 invalid inputs and all 2,872 prefixes, checks IDs/counts/spans/revisions, verifies all 126 raw timing samples and rotating order, recomputes the six median/p95 pairs, and checks compiler identity and final newlines.
+Both compiler backends and the independent audit pass.
+
+The timing table and saved optimised evidence above are from the original QPC-based runner.
+As with E9, the current runner now uses `Basic.current_time_monotonic()` and checked elapsed-nanosecond conversion, with a fixed 1,000,000,000 frequency in the existing tick/frequency columns; portable-clock smoke output is separate from the recorded evidence.
+
+Architectural consequence: keep the initial persisted representation explicit, versioned, bounded, and pointer-free; use owned decoded bytes and publish only after whole-artifact validation.
+`Text_File_Handler` is a usable line/version layer but supplies neither escaping nor a trust boundary by itself.
+Exact bit encodings avoid accidental precision loss or NaN/negative-zero normalisation, at substantial text size and decoding cost; measure a real record projection before selecting production encodings or binary alternatives.
+
+Limits: fixed-capacity synthetic records, one artifact, local dependencies, in-memory decode, and whole-artifact loading only.
+There is no complete AST reconstruction, cross-artifact/world-key validation, compiler/schema migration compatibility, checksum/authentication, allocation-failure/denial-of-service fuzzing, allocator-leak accounting, partial loading, concurrency, crash-safe publication, store restart, or OS-cold read measurement.
+The convenience disk reads used for evidence are not an untrusted bounded disk-loader API: production loading must impose its byte bound before reading/allocating the file.
+No production persistence API or migration plan was added.
+E11 tests store/restart below; E12's bounded baseline follows it.
+The explicit `using,map` wrapper probe remains unrun.
+
+#### E11 Results: Store Publication, Restart, and Overlay Recovery
+
+Completed 2026-10-19 on Windows 10.0.26200/ReFS with PowerShell 7.6.6 and .NET 10.0.12.
+Reproducible runner: [experiment_store_restart.ps1](examples/experiment_store_restart.ps1).
+From the parser's examples directory:
+
+```bash
+pwsh -NoProfile -File experiment_store_restart.ps1
+pwsh -NoProfile -File experiment_store_restart.ps1 -Mode Audit -StoreRoot .build/store_restart/ebb502e0dc82477ebb24d7455a000a32
+```
+
+The second command audits the recorded run; use the run directory printed by the first command to audit a new run.
+Each run creates a new isolated GUID directory under `examples/.build/store_restart/`; it does not modify workspace source files or an existing user cache.
+This is a standalone PowerShell/.NET filesystem and source-selection model, not a production Jai persistence implementation or an end-to-end extension of E10's `Text_File_Handler` schema.
+Separate worker processes provide actual restart boundaries, forced termination, and competing filesystem access without requiring compiler execution or executing cached source.
+
+Hypothesis: immutable content-addressed blobs, complete validation before use, a cooperative store lock, and atomic manifest replacement can preserve a complete selected state under interrupted/competing publication, while authoritative source bytes and an explicit host recovery handshake prevent stale overlays from becoming active.
+The discriminating checks kill publishers at five named write/publication boundaries, reload from fresh processes, preserve source length and timestamp while changing its bytes, deny actual writes to the cache directory, and compare cache-backed selection with fresh authored source/projection oracles.
+
+The prototype stores exact UTF-8 source as Base64 in JSON, a SHA-256 source digest, a fixed context/schema, and a small byte/line-count projection.
+The blob filename is the SHA-256 digest of its exact JSON bytes; reads validate that digest, the source digest, context/schema, and projection.
+The manifest is a size-bounded JSON envelope containing a checksum of its encoded JSON body; the body has schema/context/session, monotonically advanced generation, and separate `disk` and `recovery` blob keys.
+Keys are validated as uppercase 64-digit SHA-256 names before forming blob paths, and actual manifest/blob sizes are checked on an open stream before allocation: 8,192 bytes for manifests and 16,384 for blobs, with 512-byte authored source bounds.
+This checks corruption, not authenticity against an attacker able to rewrite hashes and payloads together; the projection is not an AST or semantic query result.
+
+All writers and GC acquire the same exclusive `FileStream` lock (`FileShare.None`).
+A publisher writes a uniquely named same-directory temporary file, flushes file data with `Flush(true)`, closes it, and publishes it with overwrite-enabled `File.Move`; the blob is installed before its reference is committed in the manifest.
+An existing digest-named blob must validate before it is reused; an identical publication reuses that blob rather than mutating it.
+Readers load the manifest without the writer lock and validate whichever complete blob it selects; their read handles permit deletion, so replacement can proceed.
+The tested contention policy is fail-open rather than blocking/retrying indefinitely: the losing publisher keeps correct in-memory source, reports `LOCK_BUSY`, and retries explicitly after the first publisher releases the lock.
+Publication rereads the manifest under that lock, so updating one slot does not overwrite a concurrent publisher's already committed other-slot update.
+
+| Check | Observed Result |
+| --- | --- |
+| Kill during partial blob write | Restart selects the old manifest/blob; staging is never selected. |
+| Kill after blob publication, before manifest write | Old selection survives; the unreferenced new blob can be collected. |
+| Kill during partial manifest write | Restart selects the complete old manifest, not the temporary prefix. |
+| Kill after manifest flush/close, before replacement | Restart still selects the old manifest. |
+| Kill after manifest replacement | Restart selects the complete new manifest/blob. |
+| Competing publishers | The second process fails open on the held lock, then retries successfully; both intended slot updates survive. |
+| Identical content publication | Both slots can name the same immutable blob without creating a duplicate. |
+| Corrupt blob/manifest or mismatched context | A fresh reader selects fresh authoritative source and records a cache diagnostic. |
+| Write-denied cache directory | Editing and saving source still work; the old manifest remains intact and write/metadata diagnostics are recorded. |
+| Reachability GC | Current roots and an explicit old-world lease survive; discarded and unleased historical blobs are removed, and crashed temporary files are cleaned. |
+
+All five interruption cases use real killed child processes, not only simulated branches.
+A fresh independent reader process validates selected state after each kill; collection then removes abandoned staging without changing that selection.
+The competing-writer check holds the first process inside the lock while another process attempts publication, then releases the winner and retries the loser.
+The parent performs 911 successful checks; the 32 worker processes comprise eight publisher processes (five killed) and 24 separate inspection/source-selection readers.
+Checks performed inside worker processes are not included in the parent's 911 count.
+
+Startup reads only the manifest; the first source request lazily decodes its selected blob.
+The lifecycle starts with disk text, persists an edited recovery revision, and verifies three separate restart choices: disk wins without host restoration, exact host-confirmed recovery can hit its artifact, and different host-restored bytes win but require fresh computation.
+Saving writes the source independently of the cache, advances the disk reference, clears the recovery reference, and leaves no active overlay.
+After another edit, an external same-size disk rewrite preserves its old modification time: the active overlay still wins until reset, after which the actual current disk bytes are hashed and selected rather than the cached saved revision.
+Discard/reset removes the persisted recovery reference; a later restart does not revive it.
+Deleting disk does not erase an active overlay; after explicit discard and deletion metadata, restart reports missing source.
+A returning path with the old timestamp, but different bytes is treated as a fresh revision, not proof of historical cache validity.
+Persistence-disabled sessions preserve in-memory overlay behaviour without reading blobs or writing recovery references.
+
+Twelve corruption cases cover modified/truncated/oversized/missing blobs, an invalid inner source digest, foreign artifact context, a bad manifest checksum, truncated/oversized manifests, unsupported manifest schema, foreign state context, and an unsafe referenced key.
+All reload as fresh source with explicit invalid-manifest/blob diagnostics rather than publishing cached data.
+GC refuses to guess roots from corrupt manifests and leaves the existing blobs untouched.
+The write-denial test installs a deny-write ACL on the isolated cache directory while keeping the source file outside that directory; it verifies actual failed persistence, continued overlay selection and disk save, and unchanged manifest contents.
+The original ACL is restored in `finally`, and later publication succeeds again.
+A separate cache path occupied by a regular file also degrades to in-memory operation with a directory-creation diagnostic.
+No elevated shell command or modification of permissions outside the generated test directory is required.
+
+GC is explicit reachability collection under the publication lock, with current disk/recovery roots plus an authored lease set.
+A first collection keeps the old leased revision and removes discarded recovery; after lease release, a second collection removes the old revision while retaining current content.
+Four negative controls discriminate automatic recovery activation, timestamp-only validation, omitted lease roots, and reuse of discarded recovery metadata.
+The omitted-lease control actually runs GC without the held lease and observes the erroneous deletion; the selection controls compare observed lifecycle values under the deliberately wrong selection rule.
+
+Saved evidence in the recorded GUID directory includes `initial_probe.json`, `process_probes.json`, `lifecycle.json`, `corruption.json`, `unwritable.json`, `negative_controls.json`, `summary.json`, and `audit_summary.json`, plus the actual isolated stores and source files.
+The separate-process `-Mode Audit` path recomputes hashes from saved manifest bodies, selected blobs, and source bytes without calling the prototype's cache readers.
+It checks exact old/new publication expectations, contention/retry/deduplication generations, lazy and host-authoritative selection, timestamp/size controls, GC root/lease results, all twelve fallback results, permission-failure diagnostics, and four broken-policy mismatches.
+The recorded independent audit passes 172 checks and verifies final newlines in 102 evidence files plus the harness; the audit report itself is also newline-terminated.
+The harness has no editor diagnostics, and its execution and saved-evidence audit both succeed.
+
+Architectural consequence: publish blobs before references, validate exact bytes on rehydration, serialise mutable manifest updates, and define an explicit retry/fail-open policy for store contention or failure.
+Keep recovery candidates distinct from active editor overlays, take restored contents from the host, and treat reset/save/deletion as metadata events rather than inference from the newest blob.
+Cache failures need surfaced system diagnostics without disabling correct source operations; inability to persist cleanup must not silently imply that recovery metadata was removed.
+Coordinate GC with publishers and lease roots; safe publication alone does not establish safe historical deletion.
+
+Limits: one authored document/context/session, small JSON source/projection artifacts, cooperative processes, a local ReFS filesystem, and deterministic interruption boundaries.
+This is not a Jai serialised integration, full parser/semantic cache, cache-directory/privacy default, cross-workspace identity policy, multiprocess lease registry, automatic corruption repair, byte-budget/retention implementation, or production host/editor API.
+Leases are supplied explicitly to this model's GC; a production shared store still needs a complete protocol for discovering/protecting leases held by other processes.
+The .NET/Linux permission branch exists but was not run; no NTFS, remote filesystem, platform-independent atomic-rename guarantee, malicious-writer defence, concurrent in-place external source mutation, or all possible timing interleavings were established.
+File flush and process-kill tests do not establish power-loss durability or directory-entry durability; first-ever publication without a prior manifest and disk-full/allocator-failure behaviour remain untested.
+The harness probes nonempty authored disk sources; E10's empty fixture does not establish an empty-source store workflow here.
+Private-storage permissions, crash durability, richer identity/version keys, repair policy, budgets, and process-wide lease tracking still require approved production contracts.
+No production persistence API or migration plan was added.
+E12's bounded baseline follows; the explicit `using,map` wrapper probe remains unrun.
+
+#### E12 Results: Real-Source Baseline and Source-Reload Control
+
+Bounded baseline captured 2026-10-19 on Windows 10.0.26200/ReFS, Jai beta 0.2.030 (2 July 2026), PowerShell 7.6.6, and .NET 10.0.12.
+Runners: [experiment_project_baseline.jai](examples/experiment_project_baseline.jai) and [experiment_project_baseline.ps1](examples/experiment_project_baseline.ps1).
+From the parser's examples directory:
+
+```bash
+jai experiment_project_baseline.jai -o -llvm -quiet -no_color -output_path .build -exe experiment_project_baseline_llvm
+pwsh -NoProfile -File experiment_project_baseline.ps1
+pwsh -NoProfile -File experiment_project_baseline.ps1 -Mode Audit -RunDirectory .build/project_baseline/40141fe0d05141dd9709bca383c951ab
+```
+
+Each measurement run creates its own GUID directory; the audit command above reads the recorded run, not a later timing round.
+Inputs are read-only real source inventories: all 56 top-level tutorials (a heterogeneous corpus, not a linked project), eight recursively inventoried Invaders files, four top-level parser implementation files, and 18 top-level Basic files.
+A three-file authored `E12_Root -> E12_Middle -> E12_Leaf` import chain supplies explicit transitive syntax inputs; its module directory and complete file list are saved, but no import resolver or typechecker is run.
+Inventories do not imply a complete real application's imported SDK closure or configured module-instance graph.
+The largest file is first in each manifest and supplies the active-file edits and retained-snapshot profile.
+Bounds are 64 files, 512 KiB per source, 2 MiB per inventory, serial workers, and a two-minute timeout per worker.
+
+Hypothesis: retaining complete owned file snapshots avoids parsing on validated unchanged requests, whereas persisting source text alone adds I/O/decoding without eliminating real parse work.
+The discriminating checks compare three modes against the same disk source and resident control snapshots, require exact bytes as well as an FNV-1a digest, and deep-compare independently owned parses using the existing snapshot oracle.
+The tutorial corpus exposed a missing oracle registry entry for `DIRECTIVE_THIS`: the parser allocates it as a base `Parser_Node`, not a generated concrete node.
+The oracle now compares that actual base layout and still rejects unsupported kinds.
+Its existing mutation/alias negative controls and bounded three-file lifecycle verification also pass.
+
+`FRESH` reads, hashes, copies, parses, and releases every file.
+`RESIDENT` still reads and hashes every disk file and checks exact bytes before selecting its existing snapshot.
+`TEXT_SOURCE_REPARSE` additionally reads a versioned text envelope, decodes exact source bytes, validates length/FNV and equality with current disk bytes, then performs the same real parse and teardown as `FRESH`.
+This envelope contains uppercase hexadecimal source bytes, not serialised syntax nodes, bindings, or semantic queries.
+**It is a source-reparse control, not a persisted-AST decoder.**
+FNV is noncryptographic and is never sufficient for reuse by itself; the independent provenance records SHA-256 hashes for each input and the measured worker/source.
+The authored codec is not E10's schema or a hardened untrusted cache reader: convenience disk reads check source size after allocation, and correctness assertions stop the worker rather than exercising production fallback.
+
+Portable `Basic.current_time_monotonic()` timestamps are subtracted before checked nanosecond conversion.
+Every mode has two warmups and 21 individual measured project requests, with rotating mode order; the p95 is nearest-rank sample 20 of 21, not a batch-average percentile.
+Overall latency includes disk reads, digest/exact-byte validation, decoding where applicable, source copies/parsing, and teardown.
+Separate read/hash/decode/parse/cleanup nanoseconds and actual requested byte counts are saved.
+Deep graph comparisons, artifact construction, memory instrumentation, and edit-source construction are outside request timings.
+Resident control snapshots remain live in every timed mode; `FRESH` is a warm in-process baseline, not an empty-process or OS-cold parse.
+These are one local optimised LLVM timing round, not confidence intervals, hard latency bounds, or approved acceptance thresholds.
+
+| Inventory | Files | Source Bytes | Fresh Median / p95 (ms) | Resident Median / p95 (ms) | Source-Reparse Median / p95 (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Tutorials | 56 | 687,364 | 18.364 / 19.721 | 2.004 / 2.789 | 24.629 / 28.005 |
+| Invaders | 8 | 75,331 | 4.151 / 5.479 | 0.280 / 0.597 | 5.077 / 6.222 |
+| Parser | 4 | 337,373 | 18.606 / 20.119 | 0.681 / 0.766 | 20.931 / 24.222 |
+| Basic | 18 | 348,676 | 16.524 / 18.436 | 0.887 / 1.211 | 18.981 / 22.274 |
+| Authored Chain | 3 | 1,163 | 0.194 / 0.398 | 0.047 / 0.082 | 0.244 / 0.422 |
+
+Resident median savings are about 9-27 times on the four real inventories; their source-reparse controls are about 1.12-1.34 times slower than fresh parsing.
+This supports validated whole-file retention, but does not quantify an equivalent AST reload's benefit or justify syntax chunking.
+Each unchanged request reads the listed source bytes; the text control additionally reads all artifact bytes below.
+Per-source headers and hex expansion make the complete text envelopes about 2.02 times source size.
+The initial resident build and artifact encode/write costs are separate, single setup observations, not repeated latency statistics; writes use ordinary file APIs without a durability claim.
+
+| Inventory | Text Bytes | Initial Read/Parse (ms) | Encode/Write (ms) | Resident Backing Bytes | With Two Extra Active Snapshots |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Tutorials | 1,387,298 | 20.465 | 19.456 | 24,865,791 | 25,772,119 |
+| Invaders | 152,099 | 3.687 | 3.441 | 6,634,216 | 12,344,378 |
+| Parser | 680,148 | 17.852 | 2.781 | 34,628,496 | 79,286,796 |
+| Basic | 703,385 | 15.273 | 7.295 | 24,901,833 | 30,829,929 |
+| Authored Chain | 2,437 | 0.335 | 0.827 | 525,825 | 1,050,535 |
+
+The untimed memory pass tracks upstream requested backing for a separately allocated source/tree/token/name world, then two independently owned copies of its largest file; both copies are deep-checked and all tracked allocations return to zero.
+The table's retained copies contain identical source, not distinct semantic worlds.
+The edit pass below retains differing file revisions instead.
+This is not RSS, physical allocator overhead, the whole process, or a residency budget: control worlds, tracker bookkeeping, and unrelated storage are excluded.
+Saved peak/request counters also include deep-oracle scratch inside the tracked phase, so they are not pure snapshot-only high-water figures.
+For the parser inventory, retaining two large copies increases backing from about 33.0 to 75.6 MiB; snapshot retention therefore needs an explicit policy despite cheap unchanged requests.
+
+Six active-file variants append a body returning 1, body returning 2, changed return interface, struct layout, malformed body, and repaired body to the original largest source.
+Each of 21 measured sequences follows one warmup sequence, reparses the entire active overlay, rotates two independently owned historical snapshots, and releases the overwritten oldest slot inside the timed update.
+Every current version and both retained versions are compared with independent fresh syntax graphs; the malformed version must have diagnostics.
+These are syntax-only in-memory edits: no editor dispatch, disk save, project update, semantic dependency fan-out, or type/layout-query recomputation is included.
+Body/interface/layout labels describe authored source changes, not proved selective invalidation.
+The 197,201-byte parser file's six median/p95 update times are respectively 8.895/11.758, 9.132/10.719, 11.602/14.568, 11.257/14.416, 11.671/13.981, and 11.155/15.389 ms.
+The first two updates have not yet evicted an old slot; later updates include that cleanup, so their difference is not evidence of semantic interface cost.
+Other inventories' per-kind medians/p95 and all 630 measured edit rows are saved rather than pooled across unlike files.
+
+Three fresh-process reload workers per inventory perform no resident-tree warmup.
+Their source-read/decode/validate/reparse totals match the project token/diagnostic and I/O totals.
+For the parser inventory, worker-only times are 22.960-25.382 ms and parent-observed process wall times are 59.411-59.675 ms; tutorials are 27.744-29.533 ms worker-only and 63.285-70.945 ms wall time.
+Wall time includes startup, runtime setup, output draining, and exit; three samples are reported as observations, not a meaningful tail percentile.
+Filesystem caches were not flushed, and earlier artifact generation warmed them.
+This is process restart, not OS-cold storage latency; no fresh-process fresh-parse competitor was measured.
+
+The recorded run contains 89 source files, 979 deep snapshot comparisons, 315 timed project requests, 630 timed edits, and 15 fresh restart processes.
+The independent PowerShell audit reimplements the envelope reader and FNV arithmetic, checks exact source bytes and SHA-256 provenance, rotating order, all row counts, parse/hit/diagnostic/token consistency, phase accounting, bytes read/written, retained counts, malformed diagnostics, zero tracked teardown, and final newlines.
+It recomputes the 15 project and 30 edit median/p95 pairs from raw TSVs and separates worker clocks from parent wall clocks.
+The measurement-plus-audit invocation passes 3,329 checks, including runner setup/process checks; the subsequent standalone saved-data audit passes 3,211 checks, including its prior newline-terminated report.
+Evidence is under `examples/.build/project_baseline/40141fe0d05141dd9709bca383c951ab/`: manifests, input paths/sizes/hashes, exact text artifacts, timing/edit/memory/setup TSVs, process outputs, runtime/worker provenance, and `audit_summary.json`.
+Fast x64 probe validation, optimised LLVM workloads, shared oracle controls, and saved-evidence auditing pass; no production cache API or migration was added.
+
+Architectural consequence: use validated resident whole-file snapshots and full changed-file reparsing as the initial comparison baseline; budget retained revisions explicitly.
+Source-only text persistence does not earn a speed benefit in these workloads.
+This source-only control does not establish the cost of real syntax persistence; the separate equivalent-work graph-text comparison follows below.
+E10's synthetic records and this source envelope cannot substitute for that measurement.
+Before selecting persistence or finer cache granularity, approve end-to-end median/tail/memory/disk targets and evaluate equivalent owned AST reload under the required process/storage conditions.
+The bounded baseline is complete, but E12's full persistence/acceptance decision remains open, along with semantic transitive-dependency updates, real configured import closures, complete section 13 editor workflows, OS-cold reads, concurrency, and cross-platform measurements.
+No numerical acceptance threshold is implied by the observed milliseconds or speed ratios; approval remains a specification gate, not an automatic benchmark outcome.
+
+##### E12 Follow-up: Equivalent Owned Graph Text Reload
+
+Captured 2026-10-19 on the same Windows/ReFS toolchain, using [experiment_snapshot_codec.jai](examples/experiment_snapshot_codec.jai) and [experiment_snapshot_codec.ps1](examples/experiment_snapshot_codec.ps1).
+This experiment reconstructs real parser-owned syntax graphs without reparsing source.  It does not change production parser, resolver, or cache APIs.
+The original source-reparse evidence above is preserved; the follow-up is a separate timing round and must be compared against its own fresh-parse competitor, not the earlier round's milliseconds.
+
+```bash
+jai experiment_snapshot_codec.jai -o -llvm -quiet -no_color -output_path .build -exe experiment_snapshot_codec_llvm
+pwsh -NoProfile -File experiment_snapshot_codec.ps1
+pwsh -NoProfile -File experiment_snapshot_codec.ps1 -Mode Check -RunDirectory .build/snapshot_codec/889f05af33c94f9480a9d0b03445f2fb
+pwsh -NoProfile -File experiment_snapshot_codec.ps1 -Mode Audit -RunDirectory .build/snapshot_codec/889f05af33c94f9480a9d0b03445f2fb
+```
+
+The runner consumes the original five manifests and verifies their saved source SHA-256 digests before measurement; no application code or compiler evaluation is executed.
+Its version-14 text format has explicit scalar/string/array/reference/layout records, contiguous object IDs, a layout fingerprint, and body length/FNV checks.
+Graph IDs reconstruct cycles, scope parents, declaration references, and owned-object aliases without persisted process addresses.
+Token/literal unions have explicit active-payload handling, including exact numeric bits and constant pointer literals; runtime/compiler pointers and unsupported unions are rejected.
+The logical roots include source/path, retained and synthetic tokens, diagnostics/related information, recovery/restart records, status, nodes, and lexical scopes.
+Allocator state, producer-private intern tables, and resizable-array spare capacity are not persisted.
+Every decoded payload and graph object belongs to a new stable pool; these are read-only snapshots, not validated inputs to mutable resolver/incremental-parser operations.
+
+The reader is an experiment-only same-layout, little-endian 64-bit implementation, driven by current reflection metadata and explicit tagged cases.
+Its fingerprint catches the recorded layout differences; it is not a complete compiler/schema migration contract or a stable independent production schema.
+Bounds include 64 MiB artifact bytes, 262,144 object IDs, 1,048,576 elements per array, 256 MiB explicitly reconstructed payload, and recursion depth 512.
+Pool/table bookkeeping is outside that payload counter; these are not whole-process resource limits.
+Convenience disk reads still impose size checks after reading, and FNV is not cryptographic authentication.
+Malformed artifacts abort a bounded worker through assertions; there is no transactional fail-open reader, exhaustive enum/span/graph-consistency validation, allocator-failure recovery, malicious-input safety claim, or production publication/store integration.
+
+Seven authored fixtures cover empty input, cyclic bindings/scopes, arrays and strings, struct literals, `#this`, null and numeric payloads, procedures, and malformed/recovery graphs.
+Their 21 deep lifetime comparisons destroy/poison the producer, poison/free artifact bytes, independently decode two siblings, and destroy/poison one sibling before comparing the other with fresh syntax.
+Every one of the 89 real-source artifacts is also decoded after producer teardown and deep-compared with a separate fresh parse after input poisoning.
+These are 110 deep comparisons across authored and real-source checks, not full Jai feature or compiler-semantic coverage.
+
+`FRESH`, `RESIDENT`, and `AST_RELOAD` use the same actual disk-source read, FNV/exact-byte validation, filename context, and live resident control trees.
+Reload additionally reads and validates the complete artifact and reconstructs its graph; it performs zero source parses.
+Fresh parsing and reload both release their temporary owned snapshots inside request latency.
+There are two warmups and 21 rotating requests per mode/inventory, for 315 measured requests; read/hash/decode/parse/cleanup clocks and source/artifact byte counts are saved.
+Deep comparisons, encoding/writing, memory instrumentation, and rejection checks are outside timing.  Apollo elapsed-nanosecond clocks and nearest-rank p95 are unchanged from the baseline.
+
+| Inventory | Fresh Median / p95 (ms) | Resident Median / p95 (ms) | AST Reload Median / p95 (ms) | AST Text Bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Tutorials | 25.059 / 28.953 | 2.984 / 3.894 | 111.255 / 145.359 | 14,826,050 |
+| Invaders | 4.209 / 5.070 | 0.256 / 0.355 | 21.926 / 25.803 | 3,911,306 |
+| Parser | 26.851 / 31.458 | 0.819 / 1.547 | 140.801 / 207.535 | 21,170,113 |
+| Basic | 14.123 / 15.017 | 0.789 / 1.081 | 82.271 / 85.221 | 16,079,410 |
+| Authored Chain | 0.139 / 0.211 | 0.033 / 0.045 | 0.607 / 0.721 | 108,262 |
+
+This graph-text representation reloads about 4.4-5.8 times slower than fresh parsing on the four real inventories, with artifacts about 21.6-62.7 times their source size.
+It preserves repeated source/token/trivia/name text rather than deduplicating strings or using source spans, and uses per-scalar text records and reflective dispatch; the result does not establish the performance of a compact field schema, binary format, or optimised decoder.
+Single setup encode/write observations are approximately 288/47/285/182/2 ms in table order, not repeated request statistics or durable publication costs.
+
+Separate untimed fresh/decoded backing profiles hold the whole inventory, then two extra largest-file copies, then release everything.
+They track upstream requested bytes, including snapshot pools and decoder object-table capacity, but exclude disk/artifact input buffers, tracker bookkeeping, deep-oracle scratch, allocator-private overhead, and OS residency.
+All ten fresh/decoded profiles return tracked bytes and outstanding allocation records to zero.
+
+| Inventory | Fresh Backing Bytes | Decoded Backing Bytes | Fresh With Two Extras | Decoded With Two Extras |
+| --- | ---: | ---: | ---: | ---: |
+| Tutorials | 24,864,447 | 13,851,194 | 25,770,727 | 14,469,486 |
+| Invaders | 6,634,024 | 3,480,299 | 12,344,138 | 6,147,235 |
+| Parser | 34,628,400 | 17,809,332 | 79,286,652 | 38,220,834 |
+| Basic | 24,901,401 | 13,824,095 | 30,829,449 | 16,936,889 |
+| Authored Chain | 525,753 | 242,831 | 1,050,415 | 463,853 |
+
+Lower decoded backing is evidence about this read-only materialisation, which omits producer-private intern tables and spare capacity; it is not proof of a better allocator or equal mutation/query capability.
+No full-project semantic state, eviction budget, distinct semantic old worlds, or peak whole-process working set is included.
+
+The valid artifact child-process control passes a deep fresh comparison.  Eleven corrupted variants assert-reject version/schema changes, checksum mismatch, truncation, trailing records, wrong root tag, oversized arrays, invalid object/layout IDs, and source/filename context mismatches.
+Inner mutations have recomputed body digests, so the checks discriminate structural/context guards rather than only checksum rejection.
+Failed workers must report the decode-probe marker and an assertion, exit nonzero, and never report success.
+The `Check` path passes 57 checks and saves raw rejected artifacts and process diagnostics; it verifies assertion-based rejection, not safe production fallback or exhaustive fuzzing.
+
+The independent PowerShell audit reimplements FNV/body framing, exact source/path reconstruction, scalar/string hex framing, contiguous/nonforward object IDs and layout placement, source SHA-256 provenance, mode order, parse/hit/load and byte totals, phase accounting, and all 15 median/p95 pairs.
+It checks saved backing and child rejection evidence without using the Jai codec; it is not an independent complete typed-AST decoder.
+The subsequent standalone audit passes 17,151,310 record/evidence assertions; this large number counts per-record assertions, not distinct fixtures or corruption cases.
+Saved evidence is under `examples/.build/snapshot_codec/889f05af33c94f9480a9d0b03445f2fb/`: original-manifest references, graph artifacts, raw/setup/backing TSVs, timing and follow-up worker/source hashes, compiler hash/build flags, process logs, rejection artifacts, and audit JSON.
+Backing/rejection modes were added and rebuilt after the saved timing round; their separate worker/source hashes are recorded rather than presented as the measured binary.
+Both fast x64 authored/probe checks and the optimised LLVM real-source, memory, rejection, and saved-evidence checks pass.
+
+Architectural consequence: the equivalent-work comparison now supports resident whole-file retention and fresh changed-file parsing over adopting this graph-text format for speed.
+The backing reduction may inform a future compact read-only snapshot design, but does not offset an unapproved latency/disk budget automatically.
+Keep persistence as an architectural capability, not a demonstrated performance win for this representation.
+Compact encoding/decoder optimisation is an optional, measured follow-up, not a reason to begin production migration.
+Numerical acceptance-policy approval, actual graph-reload process-restart/OS-cold performance, semantic dependency updates and configured closures, complete editor workflows, concurrency, and cross-platform evidence remain open.
 
 Suggested order is E1-E5 for language/toolchain facts, then E6-E8 for correctness contracts, then E9-E11 for representation/storage, with E12's baseline captured early and comparisons added as prototypes become available.
 E5 is a bounded feasibility probe, not a prerequisite to implementing the syntax-first service if evaluation remains explicitly unsupported.
@@ -1051,7 +1641,15 @@ No production changes are authorised by this checklist alone.
 - [x] Run and record E4's bounded path/source-context probes, including case/alias validation, relative lookup, exact locations, nominal identity, native links, byte equality, and complete diagnostic/marker audits.
 - [x] Run and record E5's bounded compiler-evaluation probes, including added-string freshness/boundaries, context, mapping callbacks, workspaces, failures, startup costs, and complete artifact/diagnostic audits.
 - [x] Run and record E6's bounded syntax-independence probe, including owned payloads/recovery, producer teardown, independent semantic contexts, fresh oracles, and the current-node alias control.
-- [ ] Run and record the remaining bounded experiments E7-E12 in section 14, distinguishing initial specification blockers from explicitly deferred capabilities.
+- [x] Run and record E7's bounded dependency/revision model, including exact reuse, dual-stamp checks, missing/candidate dependencies, retained worlds, conservative invalidation, and broken-policy controls.
+- [x] Run and record E8's bounded pipeline/scheduler model, including milestone readiness, legal recursion, cycle groups, pending/shared requests, cancellation, world selection, shutdown, and broken-policy controls.
+- [x] Run and record E9's bounded allocation/eviction benchmark, including SDK API probes, sparse and lease-delayed reclamation, payload cleanup, generation/slot reuse, backing accounting, and separate optimised timing.
+- [x] Run and record E10's bounded text-artifact experiment, including exact byte/numeric fidelity, independent lifetimes, malformed/truncated/schema/bounds rejection, transactional publication, independent audit, and separate optimised decode/parse timing.
+- [x] Run and record E11's bounded store/restart/overlay experiment, including killed and competing publishers, corrupt/unwritable stores, exact-content restart selection, host-confirmed recovery, save/reset/deletion/reappearance, lease-aware GC, diagnostics, and independent audit.
+- [x] Capture E12's bounded real-source baseline: validated resident reuse, fresh parsing, explicit text-source-reparse control, repeated malformed/body/interface/layout edits, retained snapshot backing, process restart, and independent saved-data audit.
+- [x] Capture E12's equivalent owned AST graph-text reload comparison on the 89-source inventory, including deep producer/input/sibling-teardown checks, exact source/context validation, fresh/resident competitors, backing profiles, rejection controls, and independent saved-data audit; retain its same-layout/read-only limits.
+- [ ] Measure actual graph-reload process restart and required cold-storage conditions before making a persisted-startup performance claim; the original restart path only measured source reparsing.
+- [ ] Approve E12's numerical median/tail/memory/disk targets and extend the baseline to semantic dependency updates and the complete section 13 editor workflows, explicitly deferring unsupported capabilities.
 - [ ] Turn the evidence into approved initial contracts and acceptance criteria using the specification-completion gate in section 14, before writing the migration plan.
 - [ ] Define owned immutable syntax snapshots and syntax diagnostics that do not depend on semantic mutation or caller allocator lifetime.
 - [ ] Define coherent semantic worlds, declaration/type identities, versioned handles, and query-result states through full Jai coverage.

@@ -30,6 +30,7 @@ Oracle_Node_Type :: struct {
 #insert -> string {
 	builder: String_Builder;
 	print(*builder, "ORACLE_NODE_TYPES :: Oracle_Node_Type.[\n");
+	print(*builder, ".{.DIRECTIVE_THIS, type_info(Parser.Parser_Node)},\n");
 
 	for Parser.TYPES {
 		name := it.(*Type_Info_Struct).name;
@@ -236,7 +237,7 @@ oracle_value :: (state: *Oracle_State, info: *Type_Info, actual: *void, expected
 				}
 
 				if !structure {
-					return oracle_fail(state, path, "unhandled node kind");
+					return oracle_fail(state, path, tprint("unhandled node kind %", left.(*Parser.Parser_Node).kind));
 				}
 			} else if !starts_with(structure.name, "Parser_") && structure.name != "Code_Pointer_Literal_Info" {
 				return oracle_fail(state, path, tprint("unhandled pointer to %", structure.name));
