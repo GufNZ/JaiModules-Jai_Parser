@@ -9,154 +9,154 @@ Typed_Numeric_Case :: struct {
 }
 
 TYPED_INTEGER_CASES :: Typed_Numeric_Case.[
-	.{parameter_type="u16",	setup="value: u8 = 255;",										compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="s16",	setup="value: s8 = -128;",										compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="s16",	setup="value: u8 = 255;",										compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="u16",	setup="value: s8 = 1;",											compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",	setup="value: u16 = 1;",										compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="s8",	setup="value: s16 = 1;",										compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="s8",	setup="value: u8 = 1;",											compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",	setup="value: s8 = 1;",											compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",													argument="1",	compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="u8",	setup="value :: 1;",											compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="u8",	setup="value: u16 : 1;",										compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u16",	setup="value: u8 : 255;",										compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="u8",	setup="value: u8 = 255;",										compiler_accepts=true,	parser_matches=true,	rival_type="u16"},
-	.{parameter_type="u8",	setup="value: u8 = 255;",										compiler_accepts=true,	parser_matches=true,	rival_type="s16"},
-	.{parameter_type="s8",	setup="value: s8 = -128;",										compiler_accepts=true,	parser_matches=true,	rival_type="s16"},
-	.{parameter_type="u16",	setup="value: u8 = 255;",										compiler_accepts=true,	parser_matches=true,	rival_type="u32"},
-	.{parameter_type="s16",	setup="value: s8 = -128;",										compiler_accepts=true,	parser_matches=true,	rival_type="s32"},
-	.{parameter_type="u16",	setup="value: u8 = 255;",										compiler_accepts=true,	parser_matches=true,	rival_type="s32"},
-	.{parameter_type="u16",	setup="value: u8 = 255;",										compiler_accepts=false,	parser_matches=false,	rival_type="s16"},
-	.{parameter_type="u8",	setup="value :: 255;",											compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="u8",	setup="value :: 256;",											compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="s8",	setup="value :: -128;",											compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="s8",	setup="value :: -129;",											compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",	setup="original :: 255; middle :: original; value :: middle;",	compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="u8",	setup="original :: 256; value :: original;",					compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",	setup="original: u16 : 1; value :: original;",					compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u16",	setup="original: u8 : 255; value :: original;",					compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="u8",	setup="value := 1; value = 256;",								compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",	setup="original := 1; value := original;",						compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",	setup="value :: -1;",											compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u64",	setup="value :: 18446744073709551615;",							compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="u8",	setup="value :: 1;",											compiler_accepts=true,	parser_matches=true,	rival_type="u16"},
-	.{parameter_type="s64",	setup="value :: 1;",											compiler_accepts=true,	parser_matches=true,	rival_type="u8"},
-	.{parameter_type="s8",	setup="value :: 1;",											compiler_accepts=false,	parser_matches=false,	rival_type="u8"},
-	.{parameter_type="u8",	setup="value :: 1 + 2;",										compiler_accepts=true,	parser_matches=false},
-	.{parameter_type="u8",	setup="value :: original; original :: 255;",					compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",	setup="original :: value; value :: original;",					compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",	setup="value :: Missing;",										compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",	setup="value :: 1; value :: 2;",								compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="s64",	setup="original := 1; value := original;",						compiler_accepts=true,	parser_matches=true,	rival_type="u8"},
+	.{parameter_type = "u16",			setup = "value: u8 = 255;",																			compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "s16",			setup = "value: s8 = -128;",																		compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "s16",			setup = "value: u8 = 255;",																			compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "u16",			setup = "value: s8 = 1;",																			compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "value: u16 = 1;",																			compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "s8",			setup = "value: s16 = 1;",																			compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "s8",			setup = "value: u8 = 1;",																			compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "value: s8 = 1;",																			compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",																argument = "1",									compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "u8",			setup = "value :: 1;",																				compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "u8",			setup = "value: u16 : 1;",																			compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u16",			setup = "value: u8 : 255;",																			compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "u8",			setup = "value: u8 = 255;",																			compiler_accepts = true,	parser_matches = true,	rival_type = "u16"},
+	.{parameter_type = "u8",			setup = "value: u8 = 255;",																			compiler_accepts = true,	parser_matches = true,	rival_type = "s16"},
+	.{parameter_type = "s8",			setup = "value: s8 = -128;",																		compiler_accepts = true,	parser_matches = true,	rival_type = "s16"},
+	.{parameter_type = "u16",			setup = "value: u8 = 255;",																			compiler_accepts = true,	parser_matches = true,	rival_type = "u32"},
+	.{parameter_type = "s16",			setup = "value: s8 = -128;",																		compiler_accepts = true,	parser_matches = true,	rival_type = "s32"},
+	.{parameter_type = "u16",			setup = "value: u8 = 255;",																			compiler_accepts = true,	parser_matches = true,	rival_type = "s32"},
+	.{parameter_type = "u16",			setup = "value: u8 = 255;",																			compiler_accepts = false,	parser_matches = false,	rival_type = "s16"},
+	.{parameter_type = "u8",			setup = "value :: 255;",																			compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "u8",			setup = "value :: 256;",																			compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "s8",			setup = "value :: -128;",																			compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "s8",			setup = "value :: -129;",																			compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "original :: 255; middle :: original; value :: middle;",									compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "u8",			setup = "original :: 256; value :: original;",														compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "original: u16 : 1; value :: original;",													compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u16",			setup = "original: u8 : 255; value :: original;",													compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "u8",			setup = "value := 1; value = 256;",																	compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "original := 1; value := original;",														compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "value :: -1;",																				compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u64",			setup = "value :: 18446744073709551615;",															compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "u8",			setup = "value :: 1;",																				compiler_accepts = true,	parser_matches = true,	rival_type = "u16"},
+	.{parameter_type = "s64",			setup = "value :: 1;",																				compiler_accepts = true,	parser_matches = true,	rival_type = "u8"},
+	.{parameter_type = "s8",			setup = "value :: 1;",																				compiler_accepts = false,	parser_matches = false,	rival_type = "u8"},
+	.{parameter_type = "u8",			setup = "value :: 1 + 2;",																			compiler_accepts = true,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "value :: original; original :: 255;",														compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "original :: value; value :: original;",													compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "value :: Missing;",																		compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "value :: 1; value :: 2;",																	compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "s64",			setup = "original := 1; value := original;",														compiler_accepts = true,	parser_matches = true,	rival_type = "u8"},
 ];
 
 TYPED_FLOAT_CASES :: Typed_Numeric_Case.[
-	.{parameter_type="u8",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="u8",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="s8",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="s8",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="u16",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="u16",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="s16",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="s16",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="u32",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="u32",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="s32",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="s32",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="u64",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="u64",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="s64",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="s64",																	argument="1",					compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="s8",																	argument="-1",					compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="s16",																	argument="-1",					compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="u8",		setup="original :: 1; middle :: original; value :: middle;",								compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="Alias",	globals="Alias :: s16;",	setup="value :: -1;",											compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="float32",																argument="256",					compiler_accepts=true,	parser_matches=true,	rival_type="u8"},
-	.{parameter_type="float64",																argument="128",					compiler_accepts=true,	parser_matches=true,	rival_type="s8"},
-	.{parameter_type="float32",																argument="-1",					compiler_accepts=true,	parser_matches=true,	rival_type="u8"},
-	.{parameter_type="u8",		setup="value :: 1 + 2;",																	compiler_accepts=true,	parser_matches=false,	rival_type="float32"},
-	.{parameter_type="float64", setup="value: float32 = 1.5;",																compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float32", setup="value: float64 = 1.5;",																compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float64", setup="value: float32 : 1.5;",																compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float32", setup="value: float64 : 1.5;",																compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float64", setup="original: float32 : 1.5; value :: original;",										compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float32", setup="original: float64 : 1.5; value :: original;",										compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float64", setup="value := 1.5;",																		compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float32", setup="value := 1.23456789;",																compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float32", setup="value: float32 = 1.5;",																compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="float64", setup="value: float64 = 1.5;",																compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="float32", setup="value := 1.5;",																		compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="float64", setup="value := 1.23456789;",																compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="float32", setup="value: float64 = 1.23456789;",						argument="cast(float32) value",	compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float64", setup="value: float32 = 1.5;",								argument="cast(float64) value",	compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float32", setup="value: float64 = 1.23456789;",						argument="cast(float32) value",	compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="float64", setup="value: float32 = 1.5;",								argument="cast(float64) value",	compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="float64", setup="original: float32 = 1.5; value := original;",										compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float32", setup="original: float64 = 1.5; value := original;",										compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float32", setup="value :: 1.5;",																		compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float64", setup="value :: 1.23456789;",																compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float32", setup="value: u8 = 255;",																	compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float64", setup="value: u8 = 255;",																	compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float32", setup="value: s64 = 16777217;",																compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float64", setup="value: s64 = 9007199254740993;",														compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="s32",		setup="value: float32 = 1.5;",																compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="s64",		setup="value: float64 = 1.5;",																compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float32",	setup="value: s64 = 16777217;",								argument="cast(float32) value",	compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="s64",		setup="value: float64 = 1.5;",								argument="cast(s64) value",		compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="u16",		setup="value: u8 = 255;",																	compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="float64", setup="value: float32 = 1.5;",																compiler_accepts=true,	parser_matches=true,	rival_type="s64"},
-	.{parameter_type="u8",		setup="value: float32 = 1.0;",																compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="s64",		setup="value: float64 : 1.0;",																compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float32",	setup="original: u8 : 255; value :: original;",												compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",		setup="original: float32 : 1.0; value :: original;",										compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="int",		setup="value: int = 1;",																	compiler_accepts=true,	parser_matches=true,	rival_type="float32"},
-	.{parameter_type="float",	setup="value: float32 = 1.5;",																compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float32",	setup="value: float = 1.5;",																compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float64",	setup="value: float = 1.5;",																compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float",	setup="value: float64 = 1.5;",																compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float",	setup="value: s64 = 16777217;",								argument="cast(float) value",	compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="int",		setup="value: float64 = 1.5;",								argument="cast(int) value",		compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float",	setup="value: float = 1.5;",																compiler_accepts=false,	parser_matches=false,	rival_type="float32"},
-	.{parameter_type="int",		setup="value: int = 1;",																	compiler_accepts=false,	parser_matches=false,	rival_type="s64"},
-	.{parameter_type="float32",	setup="Float_Alias :: float32; value: Float_Alias = 1.5;",									compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float64",	setup="Original :: float; Alias :: Original; value: Alias = 1.5;",							compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float32",	setup="Alias :: float64; value: Alias = 1.5;",												compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u16",		setup="Alias :: u8; value: Alias = 255;",													compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="u8",		setup="Alias :: u16; value: Alias = 1;",													compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float32",	setup="Alias :: float32; value: float64 = 1.5;",			argument="cast(Alias) value",	compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="u8",		setup="Alias :: Other; Other :: Alias; value: Alias = 1;",									compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",		setup="Alias :: Missing; value: Alias = 1;",												compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",		setup="Alias :: u8; Alias :: u16; value: Alias = 1;",										compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",		setup="value: Alias = 1; Alias :: u8;",														compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="u8",		setup="Alias := u8; value: Alias = 1;",														compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float32",	setup="Alias: Type : float32; value: Alias = 1.5;",											compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="u8",		setup="Alias :: u8; nested :: () { Alias :: u16; unused: Alias = 1; } value: Alias = 255;",	compiler_accepts=true,	parser_matches=true, rival_type="u16"},
-	.{parameter_type="u8",		setup="Alias :: u16; nested :: () { Alias :: u8; unused: Alias = 1; } value: Alias = 1;",	compiler_accepts=false,	parser_matches=false},
+	.{parameter_type = "u8",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "u8",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "s8",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "s8",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "u16",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "u16",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "s16",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "s16",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "u32",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "u32",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "s32",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "s32",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "u64",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "u64",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "s64",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "s64",																argument = "1",									compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "s8",																argument = "-1",								compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "s16",																argument = "-1",								compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "u8",			setup = "original :: 1; middle :: original; value :: middle;",										compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "Alias",		globals = "Alias :: s16;",	setup = "value :: -1;",														compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "float32",															argument = "256",								compiler_accepts = true,	parser_matches = true,	rival_type = "u8"},
+	.{parameter_type = "float64",															argument = "128",								compiler_accepts = true,	parser_matches = true,	rival_type = "s8"},
+	.{parameter_type = "float32",															argument = "-1",								compiler_accepts = true,	parser_matches = true,	rival_type = "u8"},
+	.{parameter_type = "u8",			setup = "value :: 1 + 2;",																			compiler_accepts = true,	parser_matches = false,	rival_type = "float32"},
+	.{parameter_type = "float64",		setup = "value: float32 = 1.5;",																	compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float32",		setup = "value: float64 = 1.5;",																	compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float64",		setup = "value: float32 : 1.5;",																	compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float32",		setup = "value: float64 : 1.5;",																	compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float64",		setup = "original: float32 : 1.5; value :: original;",												compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float32",		setup = "original: float64 : 1.5; value :: original;",												compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float64",		setup = "value := 1.5;",																			compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float32",		setup = "value := 1.23456789;",																		compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float32",		setup = "value: float32 = 1.5;",																	compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "float64",		setup = "value: float64 = 1.5;",																	compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "float32",		setup = "value := 1.5;",																			compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "float64",		setup = "value := 1.23456789;",																		compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "float32",		setup = "value: float64 = 1.23456789;",				argument = "cast(float32) value",				compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float64",		setup = "value: float32 = 1.5;",					argument = "cast(float64) value",				compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float32",		setup = "value: float64 = 1.23456789;",				argument = "cast(float32) value",				compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "float64",		setup = "value: float32 = 1.5;",					argument = "cast(float64) value",				compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "float64",		setup = "original: float32 = 1.5; value := original;",												compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float32",		setup = "original: float64 = 1.5; value := original;",												compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float32",		setup = "value :: 1.5;",																			compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float64",		setup = "value :: 1.23456789;",																		compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float32",		setup = "value: u8 = 255;",																			compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float64",		setup = "value: u8 = 255;",																			compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float32",		setup = "value: s64 = 16777217;",																	compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float64",		setup = "value: s64 = 9007199254740993;",															compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "s32",			setup = "value: float32 = 1.5;",																	compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "s64",			setup = "value: float64 = 1.5;",																	compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float32",		setup = "value: s64 = 16777217;",					argument = "cast(float32) value",				compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "s64",			setup = "value: float64 = 1.5;",					argument = "cast(s64) value",					compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "u16",			setup = "value: u8 = 255;",																			compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "float64",		setup = "value: float32 = 1.5;",																	compiler_accepts = true,	parser_matches = true,	rival_type = "s64"},
+	.{parameter_type = "u8",			setup = "value: float32 = 1.0;",																	compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "s64",			setup = "value: float64 : 1.0;",																	compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float32",		setup = "original: u8 : 255; value :: original;",													compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "original: float32 : 1.0; value :: original;",												compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "int",			setup = "value: int = 1;",																			compiler_accepts = true,	parser_matches = true,	rival_type = "float32"},
+	.{parameter_type = "float",			setup = "value: float32 = 1.5;",																	compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float32",		setup = "value: float = 1.5;",																		compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float64",		setup = "value: float = 1.5;",																		compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float",			setup = "value: float64 = 1.5;",																	compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float",			setup = "value: s64 = 16777217;",					argument = "cast(float) value",					compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "int",			setup = "value: float64 = 1.5;",					argument = "cast(int) value",					compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float",			setup = "value: float = 1.5;",																		compiler_accepts = false,	parser_matches = false,	rival_type = "float32"},
+	.{parameter_type = "int",			setup = "value: int = 1;",																			compiler_accepts = false,	parser_matches = false,	rival_type = "s64"},
+	.{parameter_type = "float32",		setup = "Float_Alias :: float32; value: Float_Alias = 1.5;",										compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float64",		setup = "Original :: float; Alias :: Original; value: Alias = 1.5;",								compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float32",		setup = "Alias :: float64; value: Alias = 1.5;",													compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u16",			setup = "Alias :: u8; value: Alias = 255;",															compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "u8",			setup = "Alias :: u16; value: Alias = 1;",															compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float32",		setup = "Alias :: float32; value: float64 = 1.5;",	argument = "cast(Alias) value",					compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "u8",			setup = "Alias :: Other; Other :: Alias; value: Alias = 1;",										compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "Alias :: Missing; value: Alias = 1;",														compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "Alias :: u8; Alias :: u16; value: Alias = 1;",												compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "value: Alias = 1; Alias :: u8;",															compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "u8",			setup = "Alias := u8; value: Alias = 1;",															compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float32",		setup = "Alias: Type : float32; value: Alias = 1.5;",												compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "u8",			setup = "Alias :: u8; nested :: () { Alias :: u16; unused: Alias = 1; } value: Alias = 255;",		compiler_accepts = true,	parser_matches = true, rival_type = "u16"},
+	.{parameter_type = "u8",			setup = "Alias :: u16; nested :: () { Alias :: u8; unused: Alias = 1; } value: Alias = 1;",			compiler_accepts = false,	parser_matches = false},
 ];
 
 NUMERIC_ALIAS_PARAMETER_CASES :: Typed_Numeric_Case.[
-	.{parameter_type="Alias",	globals="Alias :: float32;",					setup="value: float32 = 1.5;",					compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="Alias",	globals="Original :: int; Alias :: Original;",	setup="value: s64 = 1;",						compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float64",	globals="Alias :: float32;",					setup="value: Alias = 1.5;",					compiler_accepts=true,	parser_matches=true},
-	.{parameter_type="float64",	globals="Alias :: float32;",					setup="Alias :: float64; value: Alias = 1.5;",	compiler_accepts=true,	parser_matches=true,	rival_type="Alias"},
-	.{parameter_type="Alias",	globals="Alias :: float32;",					setup="value: float32 = 1.5;",					compiler_accepts=false,	parser_matches=false,	rival_type="float32"},
-	.{parameter_type="Alias",	globals="Alias :: float32; Alias :: float64;",	setup="value: float32 = 1.5;",					compiler_accepts=false,	parser_matches=false,	rival_type="float32"},
+	.{parameter_type = "Alias",		globals = "Alias :: float32;",						setup = "value: float32 = 1.5;",					compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "Alias",		globals = "Original :: int; Alias :: Original;",	setup = "value: s64 = 1;",							compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float64",	globals = "Alias :: float32;",						setup = "value: Alias = 1.5;",						compiler_accepts = true,	parser_matches = true},
+	.{parameter_type = "float64",	globals = "Alias :: float32;",						setup = "Alias :: float64; value: Alias = 1.5;",	compiler_accepts = true,	parser_matches = true,	rival_type = "Alias"},
+	.{parameter_type = "Alias",		globals = "Alias :: float32;",						setup = "value: float32 = 1.5;",					compiler_accepts = false,	parser_matches = false,	rival_type = "float32"},
+	.{parameter_type = "Alias",		globals = "Alias :: float32; Alias :: float64;",	setup = "value: float32 = 1.5;",					compiler_accepts = false,	parser_matches = false,	rival_type = "float32"},
 ];
 
 FLOAT_CONSTANT_CASES :: Typed_Numeric_Case.[
-	.{parameter_type="float32",									setup="value := 1.23456789;",													compiler_accepts=false,	parser_matches=false,	rival_type="string"},
-	.{parameter_type="float32",									setup="original: float64 : 1.5; middle :: original; value :: middle;",			compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float",									setup="value :: 1.5;",															compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="float32",									setup="value :: 1.0 + 0.5;",													compiler_accepts=true,	parser_matches=false},
-	.{parameter_type="float32",									setup="value :: original; original :: 1.5;",									compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float32",									setup="original :: value; value :: original;",									compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float32",									setup="value :: Missing;",														compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float32",									setup="value :: 1.5; value :: 1.23456789;",										compiler_accepts=false,	parser_matches=false},
-	.{parameter_type="float32",									setup="value :: 1.5; nested :: () { value :: 1.23456789; unused := value; }",	compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="float32",	globals="value :: 1.23456789;",	setup="value :: 1.5;",															compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="float32",									setup="original :: cast(float32) 1.23456789; value :: original;",				compiler_accepts=true,	parser_matches=true,	rival_type="float64"},
-	.{parameter_type="float32",									setup="original :: 1.23456789; value := original;",								compiler_accepts=false,	parser_matches=false},
+	.{parameter_type = "float32",									setup = "value := 1.23456789;",													compiler_accepts = false,	parser_matches = false,	rival_type = "string"},
+	.{parameter_type = "float32",									setup = "original: float64 : 1.5; middle :: original; value :: middle;",		compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float",										setup = "value :: 1.5;",														compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "float32",									setup = "value :: 1.0 + 0.5;",													compiler_accepts = true,	parser_matches = false},
+	.{parameter_type = "float32",									setup = "value :: original; original :: 1.5;",									compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float32",									setup = "original :: value; value :: original;",								compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float32",									setup = "value :: Missing;",													compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float32",									setup = "value :: 1.5; value :: 1.23456789;",									compiler_accepts = false,	parser_matches = false},
+	.{parameter_type = "float32",									setup = "value :: 1.5; nested :: () { value :: 1.23456789; unused := value; }",	compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "float32",	globals = "value :: 1.23456789;",	setup = "value :: 1.5;",													compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "float32",									setup = "original :: cast(float32) 1.23456789; value :: original;",				compiler_accepts = true,	parser_matches = true,	rival_type = "float64"},
+	.{parameter_type = "float32",									setup = "original :: 1.23456789; value := original;",							compiler_accepts = false,	parser_matches = false},
 ];
 
 make_typed_float_cases :: () -> [..] Typed_Numeric_Case {
@@ -184,21 +184,21 @@ make_typed_float_cases :: () -> [..] Typed_Numeric_Case {
 		for float_type: float_types {
 			float_setup := tprint("value: % = 1.5;", float_type);
 			for initializer: string.["=", ":"] {
-				array_add(*cases, .{parameter_type=float_type, setup=tprint("value: % % %;", integer_type, initializer, value), compiler_accepts=false, parser_matches=false});
-				array_add(*cases, .{parameter_type=integer_type, setup=tprint("value: % % 1.5;", float_type, initializer), compiler_accepts=false, parser_matches=false});
+				array_add(*cases, .{parameter_type = float_type, setup = tprint("value: % % %;", integer_type, initializer, value), compiler_accepts = false, parser_matches = false});
+				array_add(*cases, .{parameter_type = integer_type, setup = tprint("value: % % 1.5;", float_type, initializer), compiler_accepts = false, parser_matches = false});
 			}
 
-			array_add(*cases, .{parameter_type=float_type, setup=integer_setup, argument=tprint("cast(%) value", float_type), compiler_accepts=true, parser_matches=true});
-			array_add(*cases, .{parameter_type=integer_type, setup=float_setup, argument=tprint("cast(%) value", integer_type), compiler_accepts=true, parser_matches=true});
-			array_add(*cases, .{parameter_type=integer_type, setup=integer_setup, compiler_accepts=true, parser_matches=true, rival_type=float_type});
-			array_add(*cases, .{parameter_type=float_type, setup=float_setup, compiler_accepts=true, parser_matches=true, rival_type=integer_type});
+			array_add(*cases, .{parameter_type = float_type, setup = integer_setup, argument = tprint("cast(%) value", float_type), compiler_accepts = true, parser_matches = true});
+			array_add(*cases, .{parameter_type = integer_type, setup = float_setup, argument = tprint("cast(%) value", integer_type), compiler_accepts = true, parser_matches = true});
+			array_add(*cases, .{parameter_type = integer_type, setup = integer_setup, compiler_accepts = true, parser_matches = true, rival_type = float_type});
+			array_add(*cases, .{parameter_type = float_type, setup = float_setup, compiler_accepts = true, parser_matches = true, rival_type = integer_type});
 		}
 	}
 
 	for fixture: FLOAT_LITERAL_CASES {
 		preferred := ifx fixture.preferred_type == "float32" then "float" else "float64";
 		rival := ifx fixture.preferred_type == "float32" then "float64" else "float";
-		array_add(*cases, .{parameter_type=preferred, argument=fixture.value, compiler_accepts=true, parser_matches=true, rival_type=rival});
+		array_add(*cases, .{parameter_type = preferred, argument = fixture.value, compiler_accepts = true, parser_matches = true, rival_type = rival});
 		for form: 0..2 {
 			setup := ifx form == 0
 				then tprint("value :: %;", fixture.value)
@@ -210,10 +210,10 @@ make_typed_float_cases :: () -> [..] Typed_Numeric_Case {
 				globals = tprint("value :: original; original :: %;", fixture.value);
 			}
 
-			array_add(*cases, .{parameter_type=preferred, setup=setup, globals=globals, compiler_accepts=true, parser_matches=true, rival_type=rival});
+			array_add(*cases, .{parameter_type = preferred, setup = setup, globals = globals, compiler_accepts = true, parser_matches = true, rival_type = rival});
 			for target: string.["float32", "float64"] {
 				compatible := target == "float64" || fixture.float32_compatible;
-				array_add(*cases, .{parameter_type=target, setup=setup, globals=globals, compiler_accepts=compatible, parser_matches=compatible});
+				array_add(*cases, .{parameter_type = target, setup = setup, globals = globals, compiler_accepts = compatible, parser_matches = compatible});
 			}
 		}
 	}
@@ -249,10 +249,10 @@ make_typed_integer_cases :: () -> [..] Typed_Numeric_Case {
 				array_add(
 					*cases,
 					.{
-						parameter_type=target_type,
-						setup=tprint("value: % % %;", source_type, initializer, value),
-						compiler_accepts=compatible,
-						parser_matches=compatible
+						parameter_type = target_type,
+						setup = tprint("value: % % %;", source_type, initializer, value),
+						compiler_accepts = compatible,
+						parser_matches = compatible
 					}
 				);
 			}
@@ -260,11 +260,11 @@ make_typed_integer_cases :: () -> [..] Typed_Numeric_Case {
 			array_add(
 				*cases,
 				.{
-					parameter_type=target_type,
-					setup=tprint("value: % = %;", source_type, value),
-					argument=tprint("cast(%) value", target_type),
-					compiler_accepts=true,
-					parser_matches=true
+					parameter_type = target_type,
+					setup = tprint("value: % = %;", source_type, value),
+					argument = tprint("cast(%) value", target_type),
+					compiler_accepts = true,
+					parser_matches = true
 				}
 			);
 		}
@@ -273,8 +273,10 @@ make_typed_integer_cases :: () -> [..] Typed_Numeric_Case {
 			for second_index: first_index + 1..types.count - 1 {
 				first_width := 8 << (first_index % 4);
 				second_width := 8 << (second_index % 4);
+
 				first_signed := first_index >= 4;
 				second_signed := second_index >= 4;
+
 				first_compatible := (
 					first_width >= source_width
 					&& (source_signed == first_signed || !source_signed && first_signed && first_width > source_width)
@@ -283,6 +285,7 @@ make_typed_integer_cases :: () -> [..] Typed_Numeric_Case {
 					second_width >= source_width
 					&& (source_signed == second_signed || !source_signed && second_signed && second_width > source_width)
 				);
+
 				selected_index := -1;
 				if first_compatible {
 					selected_index = first_index;
@@ -300,17 +303,19 @@ make_typed_integer_cases :: () -> [..] Typed_Numeric_Case {
 				first_type := ifx selected_index == second_index
 					then types[second_index]
 					else types[first_index];
+
 				rival_type := ifx selected_index == second_index
 					then types[first_index]
 					else types[second_index];
+
 				array_add(
 					*cases,
 					.{
-						parameter_type=first_type,
-						setup=tprint("value: % = %;", source_type, value),
-						compiler_accepts=selected_index >= 0,
-						parser_matches=selected_index >= 0,
-						rival_type=rival_type
+						parameter_type = first_type,
+						setup = tprint("value: % = %;", source_type, value),
+						compiler_accepts = selected_index >= 0,
+						parser_matches = selected_index >= 0,
+						rival_type = rival_type
 					}
 				);
 			}
@@ -333,7 +338,7 @@ Aggregate_Conversion_Case :: struct {
 
 AGGREGATE_CHAIN_CASES :: Aggregate_Conversion_Case.[
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	#if 1 == 1 && 1 != 2 && -1 < 0 && 2 > 1 && -9223372036854775808 <= -9223372036854775808 && 9223372036854775807 >= 9223372036854775807 {
 		Value: s64;
@@ -348,7 +353,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	#if 1 == 2 || 1 != 1 || 0 < -1 || 1 > 2 || 9223372036854775807 <= -9223372036854775808 || -9223372036854775808 >= 9223372036854775807 {
 		Invalid: Missing;
@@ -363,7 +368,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Enabled :: Left < Right;
 Left :: Alias;
 Alias :: -1;
@@ -382,7 +387,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	#if -1 < 1 {
 		T: s64;
@@ -395,10 +400,10 @@ Wrapper :: struct {
 	#as using,except(T) second: Base(T=s64);
 }
 JAI,
-		parameter_type="Base(s64)"
+		parameter_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Leaf :: struct {
 	Value: s64;
 }
@@ -414,7 +419,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Zero :: -0;
 Base :: struct {
 	#if Zero == 0 && -9223372036854775808 < 9223372036854775807 {
@@ -428,7 +433,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	#if 1.5 < 2.0 {
 		Value: s64;
@@ -439,10 +444,10 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		parser_matches=false
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Bound: s64 : 1;
 Base :: struct {
 	#if Bound == 1 {
@@ -454,10 +459,10 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		parser_matches=false
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Bound :: 1 + 2;
 Base :: struct {
 	#if Bound == 3 {
@@ -469,10 +474,10 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		parser_matches=false
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	#if 18446744073709551615 > 9223372036854775807 {
 		Value: s64;
@@ -483,10 +488,10 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		parser_matches=false
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Bound: s64 = 1;
 Base :: struct {
 	#if Bound == 1 {
@@ -498,11 +503,11 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	#if 1 < 2 {
 		Value: s64;
@@ -514,11 +519,11 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Bound :: Alias;
 Alias :: Bound;
 Base :: struct {
@@ -531,12 +536,12 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false,
-		requires_error_diagnostic=false
+		compiler_accepts = false,
+		parser_matches = false,
+		requires_error_diagnostic = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Bound :: 1;
 Bound :: 2;
 Base :: struct {
@@ -549,11 +554,11 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (U: Type) {
 	U: float32;
 }
@@ -562,10 +567,10 @@ Wrapper :: struct {
 	#as using,except(U) second: Base(U=s64);
 }
 JAI,
-		parameter_type="Base(s64)"
+		parameter_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type, U: Type) {
 	T: s64;
 	U: float32;
@@ -575,10 +580,10 @@ Wrapper :: struct {
 	#as using,except(U, T) second: Base(U=float32, T=s64);
 }
 JAI,
-		parameter_type="Base(s64, float32)"
+		parameter_type = "Base(s64, float32)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Leaf :: struct {
 	Value: s64;
 }
@@ -591,10 +596,10 @@ Wrapper :: struct {
 	#as using,except(Value, T) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)"
+		parameter_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	#if true {
 		T: s64;
@@ -607,10 +612,10 @@ Wrapper :: struct {
 	#as using,except(T) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)"
+		parameter_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	#if false {
 		T: Missing;
@@ -622,10 +627,10 @@ Wrapper :: struct {
 	#as using,except(T, Value) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)"
+		parameter_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	T: s64;
 }
@@ -636,10 +641,10 @@ Wrapper :: struct {
 	#as using,except(T) third: Target;
 }
 JAI,
-		parameter_type="Target"
+		parameter_type = "Target"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	T: s64;
 }
@@ -648,11 +653,11 @@ Wrapper :: struct {
 	#as using,except(T) second: Base(s64);
 }
 JAI,
-		parameter_type="Wrapper",
-		rival_type="Base(s64)"
+		parameter_type = "Wrapper",
+		rival_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	T: s64;
 }
@@ -664,10 +669,10 @@ Wrapper :: struct {
 	#as using,except(base, T) second: Middle(s64);
 }
 JAI,
-		parameter_type="Base(s64)"
+		parameter_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	T: s64;
 	Value: s64;
@@ -677,12 +682,12 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)",
-		compiler_accepts=false,
-		parser_matches=false
+		parameter_type = "Base(s64)",
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	T: s64;
 	T: float32;
@@ -692,12 +697,12 @@ Wrapper :: struct {
 	#as using,except(T) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)",
-		compiler_accepts=false,
-		parser_matches=false
+		parameter_type = "Base(s64)",
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	T: s64;
 	Value: T;
@@ -707,12 +712,12 @@ Wrapper :: struct {
 	#as using,except(T, Value) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)",
-		compiler_accepts=false,
-		parser_matches=false
+		parameter_type = "Base(s64)",
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Leaf :: struct {
 	Value: s64;
 }
@@ -724,11 +729,11 @@ Wrapper :: struct {
 	#as using,except(T) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)",
-		parser_matches=false
+		parameter_type = "Base(s64)",
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	T :: s64;
 	Value: T;
@@ -738,11 +743,11 @@ Wrapper :: struct {
 	#as using,except(T, Value) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)",
-		parser_matches=false
+		parameter_type = "Base(s64)",
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	T: s64;
 	Value: Missing;
@@ -752,12 +757,12 @@ Wrapper :: struct {
 	#as using,except(T, Value) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)",
-		compiler_accepts=false,
-		parser_matches=false
+		parameter_type = "Base(s64)",
+		compiler_accepts = false,
+		parser_matches = false
 	},
 .{
-	globals=#string JAI
+	globals = #string JAI
 Base :: struct (Left: Type, Right: Type) {
 	First: Left;
 	Second: Right;
@@ -767,10 +772,10 @@ Wrapper :: struct {
 	#as using,except(Right, Left, Second, First) second: Base(Right=float32, Left=s64);
 }
 JAI,
-		parameter_type="Base(s64, float32)"
+		parameter_type = "Base(s64, float32)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	Value: T;
 }
@@ -780,10 +785,10 @@ Wrapper :: struct {
 	#as using,except(T, Value) second: Base(T=s64);
 }
 JAI,
-		parameter_type="Target"
+		parameter_type = "Target"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Leaf :: struct {
 	Value: s64;
 }
@@ -795,10 +800,10 @@ Wrapper :: struct {
 	#as using,except(T, leaf) second: Base(Leaf);
 }
 JAI,
-		parameter_type="Base(Leaf)"
+		parameter_type = "Base(Leaf)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Leaf :: struct (T: Type) {
 	Value: T;
 }
@@ -810,10 +815,10 @@ Wrapper :: struct {
 	#as using,except(T, leaf) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)"
+		parameter_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	Value: T;
 }
@@ -825,10 +830,10 @@ Wrapper :: struct {
 	#as using,except(T, base) second: Middle(s64);
 }
 JAI,
-		parameter_type="Base(s64)"
+		parameter_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	Value: T;
 }
@@ -837,11 +842,11 @@ Wrapper :: struct {
 	#as using,except(Value, T) second: Base(s64);
 }
 JAI,
-		parameter_type="Wrapper",
-		rival_type="Base(s64)"
+		parameter_type = "Wrapper",
+		rival_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	Value: T;
 }
@@ -850,11 +855,11 @@ Wrapper :: struct {
 	#as using,except(Value, T) second: Base(float32);
 }
 JAI,
-		parameter_type="Base(s64)",
-		parser_matches=false
+		parameter_type = "Base(s64)",
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	Value: T;
 }
@@ -863,12 +868,12 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)",
-		compiler_accepts=false,
-		parser_matches=false
+		parameter_type = "Base(s64)",
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	Value: T;
 }
@@ -877,12 +882,12 @@ Wrapper :: struct {
 	#as using,except(T) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)",
-		compiler_accepts=false,
-		parser_matches=false
+		parameter_type = "Base(s64)",
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	T: s64;
 }
@@ -891,10 +896,10 @@ Wrapper :: struct {
 	#as using,except(T) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)"
+		parameter_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	Value: T;
 }
@@ -903,12 +908,12 @@ Wrapper :: struct {
 	#as using,except(Value, T) second: Base(Missing);
 }
 JAI,
-		parameter_type="Base(s64)",
-		compiler_accepts=false,
-		parser_matches=false
+		parameter_type = "Base(s64)",
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	#if T == s64 {
 		Value: T;
@@ -919,11 +924,11 @@ Wrapper :: struct {
 	#as using,except(Value, T) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)",
-		parser_matches=false
+		parameter_type = "Base(s64)",
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type, T: Type) {
 	Value: s64;
 }
@@ -932,12 +937,12 @@ Wrapper :: struct {
 	#as using,except(Value, T) second: Base(s64, s64);
 }
 JAI,
-		parameter_type="Base(s64, s64)",
-		compiler_accepts=false,
-		parser_matches=false
+		parameter_type = "Base(s64, s64)",
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	#if true {
 		Value: T;
@@ -950,10 +955,10 @@ Wrapper :: struct {
 	#as using,except(Value, T) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)"
+		parameter_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Leaf :: struct {
 	Value: s64;
 }
@@ -969,20 +974,20 @@ Wrapper :: struct {
 	#as using,except(leaf, T) second: Base(Leaf);
 }
 JAI,
-		parameter_type="Base(Leaf)"
+		parameter_type = "Base(Leaf)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {}
 Wrapper :: struct {
 	#as using,except(T) first: Base(s64);
 	#as using,except(T) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)"
+		parameter_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	#if false {
 		Inactive: s64;
@@ -997,7 +1002,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	#if true {
 		Value: s64;
@@ -1012,7 +1017,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	#if true {
 		#if false {
@@ -1029,7 +1034,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Original :: false;
 Middle :: Original;
 Enabled :: Middle;
@@ -1047,7 +1052,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Enabled: bool : true;
 Base :: struct {
 	#if Enabled {
@@ -1061,7 +1066,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 	#if false {
@@ -1075,7 +1080,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Leaf :: struct {
 	Value: s64;
 }
@@ -1092,7 +1097,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	#if false {
 		Inactive: s64;
@@ -1106,11 +1111,11 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Enabled :: 1 == 1;
 Base :: struct {
 	#if Enabled {
@@ -1124,7 +1129,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	#if Missing {
 		Value: s64;
@@ -1135,11 +1140,11 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Enabled := true;
 Base :: struct {
 	#if Enabled {
@@ -1151,11 +1156,11 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Enabled :: true;
 Enabled :: false;
 Base :: struct {
@@ -1168,11 +1173,11 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1189,7 +1194,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1204,7 +1209,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1221,7 +1226,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1235,7 +1240,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1247,11 +1252,11 @@ Wrapper :: struct {
 	#as using,except(base) second: Middle;
 }
 JAI,
-		parameter_type="Wrapper",
-		rival_type="Base"
+		parameter_type = "Wrapper",
+		rival_type = "Base"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1268,11 +1273,11 @@ Wrapper :: struct {
 	#as using,except(second) right: Right;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1285,11 +1290,11 @@ Wrapper :: struct {
 	#as using,except(base) second: Middle;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct (T: Type) {
 	Value: T;
 }
@@ -1298,10 +1303,10 @@ Wrapper :: struct {
 	#as using,except(Value, T) second: Base(s64);
 }
 JAI,
-		parameter_type="Base(s64)"
+		parameter_type = "Base(s64)"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	#if true {
 		Value: s64;
@@ -1314,7 +1319,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Leaf :: struct {
 	Value: s64;
 }
@@ -1329,7 +1334,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1346,7 +1351,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 	Extra: s64;
@@ -1358,7 +1363,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1371,7 +1376,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1383,7 +1388,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1392,11 +1397,11 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		parameter_type="Wrapper",
-		rival_type="Base"
+		parameter_type = "Wrapper",
+		rival_type = "Base"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1406,12 +1411,12 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		rival_type="Alias",
-		compiler_accepts=false,
-		parser_matches=false
+		rival_type = "Alias",
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1420,11 +1425,11 @@ Wrapper :: struct {
 	#as using second: Base;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 	Extra: s64;
@@ -1434,11 +1439,11 @@ Wrapper :: struct {
 	#as using,except(Value) second: Base;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1448,11 +1453,11 @@ Wrapper :: struct {
 	#as using missing: Missing;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1461,11 +1466,11 @@ Wrapper :: struct {
 	#as using,except(Value) first: Base;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1478,12 +1483,12 @@ Wrapper :: struct {
 	#as using,except(OtherValue) other: Unrelated;
 }
 JAI,
-		rival_type="Unrelated",
-		compiler_accepts=false,
-		parser_matches=false
+		rival_type = "Unrelated",
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1494,7 +1499,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1510,7 +1515,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1521,12 +1526,12 @@ Wrapper :: struct {
 	using middle: Middle;
 }
 JAI,
-		parameter_type="Middle",
-		compiler_accepts=false,
-		parser_matches=false
+		parameter_type = "Middle",
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1537,11 +1542,11 @@ Wrapper :: struct {
 	using middle: Middle;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1552,11 +1557,11 @@ Wrapper :: struct {
 	#as using middle: Middle;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1567,11 +1572,11 @@ Wrapper :: struct {
 	using middle: Middle;
 }
 JAI,
-		parameter_type="Wrapper",
-		rival_type="Base"
+		parameter_type = "Wrapper",
+		rival_type = "Base"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1586,7 +1591,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1599,7 +1604,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1617,12 +1622,12 @@ Wrapper :: struct {
 	using right: Right;
 }
 JAI,
-		rival_type="Unrelated",
-		compiler_accepts=false,
-		parser_matches=false
+		rival_type = "Unrelated",
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1634,11 +1639,11 @@ Wrapper :: struct {
 	using middle: Middle;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1649,11 +1654,11 @@ Wrapper :: struct {
 	using,except(base) middle: Middle;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1664,11 +1669,11 @@ Wrapper :: struct {
 	using,only(Value) middle: Middle;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1679,12 +1684,12 @@ Wrapper :: struct {
 	using middle: Middle;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false,
-		requires_error_diagnostic=false
+		compiler_accepts = false,
+		parser_matches = false,
+		requires_error_diagnostic = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1702,12 +1707,12 @@ Wrapper :: struct {
 	#as using right: Right;
 }
 JAI,
-		rival_type="Unrelated",
-		compiler_accepts=false,
-		parser_matches=false
+		rival_type = "Unrelated",
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1720,7 +1725,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1736,7 +1741,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1747,11 +1752,11 @@ Wrapper :: struct {
 	#as using middle: Middle;
 }
 JAI,
-		parameter_type="Wrapper",
-		rival_type="Base"
+		parameter_type = "Wrapper",
+		rival_type = "Base"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 }
 Left :: struct {
@@ -1765,10 +1770,10 @@ Wrapper :: struct {
 	#as using right: Right;
 }
 JAI,
-		parser_matches=false
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 }
 Middle :: struct {
@@ -1779,10 +1784,10 @@ Wrapper :: struct {
 	#as using middle: Middle;
 }
 JAI,
-		parser_matches=false
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 }
 Middle :: struct {
@@ -1793,10 +1798,10 @@ Wrapper :: struct {
 	#as using middle: Middle;
 }
 JAI,
-		parser_matches=false
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1808,11 +1813,11 @@ Wrapper :: struct {
 	#as using middle: Middle;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1823,12 +1828,12 @@ Wrapper :: struct {
 	#as using middle: Middle;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false,
-		requires_error_diagnostic=false
+		compiler_accepts = false,
+		parser_matches = false,
+		requires_error_diagnostic = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1839,11 +1844,11 @@ Wrapper :: struct {
 	#as using middle: Middle;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1856,7 +1861,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1870,11 +1875,11 @@ Wrapper :: struct {
 	#as using middle: Middle;
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1889,7 +1894,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1902,7 +1907,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1919,7 +1924,7 @@ Wrapper :: struct {
 JAI
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1933,10 +1938,10 @@ Wrapper :: struct {
 	#as using middle: Middle(Unrelated);
 }
 JAI,
-		parameter_type="Unrelated"
+		parameter_type = "Unrelated"
 	},
 	.{
-		globals=#string JAI
+		globals = #string JAI
 Base :: struct {
 	Value: s64;
 }
@@ -1951,8 +1956,8 @@ Wrapper :: struct {
 	#as using middle: Middle(Middle(Base));
 }
 JAI,
-		compiler_accepts=false,
-		parser_matches=false
+		compiler_accepts = false,
+		parser_matches = false
 	},
 ];
 
@@ -2188,210 +2193,210 @@ JAI;
 
 NUMERIC_RANK_CASES :: Numeric_Rank_Case.[
 	.{
-		first_parameters="number: u16, aggregate: Wrapper",
-		second_parameters="number: u8, aggregate: Base",
-		arguments="number, value",
-		selected_index=1,
-		setup="value: Wrapper; number: u8 = 1;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "number: u16, aggregate: Wrapper",
+		second_parameters = "number: u8, aggregate: Base",
+		arguments = "number, value",
+		selected_index = 1,
+		setup = "value: Wrapper; number: u8 = 1;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: u16",
-		second_parameters="aggregate: Base, number: u8",
-		arguments="number=number, aggregate=value",
-		selected_index=1,
-		setup="value: Wrapper; number: u8 = 1;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: u16",
+		second_parameters = "aggregate: Base, number: u8",
+		arguments = "number=number, aggregate=value",
+		selected_index = 1,
+		setup = "value: Wrapper; number: u8 = 1;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: u16",
-		second_parameters="aggregate: Base, number: u8",
-		arguments="value, number",
-		selected_index=1,
-		setup="value: Wrapper; number: u8 : 1;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: u16",
+		second_parameters = "aggregate: Base, number: u8",
+		arguments = "value, number",
+		selected_index = 1,
+		setup = "value: Wrapper; number: u8 : 1;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: u16",
-		second_parameters="aggregate: Base, number: u8",
-		arguments="value, number",
-		selected_index=1,
-		setup="value: Wrapper; original: u8 = 1; number := original;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: u16",
+		second_parameters = "aggregate: Base, number: u8",
+		arguments = "value, number",
+		selected_index = 1,
+		setup = "value: Wrapper; original: u8 = 1; number := original;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: u16",
-		second_parameters="aggregate: Base, number: u8",
-		arguments="value, cast(u8) number",
-		selected_index=1,
-		setup="value: Wrapper; number: s64 = 1;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: u16",
+		second_parameters = "aggregate: Base, number: u8",
+		arguments = "value, cast(u8) number",
+		selected_index = 1,
+		setup = "value: Wrapper; number: s64 = 1;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: float64",
-		second_parameters="aggregate: Base, number: float32",
-		arguments="value, number",
-		selected_index=1,
-		setup="value: Wrapper; original: float32 = 1.5; number := original;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: float64",
+		second_parameters = "aggregate: Base, number: float32",
+		arguments = "value, number",
+		selected_index = 1,
+		setup = "value: Wrapper; original: float32 = 1.5; number := original;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: u16, enabled: bool = true",
-		second_parameters="aggregate: Base, number: u8, enabled: bool = false",
-		arguments="number=number, aggregate=value",
-		selected_index=1,
-		setup="value: Wrapper; number: u8 = 1;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: u16, enabled: bool = true",
+		second_parameters = "aggregate: Base, number: u8, enabled: bool = false",
+		arguments = "number=number, aggregate=value",
+		selected_index = 1,
+		setup = "value: Wrapper; number: u8 = 1;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, integer: u16, floating: float64",
-		second_parameters="aggregate: Base, integer: u8, floating: float32",
-		arguments="value, integer, floating",
-		selected_index=1,
-		setup="value: Wrapper; integer: u8 = 1; floating: float32 = 1.5;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, integer: u16, floating: float64",
+		second_parameters = "aggregate: Base, integer: u8, floating: float32",
+		arguments = "value, integer, floating",
+		selected_index = 1,
+		setup = "value: Wrapper; integer: u8 = 1; floating: float32 = 1.5;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: u16, literal: u8",
-		second_parameters="aggregate: Base, number: u8, literal: float32",
-		arguments="value, number, 1",
-		selected_index=1,
-		setup="value: Wrapper; number: u8 = 1;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS,
-		parser_matches=false
+		first_parameters = "aggregate: Wrapper, number: u16, literal: u8",
+		second_parameters = "aggregate: Base, number: u8, literal: float32",
+		arguments = "value, number, 1",
+		selected_index = 1,
+		setup = "value: Wrapper; number: u8 = 1;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS,
+		parser_matches = false
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: float32",
-		second_parameters="aggregate: Base, number: s64",
-		arguments="value, 1",
-		selected_index=1,
-		setup="value: Wrapper;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: float32",
+		second_parameters = "aggregate: Base, number: s64",
+		arguments = "value, 1",
+		selected_index = 1,
+		setup = "value: Wrapper;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="number: float32, aggregate: Wrapper",
-		second_parameters="number: u8, aggregate: Base",
-		arguments="1, value",
-		selected_index=0,
-		setup="value: Wrapper;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "number: float32, aggregate: Wrapper",
+		second_parameters = "number: u8, aggregate: Base",
+		arguments = "1, value",
+		selected_index = 0,
+		setup = "value: Wrapper;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: float32",
-		second_parameters="aggregate: Base, number: u8",
-		arguments="number=1, aggregate=value",
-		selected_index=0,
-		setup="value: Wrapper;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: float32",
+		second_parameters = "aggregate: Base, number: u8",
+		arguments = "number=1, aggregate=value",
+		selected_index = 0,
+		setup = "value: Wrapper;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: u16",
-		second_parameters="aggregate: Base, number: u8",
-		arguments="value, number",
-		selected_index=1,
-		setup="value: Wrapper; number: u8 = 1;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: u16",
+		second_parameters = "aggregate: Base, number: u8",
+		arguments = "value, number",
+		selected_index = 1,
+		setup = "value: Wrapper; number: u8 = 1;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: float64",
-		second_parameters="aggregate: Base, number: float32",
-		arguments="value, number",
-		selected_index=1,
-		setup="value: Wrapper; number: float32 = 1.5;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: float64",
+		second_parameters = "aggregate: Base, number: float32",
+		arguments = "value, number",
+		selected_index = 1,
+		setup = "value: Wrapper; number: float32 = 1.5;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: float64",
-		second_parameters="aggregate: Base, number: float32",
-		arguments="value, 1.5",
-		selected_index=1,
-		setup="value: Wrapper;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: float64",
+		second_parameters = "aggregate: Base, number: float32",
+		arguments = "value, 1.5",
+		selected_index = 1,
+		setup = "value: Wrapper;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, first: float32, second: float64",
-		second_parameters="aggregate: Base, first: u8, second: u16",
-		arguments="value, 1, 1",
-		selected_index=0,
-		setup="value: Wrapper;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, first: float32, second: float64",
+		second_parameters = "aggregate: Base, first: u8, second: u16",
+		arguments = "value, 1, 1",
+		selected_index = 0,
+		setup = "value: Wrapper;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: float32, enabled: bool = true",
-		second_parameters="aggregate: Base, number: u8, enabled: bool = false",
-		arguments="number=1, aggregate=value",
-		selected_index=0,
-		setup="value: Wrapper;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: float32, enabled: bool = true",
+		second_parameters = "aggregate: Base, number: u8, enabled: bool = false",
+		arguments = "number=1, aggregate=value",
+		selected_index = 0,
+		setup = "value: Wrapper;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Base, number: float32",
-		second_parameters="aggregate: Base, number: u8",
-		arguments="value, 1",
-		selected_index=1,
-		setup="value: Wrapper;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Base, number: float32",
+		second_parameters = "aggregate: Base, number: u8",
+		arguments = "value, 1",
+		selected_index = 1,
+		setup = "value: Wrapper;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Base, number: u8",
-		second_parameters="aggregate: Base, number: u16",
-		arguments="value, 1",
-		selected_index=0,
-		setup="value: Wrapper;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Base, number: u8",
+		second_parameters = "aggregate: Base, number: u16",
+		arguments = "value, 1",
+		selected_index = 0,
+		setup = "value: Wrapper;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Base, number: float64",
-		second_parameters="aggregate: Base, number: float32",
-		arguments="value, number",
-		selected_index=1,
-		setup="value: Wrapper; number: float32 = 1.5;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Base, number: float64",
+		second_parameters = "aggregate: Base, number: float32",
+		arguments = "value, number",
+		selected_index = 1,
+		setup = "value: Wrapper; number: float32 = 1.5;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="first: Wrapper, second: Base",
-		second_parameters="first: Base, second: Wrapper",
-		arguments="value, value",
-		selected_index=-1,
-		setup="value: Wrapper;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "first: Wrapper, second: Base",
+		second_parameters = "first: Base, second: Wrapper",
+		arguments = "value, value",
+		selected_index = -1,
+		setup = "value: Wrapper;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: u8",
-		second_parameters="aggregate: Base, number: float32",
-		arguments="value, 1",
-		selected_index=0,
-		setup="value: Wrapper;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: u8",
+		second_parameters = "aggregate: Base, number: float32",
+		arguments = "value, 1",
+		selected_index = 0,
+		setup = "value: Wrapper;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
 	.{
-		first_parameters="aggregate: Wrapper, number: float32",
-		second_parameters="aggregate: Base, number: u8",
-		arguments="value, 1",
-		selected_index=0,
-		setup="value: Wrapper;",
-		globals=MIXED_AGGREGATE_RANK_GLOBALS
+		first_parameters = "aggregate: Wrapper, number: float32",
+		second_parameters = "aggregate: Base, number: u8",
+		arguments = "value, 1",
+		selected_index = 0,
+		setup = "value: Wrapper;",
+		globals = MIXED_AGGREGATE_RANK_GLOBALS
 	},
-	.{first_parameters="first: u8, second: s16",						second_parameters="first: float32, second: float64",						arguments="1, 1",				selected_index=0},
-	.{first_parameters="first: u8, second: float32",					second_parameters="first: float32, second: u8",								arguments="1, 1",				selected_index=-1},
-	.{first_parameters="first: u8, second: s16, enabled: bool = true",	second_parameters="first: float32, second: float64, enabled: bool = true",	arguments="second=1, first=1",	selected_index=0},
-	.{first_parameters="first: float64, second: float64",				second_parameters="first: float32, second: float64",						arguments="1, 1.5",				selected_index=1},
-	.{first_parameters="first: float64, second: s64",					second_parameters="first: float32, second: s64",							arguments="1, 1",				selected_index=1},
-	.{first_parameters="first: float32, second: float64",				second_parameters="first: float64, second: float32",						arguments="1, 1",				selected_index=-1},
-	.{first_parameters="value: float64, enabled: bool = true",			second_parameters="value: float32, enabled: bool = true",					arguments="value=1",			selected_index=1},
-	.{first_parameters="first: s8, second: u8",							second_parameters="first: u16, second: s16",								arguments="1, 1",				selected_index=0},
-	.{first_parameters="first: s8, second: u16",						second_parameters="first: u16, second: s8",									arguments="1, 1",				selected_index=-1},
-	.{first_parameters="value: s8, enabled: bool = true",				second_parameters="value: u16, enabled: bool = true",						arguments="value=1",			selected_index=0},
+	.{first_parameters = "first: u8, second: s16",							second_parameters = "first: float32, second: float64",							arguments = "1, 1",					selected_index = 0},
+	.{first_parameters = "first: u8, second: float32",						second_parameters = "first: float32, second: u8",								arguments = "1, 1",					selected_index = -1},
+	.{first_parameters = "first: u8, second: s16, enabled: bool = true",	second_parameters = "first: float32, second: float64, enabled: bool = true",	arguments = "second=1, first=1",	selected_index = 0},
+	.{first_parameters = "first: float64, second: float64",					second_parameters = "first: float32, second: float64",							arguments = "1, 1.5",				selected_index = 1},
+	.{first_parameters = "first: float64, second: s64",						second_parameters = "first: float32, second: s64",								arguments = "1, 1",					selected_index = 1},
+	.{first_parameters = "first: float32, second: float64",					second_parameters = "first: float64, second: float32",							arguments = "1, 1",					selected_index = -1},
+	.{first_parameters = "value: float64, enabled: bool = true",			second_parameters = "value: float32, enabled: bool = true",						arguments = "value=1",				selected_index = 1},
+	.{first_parameters = "first: s8, second: u8",							second_parameters = "first: u16, second: s16",									arguments = "1, 1",					selected_index = 0},
+	.{first_parameters = "first: s8, second: u16",							second_parameters = "first: u16, second: s8",									arguments = "1, 1",					selected_index = -1},
+	.{first_parameters = "value: s8, enabled: bool = true",					second_parameters = "value: u16, enabled: bool = true",							arguments = "value=1",				selected_index = 0},
 ];
 
 THREE_CANDIDATE_RANK_CASES :: Numeric_Rank_Case.[
-	.{first_parameters="value: u8",					second_parameters="value: u16",				arguments="1",		selected_index=0,	third_parameters="value: u32"},
-	.{first_parameters="value: u8",					second_parameters="value: u16",				arguments="256",	selected_index=1,	third_parameters="value: u32"},
-	.{first_parameters="value: s8",					second_parameters="value: u8",				arguments="1",		selected_index=2,	third_parameters="value: s64"},
-	.{first_parameters="first: u8, second: u16",	second_parameters="first: u16, second: u8",	arguments="1, 1",	selected_index=2,	third_parameters="first: u8, second: u8"},
-	.{first_parameters="first: u8, second: u16",	second_parameters="first: u16, second: u8",	arguments="1, 1",	selected_index=-1,	third_parameters="first: u32, second: u32"},
-	.{first_parameters="first: u16, second: u32",	second_parameters="first: u32, second: u8",	arguments="1, 1",	selected_index=-1,	third_parameters="first: u8, second: u32"},
-	.{first_parameters="value: s8",					second_parameters="value: u8",				arguments="1",		selected_index=-1,	third_parameters="value: u16"},
+	.{first_parameters = "value: u8",					second_parameters = "value: u16",				arguments = "1",		selected_index = 0,		third_parameters = "value: u32"},
+	.{first_parameters = "value: u8",					second_parameters = "value: u16",				arguments = "256",		selected_index = 1,		third_parameters = "value: u32"},
+	.{first_parameters = "value: s8",					second_parameters = "value: u8",				arguments = "1",		selected_index = 2,		third_parameters = "value: s64"},
+	.{first_parameters = "first: u8, second: u16",		second_parameters = "first: u16, second: u8",	arguments = "1, 1",		selected_index = 2,		third_parameters = "first: u8, second: u8"},
+	.{first_parameters = "first: u8, second: u16",		second_parameters = "first: u16, second: u8",	arguments = "1, 1",		selected_index = -1,	third_parameters = "first: u32, second: u32"},
+	.{first_parameters = "first: u16, second: u32",		second_parameters = "first: u32, second: u8",	arguments = "1, 1",		selected_index = -1,	third_parameters = "first: u8, second: u32"},
+	.{first_parameters = "value: s8",					second_parameters = "value: u8",				arguments = "1",		selected_index = -1,	third_parameters = "value: u16"},
 ];
 
 Multi_Candidate_Rank_Case :: struct {
@@ -2665,8 +2670,8 @@ make_numeric_rank_cases :: () -> [..] Numeric_Rank_Case {
 
 make_long_identifier_source :: (identifier_length: s64, suffix: string) -> string {
 	source := alloc_string(identifier_length + suffix.count);
-	for index: 0..identifier_length-1 {
-		source.data[index] = #char "a";
+	for 0..identifier_length-1 {
+		source.data[it] = #char "a";
 	}
 
 	memcpy(source.data + identifier_length, suffix.data, suffix.count);

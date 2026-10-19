@@ -86,27 +86,27 @@ EXPECTATIONS :: Expectation.[
 
 PROBES :: Probe.[
 	.{
-		name="single_load",
-		expected_accepted=1,
-		expected_shared=1,
-		files=.[.{"shared.jai", SHARED}],
-		entry=#string JAI
+		name = "single_load",
+		expected_accepted = 1,
+		expected_shared = 1,
+		files = .[.{"shared.jai", SHARED}],
+		entry = #string JAI
 #load "shared.jai";
 #assert shared_value == 41;
 JAI
 	},
 	.{
-		name="repeated_load",
-		files=.[.{"shared.jai", SHARED}],
-		entry=#string JAI
+		name = "repeated_load",
+		files = .[.{"shared.jai", SHARED}],
+		entry = #string JAI
 #load "shared.jai";
 #load "shared.jai";
 #assert shared_value == 41;
 JAI
 	},
 	.{
-		name="diamond_load",
-		files=.[
+		name = "diamond_load",
+		files = .[
 			.{"shared.jai", SHARED},
 			.{
 				"first.jai",
@@ -121,24 +121,24 @@ JAI
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "first.jai";
 #load "second.jai";
 #assert shared_value == 41;
 JAI
 	},
 	.{
-		name="traversal_alias",
-		files=.[.{"shared.jai", SHARED}],
-		entry=#string JAI
+		name = "traversal_alias",
+		files = .[.{"shared.jai", SHARED}],
+		entry = #string JAI
 #load "shared.jai";
 #load "branch/../shared.jai";
 #assert shared_value == 41;
 JAI
 	},
 	.{
-		name="relative_to_loaded_file",
-		files=.[
+		name = "relative_to_loaded_file",
+		files = .[
 			.{
 				"branch/parent.jai",
 				#string JAI
@@ -160,22 +160,22 @@ relative_value :: 99;
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "branch/parent.jai";
 #assert relative_value == 52;
 JAI
 	},
 	.{
-		name="forward_reference",
-		files=.[.{"shared.jai", SHARED}],
-		entry=#string JAI
+		name = "forward_reference",
+		files = .[.{"shared.jai", SHARED}],
+		entry = #string JAI
 #assert shared_value == 41;
 #load "shared.jai";
 JAI
 	},
 	.{
-		name="order_first_second",
-		files=.[
+		name = "order_first_second",
+		files = .[
 			.{
 				"first.jai",
 				#string JAI
@@ -191,15 +191,15 @@ input :: 41;
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "first.jai";
 #load "second.jai";
 #assert answer == 42;
 JAI
 	},
 	.{
-		name="order_second_first",
-		files=.[
+		name = "order_second_first",
+		files = .[
 			.{
 				"first.jai",
 				#string JAI
@@ -215,15 +215,15 @@ input :: 41;
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "second.jai";
 #load "first.jai";
 #assert answer == 42;
 JAI
 	},
 	.{
-		name="file_private_loader",
-		files=.[
+		name = "file_private_loader",
+		files = .[
 			.{
 				"private.jai",
 				#string JAI
@@ -232,14 +232,14 @@ hidden :: 61;
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "private.jai";
 #assert hidden == 61;
 JAI
 	},
 	.{
-		name="file_private_sibling",
-		files=.[
+		name = "file_private_sibling",
+		files = .[
 			.{
 				"private.jai",
 				#string JAI
@@ -254,14 +254,14 @@ JAI
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "private.jai";
 #load "observer.jai";
 JAI
 	},
 	.{
-		name="loader_private_loaded",
-		files=.[
+		name = "loader_private_loaded",
+		files = .[
 			.{
 				"observer.jai",
 				#string JAI
@@ -269,15 +269,15 @@ JAI
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #scope_file
 hidden :: 61;
 #load "observer.jai";
 JAI
 	},
 	.{
-		name="file_private_independent",
-		files=.[
+		name = "file_private_independent",
+		files = .[
 			.{
 				"first.jai",
 				#string JAI
@@ -297,15 +297,15 @@ hidden :: 22;
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "first.jai";
 #load "second.jai";
 #assert first_value() == 11 && second_value() == 22;
 JAI
 	},
 	.{
-		name="scope_does_not_leak",
-		files=.[
+		name = "scope_does_not_leak",
+		files = .[
 			.{
 				"private.jai",
 				#string JAI
@@ -320,7 +320,7 @@ JAI
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #scope_export
 #load "private.jai";
 loader_value :: 73;
@@ -328,8 +328,8 @@ loader_value :: 73;
 JAI
 	},
 	.{
-		name="self_load",
-		files=.[
+		name = "self_load",
+		files = .[
 			.{
 				"shared.jai",
 				#string JAI
@@ -340,14 +340,14 @@ shared_value :: 41;
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "shared.jai";
 #assert shared_value == 41;
 JAI
 	},
 	.{
-		name="load_cycle",
-		files=.[
+		name = "load_cycle",
+		files = .[
 			.{
 				"first.jai",
 				#string JAI
@@ -366,29 +366,29 @@ second_value :: 22;
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "first.jai";
 #assert first_value == 11 && second_value == 22;
 JAI
 	},
 	.{
-		name="missing_load",
-		files=.[],
-		entry=#string JAI
+		name = "missing_load",
+		files = .[],
+		entry = #string JAI
 #load "absent.jai";
 JAI
 	},
 	.{
-		name="repeated_marker",
-		files=.[.{"shared.jai", MARKER_ONLY}],
-		entry=#string JAI
+		name = "repeated_marker",
+		files = .[.{"shared.jai", MARKER_ONLY}],
+		entry = #string JAI
 #load "shared.jai";
 #load "shared.jai";
 JAI
 	},
 	.{
-		name="diamond_marker",
-		files=.[
+		name = "diamond_marker",
+		files = .[
 			.{"shared.jai", MARKER_ONLY},
 			.{
 				"first.jai",
@@ -403,22 +403,22 @@ JAI
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "first.jai";
 #load "second.jai";
 JAI
 	},
 	.{
-		name="alias_marker",
-		files=.[.{"shared.jai", MARKER_ONLY}],
-		entry=#string JAI
+		name = "alias_marker",
+		files = .[.{"shared.jai", MARKER_ONLY}],
+		entry = #string JAI
 #load "shared.jai";
 #load "branch/../shared.jai";
 JAI
 	},
 	.{
-		name="repeated_file_private",
-		files=.[
+		name = "repeated_file_private",
+		files = .[
 			.{
 				"shared.jai",
 				#string JAI
@@ -429,18 +429,18 @@ hidden :: 11;
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "shared.jai";
 #load "shared.jai";
 JAI
 	},
 	.{
-		name="same_module_instance",
-		files=.[
+		name = "same_module_instance",
+		files = .[
 			.{"First/module.jai", PARAMETER_MODULE},
 			.{"shared.jai", PARAMETER_SHARED}
 		],
-		entry=#string JAI
+		entry = #string JAI
 Left :: #import,dir "First";
 Right :: #import,dir "First";
 #assert Left.Loaded_Type == Right.Loaded_Type;
@@ -448,12 +448,12 @@ Right :: #import,dir "First";
 JAI
 	},
 	.{
-		name="different_module_parameters",
-		files=.[
+		name = "different_module_parameters",
+		files = .[
 			.{"First/module.jai", PARAMETER_MODULE},
 			.{"shared.jai", PARAMETER_SHARED}
 		],
-		entry=#string JAI
+		entry = #string JAI
 Left :: #import,dir "First"(SETTING=2);
 Right :: #import,dir "First"(SETTING=5);
 #assert Left.Loaded_Type != Right.Loaded_Type;
@@ -462,13 +462,13 @@ Right :: #import,dir "First"(SETTING=5);
 JAI
 	},
 	.{
-		name="different_modules_same_load",
-		files=.[
+		name = "different_modules_same_load",
+		files = .[
 			.{"First/module.jai", PARAMETER_MODULE},
 			.{"Second/module.jai", PARAMETER_MODULE},
 			.{"shared.jai", PARAMETER_SHARED}
 		],
-		entry=#string JAI
+		entry = #string JAI
 Left :: #import,dir "First";
 Right :: #import,dir "Second";
 #assert Left.Loaded_Type != Right.Loaded_Type;
@@ -477,8 +477,8 @@ Right :: #import,dir "Second";
 JAI
 	},
 	.{
-		name="loader_private_child_default",
-		files=.[
+		name = "loader_private_child_default",
+		files = .[
 			.{
 				"child.jai",
 				#string JAI
@@ -492,15 +492,15 @@ JAI
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #scope_file
 #load "child.jai";
 #load "observer.jai";
 JAI
 	},
 	.{
-		name="file_scoped_named_import",
-		files=.[
+		name = "file_scoped_named_import",
+		files = .[
 			.{
 				"binding.jai",
 				#string JAI
@@ -511,14 +511,14 @@ JAI
 			.{"First/module.jai", PARAMETER_MODULE},
 			.{"shared.jai", PARAMETER_SHARED},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "binding.jai";
 #assert Bound.loaded_value == 2;
 JAI
 	},
 	.{
-		name="module_scoped_named_import",
-		files=.[
+		name = "module_scoped_named_import",
+		files = .[
 			.{
 				"binding.jai",
 				#string JAI
@@ -529,14 +529,14 @@ JAI
 			.{"First/module.jai", PARAMETER_MODULE},
 			.{"shared.jai", PARAMETER_SHARED},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "binding.jai";
 #assert Bound.loaded_value == 2;
 JAI
 	},
 	.{
-		name="file_scoped_bare_import",
-		files=.[
+		name = "file_scoped_bare_import",
+		files = .[
 			.{
 				"binding.jai",
 				#string JAI
@@ -547,14 +547,14 @@ JAI
 			.{"First/module.jai", PARAMETER_MODULE},
 			.{"shared.jai", PARAMETER_SHARED},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "binding.jai";
 #assert loaded_value == 2;
 JAI
 	},
 	.{
-		name="public_collision",
-		files=.[
+		name = "public_collision",
+		files = .[
 			.{
 				"first.jai",
 				#string JAI
@@ -570,7 +570,7 @@ colliding :: 1;
 JAI
 			},
 		],
-		entry=#string JAI
+		entry = #string JAI
 #load "first.jai";
 #load "second.jai";
 JAI
@@ -602,7 +602,7 @@ run_probe :: (probe: Probe, summary: *string) {
 	assert(write_entire_file(tprint("%/probe.jai", directory), tprint("%%", PREAMBLE, probe.entry)));
 	result, output, errors, timed_out := run_command(
 		"jai", "-x64", "probe.jai", "-quiet", "-no_color",
-		working_directory=directory, capture_and_return_output=true, timeout_ms=TIMEOUT_MS
+		working_directory = directory, capture_and_return_output = true, timeout_ms = TIMEOUT_MS
 	);
 
 	defer free(output);
@@ -636,6 +636,6 @@ main :: () {
 }
 
 #run {
-	set_build_options_dc(.{do_output=false, write_added_strings=false});
+	set_build_options_dc(.{do_output = false, write_added_strings = false});
 	main();
 }

@@ -83,21 +83,21 @@ Probe :: struct {
 
 PROBES :: Probe.[
 	.{
-		name="entry_location",
-		units=0,
-		directory="",
-		filename="probe.jai",
-		line=4,
-		source=#string JAI
+		name = "entry_location",
+		units = 0,
+		directory = "",
+		filename = "probe.jai",
+		line = 4,
+		source = #string JAI
 anchor :: 21;
 #run print("E4_PATH %\n", #filepath);
 #run print("E4_LOCATION %\n", #location(anchor));
 JAI
 	},
 	.{
-		name="loaded_location",
-		units=1,
-		source=#string JAI
+		name = "loaded_location",
+		units = 1,
+		source = #string JAI
 #load "Original/module.jai";
 #assert neighbor_value == 11 && sibling_value == 11;
 #run print("E4_PATH %\n", source_directory);
@@ -105,9 +105,9 @@ JAI
 JAI
 	},
 	.{
-		name="module_location",
-		units=1,
-		source=#string JAI
+		name = "module_location",
+		units = 1,
+		source = #string JAI
 Unit :: #import,dir "Original";
 #assert Unit.neighbor_value == 11 && Unit.sibling_value == 11;
 #run print("E4_PATH %\n", Unit.source_directory);
@@ -115,11 +115,11 @@ Unit :: #import,dir "Original";
 JAI
 	},
 	.{
-		name="relocated_location",
-		units=1,
-		directory="Copy/",
-		filename="Copy/module.jai",
-		source=#string JAI
+		name = "relocated_location",
+		units = 1,
+		directory = "Copy/",
+		filename = "Copy/module.jai",
+		source = #string JAI
 Unit :: #import,dir "Copy";
 #assert Unit.neighbor_value == 22 && Unit.sibling_value == 22;
 #run print("E4_PATH %\n", Unit.source_directory);
@@ -127,225 +127,225 @@ Unit :: #import,dir "Copy";
 JAI
 	},
 	.{
-		name="dot_load",
-		units=1,
-		directory="./Original/",
-		filename="./Original/module.jai",
-		load_report=true,
-		source=#string JAI
+		name = "dot_load",
+		units = 1,
+		directory = "./Original/",
+		filename = "./Original/module.jai",
+		load_report = true,
+		source = #string JAI
 #load "./Original/module.jai";
 JAI
 	},
 	.{
-		name="parent_load",
-		units=1,
-		directory="Branch/../Original/",
-		filename="Branch/../Original/module.jai",
-		load_report=true,
-		source=#string JAI
+		name = "parent_load",
+		units = 1,
+		directory = "Branch/../Original/",
+		filename = "Branch/../Original/module.jai",
+		load_report = true,
+		source = #string JAI
 #load "Branch/../Original/module.jai";
 JAI
 	},
 	.{
-		name="case_load",
-		accepted=false,
-		error="Non-matching Windows file case",
-		load_report=true,
-		source=#string JAI
+		name = "case_load",
+		accepted = false,
+		error = "Non-matching Windows file case",
+		load_report = true,
+		source = #string JAI
 #load "original/MODULE.JAI";
 JAI
 	},
 	.{
-		name="directory_case_load",
-		units=1,
-		directory="original/",
-		filename="original/module.jai",
-		load_report=true,
-		source=#string JAI
+		name = "directory_case_load",
+		units = 1,
+		directory = "original/",
+		filename = "original/module.jai",
+		load_report = true,
+		source = #string JAI
 #load "original/module.jai";
 JAI
 	},
 	.{
-		name="separator_load",
-		units=1,
-		load_report=true,
-		source=#string JAI
+		name = "separator_load",
+		units = 1,
+		load_report = true,
+		source = #string JAI
 #load "Original\\module.jai";
 JAI
 	},
 	.{
-		name="exact_file_pair",
-		units=1,
-		same=1,
-		pair=true,
-		source=#string JAI
+		name = "exact_file_pair",
+		units = 1,
+		same = 1,
+		pair = true,
+		source = #string JAI
 Left :: #import,file "Original/module.jai";
 Right :: #import,file "Original/module.jai";
 JAI
 	},
 	.{
-		name="dot_file_pair",
-		units=2,
-		same=0,
-		right_directory="./Original/",
-		right_filename="./Original/module.jai",
-		pair=true,
-		source=#string JAI
+		name = "dot_file_pair",
+		units = 2,
+		same = 0,
+		right_directory = "./Original/",
+		right_filename = "./Original/module.jai",
+		pair = true,
+		source = #string JAI
 Left :: #import,file "Original/module.jai";
 Right :: #import,file "./Original/module.jai";
 JAI
 	},
 	.{
-		name="parent_file_pair",
-		units=2,
-		same=0,
-		right_directory="Branch/../Original/",
-		right_filename="Branch/../Original/module.jai",
-		pair=true,
-		source=#string JAI
+		name = "parent_file_pair",
+		units = 2,
+		same = 0,
+		right_directory = "Branch/../Original/",
+		right_filename = "Branch/../Original/module.jai",
+		pair = true,
+		source = #string JAI
 Left :: #import,file "Original/module.jai";
 Right :: #import,file "Branch/../Original/module.jai";
 JAI
 	},
 	.{
-		name="case_file_pair",
-		accepted=false,
-		error="Non-matching Windows file case",
-		pair=true,
-		source=#string JAI
+		name = "case_file_pair",
+		accepted = false,
+		error = "Non-matching Windows file case",
+		pair = true,
+		source = #string JAI
 Left :: #import,file "Original/module.jai";
 Right :: #import,file "original/MODULE.JAI";
 JAI
 	},
 	.{
-		name="separator_file_pair",
-		units=2,
-		same=0,
-		right_directory="Original\\",
-		right_filename="Original\\module.jai",
-		pair=true,
-		source=#string JAI
+		name = "separator_file_pair",
+		units = 2,
+		same = 0,
+		right_directory = "Original\\",
+		right_filename = "Original\\module.jai",
+		pair = true,
+		source = #string JAI
 Left :: #import,file "Original/module.jai";
 Right :: #import,file "Original\\module.jai";
 JAI
 	},
 	.{
-		name="copy_file_pair",
-		units=2,
-		same=0,
-		right_directory="Copy/",
-		right_filename="Copy/module.jai",
-		values="11 22 11 22",
-		pair=true,
-		source=#string JAI
+		name = "copy_file_pair",
+		units = 2,
+		same = 0,
+		right_directory = "Copy/",
+		right_filename = "Copy/module.jai",
+		values = "11 22 11 22",
+		pair = true,
+		source = #string JAI
 Left :: #import,file "Original/module.jai";
 Right :: #import,file "Copy/module.jai";
 JAI
 	},
 	.{
-		name="same_directory_copy_pair",
-		units=2,
-		same=0,
-		right_filename="Original/copy.jai",
-		pair=true,
-		source=#string JAI
+		name = "same_directory_copy_pair",
+		units = 2,
+		same = 0,
+		right_filename = "Original/copy.jai",
+		pair = true,
+		source = #string JAI
 Left :: #import,file "Original/module.jai";
 Right :: #import,file "Original/copy.jai";
 JAI
 	},
 	.{
-		name="exact_dir_pair",
-		units=1,
-		same=1,
-		pair=true,
-		source=#string JAI
+		name = "exact_dir_pair",
+		units = 1,
+		same = 1,
+		pair = true,
+		source = #string JAI
 Left :: #import,dir "Original";
 Right :: #import,dir "Original";
 JAI
 	},
 	.{
-		name="dot_dir_pair",
-		units=2,
-		same=0,
-		right_directory="./Original/",
-		right_filename="./Original/module.jai",
-		pair=true,
-		source=#string JAI
+		name = "dot_dir_pair",
+		units = 2,
+		same = 0,
+		right_directory = "./Original/",
+		right_filename = "./Original/module.jai",
+		pair = true,
+		source = #string JAI
 Left :: #import,dir "Original";
 Right :: #import,dir "./Original";
 JAI
 	},
 	.{
-		name="parent_dir_pair",
-		units=2,
-		same=0,
-		right_directory="Branch/../Original/",
-		right_filename="Branch/../Original/module.jai",
-		pair=true,
-		source=#string JAI
+		name = "parent_dir_pair",
+		units = 2,
+		same = 0,
+		right_directory = "Branch/../Original/",
+		right_filename = "Branch/../Original/module.jai",
+		pair = true,
+		source = #string JAI
 Left :: #import,dir "Original";
 Right :: #import,dir "Branch/../Original";
 JAI
 	},
 	.{
-		name="case_dir_pair",
-		accepted=false,
-		error="Non-matching Windows file case",
-		pair=true,
-		source=#string JAI
+		name = "case_dir_pair",
+		accepted = false,
+		error = "Non-matching Windows file case",
+		pair = true,
+		source = #string JAI
 Left :: #import,dir "Original";
 Right :: #import,dir "original";
 JAI
 	},
 	.{
-		name="copy_dir_pair",
-		units=2,
-		same=0,
-		right_directory="Copy/",
-		right_filename="Copy/module.jai",
-		values="11 22 11 22",
-		pair=true,
-		source=#string JAI
+		name = "copy_dir_pair",
+		units = 2,
+		same = 0,
+		right_directory = "Copy/",
+		right_filename = "Copy/module.jai",
+		values = "11 22 11 22",
+		pair = true,
+		source = #string JAI
 Left :: #import,dir "Original";
 Right :: #import,dir "Copy";
 JAI
 	},
 	.{
-		name="absolute_file_pair",
-		units=1,
-		same=1,
-		pair=true,
-		absolute=true,
-		source=#string JAI
+		name = "absolute_file_pair",
+		units = 1,
+		same = 1,
+		pair = true,
+		absolute = true,
+		source = #string JAI
 Left :: #import,file "Original/module.jai";
 Right :: #import,file "%/Original/module.jai";
 JAI
 	},
 	.{
-		name="absolute_load",
-		units=1,
-		load_report=true,
-		absolute=true,
-		source=#string JAI
+		name = "absolute_load",
+		units = 1,
+		load_report = true,
+		absolute = true,
+		source = #string JAI
 #load "%/Original/module.jai";
 JAI
 	},
 	.{
-		name="missing_relative_neighbor",
-		accepted=false,
-		error="Unable to open file",
-		source=#string JAI
+		name = "missing_relative_neighbor",
+		accepted = false,
+		error = "Unable to open file",
+		source = #string JAI
 Unit :: #import,dir "Isolated";
 JAI
 	},
 	.{
-		name="entry_from_branch",
-		units=1,
-		directory="",
-		filename="probe.jai",
-		line=4,
-		from_branch=true,
-		source=#string JAI
+		name = "entry_from_branch",
+		units = 1,
+		directory = "",
+		filename = "probe.jai",
+		line = 4,
+		from_branch = true,
+		source = #string JAI
 anchor :: 21;
 #run print("E4_PATH %\n", #filepath);
 #run print("E4_LOCATION %\n", #location(anchor));
@@ -354,117 +354,117 @@ Unit :: #import,dir "Original";
 JAI
 	},
 	.{
-		name="junction_load",
-		units=1,
-		directory="Alias/",
-		filename="Alias/module.jai",
-		link="Junction",
-		load_report=true,
-		source=#string JAI
+		name = "junction_load",
+		units = 1,
+		directory = "Alias/",
+		filename = "Alias/module.jai",
+		link = "Junction",
+		load_report = true,
+		source = #string JAI
 #load "Alias/module.jai";
 JAI
 	},
 	.{
-		name="junction_file_pair",
-		units=2,
-		same=0,
-		right_directory="Alias/",
-		right_filename="Alias/module.jai",
-		link="Junction",
-		pair=true,
-		source=#string JAI
+		name = "junction_file_pair",
+		units = 2,
+		same = 0,
+		right_directory = "Alias/",
+		right_filename = "Alias/module.jai",
+		link = "Junction",
+		pair = true,
+		source = #string JAI
 Left :: #import,file "Original/module.jai";
 Right :: #import,file "Alias/module.jai";
 JAI
 	},
 	.{
-		name="junction_dir_pair",
-		accepted=false,
-		error="Non-matching Windows file case",
-		link="Junction",
-		pair=true,
-		source=#string JAI
+		name = "junction_dir_pair",
+		accepted = false,
+		error = "Non-matching Windows file case",
+		link = "Junction",
+		pair = true,
+		source = #string JAI
 Left :: #import,dir "Original";
 Right :: #import,dir "Alias";
 JAI
 	},
 	.{
-		name="symlink_load",
-		units=1,
-		directory="Alias/",
-		filename="Alias/module.jai",
-		link="SymbolicLink",
-		load_report=true,
-		source=#string JAI
+		name = "symlink_load",
+		units = 1,
+		directory = "Alias/",
+		filename = "Alias/module.jai",
+		link = "SymbolicLink",
+		load_report = true,
+		source = #string JAI
 #load "Alias/module.jai";
 JAI
 	},
 	.{
-		name="symlink_file_pair",
-		units=2,
-		same=0,
-		right_directory="Alias/",
-		right_filename="Alias/module.jai",
-		link="SymbolicLink",
-		pair=true,
-		source=#string JAI
+		name = "symlink_file_pair",
+		units = 2,
+		same = 0,
+		right_directory = "Alias/",
+		right_filename = "Alias/module.jai",
+		link = "SymbolicLink",
+		pair = true,
+		source = #string JAI
 Left :: #import,file "Original/module.jai";
 Right :: #import,file "Alias/module.jai";
 JAI
 	},
 	.{
-		name="symlink_dir_pair",
-		accepted=false,
-		error="Non-matching Windows file case",
-		link="SymbolicLink",
-		pair=true,
-		source=#string JAI
+		name = "symlink_dir_pair",
+		accepted = false,
+		error = "Non-matching Windows file case",
+		link = "SymbolicLink",
+		pair = true,
+		source = #string JAI
 Left :: #import,dir "Original";
 Right :: #import,dir "Alias";
 JAI
 	},
 	.{
-		name="file_symlink_load",
-		accepted=false,
-		error="Non-matching Windows file case",
-		link="FileSymbolicLink",
-		load_report=true,
-		source=#string JAI
+		name = "file_symlink_load",
+		accepted = false,
+		error = "Non-matching Windows file case",
+		link = "FileSymbolicLink",
+		load_report = true,
+		source = #string JAI
 #load "module_alias.jai";
 JAI
 	},
 	.{
-		name="file_symlink_pair",
-		accepted=false,
-		error="Non-matching Windows file case",
-		link="FileSymbolicLink",
-		pair=true,
-		source=#string JAI
+		name = "file_symlink_pair",
+		accepted = false,
+		error = "Non-matching Windows file case",
+		link = "FileSymbolicLink",
+		pair = true,
+		source = #string JAI
 Left :: #import,file "Original/module.jai";
 Right :: #import,file "module_alias.jai";
 JAI
 	},
 	.{
-		name="directory_case_file_pair",
-		units=2,
-		same=0,
-		right_directory="original/",
-		right_filename="original/module.jai",
-		pair=true,
-		source=#string JAI
+		name = "directory_case_file_pair",
+		units = 2,
+		same = 0,
+		right_directory = "original/",
+		right_filename = "original/module.jai",
+		pair = true,
+		source = #string JAI
 Left :: #import,file "Original/module.jai";
 Right :: #import,file "original/module.jai";
 JAI
 	},
 	.{
-		name="junction_same_leaf_dir_pair",
-		units=2,
-		same=0,
-		right_directory="Branch/Original/",
-		right_filename="Branch/Original/module.jai",
-		link="JunctionSameLeaf",
-		pair=true,
-		source=#string JAI
+		name = "junction_same_leaf_dir_pair",
+		units = 2,
+		same = 0,
+		right_directory = "Branch/Original/",
+		right_filename = "Branch/Original/module.jai",
+		link = "JunctionSameLeaf",
+		pair = true,
+		source = #string JAI
 Left :: #import,dir "Original";
 Right :: #import,dir "Branch/Original";
 JAI
@@ -488,7 +488,7 @@ prepare_link :: (directory: string, link: string) -> bool {
 
 	result, output, errors, timed_out := run_command(
 		"pwsh", "-NoProfile", "-Command", tprint(LINK_SCRIPT, kind, target, alias),
-		working_directory=directory, capture_and_return_output=true, timeout_ms=TIMEOUT_MS
+		working_directory = directory, capture_and_return_output = true, timeout_ms = TIMEOUT_MS
 	);
 	defer free(output);
 	defer free(errors);
@@ -571,7 +571,7 @@ run_probe :: (probe: Probe, summary: *string) {
 
 	result, output, errors, timed_out := run_command(
 		"jai", "-x64", entry, "-quiet", "-no_color",
-		working_directory=working_directory, capture_and_return_output=true, timeout_ms=TIMEOUT_MS
+		working_directory = working_directory, capture_and_return_output = true, timeout_ms = TIMEOUT_MS
 	);
 	defer free(output);
 	defer free(errors);
@@ -596,6 +596,6 @@ main :: () {
 }
 
 #run {
-	set_build_options_dc(.{do_output=false, write_added_strings=false});
+	set_build_options_dc(.{do_output = false, write_added_strings = false});
 	main();
 }

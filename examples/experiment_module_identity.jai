@@ -97,8 +97,8 @@ PAIRS :: Pair.[
 
 PROBES :: Probe.[
 	.{
-		name="same_module_twice",
-		source=#string JAI
+		name = "same_module_twice",
+		source = #string JAI
 Left :: #import "Identity_Probe";
 Right :: #import "Identity_Probe";
 #assert Left.Nominal == Right.Nominal;
@@ -106,8 +106,8 @@ Right :: #import "Identity_Probe";
 JAI
 	},
 	.{
-		name="explicit_defaults",
-		source=#string JAI
+		name = "explicit_defaults",
+		source = #string JAI
 Left :: #import "Identity_Probe";
 Right :: #import "Identity_Probe"(VALUE=3, LABEL="same", FLAG=false);
 #assert Left.Nominal != Right.Nominal;
@@ -116,16 +116,16 @@ Right :: #import "Identity_Probe"(VALUE=3, LABEL="same", FLAG=false);
 JAI
 	},
 	.{
-		name="repeated_explicit_defaults",
-		source=#string JAI
+		name = "repeated_explicit_defaults",
+		source = #string JAI
 Left :: #import "Identity_Probe"(VALUE=3, LABEL="same", FLAG=false);
 Right :: #import "Identity_Probe"(VALUE=3, LABEL="same", FLAG=false);
 #assert Left.Nominal == Right.Nominal;
 JAI
 	},
 	.{
-		name="one_explicit_default",
-		source=#string JAI
+		name = "one_explicit_default",
+		source = #string JAI
 Left :: #import "Identity_Probe";
 Right :: #import "Identity_Probe"(VALUE=3);
 #assert Left.Nominal != Right.Nominal;
@@ -133,16 +133,16 @@ Right :: #import "Identity_Probe"(VALUE=3);
 JAI
 	},
 	.{
-		name="empty_parameter_list",
-		source=#string JAI
+		name = "empty_parameter_list",
+		source = #string JAI
 Left :: #import "Identity_Probe";
 Right :: #import "Identity_Probe"();
 #assert Left.Nominal == Right.Nominal;
 JAI
 	},
 	.{
-		name="different_value", instances=2,
-		source=#string JAI
+		name = "different_value", instances = 2,
+		source = #string JAI
 Left :: #import "Identity_Probe";
 Right :: #import "Identity_Probe"(VALUE=4);
 #assert Left.Nominal != Right.Nominal;
@@ -150,77 +150,77 @@ Right :: #import "Identity_Probe"(VALUE=4);
 JAI
 	},
 	.{
-		name="different_label",
-		source=#string JAI
+		name = "different_label",
+		source = #string JAI
 Left :: #import "Identity_Probe";
 Right :: #import "Identity_Probe"(LABEL="other");
 #assert Left.Nominal != Right.Nominal;
 JAI
 	},
 	.{
-		name="different_flag",
-		source=#string JAI
+		name = "different_flag",
+		source = #string JAI
 Left :: #import "Identity_Probe";
 Right :: #import "Identity_Probe"(FLAG=true);
 #assert Left.Nominal != Right.Nominal;
 JAI
 	},
 	.{
-		name="different_instance_assignment", accepted=false, instances=-1, error="Type mismatch: incompatible structs",
-		source=#string JAI
+		name = "different_instance_assignment", accepted = false, instances = -1, error = "Type mismatch: incompatible structs",
+		source = #string JAI
 Left :: #import "Identity_Probe";
 Right :: #import "Identity_Probe"(VALUE=4);
 #run { left: Left.Nominal; right: Right.Nominal; right = left; }
 JAI
 	},
 	.{
-		name="nested_import_alias",
-		source=#string JAI
+		name = "nested_import_alias",
+		source = #string JAI
 Left :: #import "Identity_Probe";
 probe :: () { Right :: #import "Identity_Probe"; #assert Left.Nominal == Right.Nominal; }
 #run,stallable probe();
 JAI
 	},
 	.{
-		name="loaded_import_alias",
-		source=#string JAI
+		name = "loaded_import_alias",
+		source = #string JAI
 Left :: #import "Identity_Probe";
 #load "alias.jai";
 #assert Left.Nominal == Loaded.Nominal;
 JAI
 	},
 	.{
-		name="graph_default", observe=true,
-		source=#string JAI
+		name = "graph_default", observe = true,
+		source = #string JAI
 Grand :: #import "Identity_Grand";
 Direct :: #import "Identity_Probe";
 JAI
 	},
 	.{
-		name="graph_entry_defaults", observe=true,
-		source=#string JAI
+		name = "graph_entry_defaults", observe = true,
+		source = #string JAI
 Grand :: #import "Identity_Grand"()(MODE=11, TRACE=true);
 Direct :: #import "Identity_Probe";
 JAI
 	},
 	.{
-		name="graph_import_override", observe=true,
-		source=#string JAI
+		name = "graph_import_override", observe = true,
+		source = #string JAI
 Grand :: #import "Identity_Grand";
 Direct :: #import "Identity_Probe"()(MODE=19, TRACE=true);
 JAI
 	},
 	.{
-		name="graph_child_override", observe=true,
-		source=#string JAI
+		name = "graph_child_override", observe = true,
+		source = #string JAI
 Bridge :: #import "Identity_Override";
 Direct :: #import "Identity_Probe";
 #run print("E2_OVERRIDE % % % %\n", Bridge.mode, Bridge.Child.mode, Direct.mode, Bridge.Child.Nominal == Direct.Nominal);
 JAI
 	},
 	.{
-		name="default_instance_assignment", accepted=false, instances=-1, error="Type mismatch: incompatible structs",
-		source=#string JAI
+		name = "default_instance_assignment", accepted = false, instances = -1, error = "Type mismatch: incompatible structs",
+		source = #string JAI
 Left :: #import "Identity_Probe";
 Right :: #import "Identity_Probe"(VALUE=3);
 #run { left: Left.Nominal; right: Right.Nominal; right = left; }
@@ -277,9 +277,9 @@ JAI,
 
 	result, output, errors, timed_out := run_command(
 		"jai", "-x64", "probe.jai", "-quiet", "-no_color", "-import_dir", "..",
-		working_directory=directory,
-		capture_and_return_output=true,
-		timeout_ms=TIMEOUT_MS
+		working_directory = directory,
+		capture_and_return_output = true,
+		timeout_ms = TIMEOUT_MS
 	);
 
 	defer free(output);
@@ -340,7 +340,7 @@ main :: () {
 	}
 
 	for pair: PAIRS {
-		probe: Probe = .{name=pair.name, source=tprint("Left :: %;\nRight :: %;\n%", pair.left, pair.right, PAIR_REPORT), observe=true};
+		probe: Probe = .{name = pair.name, source = tprint("Left :: %;\nRight :: %;\n%", pair.left, pair.right, PAIR_REPORT), observe = true};
 		same := false;
 		for name: SAME_INSTANCE_PAIRS {
 			if pair.name == name {
@@ -361,6 +361,6 @@ main :: () {
 }
 
 #run {
-	set_build_options_dc(.{do_output=false, write_added_strings=false});
+	set_build_options_dc(.{do_output = false, write_added_strings = false});
 	main();
 }

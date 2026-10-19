@@ -6,7 +6,7 @@
 
 #load "test_fixtures.jai";
 
-Parser :: #import "Jai_Parser"(ENABLE_TRIVIA=true);
+Parser :: #import "Jai_Parser"(ENABLE_TRIVIA = true);
 
 Token_Count :: struct {
 	token: Parser.Token_Type;
@@ -41,48 +41,9 @@ First_Diagnostic_Signature_Count :: struct {
 	representative_filename: string;
 }
 
-CORPUS_BASELINE_DATE :: "2026-09-25";
+CORPUS_BASELINE_DATE :: "2026-10-19";
 
-CORPUS_BASELINE :: Corpus_Baseline_Entry.[
-	.{filename="005_strings.jai", diagnostic_count=3},
-	.{filename="006_structs.jai", diagnostic_count=5},
-	.{filename="008_types.jai", diagnostic_count=3},
-	.{filename="010_calling_procedures.jai", diagnostic_count=66},
-	.{filename="011_context.jai", diagnostic_count=4},
-	.{filename="012_temporary_storage.jai", diagnostic_count=1},
-	.{filename="018_print_functions.jai", diagnostic_count=1},
-	.{filename="025_ifx.jai", diagnostic_count=12},
-	.{filename="027_if_case.jai", diagnostic_count=5},
-	.{filename="042_using.jai", diagnostic_count=1},
-	.{filename="050_this.jai", diagnostic_count=2},
-	.{filename="095_static_if.jai", diagnostic_count=9},
-	.{filename="100_polymorphic_procedures.jai", diagnostic_count=27},
-	.{filename="110_polymorphic_arguments.jai", diagnostic_count=2},
-	.{filename="115_auto_bakes.jai", diagnostic_count=37},
-	.{filename="120_polymorphic_structs.jai", diagnostic_count=5},
-	.{filename="160_type_restrictions.jai", diagnostic_count=3},
-	.{filename="170_modify.jai", diagnostic_count=5},
-	.{filename="200_memory_management.jai", diagnostic_count=11},
-	.{filename="225_comma_comma.jai", diagnostic_count=9},
-	.{filename="250_how_parameters_are_passed.jai", diagnostic_count=19},
-	.{filename="400_workspaces.jai", diagnostic_count=2},
-	.{filename="497_caller_code.jai", diagnostic_count=1},
-	.{filename="550_is_constant.jai", diagnostic_count=4},
-	.{filename="560_no_reset.jai", diagnostic_count=10},
-	.{filename="600_insert.jai", diagnostic_count=10},
-	.{filename="630_compiler_get_nodes.jai", diagnostic_count=6},
-	.{filename="730_for_expansions.jai", diagnostic_count=10},
-	.{filename="040_import_and_load/main.jai", diagnostic_count=4},
-	.{filename="044_using_advanced/main.jai", diagnostic_count=74},
-	.{filename="460_code_browsing_and_generation/first.jai", diagnostic_count=1},
-	.{filename="470_running_hooks_in_the_target_workspace/target.jai", diagnostic_count=1},
-	.{filename="480_custom_checks/first.jai", diagnostic_count=4},
-	.{filename="490_browsing_by_module/first.jai", diagnostic_count=2},
-	.{filename="950_cross-compiling/do_things_at_compile_time_for_real.jai", diagnostic_count=10},
-	.{filename="950_cross-compiling/first.jai", diagnostic_count=1},
-	.{filename="040_import_and_load/files/specific.jai", diagnostic_count=4},
-	.{filename="380_module_parameters/local_modules/Rendering.jai", diagnostic_count=7},
-];
+CORPUS_BASELINE :: Corpus_Baseline_Entry.[];
 
 increment_token_count :: (counts: *[..]Token_Count, token: Parser.Token_Type) {
 	for * counts.* {
@@ -93,7 +54,7 @@ increment_token_count :: (counts: *[..]Token_Count, token: Parser.Token_Type) {
 	}
 
 
-	array_add(counts, .{token=token, count=1});
+	array_add(counts, .{token = token, count = 1});
 }
 
 token_spelling :: (token: Parser.Token_Type) -> string {
@@ -157,21 +118,21 @@ increment_first_signature :: (counts: *[..]First_Diagnostic_Signature_Count, dia
 	array_add(
 		counts,
 		.{
-			kind=diagnostic.kind,
-			expected_token=diagnostic.expected_token,
-			actual_token=diagnostic.actual_token,
-			recovery_action=diagnostic.recovery_action,
-			count=1,
-			representative_filename=diagnostic.filename,
+			kind = diagnostic.kind,
+			expected_token = diagnostic.expected_token,
+			actual_token = diagnostic.actual_token,
+			recovery_action = diagnostic.recovery_action,
+			count = 1,
+			representative_filename = diagnostic.filename,
 		}
 	);
 }
 
 first_diagnostic_for_file :: (parsed: *Parser.Parsed_Source, filename: string) -> First_Diagnostic {
 	entry := First_Diagnostic.{
-		filename=copy_string(filename),
-		status=parsed.status,
-		diagnostic_count=parsed.diagnostics.count,
+		filename = copy_string(filename),
+		status = parsed.status,
+		diagnostic_count = parsed.diagnostics.count,
 	};
 
 	if parsed.diagnostics.count {

@@ -162,7 +162,7 @@ run_probe :: (index: s64, scope: Scope, site: Site, named: bool, marker: Marker,
 	result, output, errors, timed_out := run_command(
 		"jai", "-x64", "probe.jai", "-quiet", "-no_color",
 		"-import_dir", "..",
-		working_directory=directory, capture_and_return_output=true, timeout_ms=TIMEOUT_MS
+		working_directory = directory, capture_and_return_output = true, timeout_ms = TIMEOUT_MS
 	);
 
 	defer free(output);
@@ -275,6 +275,6 @@ main :: () {
 }
 
 #run {
-	set_build_options_dc(.{do_output=false, write_added_strings=false});
+	set_build_options_dc(.{do_output = false, write_added_strings = false});
 	main();
 }

@@ -25,17 +25,17 @@ VERIFY_ONLY :: #run -> bool {
 	return arguments.count == 1;
 };
 
-Parser :: #import "Jai_Parser"(ENABLE_TRIVIA=true, TRACK_AST_REUSE=VERIFY_ONLY);
+Parser :: #import "Jai_Parser"(ENABLE_TRIVIA = true, TRACK_AST_REUSE = VERIFY_ONLY);
 #load "snapshot_oracle.jai";
 
 ticks :: () -> s64 {
 	counter: LARGE_INTEGER;
-	assert(QueryPerformanceCounter(*counter) != 0);
+	assert(!!QueryPerformanceCounter(*counter));
 	return counter.QuadPart;
 }
 
 parse_tokens :: (parsed: *Parser.Parsed_Source, old: *Parser.Parsed_Source = null, edit_start: s64 = 0, edit_end: s64 = 0) {
-	parser := Parser.Parser.{parsed=parsed, edit_source=old, edit_start=edit_start, edit_end=edit_end};
+	parser := Parser.Parser.{parsed = parsed, edit_source = old, edit_start = edit_start, edit_end = edit_end};
 	set_allocators(*parsed.node_pool);
 	parsed.root_scope = Parser.push_lexical_scope(*parser);
 	parsed.root = Parser.parse_file_node(*parser);
@@ -56,7 +56,7 @@ measure_baseline :: (source: string, filename: string, frequency: s64) {
 		storage: Pool;
 		set_allocators(*storage);
 		previous_allocator := context.allocator;
-		context.allocator = .{proc=pool_allocator_proc, data=*storage};
+		context.allocator = .{proc = pool_allocator_proc, data = *storage};
 		start := ticks();
 		parsed := Parser.materialise_tokens(source);
 		lex_end := ticks();
@@ -170,7 +170,7 @@ run_sequence :: (source: string, filename: string, edits: []Update_Edit, mode: U
 	previous_allocator := context.allocator;
 	initial_start := ticks();
 	set_allocators(*snapshots[0].storage, previous_allocator);
-	context.allocator = .{proc=pool_allocator_proc, data=*snapshots[0].storage};
+	context.allocator = .{proc = pool_allocator_proc, data = *snapshots[0].storage};
 	defer context.allocator = previous_allocator;
 
 	snapshots[0].owned_source = copy_string(source);
@@ -188,7 +188,7 @@ run_sequence :: (source: string, filename: string, edits: []Update_Edit, mode: U
 
 		update_start := ticks();
 		set_allocators(*next.storage, previous_allocator);
-		context.allocator = .{proc=pool_allocator_proc, data=*next.storage};
+		context.allocator = .{proc = pool_allocator_proc, data = *next.storage};
 		next.owned_source = copy_string(edit.source);
 		start := ticks();
 
@@ -228,12 +228,12 @@ run_sequence :: (source: string, filename: string, edits: []Update_Edit, mode: U
 
 		update_end := ticks();
 		measurements.edits[index] = .{
-			acquire=(start - update_start).(float64) * scale,
-			lex=(lex_end - start).(float64) * scale,
-			ast=(ast_end - lex_end).(float64) * scale,
-			construction=(ast_end - start).(float64) * scale,
-			release_old=(update_end - ast_end).(float64) * scale,
-			lifecycle=(update_end - update_start).(float64) * scale
+			acquire = (start - update_start).(float64) * scale,
+			lex = (lex_end - start).(float64) * scale,
+			ast = (ast_end - lex_end).(float64) * scale,
+			construction = (ast_end - start).(float64) * scale,
+			release_old = (update_end - ast_end).(float64) * scale,
+			lifecycle = (update_end - update_start).(float64) * scale
 		};
 
 		#if verify {
@@ -256,9 +256,9 @@ measure_updates :: (source: string, filename: string, frequency: s64) {
 	defer free(second);
 
 	edits := Update_Edit.[
-		.{source=first,		start=0, end=0},
-		.{source=second,	start=0, end=FIRST.count},
-		.{source=source,	start=0, end=SECOND.count}
+		.{source = first,	start = 0,	end = 0},
+		.{source = second,	start = 0,	end = FIRST.count},
+		.{source = source,	start = 0,	end = SECOND.count}
 	];
 
 	measure_sequence(source, filename, frequency, edits, "prefix-comment", "trivia-control");
@@ -335,7 +335,7 @@ profile_allocator :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory
 test_allocation_profile :: () {
 	INITIAL_BYTES :: 16;
 	RESIZED_BYTES :: 40;
-	counts := Allocation_Profile.{delegate=context.allocator, accounting_allocator=context.allocator, track_live=true};
+	counts := Allocation_Profile.{delegate = context.allocator, accounting_allocator = context.allocator, track_live = true};
 	memory := profile_allocator(.ALLOCATE, INITIAL_BYTES, 0, null, *counts);
 	assert(memory && counts.live == INITIAL_BYTES);
 	memory = profile_allocator(.RESIZE, RESIZED_BYTES, INITIAL_BYTES, memory, *counts);
@@ -349,9 +349,9 @@ profile_snapshot :: (snapshot: *Update_Snapshot, counts: *Snapshot_Allocations, 
 	counts.backing.delegate = backing;
 	counts.backing.accounting_allocator = backing;
 	counts.backing.track_live = true;
-	set_allocators(*snapshot.storage, .{proc=profile_allocator, data=*counts.backing});
-	counts.caller.delegate = .{proc=pool_allocator_proc, data=*snapshot.storage};
-	push_allocator(.{proc=profile_allocator, data=*counts.caller});
+	set_allocators(*snapshot.storage, .{proc = profile_allocator, data = *counts.backing});
+	counts.caller.delegate = .{proc = pool_allocator_proc, data = *snapshot.storage};
+	push_allocator(.{proc = profile_allocator, data = *counts.caller});
 	snapshot.owned_source = copy_string(source);
 	if !old {
 		snapshot.parsed = Parser.parse_file(snapshot.owned_source, filename);
@@ -389,10 +389,10 @@ profile_sequence :: (source: string, filename: string, edits: []Update_Edit, mod
 		profile_snapshot(next, next_counts, backing, edit.source, filename, *old.parsed, mode, edit.start, edit.end);
 		assert(old_counts.backing.live == old_retained);
 		results[index] = .{
-			requests=next_counts.caller.requests,
-			requested_bytes=next_counts.caller.bytes,
-			retained=next_counts.backing.live,
-			overlap_peak=old_retained + next_counts.backing.peak
+			requests = next_counts.caller.requests,
+			requested_bytes = next_counts.caller.bytes,
+			retained = next_counts.backing.live,
+			overlap_peak = old_retained + next_counts.backing.peak
 		};
 
 		print(
@@ -418,7 +418,7 @@ profile_sequence :: (source: string, filename: string, edits: []Update_Edit, mod
 		{
 			check_storage: Pool;
 			set_allocators(*check_storage, backing);
-			push_allocator(.{proc=pool_allocator_proc, data=*check_storage});
+			push_allocator(.{proc = pool_allocator_proc, data = *check_storage});
 			defer release(*check_storage);
 
 			assert(Parser.reconstruct_source(*next.parsed) == edit.source);
@@ -530,12 +530,13 @@ measure_sequence :: (source: string, filename: string, frequency: s64, edits: []
 		profiles[mode.(s64)] = profile_sequence(source, filename, edits, mode);
 	}
 
-	for index: 0..edits.count-1 {
-		baseline := profiles[TOKENS_INDEX][index];
-		updated := profiles[AST_INDEX][index];
+	for 0..edits.count-1 {
+		baseline := profiles[TOKENS_INDEX][it];
+		updated := profiles[AST_INDEX][it];
+
 		print(
 			"    edit=% AST versus TOKENS memory savings: requests=% (% percent); requested=% (% percent) retained=% (% percent) overlap_peak=% (% percent) bytes\n",
-			index + 1,
+			it + 1,
 			baseline.requests - updated.requests,
 			PERCENT_SCALE * (1 - updated.requests.(float64) / baseline.requests.(float64)),
 			baseline.requested_bytes - updated.requested_bytes,
@@ -558,9 +559,9 @@ measure_patch_sequence :: (source: string, filename: string, frequency: s64, sta
 	defer free(second);
 
 	edits := Update_Edit.[
-		.{source=first, start=start, end=end},
-		.{source=second, start=start, end=start + first_payload.count, expect_added_errors=malformed},
-		.{source=source, start=start, end=start + second_payload.count, restores_baseline=true}
+		.{source = first,	start = start,	end = end},
+		.{source = second,	start = start,	end = start + first_payload.count, expect_added_errors = malformed},
+		.{source = source,	start = start,	end = start + second_payload.count, restores_baseline = true}
 	];
 
 	print(
@@ -679,7 +680,7 @@ measure_realistic_updates :: (source: string, filename: string, frequency: s64) 
 	storage: Pool;
 	set_allocators(*storage);
 	previous_allocator := context.allocator;
-	context.allocator = .{proc=pool_allocator_proc, data=*storage};
+	context.allocator = .{proc = pool_allocator_proc, data = *storage};
 	parsed := Parser.parse_file(source, filename);
 	context.allocator = previous_allocator;
 	defer release_snapshot(*parsed, *storage);
@@ -779,7 +780,7 @@ main :: () {
 		else "../../../examples/invaders";
 
 	filenames: [..]string;
-	visit_files(directory, true, *filenames, visit, visit_symlinks=false);
+	visit_files(directory, true, *filenames, visit, visit_symlinks = false);
 	defer {
 		for filenames {
 			free(it);
@@ -788,7 +789,7 @@ main :: () {
 		array_free(filenames);
 	}
 
-	assert(filenames.count > 0);
+	assert(!!filenames.count);
 	print("File order: filesystem visitation order.\n");
 	counter: LARGE_INTEGER;
 	assert(QueryPerformanceFrequency(*counter) != 0);
@@ -810,7 +811,7 @@ main :: () {
 		defer free(source);
 
 		line_count: s64;
-		if source.count > 0 {
+		if source.count {
 			line_count = 1;
 			for source {
 				if it == #char "\n" {
@@ -822,7 +823,7 @@ main :: () {
 		storage: Pool;
 		set_allocators(*storage);
 		previous_allocator := context.allocator;
-		context.allocator = .{proc=pool_allocator_proc, data=*storage};
+		context.allocator = .{proc = pool_allocator_proc, data = *storage};
 		parsed := Parser.parse_file(source, filename);
 		assert(parsed.root != null);
 		reconstructed := Parser.reconstruct_source(*parsed);
@@ -831,7 +832,7 @@ main :: () {
 		bytes += source.count;
 		lines += line_count;
 		tokens += parsed.tokens.count;
-		if parsed.status == .COMPLETE && parsed.diagnostics.count == 0 {
+		if parsed.status == .COMPLETE && !parsed.diagnostics.count {
 			complete += 1;
 		}
 

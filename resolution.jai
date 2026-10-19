@@ -152,11 +152,11 @@ resolve_file_imports :: (
 			if filename.data != path.data {
 				free(path);
 			}
-			source, success = read_entire_file(filename, log_errors=false);
+			source, success = read_entire_file(filename, log_errors = false);
 		} else {
 			for import_path {
 				filename = join(it, "/", import.name, ".jai");
-				source, success = read_entire_file(filename, log_errors=false);
+				source, success = read_entire_file(filename, log_errors = false);
 				if success {
 					break;
 				}
@@ -164,7 +164,7 @@ resolve_file_imports :: (
 
 				free(filename);
 				filename = join(it, "/", import.name, "/module.jai");
-				source, success = read_entire_file(filename, log_errors=false);
+				source, success = read_entire_file(filename, log_errors = false);
 				if success {
 					break;
 				}
@@ -345,7 +345,7 @@ collect_using_mappings :: (
 
 collect_mapping_conflicts :: (scope: *Parser_Lexical_Scope, imports: *Parser_File_Imports) {
 	for using_node: scope.usings {
-		for mapping, index: imports.mapped_names {
+		for mapping: imports.mapped_names {
 			if mapping.using_node != using_node || !mapping.exported_name {
 				continue;
 			}
@@ -364,7 +364,7 @@ collect_mapping_conflicts :: (scope: *Parser_Lexical_Scope, imports: *Parser_Fil
 				}
 			}
 
-			for prior_index: 0..index-1 {
+			for prior_index: 0..it_index-1 {
 				prior := imports.mapped_names[prior_index];
 				if prior.using_node == using_node || prior.exported_name != mapping.exported_name {
 					continue;
@@ -779,7 +779,7 @@ resolve_complete_aggregate_type :: (expression: *Parser_Node, root_scope: *Parse
 		if call.procedure_expression && call.procedure_expression.kind == .IDENT {
 			header := resolve_called_procedure(call.procedure_expression.(*Parser_Ident).resolved_declaration, root_scope);
 			if (header && header.procedure_flags & .POLYMORPHIC != 0
-				&& header.arguments.count > 0 && header.arguments.count == call.arguments_unsorted.count
+				&& header.arguments.count && header.arguments.count == call.arguments_unsorted.count
 				&& header.returns.count == 1 && header.returns[0].type_inst && !header.returns[0].type_inst.must_implement
 				&& instantiate_polymorphic_aggregate_call(call, header, *visited, root_scope) == expression
 			) {
@@ -798,9 +798,9 @@ resolve_complete_aggregate_type :: (expression: *Parser_Node, root_scope: *Parse
 						) {
 							complete := true;
 							return_type := Parsed_Aggregate_Type.{declaration = candidate, type_arguments = instantiation.arguments_unsorted};
-							for index: 0..instantiation.arguments_unsorted.count-1 {
-								argument := aggregate_argument_expression(return_type, index);
-								aggregate_node := structure.arguments_block.statements[index];
+							for 0..instantiation.arguments_unsorted.count-1 {
+								argument := aggregate_argument_expression(return_type, it);
+								aggregate_node := structure.arguments_block.statements[it];
 								if aggregate_node.kind != .DECLARATION || !argument || argument.kind != .IDENT {
 									complete = false;
 									break;
@@ -902,10 +902,10 @@ substitute_aggregate_field_type :: (expression: *Parser_Node, container: Parsed_
 
 	structure := container.declaration.expression.(*Parser_Struct);
 	if expression.kind == .IDENT {
-		for index: 0..container.type_arguments.count-1 {
-			parameter := structure.arguments_block.statements[index].(*Parser_Declaration);
+		for 0..container.type_arguments.count-1 {
+			parameter := structure.arguments_block.statements[it].(*Parser_Declaration);
 			if expression.(*Parser_Ident).resolved_declaration == parameter {
-				argument := aggregate_argument_expression(container, index);
+				argument := aggregate_argument_expression(container, it);
 				if container.polymorphic_call {
 					header := resolve_called_procedure(container.polymorphic_call.procedure_expression.(*Parser_Ident).resolved_declaration, root_scope);
 					return polymorphic_argument_type(container.polymorphic_call, header, argument.(*Parser_Ident).name, visited, root_scope);
@@ -928,9 +928,9 @@ substitute_aggregate_field_type :: (expression: *Parser_Node, container: Parsed_
 	copy := New(Parser_Procedure_Call);
 	copy.* = call.*;
 	copy.arguments_unsorted = NewArray(call.arguments_unsorted.count, Parser_Argument);
-	for argument, index: call.arguments_unsorted {
-		copy.arguments_unsorted[index] = argument;
-		copy.arguments_unsorted[index].expression = substitute_aggregate_field_type(argument.expression, container, root_scope, visited);
+	for argument: call.arguments_unsorted {
+		copy.arguments_unsorted[it_index] = argument;
+		copy.arguments_unsorted[it_index].expression = substitute_aggregate_field_type(argument.expression, container, root_scope, visited);
 	}
 
 	return copy;
@@ -975,9 +975,10 @@ compare_aggregate_types :: (left: *Parser_Node, right: *Parser_Node, root_scope:
 	}
 
 
-	for index: 0..left_type.type_arguments.count-1 {
-		left_argument := aggregate_argument_expression(left_type, index);
-		right_argument := aggregate_argument_expression(right_type, index);
+	for 0..left_type.type_arguments.count-1 {
+		left_argument := aggregate_argument_expression(left_type, it);
+		right_argument := aggregate_argument_expression(right_type, it);
+
 		visited: [..]*Parser_Declaration;
 		if left_type.polymorphic_call {
 			left_header := resolve_called_procedure(left_type.polymorphic_call.procedure_expression.(*Parser_Ident).resolved_declaration, root_scope);
@@ -1054,7 +1055,7 @@ aggregate_members_hidden_by_filter :: (expression: *Parser_Node, filter: *Parser
 
 
 	parameter_shadow := false;
-	if aggregate.type_arguments.count > 0 {
+	if aggregate.type_arguments.count {
 		bindings: [..]Parser_Binding;
 		defer array_free(bindings);
 
@@ -1161,7 +1162,7 @@ aggregate_statements_hidden_by_filter :: (
 
 
 		structure := container.declaration.expression.(*Parser_Struct);
-		if container.type_arguments.count > 0 {
+		if container.type_arguments.count {
 			for parameter_node: structure.arguments_block.statements {
 				if field.name == parameter_node.(*Parser_Declaration).name && statement.kind != .DECLARATION {
 					return false;
@@ -1634,17 +1635,17 @@ match_aggregate_call_arguments :: (call: *Parser_Procedure_Call, header: *Parser
 				&& (parameter_primitive == "u8" && literal_argument._u64 <= 255
 					|| parameter_primitive == "s8" && (
 						literal_argument.value_flags & .MINUS_SIGN == 0 && literal_argument._u64 <= 127
-						|| literal_argument.value_flags & .MINUS_SIGN != 0 && 0 - literal_argument._u64 <= 128
+						|| literal_argument.value_flags & .MINUS_SIGN && 0 - literal_argument._u64 <= 128
 					)
 					|| parameter_primitive == "u16" && literal_argument._u64 <= 65535
 					|| parameter_primitive == "s16" && (
 						literal_argument.value_flags & .MINUS_SIGN == 0 && literal_argument._u64 <= 32767
-						|| literal_argument.value_flags & .MINUS_SIGN != 0 && 0 - literal_argument._u64 <= 32768
+						|| literal_argument.value_flags & .MINUS_SIGN && 0 - literal_argument._u64 <= 32768
 					)
 					|| parameter_primitive == "u32" && literal_argument._u64 <= 4294967295
 					|| parameter_primitive == "s32" && (
 						literal_argument.value_flags & .MINUS_SIGN == 0 && literal_argument._u64 <= 2147483647
-						|| literal_argument.value_flags & .MINUS_SIGN != 0 && 0 - literal_argument._u64 <= 2147483648
+						|| literal_argument.value_flags & .MINUS_SIGN && 0 - literal_argument._u64 <= 2147483648
 					)
 				)
 			) {
@@ -2211,9 +2212,8 @@ infer_aggregate_expression_type :: (expression: *Parser_Node, visited: *[..] *Pa
 
 
 				branch := ifx condition then conditional.then_block else conditional.else_block;
-				return ifx !branch || branch.statements.count != 1
-					then null
-					else infer_aggregate_expression_type(branch.statements[0], visited, root_scope);
+				return ifx branch && branch.statements.count == 1
+					then infer_aggregate_expression_type(branch.statements[0], visited, root_scope);
 			}
 
 
@@ -2568,7 +2568,7 @@ load_module_files :: (module: *Parser_Imported_Module, parsed: *Parsed_Source, d
 		}
 
 
-		source, success := read_entire_file(filename, log_errors=false);
+		source, success := read_entire_file(filename, log_errors = false);
 		if !success {
 			free(filename);
 			array_add(*module.unresolved_loads, load);

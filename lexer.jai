@@ -178,11 +178,11 @@ Table_String :: #type,isa string;
 	}
 
 	make_trivia_iterator :: inline (source: string) -> Trivia_Iterator {
-		return .{source=source};
+		return .{source = source};
 	}
 
 	for_expansion :: (iterator: Trivia_Iterator, body: Code, $flags: For_Flags) #expand {
-		#assert(flags & .REVERSE == 0);
+		#assert(!(flags & .REVERSE));
 
 		while true {
 			success, trivia := next_trivia(*iterator);
@@ -504,9 +504,9 @@ peek_next_character :: (lexer: *Lexer) -> s16 {
 
 report_parse_error :: (lexer: *Lexer, format: string, arguments: ..Any) {
 	if lexer.error_callback {
-		message := ifx arguments.count == 0
-			then format
-			else tprint(format, ..arguments);
+		message := ifx arguments.count
+			then tprint(format, ..arguments)
+			else format;
 
 		lexer.error_callback(lexer, message, lexer.current_line_number, lexer.current_character_index);
 	} else {
@@ -519,9 +519,9 @@ report_parse_error :: (lexer: *Lexer, format: string, arguments: ..Any) {
 
 report_parse_error :: (lexer: *Lexer, token: *Token, format: string, arguments: ..Any) {
 	if lexer.error_callback {
-		message := ifx arguments.count == 0
-			then format
-			else tprint(format, ..arguments);
+		message := ifx arguments.count
+			then tprint(format, ..arguments)
+			else format;
 
 		lexer.error_callback(lexer, message, token.l0, token.c0);
 	} else {
@@ -534,9 +534,9 @@ report_parse_error :: (lexer: *Lexer, token: *Token, format: string, arguments: 
 
 report_detail :: (lexer: *Lexer, format: string, arguments: ..Any) {
 	if lexer.detail_callback {
-		message := ifx arguments.count == 0
-			then format
-			else tprint(format, ..arguments);
+		message := ifx arguments.count
+			then tprint(format, ..arguments)
+			else format;
 
 		lexer.detail_callback(lexer, message);
 	} else {
@@ -584,7 +584,7 @@ set_end_of_token :: (lexer: *Lexer, token: *Token) {
 }
 
 unwind_one_character :: (lexer: *Lexer) {
-	assert(lexer.input_cursor != 0);
+	assert(!!lexer.input_cursor);
 	lexer.input_cursor -= 1;
 	lexer.current_character_index -= 1;
 }
@@ -946,8 +946,8 @@ eat_comment_if_present :: (lexer: *Lexer) -> bool {
 }
 
 parse_here_string_body :: (lexer: *Lexer, terminator: string, want_cr := false, want_percent := false) -> *Token {
-	assert(lexer.num_incoming_tokens == 0);		// The parser should not be in a state where later characters have been processed into tokens.
-	assert(terminator.count > 0);
+	assert(!lexer.num_incoming_tokens);		// The parser should not be in a state where later characters have been processed into tokens.
+	assert(!!terminator.count);
 
 	#if ENABLE_TRIVIA {
 		trivia_start := lexer.input_cursor;
@@ -1031,7 +1031,7 @@ parse_here_string_body :: (lexer: *Lexer, terminator: string, want_cr := false, 
 		remaining := lexer.input.count - cursor;
 		if remaining >= ident_len {
 			// @Speed...
-			if memcmp(lexer.input.data + cursor, ident.data, ident_len) == 0 {
+			if !memcmp(lexer.input.data + cursor, ident.data, ident_len) {
 				after_ident := cursor + ident_len;
 				if (after_ident == lexer.input.count) || !continues_identifier(lexer.input.data[after_ident]) {
 					// Leave the terminator line for ordinary lexing, outside the body.
@@ -1215,7 +1215,7 @@ parse_note :: (lexer: *Lexer) -> string {
 	}
 
 	len := lexer.input_cursor - input_cursor_orig;
-	if len == 0 {
+	if !len {
 		report_parse_error(lexer, "Empty note.\n");
 	}
 
@@ -1342,7 +1342,7 @@ make_hexfloat :: (lexer: *Lexer, result: *Token) -> *Token {
 		num_digits += 1;
 	}
 
-	if num_digits == 0 {
+	if !num_digits {
 		report_parse_error(lexer, "Expected some hexadecimal characters after \"0h\", but found none.\n");
 	} else if (num_digits != 4) && (num_digits != 8) && (num_digits != 16) {
 		report_parse_error(lexer, "Numbers designated by 0h must be 4, 8 or 16 digits; this one is %d digits.\n", num_digits);
@@ -1879,7 +1879,7 @@ count_herestring_lines :: (lexer: *Lexer, token: *Token) -> s64 {
 eat_token :: (lexer: *Lexer) {
 	assert(lexer.num_incoming_tokens > 0);
 
-	assert((MAX_CONCURRENT_TOKENS & (MAX_CONCURRENT_TOKENS - 1)) == 0);	// Assert that it's a power of two.
+	assert(!(MAX_CONCURRENT_TOKENS & (MAX_CONCURRENT_TOKENS - 1)));	// Assert that it's a power of two.
 
 	{	// @Simplify: a herestring is the only thing that can be multiline right now (I think), and it is handled in count_herestring_lines!
 		token := *lexer.tokens[lexer.token_array_cursor];
@@ -2571,7 +2571,7 @@ has_a_big_exponent :: inline (value: float64) -> bool {
 
 	exponent := (_s64 >> 52) & 0x7FF;
 
-	if exponent != 0 && exponent != 0x7FF {
+	if exponent && exponent != 0x7FF {
 		exponent -= 1023;
 		return exponent > 127 || exponent < -126;
 	}

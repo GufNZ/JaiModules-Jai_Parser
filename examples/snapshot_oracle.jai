@@ -165,8 +165,8 @@ oracle_value :: (state: *Oracle_State, info: *Type_Info, actual: *void, expected
 		case .FLOAT; #through;
 		case .BOOL; #through;
 		case .ENUM;
-			for index: 0..info.runtime_size - 1 {
-				if actual.(*u8)[index] != expected.(*u8)[index] {
+			for 0..info.runtime_size - 1 {
+				if actual.(*u8)[it] != expected.(*u8)[it] {
 					return oracle_fail(state, path, "scalar bits differ");
 				}
 			}
@@ -191,9 +191,9 @@ oracle_value :: (state: *Oracle_State, info: *Type_Info, actual: *void, expected
 				right = right_view.data;
 			}
 
-			for index: 0..count - 1 {
-				offset := index * array.element_type.runtime_size;
-				if !oracle_value(state, array.element_type, left + offset, right + offset, tprint("%[%]", path, index)) {
+			for 0..count - 1 {
+				offset := it * array.element_type.runtime_size;
+				if !oracle_value(state, array.element_type, left + offset, right + offset, tprint("%[%]", path, it)) {
 					return false;
 				}
 			}
@@ -262,7 +262,7 @@ oracle_value :: (state: *Oracle_State, info: *Type_Info, actual: *void, expected
 
 			table_add(*state.forward, left, right);
 			table_add(*state.reverse, right, left);
-			array_add(*state.pending, Oracle_Pending.{info=structure, actual=left, expected=right, path=copy_string(path)});
+			array_add(*state.pending, Oracle_Pending.{info = structure, actual = left, expected = right, path = copy_string(path)});
 			return true;
 
 		case .STRUCT;
@@ -339,7 +339,7 @@ check_snapshot :: (actual: *Parser.Parsed_Source, expected: *Parser.Parsed_Sourc
 	set_allocators(*storage);
 	defer release(*storage);
 
-	push_allocator(.{proc=pool_allocator_proc, data=*storage});
+	push_allocator(.{proc = pool_allocator_proc, data = *storage});
 	state: Oracle_State;
 
 	matched := oracle_field(*state, *actual.source, *expected.source, "source")
@@ -375,7 +375,7 @@ test_snapshot_oracle :: () {
 	set_allocators(*storage);
 	defer release(*storage);
 
-	push_allocator(.{proc=pool_allocator_proc, data=*storage});
+	push_allocator(.{proc = pool_allocator_proc, data = *storage});
 	SOURCE :: "value :: 1; value :: 1; result := value; items :: .[1, 2]; text :: \"hello\"; access := result.member; #if true { inner :: value; }";
 	actual := Parser.parse_file(SOURCE);
 	expected := Parser.parse_file(SOURCE);
@@ -473,8 +473,8 @@ test_snapshot_oracle :: () {
 	check_snapshot(*broken, *broken_fresh, false);
 	broken.synthetic_tokens[0].insertion_index -= 1;
 	check_snapshot(*broken, *broken_fresh);
-	actual_related := Parser.Parse_Diagnostic_Info.[.{span=broken.diagnostics[0].span, message="related"}];
-	expected_related := Parser.Parse_Diagnostic_Info.[.{span=broken_fresh.diagnostics[0].span, message="related"}];
+	actual_related := Parser.Parse_Diagnostic_Info.[.{span = broken.diagnostics[0].span, message = "related"}];
+	expected_related := Parser.Parse_Diagnostic_Info.[.{span = broken_fresh.diagnostics[0].span, message = "related"}];
 	broken.diagnostics[0].related_information = actual_related;
 	broken_fresh.diagnostics[0].related_information = expected_related;
 	check_snapshot(*broken, *broken_fresh);

@@ -6,8 +6,8 @@
 #import "Sort";
 #import "String";
 
-Parser_Lexer :: #import "Jai_Parser"(ENABLE_TRIVIA=true, USE_SIMD=false);
-Simd_Lexer :: #import "Jai_Parser"(ENABLE_TRIVIA=true, USE_SIMD=true);
+Parser_Lexer :: #import "Jai_Parser"(ENABLE_TRIVIA = true, USE_SIMD = false);
+Simd_Lexer :: #import "Jai_Parser"(ENABLE_TRIVIA = true, USE_SIMD = true);
 
 #if OS == .WINDOWS {
 	Windows :: #import "Windows";
@@ -20,7 +20,7 @@ main :: () {
 		assert(arguments[2] == "scalar" || arguments[2] == "simd");
 		#if Simd_Lexer.SIMD_AVAILABLE {
 			features := Simd_Lexer.get_simd_features();
-			print("Clock probe CPU/OS features: %; AVX-512 available: %\n", features, (features & .AVX512) != 0);
+			print("Clock probe CPU/OS features: %; AVX-512 available: %\n", features, !!(features & .AVX512));
 		}
 
 		benchmark_corpus(arguments[3], arguments[2]);
@@ -107,14 +107,14 @@ push_benchmark_allocator :: () #expand {
 	set_allocators(*storage);
 	`defer release(*storage);
 	previous_allocator := context.allocator;
-	context.allocator = .{proc=pool_allocator_proc, data=*storage};
+	context.allocator = .{proc = pool_allocator_proc, data = *storage};
 	`defer context.allocator = previous_allocator;
 }
 
 benchmark_ticks :: () -> s64 {
 	#if OS == .WINDOWS {
 		counter: Windows.LARGE_INTEGER;
-		assert(Windows.QueryPerformanceCounter(*counter) != 0);
+		assert(!!Windows.QueryPerformanceCounter(*counter));
 		return counter.QuadPart;
 	} else {
 		assert(false, "This benchmark currently requires Windows.");
@@ -126,11 +126,11 @@ benchmark_source_scan :: (source: string, $simd: bool, $materialise: bool) -> s6
 	#if materialise {
 		#if simd {
 			parsed := Simd_Lexer.materialise_tokens(source);
-			assert(parsed.status == .COMPLETE && parsed.diagnostics.count == 0);
+			assert(parsed.status == .COMPLETE && !parsed.diagnostics.count);
 			return parsed.tokens.count;
 		} else {
 			parsed := Parser_Lexer.materialise_tokens(source);
-			assert(parsed.status == .COMPLETE && parsed.diagnostics.count == 0);
+			assert(parsed.status == .COMPLETE && !parsed.diagnostics.count);
 			return parsed.tokens.count;
 		}
 	} else {
@@ -183,7 +183,7 @@ benchmark_scan :: (sources: [] string, $simd: bool, $materialise: bool = true, s
 			}
 		}
 
-		push_allocator(.{proc=pool_allocator_proc, data=active});
+		push_allocator(.{proc = pool_allocator_proc, data = active});
 		tokens += benchmark_source_scan(source, simd, materialise);
 	}
 
@@ -239,7 +239,7 @@ assert_benchmark_token_parity :: (actual: Simd_Lexer.Parser_Token, expected: Par
 
 benchmark_corpus :: (directory: string, clock_mode: string = "") {
 	filenames: [..] string;
-	visit_files(directory, true, *filenames, visit, visit_symlinks=false);
+	visit_files(directory, true, *filenames, visit, visit_symlinks = false);
 	defer {
 		for filenames {
 			free(it);
@@ -248,7 +248,7 @@ benchmark_corpus :: (directory: string, clock_mode: string = "") {
 		array_free(filenames);
 	}
 
-	assert(filenames.count > 0, "No Jai files found under '%'.", directory);
+	assert(!!filenames.count, "No Jai files found under '%'.", directory);
 
 	sources: [..] string;
 	defer {
@@ -265,7 +265,7 @@ benchmark_corpus :: (directory: string, clock_mode: string = "") {
 		array_add(*sources, source);
 	}
 
-	benchmark_sources(directory, sources, clock_mode=clock_mode);
+	benchmark_sources(directory, sources, clock_mode = clock_mode);
 }
 
 benchmark_workloads :: () {
@@ -302,8 +302,8 @@ benchmark_sources :: (name: string, sources: [] string, isolate_allocations: boo
 		push_benchmark_allocator();
 		scalar := Parser_Lexer.materialise_tokens(source);
 		vectorised := Simd_Lexer.materialise_tokens(source);
-		assert(scalar.status == .COMPLETE && scalar.diagnostics.count == 0);
-		assert(vectorised.status == .COMPLETE && vectorised.diagnostics.count == 0);
+		assert(scalar.status == .COMPLETE && !scalar.diagnostics.count);
+		assert(vectorised.status == .COMPLETE && !vectorised.diagnostics.count);
 		assert(vectorised.tokens.count == scalar.tokens.count);
 
 		for expected, index: scalar.tokens {
@@ -417,7 +417,7 @@ benchmark_allocation_profile :: (source: string, $simd: bool, expected_tokens: s
 	backing: Benchmark_Allocations;
 	backing.delegate = context.allocator;
 	storage: Pool;
-	set_allocators(*storage, .{proc=benchmark_count_allocator, data=*backing});
+	set_allocators(*storage, .{proc = benchmark_count_allocator, data = *backing});
 	defer release(*storage);
 
 	#if reuse {
@@ -427,10 +427,10 @@ benchmark_allocation_profile :: (source: string, $simd: bool, expected_tokens: s
 	}
 
 	requests: Benchmark_Allocations;
-	requests.delegate = .{proc=pool_allocator_proc, data=*storage};
+	requests.delegate = .{proc = pool_allocator_proc, data = *storage};
 
 	{
-		push_allocator(.{proc=benchmark_count_allocator, data=*requests});
+		push_allocator(.{proc = benchmark_count_allocator, data = *requests});
 		assert(benchmark_source_scan(source, simd, materialise) == expected_tokens);
 	}
 

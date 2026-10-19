@@ -237,7 +237,7 @@ start_worker :: (worker: *Runner_Worker, arguments: [] string, memory_bytes: u64
 		security: SECURITY_ATTRIBUTES;
 		security.nLength = size_of(type_of(security));
 		security.bInheritHandle = 1;
-		worker.log = CreateFileW(utf8_to_wide(log_path,, allocator=temp), GENERIC_WRITE, FILE_SHARE_READ, *security, CREATE_NEW);
+		worker.log = CreateFileW(utf8_to_wide(log_path,, temp), GENERIC_WRITE, FILE_SHARE_READ, *security, CREATE_NEW);
 		if worker.log == INVALID_HANDLE_VALUE {
 			worker.log = null;
 			close_worker(worker);
@@ -245,7 +245,7 @@ start_worker :: (worker: *Runner_Worker, arguments: [] string, memory_bytes: u64
 		}
 
 
-		input = CreateFileW(utf8_to_wide("NUL",, allocator=temp), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, *security);
+		input = CreateFileW(utf8_to_wide("NUL",, temp), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, *security);
 		if input == INVALID_HANDLE_VALUE {
 			input = null;
 			close_worker(worker);
@@ -261,8 +261,8 @@ start_worker :: (worker: *Runner_Worker, arguments: [] string, memory_bytes: u64
 	}
 
 
-	temp_name := utf8_to_wide("TEMP",, allocator=temp);
-	tmp_name := utf8_to_wide("TMP",, allocator=temp);
+	temp_name := utf8_to_wide("TEMP",, temp);
+	tmp_name := utf8_to_wide("TMP",, temp);
 	previous_temp: *u16;
 	previous_tmp: *u16;
 	if working_directory {
@@ -277,7 +277,7 @@ start_worker :: (worker: *Runner_Worker, arguments: [] string, memory_bytes: u64
 		}
 
 
-		wide_directory := utf8_to_wide(temporary_directory,, allocator=temp);
+		wide_directory := utf8_to_wide(temporary_directory,, temp);
 		if !SetEnvironmentVariableW(temp_name, wide_directory) {
 			close_worker(worker);
 			return false;
@@ -293,7 +293,7 @@ start_worker :: (worker: *Runner_Worker, arguments: [] string, memory_bytes: u64
 
 
 	command := get_quoted_command_string(arguments,, temp);
-	created := CreateProcessW(null, utf8_to_wide(command,, allocator=temp), null, null, inherit_handles, CREATE_SUSPENDED, null, utf8_to_wide(working_directory,, allocator=temp), *startup, *worker.info);
+	created := CreateProcessW(null, utf8_to_wide(command,, temp), null, null, inherit_handles, CREATE_SUSPENDED, null, utf8_to_wide(working_directory,, temp), *startup, *worker.info);
 	restored := true;
 	if working_directory {
 		restored_temp := SetEnvironmentVariableW(temp_name, previous_temp);
@@ -362,7 +362,7 @@ runner_usage :: () {
 }
 
 runner_integer :: (text: string) -> s64, bool {
-	value, valid, remainder := string_to_int(text, T=s64);
+	value, valid, remainder := string_to_int(text, T = s64);
 	return value, valid && !remainder;
 }
 
@@ -424,7 +424,7 @@ parse_runner_options :: (arguments: [] string) -> Runner_Options, bool {
 	}
 
 
-	mode_count := options.all.(s64) + xx options.list + xx options.self_test + xx (options.selection.count > 0);
+	mode_count := options.all.(s64) + xx options.list + xx options.self_test + xx !!options.selection.count;
 	valid := mode_count == 1
 		&& options.workers >= 1 && options.workers <= 4
 		&& options.batch_size >= 1 && options.batch_size <= 16
@@ -434,7 +434,7 @@ parse_runner_options :: (arguments: [] string) -> Runner_Options, bool {
 		&& options.first >= 0 && options.last >= 0
 		&& (
 			(!options.first && !options.last)
-			|| (options.first >= 1 && options.last >= options.first && options.selection.count > 0)
+			|| (options.first >= 1 && options.last >= options.first && options.selection.count)
 		);
 
 	return options, valid;
@@ -543,7 +543,7 @@ collect_runner_sections :: (output: string, sections: *[..] Runner_Section) -> b
 		}
 
 
-		section: Runner_Section = .{name=name, total=total, runtime=fields[3] == "true", batchable=fields[4] == "true"};
+		section: Runner_Section = .{name = name, total = total, runtime = fields[3] == "true", batchable = fields[4] == "true"};
 		if section.runtime {
 			runtime_count += 1;
 			if section.batchable {
@@ -557,11 +557,11 @@ collect_runner_sections :: (output: string, sections: *[..] Runner_Section) -> b
 	}
 
 
-	return found_header && runtime_count == 1 && sections.count > 0 && sections.*[sections.count - 1].runtime;
+	return found_header && runtime_count == 1 && sections.count && sections.*[sections.count - 1].runtime;
 }
 
 start_compiler_job :: (worker: *Runner_Worker, compiler: string, directory: string, selector: string, first: s64, last: s64, memory_bytes: u64) -> bool {
-	if !make_directory_if_it_does_not_exist(directory, recursive=true) {
+	if !make_directory_if_it_does_not_exist(directory, recursive = true) {
 		return false;
 	}
 
@@ -630,7 +630,7 @@ clean_runner_artifact :: (info: *File_Visit_Info, ignored: s64) {
 }
 
 clean_runner_job :: (directory: string) {
-	visit_files(directory, recursive=false, user_data=0, proc=clean_runner_artifact, visit_symlinks=false);
+	visit_files(directory, recursive = false, user_data = 0, proc = clean_runner_artifact, visit_symlinks = false);
 	file_delete(tprint("%/differential_test.jai", directory));
 	build := tprint("%/.build", directory);
 	if file_exists(build) && !delete_directory(build) {
@@ -638,7 +638,7 @@ clean_runner_job :: (directory: string) {
 	}
 
 	temporary_directory := tprint("%/tmp", directory);
-	if file_exists(temporary_directory) && !RemoveDirectoryW(utf8_to_wide(temporary_directory,, allocator=temp)) && !delete_directory(temporary_directory) {
+	if file_exists(temporary_directory) && !RemoveDirectoryW(utf8_to_wide(temporary_directory,, temp)) && !delete_directory(temporary_directory) {
 		print("\e[93mWARNING\e[0m unable to remove \e[96m%\e[0m\n", temporary_directory);
 	}
 }
@@ -795,7 +795,7 @@ run_runner :: (arguments: [] string) -> s32 {
 	root := copy_string(tprint("%.build/differential_runs/run-%-%", #filepath, GetCurrentProcessId(), GetTickCount64()));
 	defer free(root.data);
 
-	if file_exists(root) || !make_directory_if_it_does_not_exist(root, recursive=true) {
+	if file_exists(root) || !make_directory_if_it_does_not_exist(root, recursive = true) {
 		print("\e[91mUnable to create\e[0m fresh run directory: \e[96m%\e[0m\n", root);
 		return 1;
 	}
@@ -921,14 +921,14 @@ run_runner :: (arguments: [] string) -> s32 {
 				else last;
 
 			job: Runner_Job = .{
-				section=index,
-				first=ifx section.batchable
+				section = index,
+				first = ifx section.batchable
 					then first
 					else 0,
-				last=ifx section.batchable
+				last = ifx section.batchable
 					then batch_last
 					else 0,
-				expected=batch_last - first + 1
+				expected = batch_last - first + 1
 			};
 
 			job.directory = copy_string(tprint("%/job-%", root, jobs.count + 1));
@@ -1178,13 +1178,13 @@ main :: () {
 			case .OK;
 				if arguments.count == 4 {
 					for name: string.["TEMP", "TMP"] {
-						value, valid := get_runner_environment(utf8_to_wide(name,, allocator=temp));
+						value, valid := get_runner_environment(utf8_to_wide(name,, temp));
 						if !valid || !value {
 							exit(7);
 						}
 
 
-						text, converted := wide_to_utf8(value,, allocator=temp);
+						text, converted := wide_to_utf8(value,, temp);
 						if !converted || text != tprint("%/tmp", arguments[3]) {
 							exit(7);
 						}

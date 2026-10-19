@@ -127,6 +127,8 @@ The same parameterised instance can have several immutable revisions alive simul
 
 An owned syntax snapshot contains exact source bytes, document identity, tokens/trivia, decoded token payloads as needed, syntax nodes, source spans, syntax diagnostics, and recovery information.
 Its storage is immutable after publication and independent of its caller's allocation context.
+E6 below demonstrates that ownership boundary on a bounded projection of the existing parser's output, including recovery data and decoded strings.
+Its shallow-alias control also confirms that existing in-node lexical bindings cannot supply independent semantic contexts merely by copying the snapshot descriptor.
 
 It contains no resolved declaration pointers, inferred types, evaluated constants, target-specific layouts, or mutable import results.
 Syntactic roles such as declaration names, field labels, modifiers, and the structure of `using` remain syntax.
@@ -499,6 +501,9 @@ Its output is structured values or generated syntax, diagnostics, provenance/sou
 Initially the evaluator may be unavailable.
 Later a subprocess backend can wrap supported snippets and use the official compiler (on generated source with build options including do_output=false and an `#insert` in it, then reading back the `.build/.added_strings_w#.jai` file(s)); eventually a bootstrapped language-service backend may interpret the corresponding AST.
 Keep frontend query/ownership contracts independent of that choice.
+E5 below verifies this text channel on trusted fixtures, but not as a self-contained semantic-result protocol.
+Use request-owned intermediate directories, inspect all relevant workspace outputs, and distinguish successful results from stale or failed-compilation artifacts.
+The dump's comment headers are not unambiguous framing or complete scope/module provenance, and `using,map` results are not automatically emitted there.
 
 Snippet extraction is not generically semantics-preserving.
 Evaluation may depend on module state, imports, private names, parameters, `#caller_code`, source paths/locations, compiler hooks, or earlier compile-time mutations.
@@ -513,6 +518,13 @@ Otherwise, re-execute under an authorised policy or retain an unknown/provisiona
 In particular, treat `using,map` callbacks with mutable name arrays as ordered computations over explicit inputs, and treat generated declarations as new syntax with provenance.
 Both can alter dependencies and name lookup.
 Unknown external reads or effects make a result non-persistable, not permanently valid because the Jai snippet's hash matches.
+
+Proposed explicit `using,map` evaluator: generate an owned mutable string array from the known exported member names in compiler-compatible order, reproduce the called procedure's required compilation context, invoke that procedure on the array, and capture the resulting strings through an explicit framed result channel.
+Validate result cardinality, positional correspondence to the original members, and applicable identifier/collision rules; preserve empty strings as exclusions rather than dropping array slots.
+Copy returned string payloads into result-owned storage before releasing evaluator storage.
+Extracting just the procedure is insufficient if it depends on imports, private helpers, parameters, compile-time state, or source/caller context; preserve the necessary dependency closure or report unsupported.
+E5 observed the real callback and its instrumented names, but did not test this explicit generated-array wrapper or its result protocol.
+The absence of automatic mapping output in added-string dumps is not evidence against this proposed wrapper.
 
 Keep compiler subprocess evaluation disabled unless a program/module parameter explicitly enables the capability.
 That opt-in is necessary but not sufficient: the embedding host must also authorise execution and apply its workspace-trust policy.
@@ -645,7 +657,7 @@ Use small isolated fixtures/prototypes, not a parallel implementation of the new
 Record the hypothesis, exact compiler/build configuration, commands, observed output, limitations, and resulting decision for each experiment.
 Language probes use the official compiler as the oracle, including separate expected-failure cases; prototype cache tests compare against fresh computation.
 These are proposed manual probes on authored trusted fixtures; listing them does not authorise their execution or automatic evaluation of arbitrary workspace code.
-E1-E4 have been completed as recorded below; E5-E12 remain proposed and have not yet been run.
+E1-E6 have been completed as recorded below; E7-E12 remain proposed and have not yet been run.
 
 | ID | Experiment and discriminating check | Decision it informs |
 | --- | --- | --- |
@@ -653,8 +665,8 @@ E1-E4 have been completed as recorded below; E5-E12 remain proposed and have not
 | E2 | Completed: repeated/aliased imports, omitted/explicit defaults, argument order/types/values, nominal assignment compatibility, two-hop imports, and program-setting constraints; 32 isolated probes and evaluation-count audit. | Canonical source plus effective parameter values is insufficient for compatible nominal identity; program configuration is per module and main-program controlled.  See results below. |
 | E3 | Completed: 28 isolated loaded-file composition probes for repeated/diamond/aliased loads, order, relative paths, file scopes, module instances, collisions, missing files, and cycles; diagnostic and execution-marker audit. | Preserve load occurrences rather than deduplicating membership; share syntax without sharing contextual bindings or nominal declarations. See results below. |
 | E4 | Completed: 35 isolated path/source-context probes covering casing, dot/parent/separator/absolute aliases, copied and relocated bytes, relative loads/imports, working-directory changes, junctions, and native directory/file symlinks; exact location/path, nominal identity, diagnostic, and execution-marker audit. | Keep physical document identity, source-visible path context, and compiler-compatible module identity distinct; request validation can differ even when the filesystem reaches the same source. See results below. |
-| E5 | Compiler-evaluation feasibility: on authored trusted fixtures, try `do_output=false` plus `#insert` and inspect `.build/.added_strings_w#.jai` production, multiplicity, freshness, extraction boundaries, diagnostics, and failures.  Include one `using,map` callback and a context-dependent case.  Measure startup cost separately. | Whether the proposed output channel works, its limitations, and whether evaluator support can remain deferred.  This is not evidence that arbitrary snippets are equivalent or safe. |
-| E6 | Syntax independence probe: construct a small owned syntax-only representation covering declarations, spans, recovery, and decoded payloads; attach two different semantic contexts and release the original input/builder storage.  Verify neither binding nor release mutates the other's view. | The minimum syntax/semantic split, ownership contract, and whether current node overlays can be adapted or should be replaced.  Do not implement a second full AST. |
+| E5 | Completed: 32 compiler-evaluation compilations and five separate startup samples covering `do_output=false`, insert dumps, multiplicity, expression boundaries, context, `using,map`, multiple workspaces, stale artifacts, diagnostics, failures, and flattened-dump replay; complete artifact/log audit. | The text channel works for bounded trusted generators, but is not a fresh, self-contained semantic-result protocol.  Evaluator support remains deferrable; see results below. |
+| E6 | Completed: eight syntax fixtures across 32 producer/context lifetime permutations, 32 fresh-parse oracles, 248 exact syntax checks, 96 independently owned semantic-context lifetimes, decoded-payload mutations, span/recovery validation, and a real-resolver shallow-alias control. | Owned syntax and external semantic tables survive independent teardown; current in-node bindings alias across shallow snapshots.  This establishes a bounded ownership contract, not a full overlay-replacement decision; see results below. |
 | E7 | Dependency/revision model: a tiny query graph with a parent-only edit, dependency-only edit, unchanged interface/body change, new overload, previous missing name, transitive constant/layout change, and simultaneous old/new worlds.  Compare every result to fresh evaluation and assert expected reuse. | Exact dual-stamp validation, negative dependencies, world selection, and safe conservative module invalidation. |
 | E8 | Pipeline/scheduler model: advance declarations through signature/body/layout milestones, include valid pointer recursion and invalid by-value recursion, and simulate a slow external task, cancellation, shared waiters, and a genuinely cyclic wait. | Stage readiness, pending API semantics, cycle diagnostics, and shutdown.  No forward progress alone is not proof of a cycle while work can still complete externally. |
 | E9 | Allocation/eviction benchmark: verify the actual candidate Jai pool APIs, then compare arenas, typed pools, and a hybrid under repeated edits, sparse eviction, retained old snapshots, and slot reuse.  Track allocation generations, payload cleanup, freelist reuse, backing bytes, and fragmentation. | Initial allocation units, ownership/lease mechanism, and whether partial frees deliver useful memory or churn reductions. |
@@ -845,10 +857,10 @@ No native process failure, timeout, or unrelated error was accepted as a semanti
 | Backslash versus forward-slash file imports | Distinct nominal instances and two executions; the backslash spelling remains in that import's reported filename/directory. Do not infer one universal separator-normalisation stage. |
 | Wrong filename case in a load/file import; wrong final directory case in a directory import | Rejected with the Windows file-case portability diagnostic even though the filesystem can reach the existing source. |
 | Lowercase containing directory in a load/file import, with exact filename case | Accepted; reports retain `original/`. Paired file imports using `Original/` and `original/` have distinct nominal types and two executions. The observed validation is not uniform full-path case enforcement. |
-| Byte-identical modules relocated beside different neighbors | Distinct nominal types and values 11 versus 22 for both the relative load and the relative file import. Content equality does not establish dependency or result equality. |
+| Byte-identical modules relocated beside different neighbours | Distinct nominal types and values 11 versus 22 for both the relative load and the relative file import. Content equality does not establish dependency or result equality. |
 | Byte-identical files with different filenames in the same directory | Same `#filepath`, different filenames in `#location`, distinct nominal types, and two executions. Directory context alone is insufficient. |
 | Compile `../probe.jai` with the child process working in `Branch` | Entrypoint reports its normalised source path and still finds the source-relative `Original` module, not an unrelated directory under the process working directory. |
-| Missing source-relative neighbor | Explicit missing-file error naming `Isolated/neighbor.jai`; the root decoy is not substituted. |
+| Missing source-relative neighbour | Explicit missing-file error naming `Isolated/neighbor.jai`; the root decoy is not substituted. |
 | Directory junction or native directory symlink, through load/file import | Accepted; reports retain `Alias/`. Paired file imports through original and alias paths have distinct nominal types and two executions, while both relative lookups yield 11. |
 | Directory import through junction/symlink named `Alias` targeting `Original` | Rejected with the same file-case diagnostic, naming `Original` as the almost-matching basename. This is an observed alias validation result, not proof that all directory links are unsupported. |
 | Junction named `Branch/Original` targeting `Original` | Directory import succeeds; paired with the original it has a distinct nominal type and two executions. This control discriminates the basename-dependent rejection above. |
@@ -884,6 +896,134 @@ Hardlinks, UNC/network paths, drive-letter aliases, case-sensitive volumes, othe
 Architectural consequence: physical-source/content reuse, source-visible location/resolution context, and compiler-compatible request/nominal identity need separate validation rules.
 Do not canonicalise away observable location strings, bypass case/link request diagnostics on a cache hit, or key contextual relative lookup solely by source bytes.
 
+#### E5 Results: Compiler-Evaluation Feasibility
+
+Completed 2026-10-19 on Windows with Jai beta 0.2.030, built 2 July 2026, using the fast x64 backend.
+Reproducible runner: [experiment_compiler_evaluation.jai](examples/experiment_compiler_evaluation.jai).
+From the parser's examples directory:
+
+```bash
+jai experiment_compiler_evaluation.jai -x64 -quiet -no_color
+```
+
+Hypothesis: `do_output=false` plus enabled added-string emission can expose generated text, but artifact existence/content alone may not establish freshness, semantic completeness, or equivalent extracted execution.
+The runner executes authored trusted fixtures only, with native output disabled and a 30-second child-process timeout.
+Ordinary cases start with cleared added-string files; one explicit sequence deliberately preserves them across changed source revisions.
+Each compilation records its input revision, captured output artifacts, log, exit status, artifact count/size, and monotonic wall time.
+
+All 32 compilations matched their assertions: 24 accepted and eight expected rejections, with no skips, plus five successful version-only startup samples.
+These include five no-insert baseline compilations and a separate replay of the actual parameterised-module dump.
+The final audit checked all 24 archived artifact files, including intentionally stale snapshots, nine compiler `Error:` lines, one deliberate compile-time assertion failure, exact callback order/results, workspace boundaries, generated locations, and three SHA-256 stale-file comparisons.
+No executable, object, PDB, DLL, or library output was found in the fixture tree.
+Compiler identity was separately confirmed with `jai -version`; the timed version-only subprocess captures were empty despite successful exits, so they are not used as version evidence.
+
+| Probe family | Observed result |
+| --- | --- |
+| Single insert with `do_output=false`, `write_added_strings=true` | Compilation succeeds and produces `.build/.added_strings_w2.jai`, including a workspace comment, source-file/line comment, and inserted declaration. Native output suppression does not suppress compile-time execution. |
+| Multiple and nested inserts | Multiple records share one workspace file. A nested insert leaves both the original inserted directive and the resulting declaration in that file; its provenance points back into the intermediate file. |
+| Repeated identical insert text in distinct structs | Both occurrences are retained, not content-deduplicated. Their original struct scopes are not reconstructed by the flat record format. |
+| Empty insert versus no insert | An empty insert creates a header-only artifact. A clean no-insert compilation creates none; a reused directory can instead retain an older file. |
+| Expression insert | The returned expression text needs its own semicolon: `40 + 2;` succeeds, while `40 + 2` produces a semicolon diagnostic and still leaves the returned text in the artifact. This is also documented by the compiler's insert example. |
+| Header-like content inside an authored payload | Compiles unchanged. The payload contains a comment matching the compiler's apparent insert-record header, so splitting solely on those comments cannot reliably delimit arbitrary generated text. |
+| Insert in a loaded file | Produces the expected declaration and names the loaded source file in its provenance comment. |
+| Context-dependent generator, with and without its loaded input | With the loaded `secret` value it generates 42; without that input the same generator fails. The missing-context case reports both the unavailable input and the generated declaration that never becomes available. |
+| Same imported source with parameters 17 and 25 | Both contextual values compile and appear in one workspace dump as declarations with the same name and source-file/line provenance. Replaying that actual dump at a single top level rejects it as a redeclaration, reported twice. A flat dump does not preserve module-instance identity or scope; record order is not a source-order contract. |
+| `using,map` | The callback receives `left`, then `right`, mutates them to `mapped_left`, then `mapped_right`, and the compiled test verifies writes through those aliases. Instrumented stdout records the ordered inputs/results, but no added-string artifact is created. The dump is not an automatic mapping-result channel. |
+| Generated `#filepath` and `#location` | Observe the intermediate directory/file, not the authored insert site: the tested anchor is in `.build/.added_strings_w2.jai`, line 6, column 14. Existing textual provenance does not itself provide a structured source map. |
+| Parent plus child compiler workspace | Produces two files, `w2` and `w3` here, with distinct workspace comments. The child file contains both an `add_build_string()` record and its nested insert result. Do not assume one file, a universal workspace number, or insert-only contents. |
+| Generated parse/type errors | Both reject with diagnostics pointing into the generated file plus the originating insert directive; their artifacts still contain the invalid text. Artifact existence is not successful evaluation. |
+| Deliberate assertion inside the generator | Returns compiler exit status 1, with the authored assertion message and stack trace, and no fresh artifact in its clean directory. This is a compile-time program failure, not an induced native compiler crash. |
+| Reused-directory freshness sequence | A successful changed insert replaces old content. Removing all inserts leaves the previous file byte-identical; disabling emission also leaves it byte-identical; an early authored parse error leaves that same stale file. An error in newly generated text replaces it with the invalid new text, and a later successful run replaces that with the recovery result. |
+
+Startup was measured separately from source compilation, around the same `run_command` path and captured-output process handling:
+
+| Measurement | Samples | Minimum | Median | Maximum |
+| --- | --- | --- | --- | --- |
+| `jai -version`, process/CLI startup only | 5 | 173.873 ms | 176.788 ms | 183.992 ms |
+| No-insert compilation with Basic/Compiler imports and build-option setup | 5 | 260.185 ms | 282.648 ms | 329.836 ms |
+
+These are sequential samples from one interactive Windows session, not OS-cold measurements, a representative project baseline, or an isolated per-expression evaluation cost.
+They include launch, process handling, and the respective command's work; do not subtract the medians and call the difference the cost of `#insert`.
+E12 remains responsible for representative end-to-end latency and acceptance targets.
+
+Generated sources, per-revision `capture_*` directories, logs, `summary.tsv`, `startup.tsv`, the temporary PowerShell `audit.ps1`, and `audit_summary.json` remain under `examples/.build/compiler_evaluation/`; cleanup may remove them.
+The Jai runner regenerates fixtures, asserts expected acceptance/exit statuses and artifact counts/content, and captures evidence; the separate audit additionally validates exact diagnostic counts/classes, occurrence/header-like counts, mapping order, locations, and stale hashes.
+No native compiler crash, forced timeout/cancellation, process-tree limit, sandbox, hostile output-size case, other compiler/backend/platform, or concurrent publication protocol was tested.
+The header-like payload is a deliberately authored boundary control, not permission to execute arbitrary workspace code.
+
+Architectural consequence: this is a viable low-level text output channel for explicitly supported trusted generators, not a generic evaluator or a dump that can simply be reparsed into equivalent semantics.
+A future backend needs request-owned fresh output space, successful-completion validation, all-workspace discovery, explicit result framing, context/module identity, source provenance, and a separate supported contract for mapping results.
+Failed-compilation artifacts may aid diagnostics but must not be published as successful current results; unknown dependencies/effects remain unsupported or non-persistable.
+Compiler-backed evaluation can remain disabled/unsupported while the syntax-first service proceeds.
+Opt-in, host trust, scheduling, cancellation, and dependency/effect contracts are still required; feasibility does not settle or implement them.
+
+#### E6 Results: Syntax and Semantic Independence
+
+Completed 2026-10-19 on Windows with Jai beta 0.2.030, built 2 July 2026, using the fast x64 backend and a native runtime verifier.
+Reproducible runner: [experiment_syntax_independence.jai](examples/experiment_syntax_independence.jai).
+From the parser's examples directory:
+
+```bash
+jai experiment_syntax_independence.jai -x64 -quiet -no_color -output_path .build -exe experiment_syntax_independence
+./.build/experiment_syntax_independence.exe
+```
+
+Hypothesis: a small, independently owned syntax projection can outlive the parser/input that produced it and support independent semantic side tables without mutation or lifetime coupling between those contexts.
+The counter-control asks whether shallow copies of today's parser snapshot already provide that property when the existing resolver writes bindings.
+This experiment calls the existing parser with trivia and identifier interning enabled and automatic identifier resolution disabled; it does not implement another parser or a second full AST.
+
+The projection owns exact source and filename bytes, tokens with source-backed views into that owned source, token byte/line/column/trivia-start positions, top-level declaration names/spans, expression kind/spans, selected literal payloads/flags, and identifier spellings.
+It also independently owns syntax diagnostic messages and related-information arrays, recovery records, restart spans, and synthetic-token metadata/text.
+It retains no parser-node pointers, resolved declaration links, inferred types, or semantic-context pointers.
+Unprojected expression/procedure structure remains available only as exact source/tokens and kind/span descriptions; this is deliberately a small ownership model, not complete syntax-tree coverage or a persistence schema.
+
+| Fixture | Status | Declarations | Tokens | Diagnostics | Recovery Records | Synthetic Tokens |
+| --- | --- | --- | --- | --- | --- | --- |
+| Scalar, external reference, escaped string | COMPLETE | 3 | 16 | 0 | 0 | 0 |
+| Here-string and external reference | COMPLETE | 2 | 14 | 0 | 0 | 0 |
+| Missing semicolon between declarations | RECOVERED | 2 | 10 | 1 | 1 | 1 |
+| Missing closing parenthesis | RECOVERED | 2 | 12 | 1 | 1 | 1 |
+| Error inside a procedure, followed by another declaration | RECOVERED | 2 | 21 | 1 | 1 | 0 |
+| Truncated procedure/declaration | INCOMPLETE | 1 | 10 | 3 | 3 | 2 |
+| Empty source | COMPLETE | 0 | 1 | 0 | 0 | 0 |
+| Empty string, full-width unsigned literal, external reference | COMPLETE | 3 | 16 | 0 | 0 | 0 |
+
+Each fixture runs with producer teardown before versus after attaching the two contexts, and with the left versus right context released first: 32 scenarios in total.
+All scenarios passed, comprising 16 complete, 12 recovered, and four incomplete primary snapshots.
+Their summary rows contain 60 declarations, 400 tokens, 24 diagnostics, 24 recovery records, and 16 synthetic tokens; these totals exclude the additional fresh oracles and alias-control parse.
+Every scenario checks initial source reconstruction, retained span/index bounds, and exact projected syntax equality through lifecycle transitions and against an independently reparsed/projected oracle.
+There are 32 fresh-oracle comparisons and 248 successful exact syntax checks overall.
+
+The original source and filename are overwritten with `0xDD` before being freed.
+Parser node, builder, syntax, oracle, and semantic pools use the existing `Pool.overwrite_memory` debugging facility during teardown, rather than relying only on unmodified freed buffers.
+All pools are initialised against the upstream allocator before installing their own allocator context; the stable syntax pool is not allocated through the transient builder or a semantic context.
+The owned projection and live semantic context remain valid after parser tree, identifier storage, original buffers, and builder storage are released.
+
+The two semantic contexts share one syntax pointer but own distinct symbol objects, binding arrays, and decoded-string copies.
+The same external identifier binds to values 19 and 41 through different context-owned symbols; mutating the left symbol to 23 leaves the right context and syntax unchanged.
+Eight explicit decoded-string mutations likewise alter only the left context's copy, then are restored for subsequent checks.
+Either context can be released first while the other remains valid; after both are released, a third context with value 67 can attach to the retained syntax.
+All 96 context creations have matching releases.
+Releasing an independent fresh oracle's storage also leaves the original syntax unchanged.
+
+The negative control uses the actual `resolve_lexical_references` operation on one shallow `Parsed_Source` alias.
+The second alias observes the same identifier node and newly written `resolved_declaration` pointer.
+This confirms the current shared-node mutation boundary without changing the production parser or resolver.
+
+`summary.tsv`, `audit_summary.json`, and `compiler_version.txt` remain under `examples/.build/syntax_independence/`; native verifier/linker outputs are under `examples/.build/` and cleanup may remove them.
+The saved-summary audit checks all four lifetime permutations per fixture, context-independent status/metadata counts, exact aggregate counts, compiler identity, and runtime completion counters.
+Creation/release counters are logical ownership evidence, not a measured zero-leak, allocator high-water, or operating-system residency result.
+
+Architectural consequence: own or lease source/decoded payloads and recovery data with the syntax revision; keep context-dependent bindings/results in separately owned side tables, with a one-way semantic reference to syntax whose backing lifetime remains valid.
+Shallow snapshot copying is insufficient if the existing resolver can still mutate shared identifier fields.
+Reusing current node layouts behind a frozen adapter may be possible if all such writes are redirected, but this projection does not establish the cost or completeness of that adaptation, nor require wholesale replacement of every overlay.
+No production syntax/cache implementation or migration plan was added.
+
+The prototype does not provide full syntax coverage, a real semantic typechecker, dependency tracking, lease enforcement, concurrent readers, cancellation, persistence, allocation benchmarks, or cross-backend/platform guarantees.
+It deliberately does not release syntax while live semantic contexts still refer to it; enforcing that lifetime rule belongs to the owner/lease contract.
+No claim of complete diagnostic-related-information variants or synthetic literal-payload coverage follows from these fixtures.
+E7-E12 retain their separate dependency, scheduling, allocation, persistence, and performance questions.
+
 Suggested order is E1-E5 for language/toolchain facts, then E6-E8 for correctness contracts, then E9-E11 for representation/storage, with E12's baseline captured early and comparisons added as prototypes become available.
 E5 is a bounded feasibility probe, not a prerequisite to implementing the syntax-first service if evaluation remains explicitly unsupported.
 Do not block the initial specification on optional syntax-chunk reuse, binary formats, mmap, packed sentinel optimisation, or full compiler-backed evaluation; retain a simple supported baseline and explicit extension boundaries.
@@ -909,7 +1049,9 @@ No production changes are authorised by this checklist alone.
 - [x] Run and record E2's bounded module identity/parameter probes, including nominal compatibility, transitive configuration, expected diagnostics, and evaluation counts.
 - [x] Run and record E3's bounded loaded-file composition probes, including occurrence multiplicity, scope, relative paths, contextual module values/types, cycles, and diagnostic/marker audits.
 - [x] Run and record E4's bounded path/source-context probes, including case/alias validation, relative lookup, exact locations, nominal identity, native links, byte equality, and complete diagnostic/marker audits.
-- [ ] Run and record the remaining bounded experiments E5-E12 in section 14, distinguishing initial specification blockers from explicitly deferred capabilities.
+- [x] Run and record E5's bounded compiler-evaluation probes, including added-string freshness/boundaries, context, mapping callbacks, workspaces, failures, startup costs, and complete artifact/diagnostic audits.
+- [x] Run and record E6's bounded syntax-independence probe, including owned payloads/recovery, producer teardown, independent semantic contexts, fresh oracles, and the current-node alias control.
+- [ ] Run and record the remaining bounded experiments E7-E12 in section 14, distinguishing initial specification blockers from explicitly deferred capabilities.
 - [ ] Turn the evidence into approved initial contracts and acceptance criteria using the specification-completion gate in section 14, before writing the migration plan.
 - [ ] Define owned immutable syntax snapshots and syntax diagnostics that do not depend on semantic mutation or caller allocator lifetime.
 - [ ] Define coherent semantic worlds, declaration/type identities, versioned handles, and query-result states through full Jai coverage.
@@ -920,6 +1062,7 @@ No production changes are authorised by this checklist alone.
 - [ ] Define independent cache-backed source/syntax and semantic-query capabilities, retaining full changed-file parsing as the initial baseline.
 - [ ] Define change-notification/update tickets and immediate-result-or-pending world queries, including completion milestones, waiting, supersession, cancellation, and a separate later editor-feature API layer.
 - [ ] Define an optional evaluator contract with context reproduction, provenance, dependency/effect tracking, unsupported states, trust controls, and bounded subprocess execution.
+- [ ] Validate the explicit `using,map` wrapper proposal in section 10: generated exported-name arrays, contextual callback invocation, framed result capture, slot/exclusion validation, and result ownership after evaluator teardown.
 - [ ] Define cache-equivalence, invalidation, lifetime, restart, cancellation, corruption, and incomplete-code test matrices, including compiler verification of import/visibility rules.
 - [ ] Define inaccessible-candidate diagnostics and explicit export fix actions, separate from ordinary identifier resolution and validated against current source and export impact.
 - [ ] Benchmark the complete editor workflows in section 13 and agree acceptance thresholds before choosing chunk-level syntax reuse or finer cache granularity.

@@ -538,7 +538,7 @@ push_lexical_scope :: (parser: *Parser) -> *Parser_Lexical_Scope {
 
 resolve_lexical_references :: (scope: *Parser_Lexical_Scope) {
 	for reference: scope.references {
-		if reference.flags & .IS_RHS_OF_DOT_DEREFERENCE != 0 {
+		if reference.flags & .IS_RHS_OF_DOT_DEREFERENCE {
 			continue;
 		}
 
@@ -598,7 +598,7 @@ collect_lexer_error :: (lexer: *Lexer, message: string, line: s32, column: s32) 
 
 collect_lexer_detail :: (lexer: *Lexer, message: string) {
 	errors := lexer.user_data.(*[..]Lexer_Error);
-	assert(errors.count > 0);
+	assert(!!errors.count);
 	array_add(*errors.data[errors.count - 1].details, copy_string(message));
 }
 
@@ -661,7 +661,7 @@ parseInit :: (
 // Empty input and trailing tokens are diagnosed.  The result retains tokens, diagnostics, a root expression, and lexical bindings; source and filename are borrowed until release.
 // Warning mode reports optional semicolons where applicable without changing parse status.
 parse_expression :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false, resolve_identifiers: bool = true) -> Parsed_Source {
-	result, parser := parseInit(source, p => parse_value_expression(p), fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers=resolve_identifiers);
+	result, parser := parseInit(source, p => parse_value_expression(p), fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers = resolve_identifiers);
 
 	if !result.root && !result.diagnostics.count {
 		add_expected_expression(*parser);
@@ -676,7 +676,7 @@ parse_expression :: (source: string, fully_pathed_filename: string = "", warn_un
 // An optional final semicolon is consumed; further input is diagnosed rather than silently becoming another declaration.
 // The returned tree, tokens, and diagnostics follow the same borrowed-source and independent tree/name release rules as parse_file.
 parse_declaration :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false, resolve_identifiers: bool = true) -> Parsed_Source {
-	result, parser := parseInit(source, p => parse_declaration_node(p), fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers=resolve_identifiers);
+	result, parser := parseInit(source, p => parse_declaration_node(p), fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers = resolve_identifiers);
 
 	if !result.root && !result.diagnostics.count {
 		add_expected_expression(*parser);
@@ -704,7 +704,7 @@ parse_declaration :: (source: string, fully_pathed_filename: string = "", warn_u
 // Parse one braced imperative block, such as `{ value := 1; return value; }`.
 // The root is a Parser_Block; missing braces and unexpected input after the block produce diagnostics while retaining the partial tree for editor use.  Input is borrowed.
 parse_block :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false, resolve_identifiers: bool = true) -> Parsed_Source {
-	result, parser := parseInit(source, p => parse_block_node(p).(*Parser_Node), fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers=resolve_identifiers);
+	result, parser := parseInit(source, p => parse_block_node(p).(*Parser_Node), fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers = resolve_identifiers);
 
 	if !result.root && !result.diagnostics.count {
 		add_expected_expression(*parser);
@@ -721,8 +721,8 @@ parse_block :: (source: string, fully_pathed_filename: string = "", warn_unneces
 parse_declaration_block :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false, resolve_identifiers: bool = true) -> Parsed_Source {
 	result, parser := parseInit(
 		source,
-		(parser) => parse_block_node(parser, block_type=.DATA_DECLARATIONS).(*Parser_Node),
-		fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers=resolve_identifiers
+		(parser) => parse_block_node(parser, block_type = .DATA_DECLARATIONS).(*Parser_Node),
+		fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers = resolve_identifiers
 	);
 
 	if !result.root && !result.diagnostics.count {
@@ -739,7 +739,7 @@ parse_declaration_block :: (source: string, fully_pathed_filename: string = "", 
 // The returned snapshot borrows source and filename; retain both while inspecting tokens, source spans, or the tree.
 // Release the tree separately from retained tokens and optional interned identifier names.
 parse_file :: (source: string, fully_pathed_filename: string = "", warn_unnecessary_semicolons: bool = false, resolve_identifiers: bool = true) -> Parsed_Source {
-	result, parser := parseInit(source, parse_file_node, fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers=resolve_identifiers);
+	result, parser := parseInit(source, parse_file_node, fully_pathed_filename, warn_unnecessary_semicolons, resolve_identifiers = resolve_identifiers);
 	return result;
 }
 
@@ -1169,7 +1169,7 @@ reusable_type_instantiation :: (original: *Parser_Type_Instantiation) -> bool {
 		if original.array_element_type {
 			return (
 				original.array_dimension
-					&& original.inst_flags == 0
+					&& !original.inst_flags
 					&& original.array_dimension.first_token.(s64) == original.first_token.(s64) + 1
 					&& original.array_dimension.one_past_last_token.(s64) + 1 == original.array_element_type.first_token.(s64)
 					&& reusable_expression(original.array_dimension)
@@ -1370,7 +1370,7 @@ reusable_expression :: (node: *Parser_Node) -> bool {
 			binary := node.(*Parser_Binary_Operator);
 			if binary.operator_type == #char "." {
 				return binary.right && binary.right.kind == .IDENT
-					&& (binary.right.(*Parser_Ident).flags & .IS_RHS_OF_DOT_DEREFERENCE) != 0
+					&& binary.right.(*Parser_Ident).flags & .IS_RHS_OF_DOT_DEREFERENCE
 					&& reusable_expression(binary.left);
 			}
 
@@ -1699,7 +1699,61 @@ add_unnecessary_semicolon :: (parser: *Parser) {
 statement_requires_semicolon :: (statement: *Parser_Node) -> bool {
 	if statement.kind == {
 		case .IF;
-			return ((statement.(*Parser_If).if_flags & .IS_IFX) != 0);
+			conditional := statement.(*Parser_If);
+			return (conditional.if_flags & .IS_IFX)
+				&& !(conditional.then_block
+					&& conditional.else_block
+					&& conditional.then_block.node_flags & .IS_PARENTHESIZED
+					&& conditional.else_block.node_flags & .IS_PARENTHESIZED
+				);
+
+		case .DECLARATION;
+			declaration := statement.(*Parser_Declaration);
+			expression := declaration.expression;
+			if !expression && declaration.type_inst {
+				expression = declaration.type_inst.type_valued_expression;
+			}
+
+			return !expression || statement_requires_semicolon(expression);
+
+		case .COMPOUND_DECLARATION;
+			properties := statement.(*Parser_Compound_Declaration).declaration_properties;
+			return !properties || statement_requires_semicolon(properties);
+
+		case .BINARY_OPERATOR;
+			binary := statement.(*Parser_Binary_Operator);
+			if binary.operator_type == {
+				case #char "=";				#through;
+				case .PLUS_ASSIGN;			#through;
+				case .MINUS_ASSIGN;			#through;
+				case .TIMES_ASSIGN;			#through;
+				case .DIV_ASSIGN;			#through;
+				case .MOD_ASSIGN;			#through;
+				case .SHIFT_LEFT_ASSIGN;	#through;
+				case .SHIFT_RIGHT_ASSIGN;	#through;
+				case .ROTATE_LEFT_ASSIGN;	#through;
+				case .ROTATE_RIGHT_ASSIGN;	#through;
+				case .BITWISE_AND_ASSIGN;	#through;
+				case .BITWISE_OR_ASSIGN;	#through;
+				case .BITWISE_XOR_ASSIGN;	#through;
+				case .LOGICAL_AND_ASSIGN;	#through;
+				case .LOGICAL_OR_ASSIGN;
+					return !binary.right || statement_requires_semicolon(binary.right);
+			}
+
+		case .LITERAL;
+			return !(statement.(*Parser_Literal).value_flags & .HERE_STRING);
+
+		case .STRUCT; #through;
+		case .ENUM;
+			return false;
+
+		case .PROCEDURE_HEADER;
+			header := statement.(*Parser_Procedure_Header);
+			if header.body_or_null {
+				return header.procedure_flags & .QUICK
+					&& !(header.procedure_flags & .QUICK_IN_BLOCK_FORM);
+			}
 
 		case .DIRECTIVE_RUN;
 			return statement.(*Parser_Directive_Run).expression == null
@@ -1720,49 +1774,6 @@ statement_requires_semicolon :: (statement: *Parser_Node) -> bool {
 				return false;
 			}
 
-		// A braced value `ifx` ends a declaration at `}`, like `x := ifx ok { 1 } else { 2 }`.
-		case .DECLARATION;
-			expression := statement.(*Parser_Declaration).expression;
-			if expression {
-				if expression.kind == .IF {
-					conditional := expression.(*Parser_If);
-					if (conditional.if_flags & .IS_IFX
-						&& conditional.then_block
-						&& conditional.else_block
-						&& conditional.then_block.node_flags & .IS_PARENTHESIZED
-						&& conditional.else_block.node_flags & .IS_PARENTHESIZED
-					) {
-						return false;
-					}
-				}
-
-
-				if expression.kind == .LITERAL && (expression.(*Parser_Literal).value_flags & .HERE_STRING) {
-					return false;
-				}
-
-
-				if expression.kind == .DIRECTIVE_RUN {
-					run := expression.(*Parser_Directive_Run);
-					if run.procedure && run.expression && run.expression.kind == .BLOCK {
-						return false;
-					}
-				}
-
-
-				if expression.kind == .STRUCT || expression.kind == .ENUM {
-					return false;
-				}
-
-
-				if expression.kind == .PROCEDURE_HEADER {
-					header := expression.(*Parser_Procedure_Header);
-					if header.body_or_null {
-						return header.procedure_flags & .QUICK != 0
-							&& header.procedure_flags & .QUICK_IN_BLOCK_FORM == 0;
-					}
-				}
-			}
 	}
 
 
@@ -2860,13 +2871,13 @@ parse_for_statement :: (parser: *Parser, parent: *Parser_Block) -> *Parser_For {
 	while true {
 		flag_first := parser.cursor;
 		if parser_eat_if(parser, #char "<") {
-			if result.for_flags & .REVERSE != 0 {
+			if result.for_flags & .REVERSE {
 				add_duplicate_for_flag(parser, flag_first);
 			} else {
 				result.for_flags |= .REVERSE;
 			}
 		} else if parser_eat_if(parser, #char "*") {
-			if result.for_flags & .POINTER != 0 {
+			if result.for_flags & .POINTER {
 				add_duplicate_for_flag(parser, flag_first);
 			} else {
 				result.for_flags |= .POINTER;
@@ -2877,8 +2888,8 @@ parse_for_statement :: (parser: *Parser, parent: *Parser_Block) -> *Parser_For {
 	}
 
 	// Without a delimiter before the collection, binary flag expressions need parentheses.
-	seen_reverse := result.for_flags & .REVERSE != 0;
-	seen_pointer := result.for_flags & .POINTER != 0;
+	seen_reverse := !!(result.for_flags & .REVERSE);
+	seen_pointer := !!(result.for_flags & .POINTER);
 	while true {
 		flag_first := parser.cursor;
 		if parser_eat_if(parser, .LESSEQUALS) {
@@ -3240,7 +3251,7 @@ parse_return_statement :: (parser: *Parser) -> *Parser_Return {
 		}
 
 
-		array_add(*arguments, .{expression=expression});
+		array_add(*arguments, .{expression = expression});
 		if !parser_eat_if(parser, #char ",") {
 			break;
 		}
@@ -3378,7 +3389,7 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 			}
 		}
 
-		array_add(*arguments, .{node=first_ident, modifier=first_modifier});
+		array_add(*arguments, .{node = first_ident, modifier = first_modifier});
 
 		while parser_eat_if(parser, #char ",") {
 			argument_first := parser.cursor;
@@ -3407,7 +3418,7 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 				}
 			}
 
-			array_add(*arguments, .{node=ident, modifier=modifier});
+			array_add(*arguments, .{node = ident, modifier = modifier});
 		}
 
 		// 2. A shared `=` reassigns existing targets; `:` introduces declaration properties.
@@ -3960,7 +3971,7 @@ parse_procedure_type_header :: (parser: *Parser, parse_body := false) -> *Parser
 		parenthesized := parser_eat_if(parser, #char "(");
 
 		while true {
-			if parenthesized && returns.count == 0 && parser_peek(parser).type == #char ")" {
+			if parenthesized && !returns.count && parser_peek(parser).type == #char ")" {
 				break;
 			}
 
@@ -4332,7 +4343,7 @@ parse_procedure_body :: (parser: *Parser, header: *Parser_Procedure_Header, firs
 			if expression {
 				arguments: [..]Parser_Argument;
 				arguments.allocator = parser_node_allocator(parser.parsed);
-				array_add(*arguments, .{expression=expression});
+				array_add(*arguments, .{expression = expression});
 				return_node.arguments_unsorted = arguments;
 			}
 
@@ -4368,7 +4379,7 @@ type_instantiation_is_polymorphic :: (type_inst: *Parser_Type_Instantiation) -> 
 
 
 	if type_inst.type_valued_expression && type_inst.type_valued_expression.kind == .IDENT {
-		return ((type_inst.type_valued_expression.(*Parser_Ident).flags & .DEFINES_POLYMORPH_VARIABLE) != 0);
+		return !!(type_inst.type_valued_expression.(*Parser_Ident).flags & .DEFINES_POLYMORPH_VARIABLE);
 	}
 
 
@@ -4623,7 +4634,7 @@ parse_struct_modifiers :: (parser: *Parser, result: *Parser_Struct) {
 	while parser_peek(parser).type == #char "#" && parser_peek(parser, 1).type == .IDENT {
 		matched := true;
 
-		name: string= parser_peek(parser, 1).ident_value.name;
+		name: string = parser_peek(parser, 1).ident_value.name;
 		if name == {
 			case "foreign";									result.textual_flags |= .FOREIGN;
 			case "no_padding";								result.textual_flags |= .NO_PADDING;
@@ -4813,7 +4824,7 @@ parser_eat :: inline (parser: *Parser, count: s64 = 1) -> *Parser_Token {
 }
 
 parser_peek_if :: inline (parser: *Parser, expected: ..Token_Type) -> bool {
-	assert(expected.count > 0);
+	assert(!!expected.count);
 	if parser.cursor + expected.count > parser.parsed.tokens.count {
 		return false;
 	}
@@ -4839,7 +4850,7 @@ parser_eat_if :: inline (parser: *Parser, expected: ..Token_Type) -> bool {
 }
 
 parser_expect :: inline (parser: *Parser, expected: ..Token_Type) -> bool {
-	assert(expected.count > 0);
+	assert(!!expected.count);
 	for expected {
 		if parser_peek(parser).type != it {
 			add_missing_token(parser, it);
@@ -5397,7 +5408,7 @@ parse_postfix_suffixes :: (parser: *Parser, result: *Parser_Node, first: s64) ->
 }
 
 // Treat `,,` as the boundary between ordinary arguments and call-local context modifications.
-// In `f(x, name=y,, allocator=arena)`, the first two are call arguments; `allocator=arena` is retained separately as source-spelled context replacement.
+// In `f(x, name=y,, arena)`, the first two are call arguments; `allocator=arena` is retained separately as source-spelled context replacement.
 parse_procedure_call :: (parser: *Parser, procedure: *Parser_Node, first: s64) -> *Parser_Node {
 	parser_eat(parser);
 
@@ -6546,10 +6557,10 @@ materialise_tokens :: (source: string, old: *Parsed_Source = null, edit_start: s
 	byte_delta: s64;
 
 	#if ENABLE_TRIVIA {
-		if old && old.status == .COMPLETE && old.diagnostics.count == 0 && old.tokens.count > 1 {
+		if old && old.status == .COMPLETE && !old.diagnostics.count && old.tokens.count > 1 {
 			can_reuse = true;
 			for old.tokens {
-				if it.type == .STRING && it.value_flags & .HERE_STRING != 0 {
+				if it.type == .STRING && it.value_flags & .HERE_STRING {
 					can_reuse = false;
 					break;
 				}
@@ -6570,8 +6581,8 @@ materialise_tokens :: (source: string, old: *Parsed_Source = null, edit_start: s
 			}
 
 			restart = Max(0, first - 1);
-			for index: 0..restart-1 {
-				copy_materialised_token(*result, *lexer, old.tokens[index], 0, 0, 0, 0);
+			for 0..restart-1 {
+				copy_materialised_token(*result, *lexer, old.tokens[it], 0, 0, 0, 0);
 			}
 
 			if restart > 0 {

@@ -8,9 +8,10 @@
 Original :: #import "Jai_Lexer";
 
 Default		:: #import "Jai_Parser";
-Extended	:: #import "Jai_Parser"(ENABLE_TRIVIA=true, USE_SIMD=false);
-Raw_Strings	:: #import "Jai_Parser"(ENABLE_TRIVIA=true, EVALUATE_STRING_ESCAPES=false);
-Simd		:: #import "Jai_Parser"(ENABLE_TRIVIA=true, USE_SIMD=true);
+Extended	:: #import "Jai_Parser"(ENABLE_TRIVIA = true, USE_SIMD = false);
+Raw_Strings	:: #import "Jai_Parser"(ENABLE_TRIVIA = true, EVALUATE_STRING_ESCAPES = false);
+Simd		:: #import "Jai_Parser"(ENABLE_TRIVIA = true, USE_SIMD = true);
+
 for_expansion	:: Extended.for_expansion;
 
 #assert(size_of(Default.Token) == size_of(Original.Token));
@@ -126,7 +127,7 @@ assert_simd_lexer_parity :: (input: string) -> s64 {
 	set_allocators(*storage);
 	defer release(*storage);
 
-	push_allocator(.{proc=pool_allocator_proc, data=*storage});
+	push_allocator(.{proc = pool_allocator_proc, data = *storage});
 
 	expected_diagnostics: [..] Simd_Diagnostic;
 	actual_diagnostics: [..] Simd_Diagnostic;
@@ -135,16 +136,16 @@ assert_simd_lexer_parity :: (input: string) -> s64 {
 	scalar.user_data = *expected_diagnostics;
 	vectorised.user_data = *actual_diagnostics;
 	scalar.error_callback = (lexer: *Extended.Lexer, message: string, line: s32, column: s32) {
-		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message=copy_string(message), line=line, column=column});
+		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message = copy_string(message), line = line, column = column});
 	};
 	vectorised.error_callback = (lexer: *Simd.Lexer, message: string, line: s32, column: s32) {
-		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message=copy_string(message), line=line, column=column});
+		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message = copy_string(message), line = line, column = column});
 	};
 	scalar.detail_callback = (lexer: *Extended.Lexer, message: string) {
-		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message=copy_string(message), line=lexer.current_line_number, column=lexer.current_character_index, is_detail=true});
+		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message = copy_string(message), line = lexer.current_line_number, column = lexer.current_character_index, is_detail = true});
 	};
 	vectorised.detail_callback = (lexer: *Simd.Lexer, message: string) {
-		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message=copy_string(message), line=lexer.current_line_number, column=lexer.current_character_index, is_detail=true});
+		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message = copy_string(message), line = lexer.current_line_number, column = lexer.current_character_index, is_detail = true});
 	};
 	Extended.set_input_from_string(*scalar, input);
 	Simd.set_input_from_string(*vectorised, input);
@@ -248,7 +249,7 @@ test_simd_line_comments :: () {
 						input[offset + stop] = terminator;
 					}
 
-					source := string.{data=input.data, count=offset + length};
+					source := string.{data = input.data, count = offset + length};
 					scalar: Extended.Lexer;
 					vectorised: Simd.Lexer;
 					Extended.set_input_from_string(*scalar, source);
@@ -514,7 +515,7 @@ test_here_string_percent_modifier :: () {
 		modifier := eat_expected_token(*lexer, .IDENT);
 		assert(modifier.ident_value.name == "\\%");
 		delimiter := eat_expected_token(*lexer, .IDENT);
-		token := Extended.parse_here_string_body(*lexer, delimiter.ident_value.name, want_cr=want_cr, want_percent=true);
+		token := Extended.parse_here_string_body(*lexer, delimiter.ident_value.name, want_cr = want_cr, want_percent = true);
 		assert(token.type == .STRING);
 		assert(token.string_value == expected);
 		assert(!lexer.reported_error);
@@ -540,7 +541,7 @@ test_directive_trivia_round_trip :: () {
 	assert(modifier.ident_value.name == "\\%");
 	delimiter := eat_expected_source_token(*lexer, source, *source_cursor, .IDENT, "END", " ");
 
-	body := Extended.parse_here_string_body(*lexer, delimiter.ident_value.name, want_cr=true, want_percent=true);
+	body := Extended.parse_here_string_body(*lexer, delimiter.ident_value.name, want_cr = true, want_percent = true);
 	assert(body.type == .STRING);
 	assert(body.string_value == "123\r\n");
 	assert(body.preceding_trivia == "\n");
