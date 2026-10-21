@@ -58,7 +58,6 @@ oracle_token :: (state: *Oracle_State, actual: *Parser.Token, expected: *Parser.
 		|| actual.l1 != expected.l1 || actual.c1 != expected.c1
 		|| actual.original_text != expected.original_text
 		|| actual.preceding_trivia != expected.preceding_trivia
-		|| actual.trailing_trivia != expected.trailing_trivia
 	) {
 		return oracle_fail(state, path, "token metadata/text differs");
 	}

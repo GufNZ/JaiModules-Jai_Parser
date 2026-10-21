@@ -196,7 +196,6 @@ token :: (codec: *Codec, value: *Parser.Token) {
 	field(codec, *value.ident_is_backticked);
 	field(codec, *value.original_text);
 	field(codec, *value.preceding_trivia);
-	field(codec, *value.trailing_trivia);
 
 	if value.type == {
 		case .IDENT; #through;
@@ -456,7 +455,7 @@ encode_snapshot :: (parsed: *Parser.Parsed_Source) -> string {
 
 	assert(text.count <= MAX_ARTIFACT_BYTES);
 	digest := fnv1a_hash(text.data, text.count);
-	return sprint("[14]\nK % %\nH % % %\n%", SCHEMA_DIGEST >> 32, SCHEMA_DIGEST & 0xFFFFFFFF, text.count, digest >> 32, digest & 0xFFFFFFFF, text);
+	return sprint("[15]\nK % %\nH % % %\n%", SCHEMA_DIGEST >> 32, SCHEMA_DIGEST & 0xFFFFFFFF, text.count, digest >> 32, digest & 0xFFFFFFFF, text);
 }
 
 schema_digest :: () -> u64 {
@@ -497,7 +496,7 @@ decode_snapshot :: (text: string) -> *Owned_Snapshot {
 	set_allocators(*result.storage);
 	push_allocator(.{proc = pool_allocator_proc, data = *result.storage});
 	codec := Codec.{reading = true, reader = .{remaining = text}};
-	assert(!read_row(*codec.reader, "[14]").count);
+	assert(!read_row(*codec.reader, "[15]").count);
 	row := read_row(*codec.reader, "K");
 	schema_high := read_decimal(*row);
 	schema_low := read_decimal(*row);
@@ -888,6 +887,90 @@ run_project :: (manifest: string, prefix: string) {
 	print("E12 graph reload: % files; % AST text bytes; % deep teardown oracles and 63 timed requests passed.\n", entries.count, artifact_bytes, entries.count);
 }
 
+run_startup :: (manifest: string, prefix: string, mode: Mode) {
+	assert(mode == .FRESH || mode == .AST_RELOAD);
+	start := current_time_monotonic();
+	result: Measurement;
+	phase := current_time_monotonic();
+	filenames := read_source(manifest);
+	result.read += elapsed_ns(phase);
+	defer free(filenames);
+
+	paths := split(filenames, "\n");
+	defer free(paths.data);
+
+	files: s64;
+	source_digest: u64;
+
+	for filename: paths {
+		if !filename.count {
+			continue;
+		}
+
+
+		assert(files < 64);
+		phase = current_time_monotonic();
+		source := read_source(filename);
+		result.read += elapsed_ns(phase);
+		result.source_bytes += source.count;
+		phase = current_time_monotonic();
+		source_digest ^= fnv1a_hash(source.data, source.count);
+		result.hash += elapsed_ns(phase);
+		snapshot: *Owned_Snapshot;
+
+		if mode == .FRESH {
+			phase = current_time_monotonic();
+			snapshot = parse_owned(source, filename);
+			result.parse += elapsed_ns(phase);
+			result.parses += 1;
+		} else {
+			phase = current_time_monotonic();
+			text, ok := read_entire_file(tprint("%.%.ast", prefix, files));
+			assert(ok && text.count <= MAX_ARTIFACT_BYTES);
+			result.read += elapsed_ns(phase);
+			result.artifact_bytes += text.count;
+			phase = current_time_monotonic();
+			snapshot = decode_snapshot(text);
+			assert(snapshot.parsed.source == source && snapshot.parsed.fully_pathed_filename == filename);
+			result.decode += elapsed_ns(phase);
+
+			free(text);
+			result.loads += 1;
+		}
+
+		result.tokens += snapshot.parsed.tokens.count;
+		result.diagnostics += snapshot.parsed.diagnostics.count;
+		phase = current_time_monotonic();
+		release_owned(snapshot);
+		free(source);
+		result.cleanup += elapsed_ns(phase);
+		files += 1;
+	}
+
+	result.elapsed = elapsed_ns(start);
+	assert(files > 0 && result.parses + result.loads == files);
+	print(
+		"E12_STARTUP\t%\t%\t%\t%\t%\t%\t%\t%\t%\t%\t%\t%\t%\t%\t%\t%\t%\n",
+		mode,
+		files,
+		filenames.count,
+		result.source_bytes,
+		result.artifact_bytes,
+		result.tokens,
+		result.diagnostics,
+		result.parses,
+		result.loads,
+		source_digest >> 32,
+		source_digest & 0xFFFFFFFF,
+		result.elapsed,
+		result.read,
+		result.hash,
+		result.decode,
+		result.parse,
+		result.cleanup
+	);
+}
+
 main :: () {
 	defer reset_temporary_storage();
 
@@ -895,7 +978,9 @@ main :: () {
 	assert(arguments.count == 1 || arguments.count == 3 || arguments.count == 4, "Usage: experiment_snapshot_codec [MANIFEST OUTPUT_PREFIX [profile] | verify SOURCE ARTIFACT]");
 
 	if arguments.count == 4 {
-		if arguments[1] == "verify" {
+		if arguments[3] == "startup-fresh" || arguments[3] == "startup-ast" {
+			run_startup(arguments[1], arguments[2], ifx arguments[3] == "startup-fresh" then .FRESH else .AST_RELOAD);
+		} else if arguments[1] == "verify" {
 			print("E12_DECODE_PROBE\n");
 			text, ok := read_entire_file(arguments[3]);
 			assert(ok);

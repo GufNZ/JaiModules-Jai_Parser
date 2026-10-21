@@ -1,5 +1,5 @@
 param(
-	[ValidateSet('Run', 'Audit', 'Check')]
+	[ValidateSet('Run', 'Audit', 'Check', 'Startup', 'AuditStartup')]
 	[string] $Mode = 'Run',
 	[string] $BaselineDirectory = (Join-Path $PSScriptRoot '.build/project_baseline/40141fe0d05141dd9709bca383c951ab'),
 	[string] $RunDirectory = '',
@@ -38,8 +38,10 @@ function InvokeWorker([string[]] $arguments, [bool] $ExpectedFailure = $false) {
 		$info.ArgumentList.Add($argument)
 	}
 
+	$watch = [Diagnostics.Stopwatch]::StartNew()
 	$process = [Diagnostics.Process]::Start($info)
 	try {
+		$script:LastWorkerId = $process.Id
 		$output = $process.StandardOutput.ReadToEndAsync()
 		$errors = $process.StandardError.ReadToEndAsync()
 		if (!$process.WaitForExit(120000)) {
@@ -51,6 +53,8 @@ function InvokeWorker([string[]] $arguments, [bool] $ExpectedFailure = $false) {
 
 		$text = $output.GetAwaiter().GetResult()
 		$text += $errors.GetAwaiter().GetResult()
+		$watch.Stop()
+		$script:LastWorkerWallNs = [long]$watch.Elapsed.TotalNanoseconds
 		$script:LastWorkerExitCode = $process.ExitCode
 		if ($ExpectedFailure) {
 			Require ($process.ExitCode -ne 0 -and $text.Contains('E12_DECODE_PROBE') -and $text.Contains('Assertion failed') -and !$text.Contains('E12_DECODE_PROBE_PASS')) "Corrupt input did not reach a decoder assertion: $($arguments[-1]); exit $($process.ExitCode); $text"
@@ -98,7 +102,7 @@ function Audit([string] $root) {
 			$artifactBytes += $bytes.Length
 			$text = $Utf8.GetString($bytes)
 			$lines = $text.Split("`n")
-			Require ($lines[0] -ceq '[14]' -and $lines[-1] -ceq '') 'Graph version/final newline'
+			Require ($lines[0] -ceq '[15]' -and $lines[-1] -ceq '') 'Graph version/final newline'
 			$schema = $lines[1] -split ' '
 			$header = $lines[2] -split ' '
 			Require ($schema.Count -eq 3 -and $schema[0] -ceq 'K' -and $schema[1] -ceq $setup[0].schema_high -and $schema[2] -ceq $setup[0].schema_low) 'Graph layout fingerprint'
@@ -282,7 +286,126 @@ function Check([string] $root) {
 	Write-Output "Graph codec follow-up: $Checks checks; 5 fresh/decoded backing profiles, zero tracked teardown, valid control and $($faults.Count) assertion-rejected artifacts."
 }
 
-if ($Mode -ceq 'Audit') {
+function AuditStartup([string] $root) {
+	InitializeHash
+	$projects = @([IO.File]::ReadAllText((Join-Path $root 'projects.json')) | ConvertFrom-Json -AsHashtable)
+	$samples = @([IO.File]::ReadAllText((Join-Path $root 'samples.json')) | ConvertFrom-Json -AsHashtable)
+	$summary = [Collections.Generic.List[object]]::new()
+	Require ($samples.Count -eq $projects.Count * 44) 'Startup worker count'
+	$identities = [Collections.Generic.HashSet[string]]::new()
+	foreach ($project in $projects) {
+		$sourceBytes = 0L
+		$artifactBytes = 0L
+		$sourceDigest = [ulong]0
+		$paths = [Collections.Generic.List[string]]::new()
+		for ($index = 0; $index -lt $project.files.Count; $index++) {
+			$file = $project.files[$index]
+			$bytes = [IO.File]::ReadAllBytes($file.path)
+			Require ($bytes.Length -eq $file.bytes -and (Digest $file.path) -ceq $file.sha256) 'Startup source provenance'
+			$sourceBytes += $bytes.Length
+			$sourceDigest = $sourceDigest -bxor [E12GraphHash]::Fnv($bytes)
+			$paths.Add($file.path)
+			$artifact = "$($project.graph_prefix).$index.ast"
+			Require ((Digest $artifact) -ceq $project.startup_artifacts[$index].sha256 -and (Get-Item -LiteralPath $artifact).Length -eq $project.startup_artifacts[$index].bytes) 'Startup artifact provenance'
+			$artifactBytes += (Get-Item -LiteralPath $artifact).Length
+		}
+
+		$manifest = [IO.File]::ReadAllBytes($project.manifest)
+		Require ($Utf8.GetString($manifest) -ceq (($paths -join "`n") + "`n")) 'Exact startup manifest/context'
+		$baseline = @(Import-Csv "$($project.graph_prefix).timings.tsv" -Delimiter "`t")
+		Require ($baseline.Count -eq 63) 'Deep-validated preparation timing inventory'
+		$rows = @($samples | Where-Object { $_.project -ceq $project.name })
+		Require ($rows.Count -eq 44) 'Per-inventory startup samples'
+		for ($trial = -1; $trial -lt 21; $trial++) {
+			for ($order = 0; $order -lt 2; $order++) {
+				$row = $rows[($trial + 1) * 2 + $order]
+				$modeName = @('FRESH', 'AST_RELOAD')[($trial + $order + 2) % 2]
+				Require ($row.trial -eq $trial -and $row.order -eq $order -and $row.mode -ceq $modeName) 'Alternating startup order'
+				Require ($identities.Add($row.invocation) -and $row.pid -gt 0 -and $row.exit_code -eq 0) 'Separate successful process invocation'
+				$fields = $row.output.Trim().Split("`t")
+				Require ($fields.Count -eq 18 -and $fields[0] -ceq 'E12_STARTUP' -and $fields[1] -ceq $modeName) 'Startup output framing'
+				Require ([int]$fields[2] -eq $project.files.Count -and [long]$fields[3] -eq $manifest.Length -and [long]$fields[4] -eq $sourceBytes -and [long]$fields[5] -eq $(if ($modeName -ceq 'AST_RELOAD') { $artifactBytes } else { 0 })) 'Startup read totals'
+				Require ([long]$fields[6] -eq [long]$baseline[0].tokens -and [long]$fields[7] -eq [long]$baseline[0].diagnostics) 'Startup syntax observables'
+				Require ([int]$fields[8] -eq $(if ($modeName -ceq 'FRESH') { $project.files.Count } else { 0 }) -and [int]$fields[9] -eq $(if ($modeName -ceq 'AST_RELOAD') { $project.files.Count } else { 0 })) 'No hidden resident warmup or source reparse'
+				Require ([ulong]$fields[10] -eq ($sourceDigest -shr 32) -and [ulong]$fields[11] -eq ($sourceDigest -band 4294967295)) 'Independent startup source digest'
+				$total = [long]$fields[12]
+				$phases = 0L
+				foreach ($phase in $fields[13..17]) {
+					Require ([long]$phase -ge 0) 'Negative startup phase'
+					$phases += [long]$phase
+				}
+
+				Require ($total -gt 0 -and $phases -le $total -and [long]$row.wall_ns -ge $total) 'Startup worker/phase/parent clocks'
+				Require ([long]$fields[$(if ($modeName -ceq 'FRESH') { 15 } else { 16 })] -eq 0) 'Unexpected decode/parse phase'
+			}
+		}
+
+		foreach ($modeName in @('FRESH', 'AST_RELOAD')) {
+			$measured = @($rows | Where-Object { $_.trial -ge 0 -and $_.mode -ceq $modeName })
+			$worker = @($measured | ForEach-Object { [double]$_.output.Trim().Split("`t")[12] / 1000000 } | Sort-Object)
+			$wall = @($measured | ForEach-Object { [double]$_.wall_ns / 1000000 } | Sort-Object)
+			Require ($worker.Count -eq 21 -and $wall.Count -eq 21) 'Measured startup group size'
+			$summary.Add([ordered]@{ project = $project.name; mode = $modeName; samples = 21; worker_median_ms = $worker[10]; worker_p95_ms = $worker[19]; wall_median_ms = $wall[10]; wall_p95_ms = $wall[19]; worker_min_ms = $worker[0]; worker_max_ms = $worker[20]; wall_min_ms = $wall[0]; wall_max_ms = $wall[20]; source_bytes = $sourceBytes; artifact_bytes = $artifactBytes; manifest_bytes = $manifest.Length })
+		}
+	}
+
+	foreach ($file in Get-ChildItem $root -File) {
+		$bytes = [IO.File]::ReadAllBytes($file.FullName)
+		Require ($bytes.Length -gt 0 -and $bytes[-1] -eq 10) 'Startup evidence newline'
+	}
+
+	WriteJson (Join-Path $root 'audit_summary.json') ([ordered]@{ checks = $Checks; projects = $projects.Count; workers = $samples.Count; measured = $projects.Count * 42; warmups = $projects.Count * 2; filesystem = 'warm/unflushed'; stats = @($summary) })
+	Write-Output "E12 startup audit: $Checks checks; $($samples.Count) fresh processes, $($projects.Count * 42) measured requests; filesystem warm/unflushed."
+	foreach ($row in $summary) {
+		Write-Output ("{0} {1}: worker median/p95 {2:F3}/{3:F3} ms; process wall {4:F3}/{5:F3} ms" -f $row.project, $row.mode, $row.worker_median_ms, $row.worker_p95_ms, $row.wall_median_ms, $row.wall_p95_ms)
+	}
+}
+
+function Startup([string] $graphRoot) {
+	$projects = @([IO.File]::ReadAllText((Join-Path $graphRoot 'projects.json')) | ConvertFrom-Json -AsHashtable)
+	$root = Join-Path $graphRoot "startup_$([Guid]::NewGuid().ToString('N'))"
+	[IO.Directory]::CreateDirectory($root) > $null
+	$samples = [Collections.Generic.List[object]]::new()
+	foreach ($project in $projects) {
+		$artifacts = [Collections.Generic.List[object]]::new()
+		for ($index = 0; $index -lt $project.files.Count; $index++) {
+			$file = $project.files[$index]
+			Require ((Digest $file.path) -ceq $file.sha256) 'Startup input changed before measurement'
+			$path = "$($project.graph_prefix).$index.ast"
+			$artifacts.Add([ordered]@{ bytes = (Get-Item -LiteralPath $path).Length; sha256 = Digest $path })
+		}
+
+		$project.startup_artifacts = @($artifacts)
+		Write-Output "E12 startup measuring $($project.name): 44 separate worker processes"
+		for ($trial = -1; $trial -lt 21; $trial++) {
+			for ($order = 0; $order -lt 2; $order++) {
+				$modeName = @('FRESH', 'AST_RELOAD')[($trial + $order + 2) % 2]
+				$argument = if ($modeName -ceq 'FRESH') { 'startup-fresh' } else { 'startup-ast' }
+				$output = InvokeWorker @($project.manifest, $project.graph_prefix, $argument)
+				$samples.Add([ordered]@{ project = $project.name; trial = $trial; order = $order; mode = $modeName; invocation = [Guid]::NewGuid().ToString('N'); pid = $LastWorkerId; exit_code = $LastWorkerExitCode; wall_ns = $LastWorkerWallNs; output = $output })
+			}
+		}
+	}
+
+	WriteJson (Join-Path $root 'projects.json') $projects
+	WriteJson (Join-Path $root 'samples.json') $samples
+	WriteJson (Join-Path $root 'provenance.json') ([ordered]@{
+		worker_sha256 = Digest $Worker; source_sha256 = Digest (Join-Path $PSScriptRoot 'experiment_snapshot_codec.jai'); runner_sha256 = Digest $PSCommandPath
+		compiler_sha256 = Digest (Join-Path $PSScriptRoot '../../../bin/jai.exe'); build_flags = '-o -llvm -quiet -no_color'; graph_root = $graphRoot
+		powershell = $PSVersionTable.PSVersion.ToString(); runtime = [Runtime.InteropServices.RuntimeInformation]::FrameworkDescription; os = [Runtime.InteropServices.RuntimeInformation]::OSDescription
+		filesystem = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($root)).DriveFormat; cache_condition = 'warm/unflushed'; timer = 'worker Apollo nanoseconds; parent Stopwatch includes start/drain/exit'
+	})
+	AuditStartup $root
+	Write-Output "E12 startup evidence: $root"
+}
+
+if ($Mode -ceq 'Startup') {
+	Require (!!$RunDirectory) 'Provide graph -RunDirectory for Startup'
+	Startup ([IO.Path]::GetFullPath($RunDirectory))
+} elseif ($Mode -ceq 'AuditStartup') {
+	Require (!!$RunDirectory) 'Provide startup -RunDirectory for AuditStartup'
+	AuditStartup ([IO.Path]::GetFullPath($RunDirectory))
+} elseif ($Mode -ceq 'Audit') {
 	Require (!!$RunDirectory) 'Provide -RunDirectory for Audit'
 	Audit ([IO.Path]::GetFullPath($RunDirectory))
 } elseif ($Mode -ceq 'Check') {

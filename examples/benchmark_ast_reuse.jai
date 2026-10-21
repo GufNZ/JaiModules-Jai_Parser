@@ -135,7 +135,7 @@ check_update :: (actual: *Parser.Parsed_Source, expected: *Parser.Parsed_Source)
 		assert(token.byte_start == reference.byte_start && token.byte_end == reference.byte_end);
 		assert(token.l0 == reference.l0 && token.c0 == reference.c0 && token.l1 == reference.l1 && token.c1 == reference.c1);
 		assert(token.original_text == reference.original_text);
-		assert(token.preceding_trivia == reference.preceding_trivia && token.trailing_trivia == reference.trailing_trivia);
+		assert(token.preceding_trivia == reference.preceding_trivia);
 	}
 
 	assert(Parser.reconstruct_source(actual) == expected.source);

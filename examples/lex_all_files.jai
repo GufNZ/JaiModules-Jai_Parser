@@ -70,7 +70,7 @@ main :: () {
 		while 1 {
 			token := Parser_Lexer.peek_next_token(*lexer);
 			if token.type == .END_OF_INPUT {
-				consume_source_span(lexer.input, *source_cursor, token.trailing_trivia);
+				consume_source_span(lexer.input, *source_cursor, token.preceding_trivia);
 				break;
 			}
 
@@ -210,7 +210,6 @@ assert_benchmark_token_parity :: (actual: Simd_Lexer.Parser_Token, expected: Par
 	assert(actual.l1 == expected.l1 && actual.c1 == expected.c1);
 	assert(actual.original_text == expected.original_text);
 	assert(actual.preceding_trivia == expected.preceding_trivia);
-	assert(actual.trailing_trivia == expected.trailing_trivia);
 	if expected.type == {
 		case .IDENT;
 			assert(actual.ident_value.name == expected.ident_value.name);

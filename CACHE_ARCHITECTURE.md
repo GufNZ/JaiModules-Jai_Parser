@@ -200,7 +200,9 @@ Mutually referring declarations can be indexed together; recursive pointers can 
 A generic recursion guard that labels every cycle unsupported would prevent full coverage.
 Query readiness, interface fingerprints, and strongly connected groups should allow legitimate recursion without inventing an unbounded global fixed-point solver.
 
-As for cycle detection, if we reach a point where there are things waiting in pipelines, but we don't make forward progress, then we should stop with an error and do work to identify and report on the cycle, including suggestions for breaking it (e.g. use a pointer rather than an instance directly etc.).
+For stalled pipelines, distinguish unresolved external work from an actual cycle in the required dependency graph; idleness alone is not a cycle diagnostic.
+When an unsupported or illegal cycle is established, report its declarations and blocking milestones, including appropriate suggestions for breaking it (e.g. use a pointer rather than a by-value instance).
+Legal recursion must use the applicable identity/readiness rules rather than becoming an error merely because a query is already in flight.
 
 ## 6. Cache Boundaries
 
@@ -280,6 +282,24 @@ A `#if` or generated field can alter membership without changing the outer decla
 For example, unchanged `Record :: struct { items: [CAPACITY]Item; }` cannot reuse its layout if `CAPACITY`, `Item`'s relevant layout, or the target changes.
 It can still reuse its parsed syntax.
 Distinct recursive types must retain identity even if their structural fingerprints happen to match.
+
+#### Member Order and the Completed Context Type
+
+For ordinary structs, compare member descriptors in source declaration order, including `Context_Base`.
+This is a rule for the declaration's member-shape/revision fingerprint, not a replacement for nominal `TypeID`: identical ordered members do not merge distinct defining declarations or configured instances.
+Reordering ordinary members changes that fingerprint even when their names/types form the same set.
+
+The compiler-assembled `#Context` needs a special comparison rule because `#add_context` contributions may be encountered in different orders during compilation.
+Its completed logical member descriptor consists of the ordered `Context_Base` descriptor plus an order-independent collection of added fields, not the compiler's discovery/append sequence.
+Canonicalise the added fields by their exact canonical member-name bytes, using unsigned bytewise lexicographic order, and compare their full descriptors: name, resolved type identity, relevant attributes/default-initialiser dependencies and validated declaring provenance.
+Do not sort the base members, erase field-to-type associations, or deduplicate contributions with equal names; duplicate/conflicting names retain their language error, and incomplete contribution discovery cannot establish complete context equality.
+The same qualified additions and base therefore compare equal under different encounter permutations; adding/removing/changing an added field or reordering the base does not.
+This rule applies to the completed logical type/member comparison, not to a claim that every intermediate context is complete or that two unrelated nominal types become equal.
+
+Keep layout/ABI, reflection enumeration order and initialisation/evaluation observations as separate dependency-tracked facets.
+If their observable result depends on actual compiler field order, offsets, target or effect ordering, validate that result independently; equal canonical context membership does not permit reusing those results or replaying serialised raw context memory across layouts.
+Unqualified compiler ordering/effect behaviour requires conservative recomputation or explicit unsupported/incomplete status, not an assumed order-independent ABI.
+Future semantic acceptance cases must permute the same `#add_context` contributions, change an added field, reorder `Context_Base`, and exercise duplicate/provisional membership plus layout-sensitive consumers; this definition does not claim those compiler-backed tests have run.
 
 ### 6.4 Procedures: Separate Signature, Body, and Instantiation
 
@@ -524,6 +544,7 @@ Validate result cardinality, positional correspondence to the original members, 
 Copy returned string payloads into result-owned storage before releasing evaluator storage.
 Extracting just the procedure is insufficient if it depends on imports, private helpers, parameters, compile-time state, or source/caller context; preserve the necessary dependency closure or report unsupported.
 E5 observed the real callback and its instrumented names, but did not test this explicit generated-array wrapper or its result protocol.
+E13 below now validates a bounded generated-array wrapper against real mapping, including parameter/private-helper context, exclusions, framed results, and host-owned output after process teardown; general context extraction and production evaluation remain unsupported.
 The absence of automatic mapping output in added-string dumps is not evidence against this proposed wrapper.
 
 Keep compiler subprocess evaluation disabled unless a program/module parameter explicitly enables the capability.
@@ -651,6 +672,1349 @@ Full future semantic coverage does not mean implementing or fully specifying eve
 Some choices require product decisions rather than measurement: initial coverage, host integration style, cache defaults/budgets, recovery retention, and which performance trade-offs are acceptable.
 Experiments should inform these choices, not quietly choose them.
 
+### Initial Scope and Acceptance Draft
+
+Drafted 2026-10-20 from E1-E13.  **Initial capability scope approved 2026-10-20; acceptance targets and detailed contracts remain proposed, not implemented.**
+The approval covers the syntax-first initial scope and recorded Windows x64 qualification target, including source/unsaved-recovery persistence and semantic/evaluator deferrals; it does not approve cache defaults, exact APIs, implementation or a migration plan.
+This remains an initial capability boundary and acceptance proposal, not the completed specification.
+Full syntax/semantic coverage and configured-module caching remain the eventual direction; a syntax-first initial slice must not silently become the permanent product boundary.
+The numerical candidates below are engineering proposals, not requirements supplied by the user or thresholds established by the experiments.
+
+#### Initial Capability Boundary (Scope Approved)
+
+| Area | Initial candidate | Explicit boundary |
+| --- | --- | --- |
+| Qualification | Windows x64 with the recorded Jai beta 0.2.030 toolchain; fast-backend correctness and LLVM performance runs.  Start filesystem qualification on the measured ReFS environment. | This is a first qualification target, not proof of all Windows filesystems, other compiler versions, Linux, or macOS support.  Compatibility must be versioned, and additional platforms qualified separately. |
+| Source and syntax | Disk and editor-buffer revisions, owned immutable whole-file syntax/diagnostics, exact source reconstruction, and syntax-derived declaration/span indices.  Reuse unchanged snapshots; fully parse changed files, including malformed edits. | No subtree-sharing, syntax-chunk store, or AST-copy requirement.  Syntax-derived indices are not resolved bindings, types, or a complete semantic declaration index. |
+| World update/query | Revision-tagged change tickets and syntax/index publication milestones; selected-world queries return available, pending, superseded, cancelled, failed, or unsupported outcomes as applicable.  Leases protect retained snapshots. | No promise that syntax publication completes all future semantic analysis.  Queries never switch to a newer world implicitly.  Exact state transitions, threading and delivery contracts still require specification. |
+| Composition and semantics | Preserve authored import/load requests and context in syntax; define the extension boundary for configured module instances and semantic query results. | The initial service does not claim semantic import closure, member/type inference, overload resolution, constant/layout evaluation, or semantic navigation/refactoring.  Requests needing these return unsupported, not a guessed binding, empty successful answer, or false language error.  Existing resolver behaviour is not silently reclassified as qualified cache-backed semantics. |
+| Persistence | A versioned pointer-free text store for exact source revisions, document/recovery metadata, and manifests, with safe validation and fresh parsing as a valid reconstruction path.  Preserve the future syntax/semantic artifact boundaries. | Persistence remains an initial requirement, including unsaved revisions.  Persisting a complete AST is not required for initial operation; the experimental graph codec is not adopted.  Format, identity, publication, recovery and budget contracts remain to be specified and qualified. |
+| Recovery and failure | Exact disk/overlay selection, host-confirmed unsaved recovery, explicit save/reset/rename/delete transitions, corrupt/incompatible artifacts treated as misses, and cache diagnostics separate from language diagnostics. | No automatic resurrection of an obsolete overlay or permission to overwrite a live buffer.  Cache write failures must not reject an otherwise valid source update. |
+| Evaluation and later features | Evaluator capability initially unavailable; source-controlled opt-in and host authorisation remain mandatory prerequisites for any later backend.  Later editor features build on the same world contracts. | E5/E13 are feasibility evidence, not evaluator implementation.  No automatic compiler execution, cached effect replay, semantic rename/completion, or export-fix feature is included in this initial slice. |
+
+This candidate does not choose cache directory/size defaults, recovery retention, a public API shape, or a declaration-matching algorithm.
+Provisionally enabled persistence remains the earlier proposal, not a newly approved default; privacy and host recovery policy need an explicit decision before rollout.
+In particular, deferring semantic operations is not permission to omit the semantic ownership, identity, dependency, and unsupported-state extension contracts from the specification.
+
+#### Proposed Correctness Gates
+
+Each gate is required for the corresponding initial capability, not a claim that a prototype has already qualified the future implementation.
+Unsupported later capabilities must be labelled explicitly and excluded from successful-feature counts, not counted as passing semantic tests.
+
+| Gate | Required check and oracle | Current evidence versus remaining work |
+| --- | --- | --- |
+| C1: Syntax equivalence | Compare retained, reparsed, and persisted/reconstructed results with independently owned fresh parses of the same exact source/context.  Check tokens, tree payloads, diagnostics, recovery, spans, and exact source bytes, including malformed edits. | E6/E12 establish bounded oracles.  Apply them to the initial implementation and its full declared supported syntax matrix; no lifetime aliases or silent mismatches are acceptable. |
+| C2: Identity and source selection | Exercise parameter/configuration/version changes, path aliases, file creation/deletion/rename, negative lookups where supported, and disk/overlay save/reset/restart transitions.  Compare selected source/context against an explicit event-trace model. | E1-E4/E7/E11 supply rules and bounded controls.  Production identities/source-provider semantics and configured-semantic coverage are not qualified.  Uncertain matches must miss. |
+| C3: Ownership and publication | Retain old worlds through edits, eviction, input release, and newer-world teardown; verify exact old/new results, stale-generation rejection, and zero owned live allocations after final release.  Force out-of-order completion and shared-waiter cancellation. | E6/E8/E9 support local models.  Real-service lease/publication/race tests remain necessary; a scheduler model is not a concurrent implementation test. |
+| C4: Persistent-store failure | Validate before dereference/allocation using explicit format/read/allocation bounds; reject incompatible, truncated and corrupt data.  Test interrupted and competing writers, denied writes, restart, and leased-entry GC; compare selected state with fresh source reconstruction. | E10/E11 inform the design, not a safe production loader.  The E12 assert-aborting graph reader and post-read limits do not satisfy this gate.  Source operations must survive cache failure. |
+| C5: Honest capability states | Trace notify, wait, world selection, query, supersession and cancellation; verify each promised milestone/terminal outcome.  For unsupported semantics/evaluation, assert explicit unsupported results and no compiler child process. | E8/E13 supply limited outcome/protocol evidence.  Host integration, untrusted-workspace behaviour and executable public-contract tests remain open. |
+
+#### Provisional Performance Candidates
+
+These are **approval candidates only; adoption is not authorised**.
+Prefer paired same-work comparisons over absolute editor promises before the actual host and service exist.
+Use the E12 inventories as the starting syntax corpus, include a representative larger project before generalising, and keep synthetic authored controls separate from real-project aggregates.
+Run at least 21 measured trials per mode after declared warmups, alternate/rotate order, and report per-workload median and nearest-rank p95 plus raw samples in at least two separate local rounds.
+This is a reproducible screening procedure, not a confidence interval or hard tail-latency guarantee; mixed or noise-sized results are inconclusive rather than a pass by averaging inventories.
+Include source validation, hashing, I/O, allocation, result publication, and lifecycle cleanup consistently in competing modes.
+
+| Gate | Candidate numerical target | Measurement and decision rule |
+| --- | --- | --- |
+| P1: Resident unchanged requests | At least 10% median improvement over fresh same-world parsing/index construction, with p95 no more than 5% worse, on each real inventory in both rounds. | End-to-end request through usable syntax/index result.  Exact-input checks and C1 still apply; a raw pointer lookup is not an equivalent competitor.  E12 suggests resident reuse is promising but does not qualify this future service path. |
+| P2: Changed-file updates | Median and p95 no more than 5% slower than the fresh changed-file baseline with the same retained-world policy. | Notify-edit through usable revision-tagged syntax/index publication for body/interface/layout/malformed/repair sequences.  Report unrelated-file reuse separately.  Do not substitute compiler time or an isolated parser call for service latency. |
+| P3: Optional persisted syntax reload | At least 10% median improvement and p95 no more than 5% worse than fresh-process source validation/parsing on each real inventory in both rounds. | Compare complete equivalent results, process wall time and worker phases separately.  Label filesystem conditions; only an agreed isolated cold-storage procedure supports OS-cold claims.  E12's verbose graph format shows a regression, not qualification of this candidate.  Source/metadata persistence remains required even if AST reload is deferred. |
+| P4: Memory retention | At most 10% additional peak upstream backing versus the owned whole-file baseline for the same live world set; zero owned live allocations after all leases/worlds are released. | Measure current world plus two retained historical revisions, sparse eviction, and long edit/eviction cycles.  Report upstream backing and process memory separately; zero live ownership does not require the OS working set to return to its starting value.  Choose an absolute host budget separately. |
+| P5: Persistent overhead | At most four times the exact source bytes in the steady-state managed store for the selected current plus two retained historical revisions. | Include manifests, indices and encoded source/artifacts in the numerator; count exact source bytes once per selected retained revision in the denominator.  Measure peak temporary publication space separately.  Drop/defer optional artifact encodings that fail, not required source persistence.  Absolute disk budget and pressure/GC policy still need agreement. |
+
+No gate above is marked passed for a future service, and no absolute interactive-latency SLA is proposed without its host workload/hardware and measurements.
+Memory/disk caps, latency trade-offs, retention counts and the 10%/5%/four-times candidates require review; they are not silently selected configuration defaults.
+Before running acceptance measurements, approve the workloads, units/timing boundaries, supported host/toolchain, competing baseline and targets together.
+Complete semantic dependency and editor-workflow measurements in section 13 remain necessary before adopting finer semantic granularity or making ReSharper-like performance claims; they are deferred from this syntax-first qualification, not declared complete.
+
+#### Approval and Specification Work Still Required
+
+- [x] Approve the syntax-first initial scope, recorded Windows x64 qualification target and semantic/evaluator deferrals, without authorising implementation or approving detailed contracts/defaults.
+- [ ] Specify and review the supported extension route to broader syntax/semantic/platform coverage within the remaining detailed contracts.
+- [ ] Approve or replace P1-P5, workload selection, larger-project coverage, retention policy, and the measurement procedure; set absolute host memory/disk budgets separately.
+- [ ] Decide path/context identity, source-provider/recovery/privacy rules, cache defaults and multi-process policy without treating the prototypes as production contracts.
+- [ ] Specify record/query ownership, state transitions, safe persistence, and version/unsupported behaviour for C1-C5 with executable acceptance cases.
+- [ ] Qualify the initial implementation against those approved gates; retain explicit unrun OS-cold, semantic-workflow, concurrency and additional-platform checks where applicable.
+
+### Core Contract Draft
+
+Drafted 2026-10-20.  **Proposed, not approved or implemented.**
+This makes the source, ownership and request boundaries concrete enough to review; the names describe logical records and outcomes, not public Jai declarations.
+It does not complete the semantic, persistence-format, host-policy or concurrency specifications and does not approve the preceding scope/performance candidates.
+
+#### Source Events and World Capture
+
+The source provider is authoritative for editor buffers and acknowledged disk events; the artifact store is not a second authority for which revision is current.
+An accepted source event identifies its workspace/session, document, previous provider revision, resulting revision or absence, and source-visible resolution context.
+Provider ordering tokens distinguish successive events even if their resulting bytes are equal; content identity may still permit safe artifact reuse.
+Reject an invalid event explicitly without changing the current selection or reporting a successful update ticket.
+Before acknowledging accepted input, acquire owned bytes or an explicit immutable provider lease; no deferred work may borrow the caller's temporary edit buffer.
+
+Proposed ranged-edit coordinates are zero-based byte offsets into the exact base revision, with half-open ranges.
+Adapters convert editor-specific UTF-16/line coordinates using that same revision, not the latest buffer.
+Require matching base revision, in-range endpoints and a documented batch convention: initially one ordered sequence, with each edit applied to the result of the preceding edit.
+Reject mismatched bases and invalid ranges rather than silently rebasing, clipping, or partially applying the batch; a full-replacement event is the recovery path.
+These coordinate/batch rules are approval candidates, not assertions about existing parser APIs or a new UTF-8-validity restriction on source bytes.
+
+| Event | Proposed source selection and observable result |
+| --- | --- |
+| Open or replace overlay | Select the host-supplied revision over disk.  Retain disk state separately; identical bytes alone do not acknowledge a save or discard. |
+| External disk update | Advance the acknowledged disk reference; an active overlay remains selected.  Without an overlay, select the new disk revision and schedule its syntax milestone. |
+| Save acknowledgement | Record the exact revision actually written and acknowledged by the host.  Clear/reconcile the overlay only if the host confirms that it is that saved revision; a newer overlay edit remains selected.  A failed or delayed save must not mark the newer buffer saved. |
+| Reset/discard | On host confirmation, remove the active overlay and its active recovery reference, then select freshly validated disk bytes or explicit absence.  Cached history cannot reactivate the discarded overlay. |
+| Delete | Mark the disk reference absent.  Preserve an active host buffer as an overlay; without one, publish source absence, not an empty parsed file or an old cached revision. |
+| Rename/replacement | Accept an explicit host event and revalidate source-visible context and resolution inputs.  Do not infer declaration/module continuity or alias equivalence from matching bytes.  Exact physical identity and cross-file atomic-event policy remain decisions. |
+| Restart/recovery | Validate disk/configuration; expose persisted overlays only as recovery candidates.  Activate a candidate only after host confirmation, through a new source event. |
+| Cache failure | Preserve the accepted in-memory source selection, reconstruct from authoritative bytes where possible, and report a separate cache diagnostic.  Source acquisition failure is explicit unavailability/failure, not permission to use a stale revision. |
+
+A captured world contains immutable selected document-revision/context references and the source-provider event frontier used to choose them.
+Publication installs a coherent world atomically; completion of old work never rewrites an already captured world or silently makes an old world current.
+If later dependency discovery requires a source not captured in that world, use an immutable provider snapshot capable of supplying that frontier's bytes, or return an explicit unavailable/incomplete result requiring a new world.
+Do not read today's disk file and attach it silently to yesterday's world; the exact provider snapshot/discovery mechanism remains to be specified.
+Initial syntax publication does not assert a complete import closure or semantic world.
+
+#### Ownership and Publication
+
+| Owner | Proposed lifetime obligation |
+| --- | --- |
+| Source/syntax snapshot | Own or lease exact source/path payloads, tokens, nodes, diagnostics, recovery records and syntax indices.  These are immutable after publication and cannot borrow parser scratch, evaluator memory or a released producer snapshot. |
+| Captured world | Hold strong references/leases to its selected source/syntax and context records.  Reusing syntax does not share mutable semantic state.  A newer world cannot invalidate an older world's references. |
+| Semantic query/group | Own derived records and dependency stamps separately from syntax; lease required syntax/context.  Cyclic group ownership/reclamation still needs its own contract before semantic implementation. |
+| Pending task | Own its scratch and protected inputs until completion or acknowledged termination.  Request cancellation alone is not proof that the worker stopped reading those inputs. |
+| Request/result lease | Protect the selected world and returned payload through explicit release.  Releasing a pending waiter detaches that waiter; acquiring a result must establish its protection before task/cache protection is dropped. |
+| Resident/disk cache | May evict only when ownership permits; budget pressure cannot free leased backing.  Record/slot reuse changes allocation generation, and stale handles must reject rather than resolve a different record.  Raw addresses are not persistent identities. |
+
+Publish immutable payload and its revision/context/dependency identity as one observable action; never expose a ready flag before the protected payload exists.
+Cache residency, world selection, task completion, and durable-store publication are separate events.
+A syntax milestone need not wait for a cache write: expose persistence failure/status separately, and do not promise durability until the required artifact and manifest commit has succeeded.
+If leases prevent meeting a configured memory budget, report pressure or reject new optional work under an agreed host policy; never silently revoke a live lease.
+Exact lease representation, synchronisation, pressure policy and shutdown ownership ordering remain specification work.
+
+#### Update Tickets and Query Outcomes
+
+An accepted change returns a ticket for its requested revision and milestone; it does not return an unqualified promise that all analysis is complete.
+Proposed update lifecycle: `queued -> running -> published | superseded | cancelled | failed`, allowing direct queued-to-terminal transitions where appropriate.
+`published` identifies the exact captured world and achieved syntax/index milestone, including incomplete-code diagnostics where applicable.
+`superseded` means that milestone was not delivered for the requested revision; include a successor ticket only if one exists, and require explicit selection of its result.
+Cancelling a wait is independent of cancelling underlying work; neither action implicitly discards accepted buffer contents or selects another source revision.
+An abandoned update must report its terminal reason; retrying analysis of retained source uses an explicit new request/ticket.
+
+| Selected-world query outcome | Required meaning |
+| --- | --- |
+| Available | Return a protected payload, world/revision/context identity, and completeness/diagnostic status.  Syntax with parse diagnostics may be available; incomplete semantic knowledge is not a successful negative lookup. |
+| Pending | Return a waiter for work keyed by the selected world/query/context.  Deduplicate equivalent work, but track waiter cancellation independently.  Internal blocked dependencies are not a successful result. |
+| Unavailable | State the reason, such as an absent source or unavailable captured provider revision, without substituting current disk bytes or fabricating a language diagnostic. |
+| Unsupported | State the unsupported capability/context.  Do not schedule evaluator execution, return an empty successful answer, or leave a waiter pending forever for functionality not supplied. |
+| Failed | Report computation/source/service failure separately from ordinary syntax diagnostics and cache-recovery warnings; include the selected identity where available. |
+| Cancelled | Complete only the cancelled waiter/request.  Other waiters may still receive the protected result of shared work. |
+
+Each ticket/waiter has at most one terminal transition; observation/waiting after termination returns that outcome rather than consuming it or causing another transition.
+Check operation generation and terminal state at publication so duplicate/late completion cannot resurrect cancelled work, overwrite a superseded ticket or deliver a payload to a released waiter.
+A query on an explicitly retained old world is not automatically superseded by a new head world; its identity remains old until the caller selects another world.
+Callback delivery, reentrancy, wait primitives, worker cancellation and shutdown semantics still need an approved execution model and real concurrent tests.
+
+#### Acceptance Trace Drafts
+
+These are future executable acceptance cases for C1-C5, not additional experiments already run or tests already passing.
+Each trace must assert the selected identities and exact fresh-oracle result where supported, not merely cache-hit counters.
+
+| Trace | Events and required assertions | Gates |
+| --- | --- | --- |
+| T1: Edit and query | Capture disk world A; notify overlay B; await B's syntax milestone; query B.  Assert exact B bytes/diagnostics, no semantic-completion promise, and unchanged leased A results. | C1, C2, C3, C5 |
+| T2: Stale edit batch | Submit a range based on A after B is selected, then a batch containing an invalid range.  Reject each atomically with B unchanged; a valid full replacement can subsequently succeed. | C1, C2, C5 |
+| T3: Save racing edit | Submit save of B, select newer overlay C, then receive B's save acknowledgement.  Disk points to B while the active overlay remains C; neither the late acknowledgement nor equal-byte reuse discards C. | C2, C5 |
+| T4: Reset and restart | With disk A and overlay B, confirm reset, release/restart, and validate disk.  Select current disk or absence, never B merely because its blob remains.  A separate confirmed recovery of B is a new explicit event. | C2, C4, C5 |
+| T5: Retention and reload | Lease A, publish B, request eviction and release producer/scratch storage.  A and B remain exact until their respective leases end; freed generations reject stale handles.  Rehydration failure reconstructs or reports unavailability without changing source selection. | C1, C3, C4 |
+| T6: Shared waiters | Two waiters join one world-keyed query; cancel/release one, complete the task, then attempt duplicate completion.  The survivor receives one protected result; the cancelled waiter receives no late payload. | C3, C5 |
+| T7: Superseded update | Queue B then C and finish work out of order.  Each ticket gets one truthful terminal outcome; B cannot replace C as head, but an explicitly retained B world can still be queried. | C2, C3, C5 |
+| T8: Cache and capability failures | Deny store writes or corrupt an artifact, then notify/query valid source and request unsupported semantics/evaluation.  Source syntax remains usable, cache warnings stay separate, unsupported is terminal, and no compiler process launches. | C1, C4, C5 |
+
+Still open: approval of these contracts; exact record schemas and identities; semantic stage/dependency contracts; safe store format/publication/GC; source discovery and atomic multi-document capture; notification/threading/shutdown design; and executable implementation qualification.
+The migration-plan gate and all scope/performance approval gates remain open.
+
+### Persistence Contract Draft
+
+Drafted 2026-10-20.  **Proposed, not approved or implemented.**
+This refines C2-C4 and the source/world contracts using E10/E11, without adopting their experimental formats, fixed fixture limits, or filesystem guarantees as a production implementation.
+Text records using `Text_File_Handler` remain the initial direction; exact grammar, schema IDs, numeric bounds, lock primitives and supported filesystem durability guarantees still require specification and approval.
+Required source/recovery persistence is distinct from optional decoded-syntax or semantic artifacts.
+
+#### Records and Persistent Identity
+
+| Logical record | Proposed required content and boundary |
+| --- | --- |
+| Store descriptor | Format/schema versions, store namespace and compatibility policy.  Do not infer compatibility from the directory name or compiler version alone. |
+| Source artifact | Exact source bytes, byte length and strong digest, plus encoding information needed to reconstruct those bytes without newline/Unicode normalisation.  Preserve arbitrary parser-accepted bytes; the text envelope may encode them. |
+| Context descriptor | Document/path identity inputs, source-visible filename/directory, resolver/parser configuration and their versions.  Include configured module/program/import-request discriminators for semantic artifacts; physical-file equality is not semantic identity. |
+| Optional derived artifact | Record kind/schema, producer/query version, source/context references, completeness/support status and validated dependency identities.  Payloads contain explicit IDs/offsets, never pointers, allocators, pools or process-local reflection objects. |
+| Workspace manifest | Workspace namespace, committed generation, and roots for acknowledged disk revisions, recoverable overlay candidates and policy-retained history.  Reference immutable artifacts; record absence/reset state explicitly where needed.  A manifest is not authority that cached disk bytes are still current. |
+| Recovery descriptor | Workspace/document-session association, exact source/context reference and host recovery provenance needed to present a candidate.  No automatic activation flag inferred from recency.  Save/reset/discard advance or remove the corresponding recovery reference explicitly. |
+
+Use canonical versioned encodings for identity inputs; equal decoded values in different ad hoc spellings must not accidentally become a different key, or vice versa.
+Candidate immutable artifact keys are SHA-256 of the exact encoded artifact bytes, with source-byte and logical-context validation inside the record.
+This separates wire integrity from source identity and dependency validity; a matching outer digest alone is not a valid syntax/semantic hit.
+Verify existing content before treating a same-key file as reusable; conflicting or invalid content is a cache fault, not permission to overwrite a blob potentially used by another reader.
+Checksums/digests detect corruption, not authenticity against an attacker able to replace content and hashes together.
+Persisted data never grants compiler-execution permission.
+
+Use only validated encoded keys to form store-relative paths; never concatenate raw source paths, supplied artifact names or unvalidated dependency IDs.
+The concrete directory layout must retain the source/context and module-instance distinctions described in section 8, while allowing context-independent source bytes to be shared.
+Reject traversal, out-of-store redirects and unsupported link/reparse-point cases under an explicit filesystem policy; user-private permissions are necessary but not a substitute for validation.
+Session tickets, raw world handles, allocation generations and live request leases are not restored as active process objects; reconstruct fresh session identities and validate persisted references.
+
+#### Read and Validation Sequence
+
+1. Open the configured store under the approved trust/path policy.  If unavailable or incompatible, retain correct in-memory operation and report a cache diagnostic.
+2. Acquire a coherent manifest generation and protect its selected records against concurrent collection before accessing them.  The exact pin/open protocol must be shared with publishers and GC, not improvised by a reader after deletion becomes possible.
+3. Check actual open-stream sizes against manifest/artifact limits before allocating or reading the declared payload.  Bound aggregate decoded bytes, record/dependency counts, nesting, temporary storage and arithmetic; recheck truncated/changing input rather than trusting a prior path stat.
+4. Decode a versioned envelope with exact lengths and byte-preserving payload encoding.  Reject unsupported record kinds/versions, duplicate required fields, invalid IDs, trailing data, malformed references and unsupported extensions according to the specified grammar.
+5. Verify encoded-byte digest, inner source length/digest, expected context/configuration and supported producer/schema.  Validate every dependency needed for the requested result; uncertain or unavailable dependencies cause a miss/incomplete outcome, not a stale hit.
+6. Reconstruct into unpublished owned storage.  Validate structural references, ranges and object/array bounds before exposing any result.  On failure release partial ownership, report the cache fault, and use fresh authoritative source computation where available.
+7. Publish only a complete protected result or an explicit unavailable/unsupported/failed outcome.  Parsing malformed source may produce an available syntax result with diagnostics; corrupt store bytes must not be converted into source-language errors.
+
+Loading a source artifact requires exact authoritative disk/overlay selection first; a cached saved revision is not a substitute for checking current disk bytes.
+Recovery candidates are a separate host-confirmed source input and may be inspected without first being activated as an overlay.
+Do not eagerly decode historical graphs; validate/load only the records needed for the selected source or query, and bound each resulting dependency traversal.
+Concrete numeric limits must be approved and enforced before qualifying a loader; E12's assert-aborting reader and post-read checks do not meet this contract.
+
+#### Publication, Contention and Durability
+
+Proposed publication sequence:
+
+1. Construct and validate immutable candidate records in request-owned staging storage; use unique same-filesystem temporary paths.  Never expose partial bytes under a committed key or manifest name.
+2. Acquire the store's cooperative mutation coordination with an explicit bounded wait/fail-open policy.  Re-read and validate the latest manifest generation before applying only this operation's intended changes, including disk/recovery slots independently.
+3. Install validated immutable artifacts before any manifest references them.  Reuse a verified existing artifact, or publish a complete new one with the approved filesystem primitive.  Coordinate this step with GC so newly installed unreferenced blobs cannot be collected before commit.
+4. Build a complete next-generation manifest, validate its references, then replace the committed manifest atomically under the qualified filesystem contract.  Readers must select either a complete prior generation or a complete new generation, never a mixed update.
+5. Report the committed generation and release coordination/staging resources.  If publication fails before the commit point, preserve the prior selected state and report failure/contention separately from successful in-memory syntax publication.  Uncertain commit outcomes require reconciliation by re-reading the committed generation/operation identity, not blind replay.
+
+An update racing another save/reset must validate its host event/session ordering before replacing recovery metadata; a late writer cannot resurrect an older recovery root simply because it acquired the lock later.
+Lock ownership, operation identity/idempotence, crash release, retry policy and stale-session handling need exact platform contracts; process-ID reuse or a timeout alone is not proof that an owner died.
+Do not hold service/world locks while waiting for store coordination, and do not make store contention block otherwise valid source selection indefinitely.
+The cache never writes editor source files as a side effect of committing a manifest.
+
+Distinguish in-memory availability, successful atomic process-visible commit, and power-loss durability in diagnostics/status.
+Only claim the last after specifying and qualifying required file and directory flush/replacement guarantees on the supported filesystem; E11's killed-process checks do not establish power-loss recovery.
+A corrupt committed manifest must not be overwritten by guessing its roots.  Fall back to in-memory operation and an explicit repair/reinitialisation policy that preserves recoverable candidates or reports their loss risk.
+
+#### Recovery, Collection and Pressure
+
+Host save/reset/discard updates the active in-memory source state independently of persistence success.
+If removal of a recovery reference cannot be committed, report that cleanup is not durable; never claim the old candidate was removed from disk.
+On a later restart, even a surviving candidate still requires host confirmation and cannot silently override a newly opened buffer.
+Persistence disabled means no store reads/writes or recovery activation; disabling it must not change the source/world semantics or imply that previously stored private data was deleted.
+Explicit clear/retention controls must explain their scope, protected roots and failures; deletion is not secure erasure from storage or backups.
+
+GC uses validated committed roots, retained history and all live leases/pins from participating processes under the same publication/reader coordination protocol.
+It may collect only artifacts proved unreachable and unprotected, plus abandoned staging proved not to belong to a live publication.
+Unknown/corrupt roots or uncertain cross-process lease ownership require conservative retention/fail-closed collection, not speculative deletion.
+Readers must pin the selected generation/artifacts or hold a qualified open backing handle before GC may unlink them; lazy reopening by pathname needs a surviving disk pin, not merely an in-memory pointer lease.
+In-memory-only results may permit unlinking optional disk artifacts if every surviving result is independent of those bytes, but never revoke required recovery/source roots as an unnoticed optimisation.
+
+Distinguish resident eviction, removal of optional derived artifacts, expiry of historical recovery candidates and deletion of acknowledged source/recovery roots.
+Under budget pressure reclaim unleased optional/history data according to an approved retention policy; protected live data may exceed the target until released.
+If required roots cannot fit or writes fail, surface pressure/persistence degradation and continue correct source operations; do not silently drop unsaved recovery while reporting persistence success.
+Absolute budgets, retention defaults, cross-process pin representation, shared-store scope and clearing/privacy behaviour remain approval decisions.
+
+#### Store Acceptance Trace Drafts
+
+These are future executable C2-C4 qualification cases, not new passing experiments or evidence of production durability.
+
+| Trace | Required assertions |
+| --- | --- |
+| S1: Bounded decoding | Reject oversized/truncated envelopes, overflowed lengths/counts, invalid IDs/ranges, wrong schemas/context and unresolved dependencies before unsafe allocation/dereference; release partial storage and compare fallback with fresh source. |
+| S2: Interrupted publication | Interrupt at staging, artifact-install, manifest-write and manifest-replacement boundaries.  A fresh reader selects a complete old/new generation or explicit recoverable fault, never a partial/mixed state; label process-kill versus power-loss coverage. |
+| S3: Competing slot updates | Race disk and recovery publications from one base generation.  Successful retry preserves both intended updates; a late old-session reset/save cannot replace newer recovery state. |
+| S4: Reader versus GC | Pause a reader between manifest selection, pin acquisition and lazy artifact access while another process collects.  The qualified coordination protects required backing or returns a safe retry/miss; no leased result becomes dangling. |
+| S5: Corrupt roots | Corrupt the manifest or make a live lease indeterminate.  Fresh source remains usable, collection retains uncertain candidates, and repair never silently guesses/deletes their roots. |
+| S6: Failed discard commit | Confirm host discard/reset, deny metadata writes, then restart.  In-memory selection followed the host, failed cleanup was reported, and surviving recovery remains only a candidate requiring new host confirmation. |
+| S7: Pressure and disable | Hold world/recovery pins while exceeding the configured budget, then disable persistence.  Report protected pressure/degradation without false durable success or source failure; no further store access occurs while disabled and prior data is not falsely reported deleted. |
+| S8: Namespace and permission failure | Supply unsafe keys/out-of-store redirects, foreign namespace/version data and denied paths.  Reject or miss with cache diagnostics, never escape the store, modify editor source or launch a compiler. |
+
+Still open: exact text grammar/record schemas and bounds; operation/session merge ordering; locks/pins and filesystem guarantees; repair/privacy/default policies; implementation and concurrent/platform qualification.
+No store acceptance trace, power-loss claim, scope/performance approval, or migration gate is marked complete by this draft.
+
+### Semantic Identity and Dependency Contract Draft
+
+Drafted 2026-10-20.  **R5 direction approved 2026-10-21; detailed schemas/algorithms remain proposed and unimplemented.**
+This refines the eventual semantic extension using E1-E8; it does not add semantics to the proposed syntax-first initial slice or qualify the current resolver as a cache-backed typechecker.
+Identity matching, canonical parameter encodings, stage schemas and supported Jai rules still require specification, approval and executable qualification.
+The following records are logical obligations, not public API names or a compiler-internal pipeline claim.
+
+#### Identity and Revision Separation
+
+| Identity boundary | Proposed rule |
+| --- | --- |
+| Configured module instance | Include resolved source plus validated compiler-compatible import-request distinctions, ordered explicitly supplied typed module arguments, and effective program/target settings.  Do not merge omitted versus explicit defaults, reordered arguments or path aliases merely because effective values/bytes match; preserve E2/E4 distinctions until a rule is qualified. |
+| Loaded declaration occurrence | Distinguish each semantically relevant load occurrence and its source-visible/resolution context inside the owning module instance.  A shared physical syntax snapshot does not deduplicate repeated declarations, module-private state or nominal types. |
+| Declaration identity | Identify a declaration within its configured instance/occurrence and logical owner.  Keep a separate declaration revision for its selected syntax/context.  Name, byte span, syntax hash and allocator address alone are insufficient. |
+| Cross-edit matching | Retain a logical declaration identity only after a specified unambiguous match within compatible ownership/context.  Reordering/moves, overloads and identical anonymous declarations need explicit rules.  Uncertain matches get fresh identities and conservative misses, not guessed continuity. |
+| Nominal and instantiated types | Root nominal identity in the owning declaration identity and configured instance; keep revision-dependent type facts separate.  Instantiations include validated typed argument identities/values and relevant context, not display names or a layout hash.  Structural layout equality cannot merge distinct nominal types. |
+| Struct and completed-context member comparison | Ordinary struct member descriptors, including `Context_Base`, preserve source order.  Completed `#Context` compares that ordered base plus canonical order-independent `#add_context` fields as defined in section 6.3; compiler encounter order is not logical context identity.  Layout/reflection/initialisation facets require their own observations. |
+| Query and task | A logical query key includes operation/version, subject, explicit arguments and semantic context.  In-flight work additionally captures the selected world; a new world's request cannot accidentally join computation over old inputs.  Cross-world result reuse requires validation rather than equal logical keys alone. |
+| Persisted identity | Encode logical identities/revisions with a versioned schema and validated reference graph.  Restart reconstructs fresh live handles; uncertain cross-restart matching is a miss.  Do not persist pointer identity, occupied pool slots or session allocation generations as semantic identity. |
+
+A retained old world keeps its original identities, revisions and lookup views even when a new world chooses different matches.
+Matching identifies the logical subject; it does not certify that its old result remains valid after an edit.
+Exact path/alias policy, typed-value canonicalisation, declaration-matching algorithm and persisted-ID allocation remain open choices, not implicit defaults selected by this table.
+
+#### Query Records and Observed Dependencies
+
+Every successful reusable computation publishes its protected immutable result together with the exact context and dependencies observed in that captured world.
+Proposed dependency records identify the observed subject, facet/query kind, context, observed revision/fingerprint, completeness and dependency-record schema version.
+An edge also records the parent's validation state independently of the target's current revision: E7's link-stamp/target-stamp distinction must not collapse into one mutable target flag.
+Record dependencies during actual reads, including candidate discovery, missing-name results and configuration reads; a guessed static dependency list is not sufficient.
+
+| Observed facet | Required dependency and invalidation boundary |
+| --- | --- |
+| Scope membership and visibility | Observe the complete relevant scope/import/load membership and access context, including file/module/export restrictions.  Adding/removing a name or changing visibility invalidates affected successful and negative lookups.  An all-visibility index is not an access-filtered binding result. |
+| Overload candidates | Observe the eligible candidate set as well as facts used to select one candidate.  A new candidate may change the answer even when the previously selected procedure is unchanged. |
+| Procedure signature/body | Separate signature and body results where their inputs permit.  Inferred signatures, defaults, inline/compile-time behaviour, reflection and caller-context operations must observe the body/context they actually use; a body edit is not universally private. |
+| Types, constants and layout | Observe nominal/instantiation identity, field membership/types, constants/conditions, target/ABI and prerequisite milestones.  Equal size alone is not equal type or equal layout semantics. |
+| Source locations | Track source revision and mapping/context independently of reusable semantic values.  A whitespace-only edit may preserve a value while changing the spans needed to display diagnostics or apply edits. |
+| Generated membership/evaluation | Observe conditions, generated syntax and tracked evaluator inputs/effects/provenance.  Incomplete discovery is provisional; unknown effects or unavailable context are unsupported/non-persistable, not a complete stable interface. |
+
+Never cache a definitive negative lookup from a scope whose relevant imports/conditions/generated membership are still incomplete.
+If a required observation cannot be represented or tracked, conservatively depend on the whole configured module/context, recompute, or return an explicit incomplete/unsupported result.
+Initial whole-module semantic invalidation remains acceptable; fine-grained reuse is an optimisation subject to these same correctness obligations.
+
+#### Validation and Publication Sequence
+
+1. Resolve the requested subject/context in the selected captured world, without silently attaching a newer source revision or changing configured instance.
+2. Check query/producer/schema compatibility and all explicit identity/context inputs.  Equal fingerprints do not bypass these guards; unknown identity or configuration is a miss.
+3. Validate every recorded dependency in that world.  Dirty means potentially stale, not automatically wrong or automatically reusable.  Missing records, changed membership/completeness and unverifiable inputs require recomputation or explicit unavailability.
+4. If recomputing, capture reads against immutable world-selected inputs, collect provisional dynamic dependencies, and obtain required milestones.  Cancellation/failure must not publish a partially collected dependency set as a complete result.
+5. Publish payload, completeness/diagnostics and dependency records atomically with world protection.  Use domain-separated versioned fingerprints of the observable facet, with collision/integrity safeguards; never hash process addresses or omit observable identity/status.
+6. Stop downstream propagation on equal observable results only where the consumer's observed facet, identity, context and completeness remain compatible.  Refresh validation stamps for the new dependency observations even when the reusable value is unchanged; validate source maps separately.
+
+Reverse edges accelerate dirty propagation but do not prove validity; missed watcher events must not certify a hit after restart.
+Persist a deterministic language error only with its complete validated inputs/dependencies; cancellation, missing compiler capability, transient I/O failure and incomplete discovery are not persistent claims that source is invalid.
+Cross-world reuse must still publish a result identified with the requesting world and its valid current source mapping; do not relabel stale diagnostic spans or expose mutable result objects shared between worlds.
+
+#### Declaration Milestones and Cycles
+
+| Logical milestone | Readiness and extension rule |
+| --- | --- |
+| Declaration/scope discovery | Syntax-backed identity and provisional membership can exist before full semantics.  Mark whether the relevant import/conditional/generated membership is complete; do not promise a closed namespace prematurely. |
+| Nominal identity and signature | Publish protected identities and independently ready signatures where the declaration's rules allow it.  Recursive references may use an incomplete identity without asserting completed layout/body facts. |
+| Constant/condition/instantiation | Request the precise prerequisite facts and track explicit context/arguments.  Unsupported evaluation yields an explicit outcome, not a fabricated constant or silently omitted declaration. |
+| Aggregate layout and values | Wait for required field/value/layout milestones; legal pointer recursion and impossible by-value recursion require different outcomes under qualified language rules. |
+| Body/expression analysis | Depend on ready signatures, lookup/candidate sets and queried type/value facts; publish independently of unrelated declaration bodies when dependencies permit. |
+| Generated syntax and final diagnostics | New generated input re-enters syntax/discovery with provenance.  Consumers of changed membership must be invalidated or remain provisional; a completed earlier stage does not mean all later semantic work is complete. |
+
+These are a query catalogue outline, not one mandatory total order: inferred types, polymorphism and generated work may introduce additional prerequisites dynamically.
+Detect cycles from required unresolved graph edges and classify them using the supported declaration rules; report blocking identities/milestones for an illegal cycle.
+External pending work and scheduler idleness alone do not establish a cycle.  No generic recursion guard, global fixed-point solver, or compiler evaluator is required merely to complete this draft.
+Actual stage schemas, legal recursion classes, generated-work discovery and cancellation/retry ownership remain specification and implementation work.
+
+#### Semantic Acceptance Trace Drafts
+
+These are future executable equivalence/invalidation cases, not new passing experiments or claims of full semantic support.
+Use fresh same-world computation as the cache oracle and isolated official-compiler fixtures for supported language facts; unimplemented semantic operations must return unsupported.
+
+| Trace | Required assertions |
+| --- | --- |
+| D1: Instance and occurrence separation | Reuse physical syntax across distinct import requests/parameters and repeated loads.  Preserve qualified nominal/visibility distinctions and occurrence multiplicity; no false declaration/type equality. |
+| D2: Ambiguous declaration matching | Reorder/move declarations and introduce identical/overloaded candidates.  Retain identities only for qualified unambiguous matches; conservative misses are acceptable, false identity reuse is not.  Old leased worlds remain unchanged. |
+| D3: Negative and visibility dependencies | Cache a supported missing/inaccessible name, then add it or change scope/import visibility.  Recompute the access-filtered lookup without turning inaccessible candidates into bindings. |
+| D4: Candidate-set change | Cache overload selection, then add/remove an eligible candidate while preserving the old winner's bytes.  Compare selection/ambiguity diagnostics against fresh computation. |
+| D5: Signature versus body | Change a local implementation, then an inferred/default/inline or compile-time-observed body.  Reuse only unaffected observed facets; body-sensitive consumers and current diagnostic locations remain fresh-equivalent. |
+| D6: Constants and target | Change a constant-driven field dimension or target context.  Revalidate layout/ABI consumers without conflating equal-sized nominal types or reusing facts from another configured instance. |
+| D7: Equal result, new observation | Change an upstream revision while preserving an observed value, then change it again.  The first edit may stop propagation, but refreshed edge stamps make the second edit invalidate correctly; changed spans are remapped separately. |
+| D8: Provisional work and cycles | Discover a generated/imported name after an initial miss, and contrast legal pointer recursion, illegal by-value recursion and externally pending work.  Provisional results never become false complete negatives; only qualified actual cycles produce cycle diagnostics. |
+
+Still open: identity/canonicalisation/matching algorithms, supported semantic slice, exact query/facet schemas, generated/evaluator dependency contracts, cycle classes and executable fresh-oracle qualification.
+No semantic trace is marked passed here; syntax-first deferrals, policy approvals, performance qualification and the migration-plan gate remain unchanged.
+
+### Execution and Shutdown Contract Draft
+
+Drafted 2026-10-20.  **R4 direction approved 2026-10-21; detailed execution/limit contracts remain proposed and unimplemented.**
+This refines C3/C5 and the core ticket/lease contracts using E8's bounded scheduler evidence; E8 did not test actual concurrent workers, reentrant callbacks or stopping a running worker.
+The proposed initial delivery mechanism is host-pulled completion records plus poll/wait, not arbitrary callbacks from workers.
+Exact Jai signatures, lock primitives, thread counts, event-loop integration and queue/budget values remain open; this draft neither implements a scheduler nor approves an execution platform.
+
+#### Coordinator and Worker Boundary
+
+A logical coordinator serialises source-event acceptance, task registration, dependency readiness, waiter attachment/cancellation, terminal-state publication and head-world selection.
+This is a linearisation responsibility, not a requirement for a dedicated thread or a single global lock.
+Every externally visible transition must have a defined ordering against competing transitions; acquiring a payload lease is part of observing an available result, not a later unprotected operation.
+
+| Operation | Proposed ordering and ownership rule |
+| --- | --- |
+| Accept source/update | Validate provider ordering and admission capacity before acknowledgement.  Own/lease the input and install the ticket coherently; no caller receives success for work the service cannot retain.  Store failure alone does not reject otherwise valid in-memory work. |
+| Request/join query | Atomically inspect the selected world-keyed task, return a protected existing terminal result or register a waiter for pending work.  Completion racing registration cannot strand a waiter or create two equivalent tasks. |
+| Dispatch worker | Transfer protected immutable inputs and owned scratch, plus task identity/allocation generation and attempt token.  A worker must not mutate published syntax/worlds or call host code while holding service coordination. |
+| Complete worker | Validate task/world/generation/attempt and the expected nonterminal state; publish result/dependencies together before resolving surviving waiters.  Duplicate or obsolete completions are rejected, and their unpublished payloads released by their recorded owner. |
+| Cancel/release waiter | Order cancellation against terminal publication.  If cancellation wins, that waiter is cancelled and gets no result payload; if completion won, its existing terminal outcome is not rewritten.  Releasing the handle retires its notification interest and protection explicitly. |
+| Coalesce update work | Preserve accepted source-event ordering and each ticket's truthful milestone outcome.  Only unneeded computations may be skipped; an older completion cannot replace a newer selected head or silently satisfy a different revision's ticket. |
+
+Do not invoke filesystem/compiler/provider callbacks, wait on dependencies, or block on store coordination while holding service state locks.
+Acquire external inputs through an explicit asynchronous or bounded operation, then revalidate its captured identity at publication; returning from an external call does not make its result current.
+Provider re-entry, lock ordering and cross-component ownership transfer need explicit implementation rules, not reliance on recursive locks.
+
+#### Completion Observation and Host Delivery
+
+An immediate terminal query response needs no later completion notification for that call.
+A pending response installs a live waiter whose terminal outcome is retained until observed/released according to its handle contract, even if completion happens before the caller next polls.
+Poll/wait reads that same stable outcome; it does not consume the payload, repeat the terminal transition, or implicitly select a newer world.
+A timeout stops that wait attempt and reports pending/timeout, not cancellation or source failure unless the caller separately requests cancellation.
+
+Proposed host delivery is a completion registry/queue addressed by protected handle identity and generation, with a coalescible wake signal.
+Host draining emits at most one terminal completion record per live pending registration; a lost/coalesced wake must not lose the retained outcome.
+Registering/inspecting completion and arming a wait must prevent the classic check-then-sleep lost wakeup; poll remains authoritative if the host delays delivery.
+Queue pressure must not silently drop terminal outcomes: reserve admission/retention capacity, use a bounded indexed registry, or reject new work explicitly before acknowledgement.
+The concrete representation and numeric limits still need specification.
+
+Drain/delivery is host-owned and serialised for a subscription; the core never invokes a host callback inline from submission, task completion or cancellation.
+A callback adapter, if added, runs only while the host explicitly dispatches records, outside internal locks and with callback argument/result leases held through return.
+The host may submit/cancel/query again from that callback; re-entry is a new operation, not permission to recursively mutate the notification iteration or access released handles.
+Release during delivery suppresses future interest, but backing used by the active delivery stays leased until it returns.
+Callback exceptions/failures must not change an already committed task outcome or leak its delivery lease; the adapter's error reporting and reentrant-dispatch policy remain to be specified.
+No UI thread affinity is inferred; the adapter/host must declare its dispatch thread and avoid a blocking wait that depends on progress on that same thread.
+
+#### Cancellation, Scheduling and Pressure
+
+Waiter cancellation is independent of computation cancellation and never undoes an accepted source event.
+Cancel underlying work only after confirming there are no other waiters, required update milestones or dependency consumers that still need it, or as part of explicit service shutdown.
+The initial last-consumer policy may retain or cooperatively stop an unneeded computation; it must be chosen explicitly and cannot affect correctness of surviving results.
+Cancellation is a request until the worker acknowledges termination or returns; retain its inputs, scratch and completion routing throughout that interval.
+If a new attempt starts, use a new attempt token; an old worker cannot complete the new attempt even when the logical query key matches.
+
+Prioritise active-file syntax and user-requested queries over optional historical loading or GC, and propagate needed priority to prerequisite work.
+Do not busy-spin on blocked dependencies or diagnose a cycle from lack of runnable workers alone.
+Specify bounded admission and a fairness/progress policy for required background work; priority classes are not a measured latency guarantee or a reason to starve accepted work indefinitely.
+Pressure may reject/defer new optional work or surface an explicit admission failure, but must preserve existing leases and terminal-outcome observation.
+Thread-pool size, scheduling quanta, starvation bounds, cancellation check locations and compiler subprocess limits are still implementation/qualification decisions.
+
+#### Service Shutdown and Retained Results
+
+Proposed lifecycle: `open -> quiescing -> draining -> stopped`; shutdown is idempotent and repeated calls observe the same shutdown operation.
+
+1. Enter quiescing at a defined coordinator transition.  Reject new work explicitly, stop new dispatch, and detach source/watch/provider registrations, so no new callback can acquire untracked service state.  Order concurrent submissions as either accepted before this point or rejected after it.
+2. Resolve remaining pending tickets/waiters with truthful terminal outcomes and request cancellation of unneeded/running tasks.  Preserve already published outcomes and host-accepted source state; report unfinished persistence/recovery cleanup rather than implying a successful durable flush.
+3. Drain worker/provider/store operations and in-flight host delivery under their ownership protocols.  Reject late/duplicate completion tokens without accessing destroyed state; retain a live completion sink and task input leases until every producer is known to have stopped or detached safely.
+4. Enter stopped only after the declared worker/callback/resource conditions are met.  Detach scheduler-owned references and release unleased resources; result/world leases already handed to clients remain valid and releasable through a surviving owner, not a destroyed service allocator.
+
+A shutdown wait deadline reports incomplete shutdown if a worker/provider cannot stop; it does not prove that task memory is safe to free.
+Never forcibly reclaim borrowed state or report stopped merely because a timeout expired.
+An optional isolated compiler backend may require a bounded process-tree stop protocol, but no compiler process is launched by initial shutdown or by persisted artifacts.
+Delivery obligations for live registered handles remain observable through the shutdown handle/host drain; the host may explicitly release registrations instead, but shutdown cannot silently discard them.
+The final destruction/release API must distinguish scheduler shutdown from the last external result lease and must document who owns any outstanding operations.
+Blocking shutdown from inside a dispatch callback cannot wait for that same callback to return; request shutdown there and observe completion after unwinding.
+
+#### Execution Acceptance Trace Drafts
+
+These are future executable concurrent/interleaving cases for C3/C5, not passing E8 model scenarios or evidence that the proposed implementation is race-free.
+
+| Trace | Required assertions |
+| --- | --- |
+| X1: Register versus complete | Force completion before, during and after waiter attachment/return.  Return an immediate protected result or one live pending registration with one retained terminal outcome; no lost wake or duplicate equivalent task. |
+| X2: Cancel versus complete | Race one waiter's cancellation with shared completion.  Exactly one terminal outcome wins for that waiter, the other waiter remains correct, and unpublished/unused payload ownership is released once. |
+| X3: Release and slot reuse | Queue a notification/completion, release its registration and reuse the slot for another generation.  Old records cannot reach the new client; an already active delivery retains its backing through return. |
+| X4: Reentrant host dispatch | From host dispatch, submit another query, cancel a waiter, release a lease and request shutdown.  No callback runs under internal locks, no recursive delivery corrupts iteration, and shutdown completion does not depend on blocking its own callback. |
+| X5: Pressure and delayed delivery | Delay host draining while admitted tasks finish and wake signals coalesce.  Outcomes remain pollable, and each live registration has at most one terminal record; queue/admission pressure never loses accepted work or revokes leases. |
+| X6: Priority and external wait | Mix visible-file work, background dependencies and blocked external input.  Required prerequisites make progress under the approved fairness policy, optional work cannot monopolise dispatch, and external waiting is not reported as a cycle. |
+| X7: Shutdown racing submission | Order submissions around quiescing, run repeated shutdown, and attempt duplicate/late completions.  Every accepted request gets a truthful observable outcome; new work rejects and preserved result leases remain readable/releasable after stopped. |
+| X8: Worker outlives deadline | Hold a worker/provider operation beyond a shutdown wait deadline, then allow it to stop.  Report incomplete shutdown initially, preserve protected inputs/completion sink, and enter stopped only after safe termination without use-after-free or false durable-success status. |
+
+Still open: approval of the execution model, lock ordering, queue/admission limits, callback adapter contract, worker stop/fairness policy, source-provider integration, exact public signatures and real concurrent/platform qualification.
+No execution trace is marked passed here, and the scope/performance, implementation and migration approval gates remain open.
+
+### Source Provider and Capture Contract Draft
+
+Drafted 2026-10-20.  **R3 direction approved 2026-10-21; detailed provider/event schemas remain proposed and unimplemented.**
+This refines C1/C2/C5 and the core source-event contract; it does not qualify a real editor adapter, an operating-system snapshot facility, or atomic cross-file refactoring.
+The proposed initial provider mode captures an explicit finite set of documents, preserving unknown membership rather than pretending the workspace/import closure is already complete.
+Provider capability negotiation, host integration and exact identity/event schemas remain specification and approval work.
+
+#### Provider View and Capture Contents
+
+The source provider exposes a workspace/session namespace, an ordered accepted-event frontier, immutable selected revision references and an explicit capability/consistency description.
+A provider view distinguishes active overlay bytes, acknowledged disk bytes, confirmed absence and unobserved/unavailable source; it does not derive active selection from the cache's newest artifact.
+Capture records retain the provider namespace/frontier, resolver configuration, source-visible context, requested document set, and the selected revision/state for each requested document.
+All source bytes needed by a published capture must be owned or immutably leased before it is reported available, including paths/context used by diagnostics and resolution.
+
+| Selected document state | Proposed interpretation |
+| --- | --- |
+| Present overlay | Exact host-selected immutable buffer revision, regardless of disk existence or equality.  Retain the separate acknowledged disk state for save/reset handling. |
+| Present disk | Exact bytes acquired and acknowledged by the provider for this capture, with their context and acquisition/consistency provenance.  Do not infer their current validity from timestamp/size or a historical manifest. |
+| Confirmed absent | Absence established by an authoritative provider observation for this document/request/context at the captured frontier.  This may support a negative dependency only within that qualified observation's scope. |
+| Unknown/unobserved | The capture has not established this document or resolver-candidate membership.  It is not a missing file, a complete negative lookup, or permission to read the latest disk into the old world. |
+| Unavailable | The provider cannot supply required protected bytes/state, for example because a lease expired, access failed or historical capture is unsupported.  Report the reason and incomplete/unavailable outcome explicitly. |
+
+The captured frontier orders provider events; it is not proof that every physical file existed in that state at one instant.
+Ordinary sequential filesystem reads do not provide an atomic multi-file snapshot, even when timestamps/stat data appear unchanged.
+The provider must declare whether it supplies host-frozen revisions, another qualified immutable snapshot, or merely individually observed disk revisions.
+Exact byte hashing certifies the captured bytes, not simultaneous cross-file observation or freedom from an external writer modifying a file during acquisition.
+If a required read-consistency guarantee cannot be supplied, return explicit unavailability/incompleteness for that guarantee; metadata rechecks alone must not be advertised as proving it.
+The syntax-first service may parse explicitly captured observed bytes without claiming a coherent compiler-equivalent cross-file disk instant or full semantic closure.
+
+#### Initial Capture and Dependency Discovery
+
+1. The host requests a finite document set and required provider capabilities/consistency at an explicit frontier or a newly selected provider view.  Validate namespace, identities, overlay precedence, resolver configuration and admission bounds.
+2. Acquire protected exact source/state for that set, without allowing concurrent provider events to rewrite a revision already selected for the capture.  If the provider cannot freeze a required selection, retry a new capture explicitly or report unavailable; do not quietly mix old and new revisions under one claimed frontier.
+3. Publish a capture descriptor with its membership/completeness and consistency limits.  Syntax/index tasks operate only over these immutable inputs; release the temporary acquisition state without releasing published leases.
+4. On import/load/generated dependency discovery, resolve using the captured context and inspect only candidate membership the provider view can establish.  An unknown candidate set cannot yield a definitive missing-module diagnostic or complete export set.
+5. If the provider can supply the same frontier's immutable source/membership, extend through a specified versioned capture/discovery operation without changing established observations.  Otherwise, report the missing capture requirement and request a successor capture/update ticket; an existing query does not implicitly adopt that successor world.
+
+The proposed initial implementation may support only the finite-set path and explicitly report broader semantic discovery unsupported/unavailable.
+It need not implement filesystem time travel, eager recursive import enumeration or a full resolver merely to expose syntax snapshots.
+Any future lazy discovery must specify how namespace/candidate-set absence is frozen as well as how present file bytes are retained.
+Resolver search paths, directory membership, newly created files and changed permissions are observations/dependencies, not incidental I/O invisible to the world model.
+A physically identical path reached through a different source-visible request must still undergo the path/context identity validation required by E2/E4.
+
+#### Multi-Document Events and Analysis Publication
+
+A proposed host source transaction names its workspace/session and base frontier, contains explicit per-document base revisions and ordered edits/replacements/rename/absence events, and identifies the requested analysis milestone.
+Validate every member's identities/ranges/context and acquire all resulting immutable bytes before committing any member to the provider's accepted selection.
+Reject stale bases, conflicting duplicate document operations, ambiguous rename ownership, invalid ranges or admission failure as one rejected transaction; no member becomes an acknowledged partial success.
+Initially reject multiple operations on the same logical document unless the transaction grammar defines their ordering unambiguously; the existing sequential ranged-edit convention applies within a single document's edit sequence.
+
+Commit the accepted source transaction at one coordinator transition and frontier; all members become selected together in the provider model.
+This is a logical in-memory source-selection transaction, not an atomic filesystem save, editor write operation or persistent-manifest durability guarantee.
+If the host provides only unrelated single-document events, publish their actual separate frontiers; do not relabel intermediate states as one atomic change.
+Source acceptance and syntax/index readiness are distinct: a later parse/allocation/provider failure does not pretend that the host's accepted edits never happened.
+An aggregate analysis milestone is published only when its requested members have valid results or explicitly specified absence/diagnostic states; otherwise the ticket remains pending or terminates with its actual failure/supersession.
+Do not assemble an aggregate "current" result from whichever per-file parse completed most recently.
+Until that milestone exists, an older retained analysis world remains queryable only under its old identity, not relabelled as current accepted source.
+
+Later cross-file refactoring must separately validate the host's current base revisions and apply edits through its authorised transaction protocol.
+This draft does not authorise applying edits, writing disk files, or assuming that the host can atomically apply a proposed rename/refactoring.
+The adapter must declare its supported atomicity; unsupported application guarantees remain explicit even if analysis capture is coherent.
+
+#### Provider Lifetime, Failure and Diagnostics
+
+Provider leases protect immutable revisions independently of a live editor callback; no syntax task may retain borrowed callback memory after return.
+Closing/resetting a buffer changes future selection through an event but does not mutate/release bytes held by an old-world lease.
+If the host cannot retain old bytes, the service must copy them before acknowledging the capture or reject that capability; expiry cannot silently turn a valid published lease into a dangling reference.
+An unavailable uncaptured revision is distinct from an already published lease being invalidated, which violates the ownership contract.
+
+Acquisition limits, retry/cancellation and shutdown follow the execution contract: external provider calls run outside internal locks, return under captured operation identity, and retain ownership until stopped/detached safely.
+Provider failure, permission denial and incomplete capture are service/capability outcomes, not fabricated parse errors or successful empty source.
+Expose consistency/completeness and selected identities with results, so the host can decide whether a syntax-only result is sufficient; do not bury a weakened capture guarantee in a cache hit counter.
+Path-alias rules, per-document versus workspace-frontier conflict checks, snapshot capability names, retained-provider storage and absolute acquisition bounds remain approval decisions.
+
+#### Source Capture Acceptance Trace Drafts
+
+These are future executable source-provider cases for C1/C2/C5, not tests already run or claims of coherent filesystem snapshots.
+
+| Trace | Required assertions |
+| --- | --- |
+| V1: Overlay and disk race | Capture an overlay while external disk events arrive, then save/reset through explicit host events.  Captured overlay bytes remain exact, separate disk state advances truthfully, and old-world reads do not change. |
+| V2: Unknown versus absent | Request an uncaptured dependency and contrast it with a provider-confirmed absent candidate.  Unknown yields incomplete/unavailable/unsupported as appropriate, never a definitive missing-name/module result. |
+| V3: Late discovery | Discover a dependency after a newer provider frontier exists.  Use qualified historical bytes/membership or require an explicit successor capture; no latest bytes are attached to the old query. |
+| V4: Disk consistency limit | Mutate files during sequential acquisition and preserve timestamps where possible.  Exact captured bytes/provenance are reported, and no atomic snapshot or stable-read guarantee is inferred from hashes/stat checks alone. |
+| V5: Atomic source batch rejection | Submit a multi-document transaction with one stale/invalid member or an ambiguous rename.  Reject all selection changes; a valid replacement transaction can subsequently commit one coherent frontier. |
+| V6: Batch analysis ordering | Accept a valid multi-document transaction, complete parsing out of order and fail one required task.  No mixed-revision aggregate milestone is published; accepted source remains truthful and retained prior analysis stays labelled old. |
+| V7: Capture lifetime | Close/reset a host buffer and release acquisition callback storage while an old capture is leased.  Published bytes remain exact; an adapter unable to protect them must have copied/rejected before acknowledgement. |
+| V8: Provider failure and stop | Race delayed provider completion with permission failure, cancellation and shutdown.  Return truthful outcomes, reject obsolete completion tokens and keep inputs alive until safe stop; never execute source or write editor files. |
+
+Still open: provider schemas/capability negotiation, namespace/path identity, snapshot and resolver-membership mechanism, transaction grammar, host application guarantees, numeric limits and executable adapter qualification.
+No source-capture trace is marked passed here; policy/scope/performance approvals, production implementation and the migration-plan gate remain open.
+
+### Source Update and Query Interface Schema Draft
+
+Drafted 2026-10-20.  **Proposed interface schema, not approved API or implemented code.**
+The fifteen-operation interface was approved as the specification baseline on 2026-10-21, subject to exact schemas and API review, not production implementation or migration.
+This makes the source/update/query portion concrete under the approved initial scope and R3-R5 directions; R2/R6-R8, exact ABI, limits, persistence wire grammar and implementation authorisation remain open.
+The notation below is a logical tagged-record schema, not Jai source or a persistent memory layout.
+All records carry an interface schema version; unknown versions/tags are rejected before accepting work, never interpreted as an empty successful operation.
+
+#### Record Shapes and Value Types
+
+| Type | Proposed v1 shape and meaning |
+| --- | --- |
+| `InterfaceVersion` | Exact supported schema identifier.  Changes to tags, field meaning or ownership require explicit compatibility/version rules. |
+| `SessionID`, `WorkspaceID`, `DocumentID`, `ProviderRevision`, `ProviderFrontier`, `SourceRevision`, `ContextID` | Distinct opaque identity types, never interchangeable strings or allocation addresses.  Use the canonical-key and authority rules below; adapter allocation/path binding remains subject to review.  Provider revisions/frontiers are namespace-scoped equality/order tokens, not wall-clock timestamps. |
+| `Handle` | `{session: SessionID, kind: HandleKind, slot: u64, generation: u64}`.  Kinds: `SESSION`, `WORLD`, `TICKET`, `WAITER`, `RESULT`, `SHUTDOWN`.  Validate session/kind/generation on every operation; retire a slot before generation wrap.  A handle identifies one owning registration, not a serialisable world/declaration identity. |
+| `SessionOptions` | `{version, workspace, provider_namespace, provider_capabilities, context, requested_limits, store_policy}`.  The host explicitly supplies required configuration/policy or requests a documented negotiated value; unspecified defaults are not silently chosen by this draft. |
+| `SessionDescription` | `{session_identity, workspace, provider_namespace, lifecycle, accepted_frontier, tracked_document_states, capabilities, consistency, effective_limits, store_status}`.  Return one coherent caller-owned value snapshot, not mutable borrowed coordinator storage.  It reports source selection/capabilities, not a published analysis world or atomic filesystem view. |
+| `SourceInput` | Tagged `INLINE_BYTES {bytes}` or `PROVIDER_LEASE {provider_identity, provider_revision, immutable_lease}`.  Inline bytes are borrowed only during submission; acceptance copies them or acquires an independent immutable lease.  The provider lease must be retained successfully before acknowledgement. |
+| `ExpectedProviderState` | Tagged `UNTRACKED` or `REVISION {provider_revision}`.  `UNTRACKED` matches only a document with no accepted provider state in this session; it is not confirmed absence and never bypasses a tracked revision conflict. |
+| `DiskObservation` | Tagged `PRESENT {source: SourceInput, source_revision, context: ContextID, consistency}` or `ABSENT {provider_revision, context, observation_provenance}`.  Neither unknown membership nor permission denial is `ABSENT`.  Check revision claims against captured inputs/provider authority; do not trust an arbitrary digest field. |
+| `RangeEdit` | `{start_byte: u64, end_byte: u64, replacement: bytes}` with half-open endpoints into the current intermediate document bytes.  The enclosing event names the initial base revision; apply edits sequentially, checking ranges/overflow after each, then accept or reject the whole batch. |
+| `DocumentEvent` | `{document: DocumentID, expected_provider_state: ExpectedProviderState, source_context: ContextID, event: EventPayload}`.  All required base/host-confirmation tokens are explicit, not inferred from timestamps or cache contents.  A first `SET_OVERLAY`, `OBSERVE_DISK` or host-confirmed `RESTORE_OVERLAY` may use `UNTRACKED`; editing, saving or resetting requires compatible tracked base state. |
+| `SourceBatch` | `{version, workspace: WorkspaceID, session: SessionID, expected_frontier: ProviderFrontier, events: []DocumentEvent, milestone: SYNTAX_INDEX}`.  Initially require one event per logical document; a range-edit event may contain its sequential edit list.  Reject an empty batch or unsupported milestone explicitly. |
+| `AnalysisRequest` | `{version, expected_frontier, documents: []DocumentID, milestone: SYNTAX_INDEX}`.  Request analysis of a nonempty set of already tracked selected revisions without changing provider source state.  Unknown members or incompatible consistency reject explicitly; no hidden provider/disk read is implied. |
+| `WorldDescription` | `{world_identity, workspace, provider_frontier, context, members: []SelectedDocument, membership_completeness, consistency}`.  `SelectedDocument` carries document/context and tagged present source revision, confirmed absence, unknown or unavailable with reason.  The `WORLD` handle protects immutable description/source/index backing. |
+| `QueryRequest` | `{version, world: Handle(WORLD), document: DocumentID, kind: SYNTAX_SNAPSHOT | SYNTAX_DIAGNOSTICS | SYNTAX_DECLARATION_INDEX | SEMANTIC_QUERY | COMPILER_EVALUATION}`.  The first three are syntax-derived operations; the last two are known reserved capability tags returning `UNSUPPORTED` before task creation in this initial slice.  Unknown tags or invalid handles remain operation errors, not capability results. |
+| `ResultDescription` | `{result_identity, world_identity, document, source_revision_if_present, context, kind, completeness, diagnostics_status, payload}`.  `RESULT` owns access to its immutable payload and source-map backing; parse diagnostics do not turn usable syntax into a service failure. |
+| `CompletionRecord` | `{registration: Handle(WAITER), operation_identity, terminal_kind, world_identity_if_known}`.  A host-drained record is informational, not a payload lease.  Use its still-live registration to inspect/acquire the protected result; stale/released generations reject. |
+
+Counts, bytes, decoded sizes and accepted registrations must have concrete checked limits before implementing this schema.
+The fixed-width handle fields do not bound total allocations or authorise wrapping IDs; no client may fabricate a valid registration by copying a logical identity into a slot.
+
+#### Canonical Identity and Payload Refinement
+
+Proposed 2026-10-21 under the approved specification baseline; not final API, persistent wire grammar or implementation approval.
+The following defines equality and hash-input bytes independently of Jai struct padding, native pointers and text-file formatting.
+Adapter namespace provisioning, complete context fields and exact syntax-node variants still require review; no store defaults or resource budgets are selected here.
+
+Define `B(x)` as an unsigned 64-bit little-endian byte count followed by exactly the bytes of `x`.
+Define `K(tag, fields)` as `B(ASCII("jai-cache-key"))`, unsigned 32-bit little-endian key-schema version `1`, `B(ASCII(tag))`, unsigned 64-bit little-endian field count, then each field encoded with `B` in declared order.
+Nested keys are complete `K` byte sequences used as fields, not unframed concatenations; numeric fields have explicitly declared widths and little-endian encoding.
+Lengths must be representable and checked before allocation/addition; a 64-bit length is not permission to allocate that much memory.
+Hashing uses SHA-256 over the complete key bytes, but the key descriptor remains available for equality/validation; a digest alone is not a logical identity or proof of source authority.
+This is a canonical fingerprint input, not a replacement for the proposed versioned text persistence format.
+
+| Value | Proposed canonical identity and authority |
+| --- | --- |
+| Namespace token | Nonempty opaque bytes issued by its responsible owner, compared byte-for-byte without Unicode normalisation, case folding or separator rewriting.  The adapter must bind the token to one authority/configuration and never reassign it to a different one while references/recovery records can survive.  An unverified binding is rejected or assigned a fresh namespace, not guessed from a display path. |
+| `WorkspaceID` | `K("workspace", [host_namespace, workspace_token])`.  The host decides whether a reopened workspace has the same identity; cache discovery cannot choose it.  Shared project paths do not implicitly merge separate workspaces. |
+| `DocumentID` | `K("document", [provider_namespace, document_policy_version, provider_document_key])`.  The provider registers the resolved absolute-path binding and its alias/case/link policy; the service does not independently lowercase or resolve it.  Source-visible path/directory spelling remains separate context input.  Deletion/reappearance preserves or changes this key only according to the declared provider policy. |
+| `SessionID` | `K("session", [service_incarnation_namespace, session_token])`, issued by the service.  The incarnation namespace is never reassigned while old references/records can survive; session tokens are not reused within it.  Neither is derived from workspace/path/content; owner routing is validated before slot lookup.  Restart creates a new incarnation and rejects every old handle even if persisted workspace/document keys match.  The allocation mechanism still requires review. |
+| `ProviderRevision` | `K("provider-revision", [provider_namespace, session_identity, document_identity, provider_state_token])`.  A token identifies one accepted combined disk/overlay state, not just selected bytes.  The provider cannot reuse it for a different state; rejected batches do not install a new token. |
+| `ProviderFrontier` | `K("provider-frontier", [provider_namespace, session_identity, frontier_token])`.  The coordinator records the accepted-event order; token bytes/digests are not lexicographic clocks.  Retry analysis leaves the frontier unchanged, and a rejected transaction creates no accepted successor. |
+| `SourceRevision` | `K("source", [source_key_version_u32, byte_count_u64, SHA256(exact_source_bytes)])`, with source-key version `1`.  Exact bytes remain the authority; collision ambiguity rejects affected reuse rather than merging different sources.  Equal empty/present sources can share this value across documents, but confirmed absence has no source revision.  No BOM stripping, newline conversion, decoding or trailing-NUL insertion is part of identity. |
+| `ContextID` | `K("context", [context_schema_identifier, canonical_context_descriptor])`.  The versioned descriptor includes syntax configuration/parser schema and all source-visible path/resolution inputs used by that result; semantic extension fields must include the section 3/semantic-contract inputs before semantic reuse is supported.  An opaque host label alone cannot establish equivalent context. |
+| World/result/operation identity | Service-issued, session-scoped, typed nonreused tokens, distinct from registration handles and from content keys.  Repeated analysis may produce a distinct world/result identity at the same frontier.  Equality of those tokens never authorises restoring handles from persistence. |
+
+For `ContextID`, descriptor records use named, versioned fields in schema-declared order; nested sequences preserve order unless that field's schema explicitly defines set semantics and canonical sorting.
+This service configuration identity is not Jai's `#Context` type.
+A future semantic descriptor containing the completed language context must use section 6.3's ordered-base/unordered-additions rule, not encode compiler encounter order as type identity.
+Reject duplicate/unknown fields and missing required fields for the selected schema rather than dropping them during hashing.
+The syntax-only descriptor registry below is proposed for API review; until its producer/adapter bindings are validated, an adapter cannot claim cross-session context equivalence or persistent derived-result reuse from this recipe alone.
+Opaque provider path keys need not be UTF-8; adapters retain native source-visible spelling without lossy conversion and define its descriptor encoding explicitly.
+Handle transport, if later added, must encode its fields explicitly and validate the live owner/registration; it is never a persistent identity record.
+
+##### Syntax Context Registry and Adapter Bindings
+
+Proposed 2026-10-21, not approved adapter/API behaviour.  The initial context schema identifier is ASCII `jai-cache-syntax-context/1`.
+Its descriptor is `K("syntax-context-descriptor", fields)` with exactly the following ten fields in table order; each field is itself `K(field_name, values)`.
+Field names/tags/schema identifiers are exact ASCII; booleans are one byte `0` or `1`, and version numbers explicitly marked `u32` are unsigned little-endian.
+There are no omitted/default fields or generic extension maps in this schema.  Unknown schemas, duplicate/reordered fields, invalid booleans and missing required values reject before accepting a context.
+The registry is closed for the syntax-first scope, not an assertion that these fields suffice for future semantic/evaluator contexts.
+
+| Field name | Ordered values and authority |
+| --- | --- |
+| `producer` | Service-verified producer namespace, immutable parser implementation/build identity, compiler SDK/layout identity and lexer implementation identity.  These identify the implementation actually used, not an unverified client-supplied version label.  A change conservatively misses even if output compatibility is suspected. |
+| `syntax_schemas` | Token, node, recovery and declaration-index schema identifiers, in that order.  Each resolves to an exact supported field/variant registry; an unknown registry cannot be accepted merely because its identifier hashes successfully. |
+| `parser_parameters` | `ENABLE_TRIVIA`, `EVALUATE_STRING_ESCAPES`, `INTERN_IDENTIFIERS`, `USE_SIMD`, `TRACK_AST_REUSE`, in the declaration order of the current module parameters, each as a boolean.  The full-featured initial profile requires `ENABLE_TRIVIA = true`; reject a false value at profile admission rather than supporting a second byte-mapping path.  All five remain conservatively keyed, including instrumentation/implementation choices; removing a field requires a new schema and equivalence evidence. |
+| `parse_profile` | Registered grammar/language profile identifier and recovery-policy identifier.  V1 supports only explicitly implemented profiles; no unkeyed runtime parser option or hidden host default may affect results.  A newly exposed parse option requires a schema revision before reuse. |
+| `diagnostic_profile` | Diagnostic schema identifier, registered message/severity-policy identifier and presentation-language identifier.  The producer validates the selected policy; changing diagnostic text/order/policy cannot reuse a result under an unchanged profile.  An unsupported localisation is rejected, not silently substituted. |
+| `visible_filename` | One `PathValue` preserving the exact source-visible filename spelling supplied for this occurrence, including retained dot/parent segments and alias spelling.  It is not inferred from a canonical physical key. |
+| `visible_directory` | One `PathValue` preserving the effective source-visible directory independently of filename.  This records context for `#filepath`/location-sensitive results without evaluating those constructs as context-free literals. |
+| `relative_base` | One `PathValue` for the explicit absolute base used for relative-request interpretation.  No later dependence on process working directory is permitted. |
+| `resolver_binding` | `K("NO_RESOLUTION", [])` for an initial syntax-only capture that does not resolve imports/loads, or `K("RESOLVER_CONFIG", [resolver_schema, canonical_registered_descriptor])` only for an explicitly supported resolver schema.  V1 baseline requires only `NO_RESOLUTION`; it is not an empty/complete search result.  Authored import/load requests remain syntax, not resolved membership. |
+| `semantic_extension` | Exactly `K("UNSUPPORTED", [])` in this schema.  Module/program arguments, target/layout facts and evaluator policies are not silently ignored inputs to semantic reuse; requests requiring them return the reserved unsupported capability outcome.  A supported semantic schema must enumerate those inputs separately. |
+
+`PathValue` is `K("path", [encoding_tag, code_units])`, where `encoding_tag` is ASCII `WINDOWS_UTF16LE` or `POSIX_BYTES`.
+Windows code units are the exact little-endian 16-bit units without a terminator, BOM insertion or Unicode normalisation; their byte count must be even.  POSIX bytes are preserved without UTF-8 decoding.
+Reject embedded NUL code units/bytes and unsupported host encodings; the tag is part of equality, not permission to treat a foreign path as locally openable.
+The provider validates absolute-path/base requirements using its registered platform policy, while source-visible filename/directory spellings are retained without canonical rewriting.
+Empty required path values are invalid; a future anonymous/virtual-document context needs an explicit alternative schema rather than an invented disk path.
+Path encodings describe observed inputs, not proof of filesystem equivalence, stable file identity, permission or atomic capture.
+
+Adapter binding is admission metadata for the existing session/source operations, not a sixteenth public operation:
+
+1. `OpenSession` binds the host/workspace/provider namespaces to an owned descriptor `{adapter_schema, authority_identity, document_policy_version:u32, path_platform, case_alias_link_policy, reappearance_policy, consistency_capabilities, lease_capabilities}`.  Validate supported versions and explicit capability values; no policy is inferred from the current machine's filesystem or a cache manifest.  The adapter-schema field registry and platform-policy alternatives require separate review before an adapter is qualified.
+2. For each first accepted document, bind its provider key to its resolved absolute-path record and that policy.  The provider attests the binding; the service checks namespace/policy/version compatibility and internal consistency before owning it with the accepted state.  Source-visible occurrence paths come from the context, not this canonical record.  Conflicting claims for an existing key reject the entire batch rather than mutating an old world's identity.
+3. Default to no unproven alias merge: distinct registered keys remain distinct even if filesystem probes or bytes match.  A declared alias policy may map requests to one physical document only after the adapter's required validation; occurrence-specific contexts still remain separate.  Changed case/link/reappearance policy requires a new policy version/namespace and explicit successor capture, never reinterpretation of retained worlds.
+4. Across restart, reuse workspace/document bindings only after the host/provider re-establishes the same authority and policy.  A manifest is a candidate, not that confirmation.  If continuity cannot be established, issue fresh namespace bindings and miss derived reuse; recovery remains a host-confirmed candidate and old live handles remain invalid.
+5. Before batch acknowledgement, validate every supplied `ContextID` against an owned canonical descriptor, actual producer configuration and the corresponding document/occurrence binding.  Recompute the key, reject mismatches/unknown profiles, acquire all descriptors/path/source leases, then commit with the source batch.  Failed binding admission leaves both document selection and accepted frontier unchanged.  Session configuration supplies the registered producer/profile policy; per-document contexts supply occurrence-specific path inputs, not a mutable session-wide filename.
+
+Consistency/lease capabilities describe acquisition guarantees but are not syntax-content identity fields: keep their captured provenance in world/provider records and validate query requirements separately.
+Likewise, queue priority, memory/store budgets, save/overlay selection and delivery timing are not hidden parser options.  Pressure cancellation/failure cannot be cached as a successful complete syntax result; any supported output-limiting policy that changes payload contents must be keyed explicitly or return a distinct incomplete outcome.
+Do not perform filesystem I/O merely to compare context descriptors, or compare arbitrary textual formatting of a descriptor instead of the canonical fields.
+
+Registry/binding review cases to implement later: toggle each of the five module parameters; change producer/schema/profile; preserve bytes while changing visible alias/base/encoding; reject unknown fields, invalid boolean/path encodings and conflicting document bindings; restart with confirmed versus unconfirmed namespace continuity; reject one bad context in a multi-document batch with no partial admission.
+These refine C1/C2, T2/T5 and V1/V4/V5 without qualifying any adapter or executing semantic evaluation.  Exact payload variant registries, policy alternatives, access signatures and admission bounds remain open; R2/R6-R8 and implementation/migration authorisation are unchanged.
+
+All three supported query payloads use a versioned envelope `{payload_schema, world_identity, document, source_revision, context, completeness, data}`.
+These bindings must equal the `ResultDescription` and the selected present member of the queried world; missing/unknown/unavailable members produce their explicit query outcome rather than a fabricated empty payload.
+An empty present file can produce available empty diagnostics/index results, but a syntax snapshot still represents that exact empty source revision.
+Envelope access and all nested views borrow from the owning `RESULT`; an independent copy or retained result is required to outlive it.
+
+| Payload | Required v1 logical data and limits of meaning |
+| --- | --- |
+| Common span | `{document, source_revision, start_byte:u64, end_byte:u64}` with `0 <= start_byte <= end_byte <= exact_source.count`.  Zero-width insertion/recovery spans are permitted.  A span from another revision is not remapped implicitly; generated/unlocated items require an explicit tagged origin, not an out-of-range sentinel. |
+| `SYNTAX_SNAPSHOT` | Exact owned source bytes, syntax-schema identifier, token sequence, root/node records and recovery information needed for C1 comparison.  Node references are snapshot-local IDs resolved only within this envelope, not pointers, declaration identities or global IDs.  The schema must enumerate node/token variants and every observable child/list/span field before API approval; exposing today's mutable `Parser_Node` memory is not this contract. |
+| `SYNTAX_DIAGNOSTICS` | Ordered records under `jai-cache-syntax-diagnostics/1` as specified below, including code, severity, origins/messages, token details and recovery action.  Preserve parser emission order; do not deduplicate by message or location.  A malformed source diagnostic is an available syntax result, not a service failure. |
+| `SYNTAX_DECLARATION_INDEX` | Source-ordered syntax records `{local_entry_id, name_origin, spelling_bytes, syntax_kind, declaration_span, container_local_id_if_any, visibility_syntax}`.  IDs are local to this result; repeated/anonymous/recovered declarations are not merged by name.  Visibility records syntax, including unspecified/recovered states, not resolved accessibility/export membership.  This index promises neither nominal `DeclarationID` continuity nor semantic lookup/completeness. |
+
+Messages are strict UTF-8 presentation text; source/name bytes are exact parser input slices and are not required to be valid UTF-8 for this interface.
+Any line/column or editor UTF-16 conversion belongs to an explicit adapter mapping for the same source revision; byte ranges never silently become character indices.
+The existing syntax payload must preserve malformed/incomplete-source observations under C1 even where a diagnostic/index presentation needs an explicit unavailable field; exact optional/tag encodings remain review work.
+
+##### Diagnostic Origins and Declaration Index Records
+
+Proposed 2026-10-21 for API review, not implemented payload accessors or an approved AST schema.
+This refines the actual `Parse_Diagnostic` fields rather than deriving codes from rendered messages or compiler enum ordinals.
+Tags below are exact ASCII names; record fields appear in the declared order, arrays preserve order, and counts/IDs/ranges are checked before use.
+Unknown tags/fields are invalid for the selected schema, not silently discarded extensions.
+
+`Origin` is a closed tagged union for this initial slice:
+
+- `SOURCE {span}` names an exact common byte span in the selected document/revision.  Zero-width spans, including end-of-file, are valid; token spans must be mapped through that revision's token/source data, never interpreted directly as byte offsets.
+- `INSERTED {anchor_span, expected_token}` names a synthetic missing token at a zero-width `SOURCE` anchor; it does not claim that synthetic spelling exists in the source bytes.
+- `UNLOCATED {reason}` uses `NO_SOURCE_LOCATION` or `RECOVERED_LOCATION_UNAVAILABLE`, retaining the diagnostic without manufacturing an in-range location.  Raw unmappable token/location observations remain in the parser observation record below for C1 checking.
+
+Generated/evaluated-source origins are unsupported in this syntax-only schema, not `SOURCE` spans into the caller's file.
+They require a future origin schema with protected provenance/source mapping.
+`Optional(T)` is exactly `NONE` or `SOME {value:T}`; missing and present-empty bytes are distinct.
+A payload-local ID is `u64`, zero-based, valid only in its envelope; optional references use `Optional`, not `-1`/maximum-integer sentinels.
+
+`jai-cache-syntax-diagnostics/1` data is `{parse_status, records: []Diagnostic}`.
+`parse_status` is `COMPLETE | INCOMPLETE | RECOVERED | FATAL` from the protected parse, not a judgement of semantic validity.
+`Diagnostic` is `{code, severity, primary_origin, message_utf8, related: []RelatedDiagnostic, parser_observation}`; `RelatedDiagnostic` is `{origin, message_utf8}`.
+Codes map one-to-one from the current parser's named kinds: `EXPECTED_TOKEN`, `EXPECTED_EXPRESSION`, `UNEXPECTED_TOKEN`, `UNNECESSARY_SEMICOLON`, `LEXER_ERROR`.  Severity is `ERROR | WARNING`; recovery action is `NONE | INSERT_MISSING_TOKEN | SKIP_TOKENS`.
+`parser_observation` is `{token_span, expected_token, actual_token, recovery_action, lexer_line:s32, lexer_column:s32}`.
+`token_span` preserves the parser's signed first/one-past-last token indices as observation data; it is not a dereferenceable byte span.
+A mapping failure must not turn an invalid index into a valid one by clamping.
+`expected_token` and `actual_token` use `TokenTag` under the exact token-schema identifier already bound by the context, not native enum ordinals.
+Preserve inactive/default values as observations; only the code/recovery contract determines whether they have explanatory meaning.
+Lexer line/column observations are retained verbatim, not substituted for revision-bound byte ranges or advertised as editor UTF-16 coordinates.
+Related records preserve both messages and emission order.
+Their original parser token spans must also be preserved in the syntax snapshot's diagnostic observations so C1 can compare unmappable locations without guessing a source span.
+If producer messages cannot be represented losslessly as the required UTF-8 presentation text, report a payload-conversion failure and preserve the original bytes in the syntax snapshot; do not silently replace invalid bytes and claim exact diagnostics equivalence.
+`FATAL` parse status is not automatically a service failure: publish available diagnostics/recovered syntax when safely owned; an allocation/internal parser failure remains a service failure, not a fabricated language diagnostic.
+
+`jai-cache-syntax-declaration-index/2` data is `{coverage, entries: []IndexEntry, shared_regions: []SharedRegion}`.
+`coverage` is `COMPLETE_SYNTAX_TRAVERSAL` or `PARTIAL_SYNTAX_TRAVERSAL {reasons}`; completeness concerns traversal of this captured parse, never import closure or semantic membership.
+Recovery does not automatically mean partial traversal, and a complete traversal can contain recovered entries.
+`IndexEntry` refines the earlier shorthand as `{local_entry_id, declaration_node_id, name, syntax_kind, declaration_origin, container, visibility_syntax, program_export_syntax, recovery_status}`.
+`name` is `SPELLED {origin:SOURCE, spelling_bytes}`, `ANONYMOUS`, or `MISSING {origin}`.  Spelled bytes must equal their source slice; an anonymous or missing name is not an empty identifier.  `container` is `ROOT | DECLARATION {local_entry_id} | SHARED_REGION {local_region_id}` and `recovery_status` is `PARSED | RECOVERED`.  The version change makes shared ownership explicit; this is a replacement draft, not a compatibility promise for an implemented v1 payload.
+`syntax_kind` is `DECLARATION | COMPOUND_BINDING | ENUM_MEMBER`; it describes the declaration grammar, not whether an initialiser eventually denotes a procedure/type/value.  A compound declaration emits one entry per newly declared binding in authored order, sharing the declaration node/origin; assigned targets are uses, not index declarations.
+`ENUM_MEMBER` is the context-qualified bare enum-member occurrence described below, not any identifier in an enum's subtree.
+Preserve repeated declared names and infer no semantic category from spelling.
+Entries follow source declaration order; enclosing declarations precede their nested entries, and ties use parser child/binding order.
+Declaration containers refer only to earlier enclosing entries.
+Shared-region containers follow the acyclic ownership rules below; validate both ID domains and reject cycles, never treat an arbitrary local ID as a pointer or nominal declaration identity.
+`visibility_syntax` is `{scope_directive, declaration_marker, observations}`.  `scope_directive` is `UNSPECIFIED | SCOPE_EXPORT | SCOPE_MODULE | SCOPE_FILE | RECOVERED_UNKNOWN`; `declaration_marker` is `UNSPECIFIED | EXPORT | RECOVERED_UNKNOWN`; `observations` preserves the ordered directive/marker source spans used to derive those syntactic tags.
+These are authored `#scope_export`, `#scope_module`, `#scope_file` and `#export` observations, not a claim of resolved accessibility, valid marker placement, conditional activation or completed exports.
+Unsupported/malformed observations remain recovered/partial with reasons rather than being coerced to exported or private.
+Do not execute conditions, follow imports/loads, expand `#add_context`, evaluate `using,map`, or merge instantiated members while building this index.  Walk only owned authored/recovered syntax; complete traversal of it is compatible with semantic queries remaining unsupported.
+Exact node/token variant registries and traversal-to-current-node mapping still need API review; this draft does not certify that the current parser exposes every marker without an adapter or lossless source observation.
+
+Future acceptance vectors: end-of-file zero-width and inserted-token origins; unmappable lexer/token locations with preserved raw observations; duplicate diagnostics and ordered related messages; invalid message encoding; compound/repeated/anonymous/recovered names; nested containers; visibility changes; partial versus complete syntax traversal without evaluator execution.
+Validate these against fresh owned parser observations under C1/C5 after implementation authorisation.
+This document refinement neither implements those tests nor selects numeric admission limits, adapter defaults or a persistent payload wire format.
+
+##### Current Parser Mapping and Known Gaps
+
+Proposed mapping review 2026-10-21; this is a producer-adapter contract, not an implemented traversal or proof of complete coverage.
+
+| Producer surface | Required payload mapping or explicit gap |
+| --- | --- |
+| `Token_Type` in `lexer.jai` | `TokenTag` is `BYTE_CHAR {value:u8}` or `NAMED {name_ascii}` under `jai-cache-token-tags/1`, registered below.  Normalise producer aliases before encoding; reject unknown/noncanonical payload names rather than serialising enum ordinals. |
+| `Parser_Token` with `ENABLE_TRIVIA` | Use checked `byte_start`/`byte_end` against the owned exact source.  For a nonempty token interval, map the first token's start through the last included token's end; do not include preceding/trailing trivia implicitly.  Preserve token intervals as separate observations. |
+| `Parser_Token` without `ENABLE_TRIVIA` | This aliases `Token`, which has line/column observations but no byte-offset fields.  It is outside the full-featured service profile: no non-trivia byte-mapping adapter is required.  Existing AST-compatibility mode may remain in the current parser independently; this specification does not require preserving that mode in the future owned-syntax API. |
+| `add_missing_token` | Correlate the diagnostic's recovery record with `synthetic_tokens` and `insertion_index`; map the insertion position to a checked zero-width source anchor.  At end of input use the exact source length when the token/source mapping validates it.  No synthetic token bytes are inserted into the authoritative source.  Missing/ambiguous correlation remains `UNLOCATED`, not a guessed inserted origin. |
+| `Parser_Declaration` / `.DECLARATION` | Emit the authored declaration with its actual name and origin, retaining recovery state and containing syntax ownership.  A synthetic helper `declaration_properties` inside a compound node is not an additional standalone declaration entry. |
+| `Parser_Compound_Declaration` / `.COMPOUND_DECLARATION` | Read `comma_separated_assignment.arguments` in authored order and shared `declaration_properties`.  For a qualified `parse_declaration_node` construction, the binding predicate is `(!reassignment && modifier != ASSIGN) || modifier == DECLARE`, where reassignment is the shared `operator_type` equal to the `=` character.  Emit only arguments satisfying this predicate; `ASSIGN` targets and ordinary multi-target reassignment remain uses.  The separate expression-led construction needs route classification as described below; do not apply this predicate universally.  Do not collapse names or duplicate the shared properties node as an entry. |
+| `Parser_Directive_Scope` / `.DIRECTIVE_SCOPE` | Map `scope_type` `EXPORT`, `INTERNAL`, `FILE` to `SCOPE_EXPORT`, `SCOPE_MODULE`, `SCOPE_FILE` respectively, preserving the directive origin.  Track authored directive state in syntax-list order; conditional branches retain branch-local observations without evaluation or a guessed merged visibility state. |
+| Declaration `#export` observation | The reviewed scope-directive parser does not establish a declaration-marker mapping.  `EXPORT` in `declaration_marker` is reserved until a real producer path or qualified lossless syntax adapter is identified.  Do not infer it from scope `EXPORT`, resolved visibility, string matching inside comments/literals, or absent metadata.  Unrepresentable relevant observations require `RECOVERED_UNKNOWN`/partial coverage, not a false `UNSPECIFIED` assertion. |
+| Declaration `#program_export` metadata | `parse_declaration_metadata` sets `PROGRAM_EXPORT` and optionally stores a string token's value in `program_export_name`.  This requests a program/linker export, not module visibility or the reserved declaration `EXPORT` marker.  Preserve it separately as specified below; the stored string is scalar data, not an AST child. |
+
+The index traversal follows authored syntax ownership/child edges only; it must not follow resolved declarations, lexical binding/reference tables or inferred semantic backreferences.
+Snapshot-local node IDs identify syntax occurrences, not names; assign index-local entry IDs independently, preserving the declared enclosing-before-nested and per-binding order.
+For nested syntax within a shared compound initialiser, use the proposed shared-region representation below rather than selecting one binding as its sole enclosing declaration.  Until that representation and the reached child mappings are reviewed and qualified, report partial coverage for that region rather than duplicate it or invent container identity.
+`COMPLETE_SYNTAX_TRAVERSAL` requires a reviewed child-edge/variant registry covering every reached authored node kind and every required origin/name/visibility observation.  An unknown node or unmapped required field makes coverage partial with a reason; successful parsing alone is not that proof.
+
+Mapping checks to implement after authorisation: raw punctuation versus named/aliased tokens; trivia-enabled origins and rejection of a non-trivia full-featured profile; EOF insertion/recovery correlations; `a, b := values` versus `a, b = values` and mixed declare/assign modifiers; shared compound initialiser ownership; sequential/conditional scope directives; unmapped declaration markers and unknown child variants.
+These supplement C1/C5 and the payload review vectors without claiming executable adapter qualification.
+The initial fifteen-operation interface and all pending policy/implementation gates are unchanged.
+
+##### Program Export Metadata Versus Visibility
+
+Proposed 2026-10-21 for the declaration-index/2 draft; no producer adapter or source-observation pass is implemented by this refinement.
+`parse_declaration_metadata` recognises `align`, `no_reset`, `uninitialized`, `elsewhere` and `program_export`; its default branch stops without consuming an unknown directive.
+That path does not recognise `export`.
+This establishes a limit of the reviewed producer path, not that `#export` is supported elsewhere or that every remaining source token was inspected as declaration metadata.
+Keep declaration-marker `EXPORT` reserved and the earlier unknown-observation rule intact.
+Neither `PROGRAM_EXPORT` nor `program_export_name` supplies a declaration-marker or scope-directive value.
+
+`program_export_syntax` is `{coverage, occurrences: []ProgramExportOccurrence, producer_observation}`.
+Its `coverage` is `COMPLETE_METADATA_OBSERVATION | PARTIAL_METADATA_OBSERVATION {reasons}` for this declaration's metadata, not semantic export validity or whole-index traversal.
+`ProgramExportOccurrence` is `{marker_origin:SOURCE, name_argument: Optional(ProgramExportName)}`; `ProgramExportName` is `{origin:SOURCE, value_bytes}`.
+The marker origin covers the authored `#` and `program_export` tokens; a name origin covers the consumed string token.
+Trivia between tokens remains in the protected source, not in decoded `value_bytes`.
+Preserve occurrences in token order, including repeats.  `NONE` means no string token was consumed for that occurrence; `SOME` with empty bytes means an explicitly present empty string.  Do not substitute the declaration's name when the argument is absent.
+`value_bytes` is the exact lexer string value under the captured `EVALUATE_STRING_ESCAPES` profile, not a host-decoded or normalised linker name; raw spelling and malformed-input observations remain protected separately.
+`producer_observation` is `Optional({requested:bool, stored_name_bytes})` from `PROGRAM_EXPORT` and `program_export_name`, even when source correlation is incomplete.
+Use `SOME` for declaration-properties records and `NONE` for index occurrences such as bare enum members that have no such producer record; do not manufacture a false flag/empty string pair.
+Copy/lease these bytes independently of producer allocator lifetime; they are not pointer identity or an identifier-interner key.
+
+The producer loop sets the flag on every recognised occurrence and overwrites the stored name only when the following token is a string.
+Thus, a later bare `#program_export` does not clear an earlier stored name.
+With complete correlation, `requested` must equal whether any occurrence was consumed and the stored name must match the last consumed name, or the producer's initial empty value if none was consumed.
+Do not infer occurrence count, argument presence or ordering from that final flag/string pair; it loses information, particularly for explicit empty names and repeated markers.
+An adapter must correlate exact metadata tokens with the owning declaration's parse route and recovery, not search all tokens within its full span: an initialiser, nested procedure, comment or string can contain unrelated text.
+A complete observation requires a qualified metadata interval and all consumed occurrences; otherwise retain verified occurrences and producer data, report partial metadata coverage and propagate a declaration-index partial reason.
+A zero flag alone does not prove complete absence.
+
+For a compound declaration, source metadata belongs to the shared region.
+Each binding entry may expose the same immutable observation value, but it is one authored observation sequence, not one occurrence per binding or a claim that every target is semantically exported.
+The compound with no declared bindings still retains this data in its protected syntax; a declaration index with no binding entries does not invent one to carry metadata.
+No helper token span may be fabricated to recover the metadata interval; compound properties require correlation through the owning compound and actual parse boundaries.
+
+The cheap discriminating source check is the assignment in `parse_declaration_metadata`: it copies `parser_eat(parser).string_value`, not a `Parser_Node` pointer, and only inside the `.STRING` branch.
+Existing `parser_tokens_test.jai` fixtures exercise named exports and incremental owned-byte comparisons, but they are not qualification of the new occurrence schema.
+Future independent acceptance vectors: absent/bare/named/explicit-empty requests; repeated named then bare and named then empty requests; evaluated versus unevaluated escapes; compound metadata; nested initialiser decoys; unknown directives and malformed/recovered string tokens; byte ownership after producer teardown.
+Check exact source origins, occurrence order, absent-versus-empty names, final producer observations and partial reasons.  Leave declaration `#export` mapping open until supported producer evidence exists; do not invent a syntax adapter or change parser behaviour to close it on paper.
+
+##### Authored Child Edges and Shared Compound Regions
+
+Proposed 2026-10-21 for schema review; no production visitor, index conversion or acceptance test is implemented here.
+The local hypothesis is that the compound node, not any one binding, owns its shared properties and initialiser: `parse_declaration_node` allocates one `declaration_properties`, parses its expression once, then records scope bindings pointing to that helper.
+A discriminating future check is a compound initialiser containing a nested declaration: traversal must produce one nested entry and one shared region, even with repeated declared names, mixed declared/assigned targets or no declared bindings.
+Duplicating the nested entry per binding or assigning it to the first binding falsifies this contract.
+
+`SharedRegion` is `{local_region_id, compound_node_id, parent_container, binding_entries: []local_entry_id}`.
+Region IDs are zero-based payload-local `u64` in a separate domain from entry IDs.  `parent_container` uses the same container union as `IndexEntry`; it identifies the enclosing ownership context outside this compound, never one of this region's bindings.
+`binding_entries` contains exactly this compound's newly declared binding entries in authored argument order, preserving duplicate spellings as distinct entries.  Assigned targets are not members.
+An empty list is valid for a pure assignment and does not fabricate a declaration.
+Every listed entry must reference this `compound_node_id` and have `container == parent_container`; a binding cannot belong to two regions.
+Create the region and emit all its binding entries before descending into shared properties, alignment or notes.
+Direct nested declarations there use `SHARED_REGION`; descendants of a nested ordinary declaration use that declaration as usual.
+A nested compound's region retains the outer container through `parent_container`.
+The binding list expresses syntactic association, not value distribution, inferred tuple arity, evaluation order or semantic ownership of a type/procedure.
+Even a one-binding mixed compound keeps its region; do not collapse it into a special single-owner case.
+Validate container ancestry across both tables, region membership and all node references before exposure.
+Containment must be acyclic; binding-list references are associations, not additional containment edges.
+Do not infer ancestry from overlapping source spans or compare local IDs from different payloads.
+
+For `jai-cache-authored-edges/1`, each reviewed producer field has exactly one traversal role: `CHILD`, `CHILD_LIST`, `HELPER`, `BACKREFERENCE`, or `NON_CHILD`.
+`HELPER` is structural storage traversed through its registered fields, not an extra authored declaration; it may have no independent source origin.
+Embedded base records, scalar flags/names/spans and inactive union arms are not child occurrences.
+Follow only the active discriminant-selected arm; a null optional child is absent, not an unknown node.
+Register field paths and variant guards against the exact producer/schema binding.  Reflection over all pointers, the compiler inventory's broad `S` category, or successful parsing is not an ownership registry.
+In particular, syntactic backlinks remain backlinks even when classified `S` in `compiler_fields.md`.
+
+The following is the candidate field-path registry for the current parser-owned shapes.
+Names without a prefix refer to `Parser_*` records; grouped rows do not waive per-variant review.
+
+| Owner | Candidate downward paths / active helpers |
+| --- | --- |
+| `Declaration` | `type_inst`, `expression`, `alignment_expression`, `notes[]`; compound properties use this field map without emitting a helper declaration.  `program_export_name` is scalar string metadata, not a child. |
+| `Compound_Declaration` | `comma_separated_assignment.arguments[].node`, `declaration_properties` as helper, `alignment_expression`, `notes[]`; visit shared payload once, not through lexical bindings. |
+| `Block` | `statements[]` only; source order is authoritative. |
+| `Procedure_Header`, `Procedure_Body` | Follow the procedure ownership/alias rules below: parameter segments, `returns[]`, optional `library_identifier`, `modify_directives[]`, optional `body_or_null`.  Body owns `block`, not `header`.  `foreign_function_name` and `deprecation_string` are scalar strings; header `notes[]` is not populated on the reviewed routes. |
+| `Struct`, `Enum` | Struct: optional `arguments_block`, `modify_directives[]`, `block`.  Enum: optional `internal_type_inst`, `block`.  Follow the aggregate-context rules below; struct `alignment` is numeric metadata, and aggregate `notes[]` is not populated on the reviewed routes. |
+| `Unary_Operator`, `Binary_Operator`, `Cast` | `subexpression`; `left`, `right`; `target_type`, `expression`, respectively. |
+| `Procedure_Call` | `procedure_expression`, `arguments_unsorted[]` helpers (`name`, `expression`), `context_modification.modification_expressions[]`; not sorted/resolved arguments or macro output. |
+| `Comma_Separated_Arguments`, `Return` | `arguments[].node`; `arguments_unsorted[]` helpers (`name`, `expression`), respectively. |
+| `Expression_Query`, `Type_Query`, `Type_Instantiation` | `expression_to_query`; `type_to_query`; type-instantiation paths follow the explicit source-form guards below, not a nonnull-pointer priority chain. |
+| `Literal` | Follow the literal-arm and construction-route guards below: struct `type_expression`, `arguments[]`; array `element_type`, `array_members[]` on reviewed routes.  Scalar/null literals have no authored children; array alignment is not populated by these reviewed constructors. |
+| `If`, `Case`, `While` | `condition`, `then_block`, `else_block`; `condition`, `then_block`; `condition`, `block`, respectively.  Walk both authored branches without evaluation. |
+| `For` | `iteration_expression`, `iteration_expression_right`, `block`, `ident_it`, `ident_it_index`; exclude implicit declaration/expansion fields. |
+| `Loop_Control`, `Defer`, `Push_Context`, `Using` | `target_ident`; `block`; `to_push`, `block`; `expression`, `filter_expression`, respectively. |
+| `Directive_Add_Context`, `Directive_Bytes`, `Directive_Code`, `Directive_Location`, `Directive_Run` | `expression`; use the parser-added run expression, not the compiler-lowered procedure. |
+| `Directive_Bake`, `Directive_Exists`, `Directive_Import` | `procedure_call`; `query_expression`, `sync_expression`; `name`, `module_parameters_call`, `program_parameters_call`, respectively. |
+| `Directive_Insert` | `expression`, `scope_redirection`, `break_replacement`, `continue_replacement`, `remove_replacement`; not generated `expansion`. |
+| `Directive_Library`, `Directive_Load`, `Directive_Modify` | `name`; `short_name`; `block`, respectively.  Do not follow imported/loaded files. |
+| `Directive_Module_Parameters`, `Directive_Overlay`, `Directive_Poke_Name`, `Directive_Procedure_Name` | `module_parameters`, `program_parameters`, `common_code`; `target_expression`, `declaration_or_using`; parser `module_expression`, `name`; `argument`, respectively. |
+| `Ident`, `Context`, `Note`, `Placeholder`, `Directive_Context_Type`, `Directive_Scope`, `Directive_Through`, `Directive_Wildcard` | No authored node children in the candidate mapping; retain source scalar observations separately. |
+| `Asm` | Parser-owned `features[]`, `statements[]` helpers, not opaque compiler `b1`/`b2`/`b3` storage.  Use the explicit assembly-helper guards and order below; `UNPARSED` base operands can still own parsed modifiers. |
+
+Explicit `BACKREFERENCE` paths include `Block.parent`, `Block.belongs_to_struct`, `Block.owning_statement`, `Procedure_Body.header`, `Case.owning_if` and parser `Asm.enclosing_scope`.
+Lexical scopes/children/bindings, identifier `resolved_declaration`, common inferred `type`, enclosing-load references, compiler constants/polymorph/expansion records and sorted/resolved call data are excluded from authored descent.
+These exclusions do not delete source observations from the protected syntax snapshot or define semantic invalidation edges.
+
+Assign snapshot-local node IDs on first registered downward encounter, retaining the same ID for explicitly registered helper aliases; never serialise pointer addresses or merge separate nodes by equal spelling/span.
+An active-path revisit is a cycle error.  A completed-node revisit is permitted only by a registered alias rule with a specified single traversal owner; otherwise coverage is partial with an unexpected-sharing reason, not silently deduplicated by a global visited set.
+Use valid source positions to interleave independent authored children in lexical order; equal/unlocated positions use a reviewed per-kind field-path order and then list index.
+This candidate table is not itself that complete ordering/guard registry.
+Helper nodes without a finished token span, including compound `declaration_properties`, do not gain a fabricated `SOURCE` origin from zero-initialised token fields; shared-region source identity comes from the owning compound.
+
+There is a second compound-construction path in `parse_statement`: expression-led multi-target assignments allocate the same helper shape but do not set `operator_type` there.
+Consequently, the earlier binding predicate is qualified only for the reviewed `parse_declaration_node` route; it is not a universal shape-only classifier for arbitrary compound nodes.
+Until a qualified producer observation distinguishes these routes and non-identifier targets, preserve their syntax but report partial declaration-index coverage rather than emit bindings from a default operator value.
+Do not repurpose resolver bindings as authored ownership to hide this gap.
+
+Remaining review/qualification: exact active-form guards and child order for every variant and assembly helper; producer-version drift; alias rules for shared metadata; declaration-marker mapping; and reliable compound-route classification.
+Future C1/C5 vectors must cover shared initialisers with nested anonymous/ordinary/compound declarations, zero/one/multiple declared bindings, repeated names, both compound construction routes, recovered null/unlocated helpers, injected cycles/unregistered sharing, inactive literal arms and deliberately populated semantic backlinks.
+Assert exact entry/region counts, IDs, association order, parent containers and coverage reasons against independently authored expectations, not only a second traversal using the same registry.
+The schema/traversal proposal is drafted, not reviewed or behaviourally qualified; R2/R6-R8 and implementation/migration authorisation remain unchanged.
+
+##### Struct and Enum Ownership and Member Context
+
+Proposed refinement of `jai-cache-authored-edges/1` and the declaration-index/2 draft, grounded in `parse_aggregate_definition`, `parse_aggregate_parameter_block`, `parse_aggregate_block`, `parse_struct_modifiers` and enum-mode statement parsing.
+Struct/union and enum nodes are authored type expressions, not automatically extra named declaration entries or nominal type identities.
+Members inherit the enclosing declaration/shared-region index container already established by traversal; do not create a container from a resolved type or invent an anonymous binding merely because an aggregate expression has a body.
+
+| Producer route | Downward order and retained observations |
+| --- | --- |
+| Struct or union | Optional `arguments_block`, `modify_directives[]` in order, then `block`.  `textual_flags.UNION` distinguishes the union spelling on the same `STRUCT` node shape; it does not select a different child arm. |
+| Aggregate parameter block | `statements[]` in stored order.  This is a parser block with `STRUCT_ARGUMENTS` and a parenthesised source interval, not evidence of authored braces.  Parameters are parsed through declaration grammar; do not assume every reached node is an ordinary declaration. |
+| Struct/union body block | `statements[]` in stored order, including declarations, using/directive forms, conditional declarations and field-default expressions.  `block.belongs_to_struct` is a backreference, never a descent to the aggregate. |
+| Enum or enum-flags | Optional `internal_type_inst`, then `block`.  `is_flags`, `marked_as_complete` and `marked_as_specified` are scalar source observations, not child nodes or completed semantic membership. |
+| Enum body / enum-mode branch block | `statements[]` in stored order.  Recognise bare member occurrences only under the enum-member grammar route; conditional branch blocks preserve that route without evaluating the condition. |
+
+`parse_struct_modifiers` stores `#align` by copying a number token's integer value into `alignment`; it does not create an alignment-expression child.
+This differs from declaration `alignment_expression` and the unpopulated aggregate-literal helper alignment discussed separately.
+Neither a nonzero alignment nor a source flag authorises treating numeric storage as a node pointer.
+Modifiers are accepted before parameters, after parameters and after the body.  Preserve final scalar observations and exact source; repeated modifier/alignment occurrences and their positions require qualified token/parse correlation, not inference from the final value or an invented child node.
+A zero/default alignment does not distinguish no modifier from an explicitly supplied value, and a malformed modifier must retain its diagnostics rather than become an inferred valid request.
+
+The reviewed constructors do not attach `Struct.notes` or `Enum.notes`; enclosing declaration/compound notes are separate authored ownership.
+Unexpected populated aggregate-note lists require a reviewed producer route or an explicit partial mapping reason, not silent omission or assumed shared ownership.
+Compiler `defined_type`, enum `internal_type`/`external_type`, constants blocks and inferred layout values are outside authored descent, even if populated later.
+
+A direct bare enum member is produced by `parse_enum_member` as a `Parser_Ident` from `IDENT ;` under enum-member mode.
+Emit one `ENUM_MEMBER` entry for that grammar occurrence, with `declaration_node_id` naming the identifier node, its spelled-name origin and its source occurrence as declaration origin; preserve repeated names without merging.
+It has no declaration-properties/program-export producer observation.
+The token/statement boundary establishes its grammar extent; an identifier node's own span need not include the semicolon.
+Named enum declarations parsed through ordinary declaration grammar retain `DECLARATION`/`COMPOUND_BINDING` as appropriate, rather than being relabelled solely because their container is an enum.
+Do not classify identifiers in initialisers, conditions, type annotations or nested expressions as bare members.
+Carry enum-member mode only along the registered enum body and static-branch statement routes; a missing route/boundary observation requires partial coverage, not a name-based guess.
+`parse_static_if_statement` forwards the enum mode through statement-block parsing: traverse both authored branches, including single-statement branches, with branch-local visibility observations and no guessed active branch or merged enum membership.
+
+Struct field defaults such as `field = 1` and `info.flavor = value` are assignment expressions, not new member declarations.
+Descend through their normal binary-expression children without emitting another binding for the target.
+`parse_aggregate_block` can populate the target identifier's `resolved_declaration` while matching earlier members; that parser-time reference is still non-owning and excluded from authored traversal.
+Do not follow it back to duplicate the member or infer valid semantic resolution.
+An absent optional aggregate parameter/internal-type field is ordinary absence.  A missing required body retains its actual diagnostics/recovery: do not create an empty source block or silently certify complete field mapping without the relevant recovery observation.
+
+The discriminating future vectors are a bare enum member versus an identifier use in its conditional expression, and a struct declaration followed by a default assignment whose target points back to that declaration.
+Additional independent vectors cover struct versus union, parameter blocks, modifiers at all accepted positions, explicit/default/malformed alignment, enum versus enum-flags, duplicate members, named enum declarations, both enum-mode conditional branches, missing bodies and unexpected notes or semantic pointers.
+Assert exact visit order, entry kinds/origins/containers, source scalar observations, excluded backlinks and partial reasons against independent expectations.  The new enum-member tag and optional program-export producer observation remain draft schema refinements, not an implemented API or completed producer qualification.
+
+##### Procedure Ownership, Parameter Aliases and Quick Bodies
+
+Proposed refinement of `jai-cache-authored-edges/1`, grounded in `parse_procedure_type_header`, `parse_arrow_procedure_header`, `parse_procedure_flags`, `parse_procedure_body` and the single-identifier quick-lambda constructor.
+Header/body/block nodes retain their producer identities and observations; procedure syntax does not itself create an extra declaration-index entry or a semantic scope container.
+Named parameters/returns and declarations reached in a body use the nearest enclosing declaration/shared-region container already established by authored traversal.
+Do not manufacture a named procedure entry from `Procedure_Header.name`, which may be copied from its enclosing declaration.
+
+| Producer path | Ownership and order |
+| --- | --- |
+| Header parameter lists | Traverse `arguments[]` in stored parameter order, interleaving each matched `parameter_usings[]` wrapper and its filter immediately before that argument.  The argument declaration is owned and descended through `arguments[]` exactly once. |
+| Parameter `Using.expression` | Registered non-owning alias to its matching argument, not a second descent.  Visit the `Using` node and its `filter_expression`, retain the expression association, then visit the owning argument.  Resolve the alias ID after the argument is assigned its node ID; the association does not change first downward-encounter ID assignment. |
+| Header return list | After parameters, traverse `returns[]` in stored order.  Named returns and unnamed type-only slots keep their actual parser records; no inferred return declarations are added. |
+| Header suffix/body | Traverse the optional `library_identifier`, then `modify_directives[]` in order, then optional `body_or_null`.  String-valued foreign/deprecation metadata is not a child.  Source positions still order any independently authored suffix observations; repeated flag occurrences require separate correlation, not inference from the final fields. |
+| `Procedure_Body` | Owns `block`.  `header` is a backreference; `block.owning_statement` points back to this body and is not a descent edge. |
+| Type-only/header-only forms | A null `body_or_null` is valid; do not follow an unattached allocated body or create an empty block.  `TYPE_ONLY` and other source/derived parser flags remain observations, not proof of semantic validity. |
+| Expression-bodied quick form | Header -> body -> parser-created block -> parser-created return -> `arguments_unsorted[].expression`.  Follow only these published downward edges; preserve `AUTO_INSERTED_FOR_QUICK_LAMBDA` and the header's `QUICK` observation. |
+| Braced quick form | Header -> body -> authored block statements; preserve `QUICK_IN_BLOCK_FORM`.  Do not add another implicit return around the block. |
+
+The parameter alias rule is narrowly guarded by a `parameter_usings[]` node attached to this header whose `expression` is pointer-identical to exactly one entry in this header's `arguments[]` while the producer is owned.
+Match the argument position using that association, not names or overlapping spans; preserve wrapper order and require associations to progress in argument order.
+Missing, duplicate or unmatched associations are mapping gaps, not a reason to globally suppress `Using.expression` descent.
+Ordinary non-parameter using statements still own their expression under the normal registry rule.
+This registers the known cross-list sharing without permitting arbitrary revisits of completed nodes or following lexical-scope binding tables.
+
+Unnamed type-only arguments/returns are parser declaration slots with no authored name: if emitted by the index's declaration-slot mapping, their name is `ANONYMOUS`, not `MISSING` and not a fabricated empty identifier spelling.
+Bare named quick-lambda parameters are authored declarations despite having no explicit type.
+Do not classify them as recovered merely because `type_inst` is null.
+The header constructor's parameter/return wrapper allocation does not establish a nominal binding identity; source-slot indexing and semantic name binding remain distinct.
+
+`parse_procedure_flags` assigns `foreign_function_name` and `deprecation_string` from a string token's value.  Preserve their owned bytes separately from raw spelling; final empty values alone do not distinguish omitted versus explicitly empty strings or retain repeated suffix occurrences.
+Its `library_identifier` is an actual `Parser_Ident` child.  Resolving that identifier or importing a library is outside syntax traversal.
+The reviewed routes do not attach `Procedure_Header.notes`; declaration notes are attached by `parse_declaration_notes` to the enclosing declaration/compound instead.  A populated header-notes list needs a reviewed producer route, not silent omission or assumed duplicate ownership.
+
+For expression-bodied quick lambdas, the block/return are parser normalisation records, not evidence of authored braces or a `return` keyword.
+Their `finish_node` intervals can begin at the whole procedure's `first` token; preserve those raw intervals, but do not use them to assert that synthetic keywords occur at that location or to reorder parameters after the body.
+Do not label the implicit return as an inserted missing-token recovery origin: it is normalisation, not `add_missing_token` recovery.
+A presentation that needs a distinct keyword origin must report it unavailable unless a separate qualified observation provides one.
+On a missing quick-body expression, retain the published empty return-argument list and diagnostic; a fully mapped recovered hole is not an invented expression or an automatic traversal failure.
+If no body syntax is consumed, `parse_procedure_body` leaves its newly allocated body unattached; pool allocation is never evidence of authored reachability.
+
+The discriminating future vector is a filtered `using` parameter: visit its filter before its declaration and the declaration's subtree once, while preserving the non-owning expression association.
+Additional independent vectors cover interleaved ordinary/using parameters; repeated parameter names; unnamed type-only parameters/returns; single-identifier and parenthesised quick lambdas; arrow-return shorthand; expression versus braced quick bodies; missing expressions; header-only forms; foreign/deprecation strings; header/body/block backlinks; and injected unmatched/duplicate parameter aliases.
+Assert exact visit order/IDs, alias targets, index containers/names, normalisation observations and partial reasons against independent expectations.
+Existing parameter-using and foreign-header parser fixtures are source evidence, not qualification of this proposed traversal.
+Remaining procedure flag/value schemas, repeated-suffix origins and executable visitor qualification stay open; no parser or resolver behaviour is changed by these rules.
+
+##### Literal Arms and Parser-Created Containers
+
+Proposed refinement of `jai-cache-authored-edges/1`, grounded in `parse_aggregate_literal`, `parse_primary`, `parse_using_filter` and the `char`/`filepath` directive cases.
+Select the literal union arm using `value_type`, with the reviewed source-value flags and construction route where needed.
+Never read a second arm to discover children or encode inactive union bytes.
+The literal-value flag domain is not the lexer's `Value_Flags` domain; the token flag mask specified elsewhere must not be applied to AST literal flags.
+
+| Literal arm / reviewed route | Downward paths and retained observations |
+| --- | --- |
+| `NUMBER` | No child; retain the active `_float64` bits when the literal `FLOAT` flag is set, otherwise `_u64` bits, plus reviewed source flags.  This includes parser-produced `#char` values, not only numeric tokens. |
+| `BOOLEAN` | No child; retain the parser's `_u64` observation for the authored `true`/`false` token, without treating the union as a pointer. |
+| `STRING` | No child; retain `_string` bytes and source flags.  Routes include quoted/here strings, `#filepath`, and parser-created using-filter names; do not require every string value to equal its full source slice. |
+| `UNINITIALIZED` | No child; retain the `---` occurrence.  Declaration parsing can instead set `IS_UNINITIALIZED` and clear the expression; do not reconstruct a missing literal node in that declaration. |
+| `STRUCT` from `parse_aggregate_literal` | `struct_literal_info` is helper storage: optional `type_expression`, then `arguments[]` in authored order.  A typed prefix is wrapped with `make_type_instantiation`; an untyped literal legitimately has no type wrapper. |
+| `ARRAY` from `parse_aggregate_literal` | `array_literal_info` is helper storage: optional `element_type`, then `array_members[]` in authored order.  The untyped route sets `WAS_UNTYPED`; typed prefixes are wrapped rather than resolved. |
+| `ARRAY` from a parenthesised `using,only` or `using,except` name list | Helper `array_members[]` contains parser-created `STRING` literals in name-list order.  There is no element-type wrapper and this constructor does not set `WAS_UNTYPED`; the source is a name list, not `.[...]`. |
+| `POINTER` from the authored `null` route | No authored child.  Preserve the qualified null observation: this constructor allocates `Code_Pointer_Literal_Info` with `pointer_literal_type == CONSTANT_VALUE`.  Do not follow its symbol/data/string-or-array pointer fields as syntax edges. |
+
+Other pointer/type-definition/evaluated literal routes are not admitted as authored children by this registry.
+An unsupported value tag or unqualified pointer route requires an explicit unmapped/partial reason, not a cast into an aggregate helper or an assumed null value.
+Source `null` must not be rejected merely because it uses the pointer arm; conversely, `value_type == POINTER` alone is not proof that an arbitrary producer value was authored `null`.
+The current parser's aggregate and using-filter constructors do not populate `array_literal_info.alignment`.
+A nonnull alignment needs a separately reviewed producer route and ordering rule; preserve the observation and report partial mapping rather than silently traverse it or drop it.
+
+Typed and untyped empty aggregates still own an active helper; zero members is valid, while a null helper for a selected aggregate arm is a mapping gap unless explicit producer recovery evidence accounts for it.
+Missing type wrappers are ordinary absence on untyped aggregates and parser-created name lists.  Do not infer a typed form from the absence of `WAS_UNTYPED`, since the using-filter constructor provides a counterexample.
+Member lists contain expression nodes, not necessarily declarations or named-argument records.
+Preserve assignment expressions and repeated member spellings without promoting them to declaration-index entries or resolving field names.
+Walk nested declarations only through the active expression's own reviewed child mapping and the current authored container; helper storage does not fabricate an enclosing declaration.
+
+Parser-created using-filter string nodes have identifier-token origins and identifier value bytes, not quoted-string spellings.
+`#filepath` values depend on the captured filename/directory context and are not a literal copy of the directive spelling.
+Retain those source/value distinctions and source-context dependencies; do not evaluate `using,map` or derive semantic filter results during traversal.
+Copy/lease active string bytes and helper lists independently of producer/interner lifetimes.
+Exact source spelling remains in the protected source/token data; decoded scalar values do not replace it.
+Keep wrapper and child IDs distinct even when their spans coincide, and do not discover unattached/recovery-discarded literals by scanning pool allocations.
+
+The discriminating future vectors are source `null` versus an unsupported pointer payload, and an untyped aggregate array versus a using-filter name-list array with no `WAS_UNTYPED` flag.
+Further independent cases cover typed/untyped empty and nested aggregates; repeated named member expressions; scalar/float bit preservation; `#char`, here strings and `#filepath`; standalone versus declaration `---`; missing helpers; inactive union-pointer controls; unexpected alignment; and owned bytes after producer teardown.
+Assert exact active paths/order, source/value observations, local node IDs and partial reasons against independent expectations.
+Exact AST flag/value payload schemas and executable qualification remain open; these traversal rules do not claim those contracts are complete.
+
+##### Type Instantiation Source-Form Guards
+
+Proposed refinement of `jai-cache-authored-edges/1`, grounded in `parse_type_instantiation` and `make_type_instantiation`.
+The producer has no separate source-form discriminant: the labels below are registry rules, not new producer enum values or a final payload wire union.
+Select a rule from a qualified construction/source observation bound to the owned token interval, then validate its source flags and fields together.
+Do not choose the first nonnull child or equate a missing recovered child with a different grammar form.
+Preserve raw producer `inst_flags` separately; only reviewed source bits participate in these guards, never inferred `result` or common node `type`.
+
+| Source form / required observation | Active child order and source flags |
+| --- | --- |
+| Varargs `..T` | `array_element_type`; `VARARGS` and `ARRAY_VIEW` are both set.  This is not a dimensionless array-view spelling. |
+| Polymorphic `$T` with optional `/ [interface] constraint` | `type_valued_expression`, then `must_implement` only for a consumed constraint suffix.  The expression is the parser-created identifier marked `DEFINES_POLYMORPH_VARIABLE`; `INTERFACE` records the consumed `interface` keyword, not completion of constraint resolution. |
+| `#type` with optional `,distinct` or `,isa` | `type_directive_target`; `TYPE_DIRECTIVE`, optionally `TYPE_DIRECTIVE_DISTINCT` or `TYPE_DIRECTIVE_ISA`.  Modifier tokens and recovery remain source observations; an unknown modifier is not silently normalised to an accepted one. |
+| Pointer `*T` | `pointer_to`; no array, directive or procedure source-form flag is implied. |
+| Array view `[]T` | `array_element_type`; `ARRAY_VIEW`, without `VARARGS`.  `array_dimension` is inactive. |
+| Resizable array `[..]T` | `array_element_type`; `RESIZABLE`.  `array_dimension` is inactive. |
+| Fixed-dimension array `[expression]T` | `array_dimension`, then `array_element_type`, including expressions that contain directives or are not semantically valid dimensions.  Neither `ARRAY_VIEW` nor `RESIZABLE` is implied. |
+| Procedure type beginning `(` on this parse route | `type_valued_expression`, the parsed `Procedure_Header`; `TYPE_OF_PROCEDURE` on the wrapper and `TYPE_ONLY` on the header.  Traverse authored parameters/returns under the header rules, not its lexical scope bindings. |
+| General type-valued expression wrapper | `type_valued_expression` from `make_type_instantiation`; no wrapper-specific source-form flag is added there.  This includes postfix member/call expressions and contextual aggregate-type wrappers, not only identifiers. |
+
+For each selected rule, the other type-instantiation child fields are inactive; unexpected populated fields or conflicting source-form flags are producer-mapping mismatches, not additional children or permission to switch rules.
+`must_implement` is not a globally active extra edge on all type nodes.  In particular, `$T` and a recovered `$T /` can both have a null constraint pointer; token/parse correlation must preserve the consumed suffix and diagnostic rather than assert that both are unconstrained.
+An `INTERFACE` flag is not required for an ordinary `/ constraint`, and its absence does not prove the suffix was absent.
+Do not treat all `ARRAY_VIEW` records as varargs or all null `array_dimension` fields as array views: a recovered fixed-dimension form can have a missing dimension, and a general wrapper has no dimension at all.
+
+Required-child recovery is explicit: retain a recognised missing target/dimension/constraint and its diagnostic/origin correlation rather than invent a node or dereference null.
+A fully mapped recovered hole need not make traversal partial; absent form/boundary/recovery evidence does, with the missing field path and reason.
+Successful grammar recovery alone does not establish the form mapping.
+The current pointer/varargs constructors return null when their recursive element parse fails, whereas array and `#type` constructors can publish a wrapper with a null required child.
+Do not manufacture an unpublished wrapper from source punctuation; preserve the surrounding parse's actual recovery observations.
+
+`make_type_instantiation` copies the expression's coordinates and token interval into a newly allocated wrapper.
+Equal spans do not make wrapper and expression one node, and nested wrappers retain distinct IDs.
+For aggregate literal type information the same helper can wrap an expression parsed on a different route; a leading token alone is not universal proof that the type-parser pointer/array/procedure rule was used.
+Unqualified route ambiguity requires partial mapping, not a guessed source-form tag.
+Traverse each qualified wrapper's active children in the table order; for fixed arrays, visiting the element before the dimension would change authored order and snapshot-local ID assignment.
+Do not resolve postfix calls/member expressions, evaluate dimensions/constraints, instantiate types or follow compiler `result` while traversing these fields.
+
+The discriminating future vectors are `..T` versus `[]T`, fixed arrays with a recovered missing dimension, and `$T` versus a consumed but missing `/` constraint.
+Additional independent cases cover nested pointer/array combinations; both `#type` modifiers and malformed modifiers; procedure-type parameters/returns; postfix member/call wrappers; contextual aggregate-type wrappers; inactive populated fields; conflicting flags; and equal-span wrapper/child IDs.
+Existing nested-type reuse/fallback fixtures in `parser_tokens_test.jai` contain relevant forms, including cases deliberately excluded from reuse; non-reusability does not exclude them from complete fresh-syntax traversal.
+Future qualification must assert exact paths/order, retained flags, recovery holes and partial reasons against independently authored expectations.
+This draft neither implements form correlation nor certifies the remaining procedure/literal child registries.
+
+##### Assembly Helper Guards and Traversal Order
+
+Proposed refinement of `jai-cache-authored-edges/1`, grounded in the parser's `parse_asm_instruction_span`, `add_asm_operand` and `parse_asm_*_span` constructors.
+These auxiliary records are `HELPER` storage, not additional `Parser_Node` occurrences; only their identifier/expression fields enter the ordinary node traversal and node-ID domain.
+Preserve helper kinds, spans, list order and scalar observations in the protected syntax snapshot; do not reinterpret their memory as compiler `Code_Asm` payloads.
+
+| Helper / guard | Downward order and restrictions |
+| --- | --- |
+| `Asm` | `features[]`, then `statements[]`, each in stored source order.  `body_span` is observation data; `enclosing_scope` is a backreference. |
+| `Asm_Feature` | `name`. |
+| `Asm_Statement` | `INSTRUCTION`: `instruction`; `REGISTER_DECLARATION`: `register_declaration`; `REGISTER_PINNING`: `register_pinning`; `UNPARSED`: no base child.  Other arm fields are inactive regardless of pointer contents. |
+| `Asm_Instruction` | `mnemonic`, optional `size` helper, then `operands[]` in stored order. |
+| `Asm_Mnemonic_Size` | `FIXED`: no child; retain the size token span, not a fabricated numeric-expression node.  `POLYMORPHIC`: `polymorphic_name`. |
+| `Asm_Operand` | First the selected base arm: `VALUE` -> `value`; `REGISTER_DECLARATION` -> `register_declaration`; `REGISTER_PINNING` -> `register_pinning`; `MEMORY` -> `memory`; `UNPARSED` -> no base child.  Then `modifiers[]` for every base kind, including `UNPARSED`. |
+| `Asm_Value` | `expression` when present.  For optional absent memory components the zero/default span is not an authored source occurrence. |
+| `Asm_Register_Declaration` | `name`, then `register_class` only when `!is_inferred`, then optional `pinning`.  Inferred class means no class child, not an empty identifier. |
+| `Asm_Register_Pinning` | `source`, then `target`, both `Asm_Value` helpers. |
+| `Asm_Memory_Operand` | `base`, then optional `index`, `scale`, `displacement` values in that order.  Presence comes from a nonnull expression in this producer; do not infer a component from default span indices. |
+| `Asm_Operand_Modifier` | `BANG`, `BANG_N`, `BANG_D`, `BANG_U`, `BANG_Z`: no child.  `AMPERSAND`, `AMPERSAND_STAR`: `argument` value.  Preserve modifier order and individual spans. |
+
+This is the per-helper fallback order for equal/unlocated positions; it also matches the reviewed constructor's source progression for recognised forms.
+The optional-versus-required distinction is field-specific: a null optional size/pinning/memory component is ordinary absence, whereas a null selected statement arm, instruction mnemonic, feature name, explicit register name/class, polymorphic size name or required modifier argument is an incomplete mapping.
+For a `VALUE` operand or recognised pinning/memory form, missing required expressions likewise prevent a complete mapping; retain available source/diagnostic observations rather than dereference null or invent a child.
+An unknown helper discriminant is an unmapped variant and makes index coverage partial.
+Do not guess its arm from nonnull fields.
+Inactive fields are never traversed; fresh-observation comparisons must still detect unexpected producer data without following semantic or inactive pointers.
+
+`UNPARSED` statements and operand bases retain their exact token spans as opaque syntax and require a partial-traversal reason for the uninspected region, not a claim that the region contains no declarations.
+Recognised modifiers on an unparsed base remain independently traversable: `add_asm_operand` can assign `operand.modifiers` before discovering a missing/unsupported base.
+On an earlier malformed-modifier return, the producer may not attach the temporary modifier list at all; preserve only the published helper records plus raw source/diagnostics, never infer unattached records from pool allocations.
+A diagnostic alone does not force partial coverage of all other assembly children; identify the actual uninspected or unmappable region.
+
+Register-declaration/pinning helpers express assembly grammar, not ordinary `DECLARATION` or `COMPOUND_BINDING` entries.
+Their names remain authored identifier occurrences; a future assembly-symbol index needs a separately reviewed kind rather than silently widening this declaration index.
+Ordinary declarations reached inside a parsed value expression still follow the surrounding authored container rules; an assembly instruction/helper does not fabricate an enclosing declaration entry.
+Register-declaration `name` and pinning `source.expression` may be separately allocated identifiers for the same source token.
+Retain distinct producer node IDs and registered paths; equal spans/names are not a licence to merge them or emit duplicate declarations.
+Do not demand that every descendant span fit inside its immediate helper span: the current register-declaration helper's span can stop before its attached pinning.  Validate all spans against the owned token/source revision and the registered construction, without silently widening producer observations.
+
+The discriminating future vector is an `UNPARSED` operand with an attached `AMPERSAND` modifier: the base contributes an opaque/partial reason while the modifier's identifier is visited exactly once.
+Additional independent vectors cover all four statement kinds, five operand kinds, both size kinds and seven modifier kinds; absent/inferred versus explicit register classes; optional memory components; separately allocated same-token identifiers; malformed suffixes; injected inactive pointers and unknown tags.
+Existing assembly fixtures in `parser_tokens_test.jai` provide source forms and recovery observations, not qualification of this proposed visitor.
+Assert exact visit paths/order, selected-arm exclusions, node IDs and local coverage reasons after implementation authorisation.
+This closes the draft's unspecified assembly-helper field paths, not the outstanding producer review or executable qualification gates for the complete registry.
+
+##### Token Registry and Required Trivia Profile
+
+On 2026-10-21 the user accepted trivia handling as a requirement for full-featured API support and allowed dropping the compatibility restriction if it reduces complexity.
+Accordingly, the proposed initial full-featured profile uses trivia-enabled, byte-indexed owned syntax only; dual-mode support and a non-trivia origin adapter are not acceptance requirements.
+This records a scope simplification, not authorisation to remove the existing parser's AST compatibility mode or change production module defaults now.
+Keep trivia/source ownership and exact byte spans in the eventual API regardless of whether the implementation later removes the compile-time switch entirely.
+Performance comparisons for this profile must use an equivalent trivia-enabled fresh baseline; historical measurements with different options are not interchangeable acceptance samples.
+
+`jai-cache-token-tags/1` has the following closed `NAMED` registry, grouped for readability only; group/row order is not token precedence or an encoded enum ordinal.
+
+| Group | Canonical names |
+| --- | --- |
+| Values | `IDENT`, `NUMBER`, `STRING` |
+| Operators | `PLUSEQUALS`, `MINUSEQUALS`, `TIMESEQUALS`, `DIVEQUALS`, `MODEQUALS`, `ISEQUAL`, `ISNOTEQUAL`, `LOGICAL_AND`, `LOGICAL_OR`, `LESSEQUALS`, `GREATEREQUALS`, `RIGHT_ARROW`, `DOUBLE_DOT`, `DOUBLE_DOLLAR`, `SHIFT_LEFT`, `SHIFT_RIGHT`, `ROTATE_LEFT`, `ROTATE_RIGHT`, `TRIPLE_EQUALS`, `SHIFT_LEFT_EQUALS`, `SHIFT_RIGHT_EQUALS`, `ROTATE_LEFT_EQUALS`, `ROTATE_RIGHT_EQUALS`, `BITWISE_AND_EQUALS`, `BITWISE_OR_EQUALS`, `BITWISE_XOR_EQUALS`, `LOGICAL_AND_EQUALS`, `LOGICAL_OR_EQUALS`, `POSTFIX_DEREFERENCE`, `PREFIX_DEREFERENCE`, `ISEQUAL_FOR_SWITCH_STATEMENT`, `DOUBLE_MINUS`, `TRIPLE_MINUS`, `DOUBLE_COMMA`, `BEGIN_STRUCT_LITERAL`, `BEGIN_ARRAY_LITERAL` |
+| Keywords | `KEYWORD_FOR`, `KEYWORD_IF`, `KEYWORD_IFX`, `KEYWORD_THEN`, `KEYWORD_ELSE`, `KEYWORD_CASE`, `KEYWORD_RETURN`, `KEYWORD_STRUCT`, `KEYWORD_WHILE`, `KEYWORD_BREAK`, `KEYWORD_CONTINUE`, `KEYWORD_REMOVE`, `KEYWORD_USING`, `KEYWORD_DEFER`, `KEYWORD_SIZE_OF`, `KEYWORD_TYPE_OF`, `KEYWORD_CODE_OF`, `KEYWORD_INITIALIZER_OF`, `KEYWORD_TYPE_INFO`, `KEYWORD_NULL`, `KEYWORD_ENUM`, `KEYWORD_TRUE`, `KEYWORD_FALSE`, `KEYWORD_INLINE`, `KEYWORD_NO_INLINE`, `KEYWORD_CAST`, `KEYWORD_AUTO_CAST`, `KEYWORD_CONTEXT`, `KEYWORD_PUSH_CONTEXT`, `KEYWORD_OPERATOR`, `KEYWORD_IS_CONSTANT`, `KEYWORD_ENUM_FLAGS`, `KEYWORD_UNION`, `KEYWORD_INTERFACE` |
+| Other | `QUICK_LAMBDA`, `NOTE`, `END_OF_INPUT`, `ERROR` |
+| AST-only operators | `OPERATOR_ARRAY_SUBSCRIPT`, `OPERATOR_ASSIGNMENT_TO_ARRAY_SUBSCRIPT` |
+
+`BYTE_CHAR` represents an unsigned byte value from `0` through `255`; representability does not claim that every byte is a valid source token.  Preserve inactive/default diagnostic token observations without fabricating source spelling.
+Producer aliases `BITWISE_XOR`, `BITWISE_NOT`, `BITWISE_AND`, `BITWISE_OR` encode as `BYTE_CHAR` values `94`, `126`, `38`, `124` respectively.
+`__FIRST_KEYWORD` normalises to `NAMED {KEYWORD_FOR}` and `__LAST_KEYWORD` to `NAMED {KEYWORD_INTERFACE}`.
+Those six alias spellings are not accepted as canonical `NAMED` payloads; payload decoding accepts only the table's exact names or a valid byte-character value.
+The two AST-only operator names may appear in registered operator fields, not as claimed lexer-emitted source tokens.
+Other token-role constraints must likewise agree with the actual producer; registration alone does not prove a value can occur in every field.
+Duplicate canonical names, unregistered producer values and malformed tags fail conversion.
+Adding/renaming/remapping a token or alias requires an explicit registry/schema compatibility change, not reliance on a changed native enum number.
+This closes the current tag-name/alias inventory; the token-value/trivia draft below and complete node/child variants still need payload-schema review and executable producer round-trip checks.
+
+##### Token Values, Flags and Trivia Ownership
+
+Proposed 2026-10-21 under `jai-cache-source-tokens/1`, for materialised source tokens in the required trivia-enabled profile; synthetic tokens remain separate recovery records, not fabricated source tokens.
+`TokenRecord` is `{tag, origin:SOURCE, coordinates, value_flags:u32, ident_is_backticked:bool, original, preceding, value}`.
+`coordinates` preserves `{l0:s32, c0:s32, l1:s32, c1:s32}` verbatim as producer observations, independently of validated byte origins; unset/error coordinates are not clamped into valid editor positions.
+`original` and `preceding` are checked half-open byte slices of the envelope's exact source, not producer pointers or independently mutable strings.  Preserve empty slices and validate their offsets before exposing views.
+The token origin agrees with its materialised `byte_start`/`byte_end`; `original` preserves the producer's `original_text` slice.  If a producer route makes these differ, retain both observations and qualify that mapping explicitly rather than silently rewriting either.
+
+| Active `value` tag | Producer discriminator and exact payload |
+| --- | --- |
+| `NAME {bytes}` | `IDENT`, `NOTE` and materialised `KEYWORD_*` tokens carry the active `ident_value.name` bytes.  Preserve decoded/handler-produced bytes independently of source spelling; keywords use the copied name, and backticked spellings remain distinguishable through source and `ident_is_backticked`. |
+| `UNSIGNED_INTEGER {bits:u64}` | `NUMBER` without `FLOAT` preserves the exact unsigned accumulator, including overflow-result bits with the producer's flags/diagnostics.  Do not reinterpret a high-bit value as a signed integer or infer representation from decimal spelling. |
+| `FLOAT64_BITS {bits:u64}` | `NUMBER` with `FLOAT` preserves the exact IEEE-754 binary64 object bits of `float64_value`, even when the producer first rounded to float32.  No decimal formatting round trip, NaN canonicalisation or signed-zero folding. |
+| `STRING_BYTES {bytes}` | `STRING` preserves the active `string_value` bytes under the captured `EVALUATE_STRING_ESCAPES` setting, including its intentional empty result when evaluation is disabled.  Keep exact raw source separately; a decoded value is not necessarily a source slice or UTF-8 text. |
+| `NO_VALUE` | A reviewed producer route with no active union member, including punctuation and EOF.  Never read union backing bytes to fill this value; an unreviewed route needs a mapping failure, not a guessed zero/name. |
+
+Quoted notes are still `NOTE`/`NAME`: the lexer parses a string then changes the tag and copies its resulting name.  Do not reinterpret the overlapping union as both a note name and a string value.
+Identifier storage addresses, interning identity, allocator state and uninitialised union/hash bytes are not payload identity.
+If a future consumer requires a derived name hash, define/recompute it from the name with a versioned algorithm rather than persisting incidental `ident_value.hash` storage.
+The record retains `ident_is_backticked` and `value_flags` observations even where inactive; their semantic interpretation is controlled by token kind/producer route, not by nonzero union bytes.
+
+The closed `Value_Flags` mask is `0x1070001F`, with names/bits: `HERE_STRING=0x1`, `NUMBER=0x2`, `HEX=0x4`, `BINARY=0x8`, `FLOAT=0x10`, `REQUIRES_FLOAT64=0x100000`, `DEFAULTS_TO_FLOAT64=0x200000`, `REQUIRES_FLOAT64_DUE_TO_SIGNIFICANT_DIGITS=0x400000`, `OVERFLOWED=0x10000000`.
+Unknown bits reject conversion under this schema; preserve observed combinations without inventing extra lexical validity rules from flag names.
+In particular `HEX` may be set for an integer representation reason rather than a hexadecimal source prefix.
+`Note_Flags.IS_SYSTEM_LEVEL` is a separate flag domain, not another interpretation of the overlapping `Value_Flags.HERE_STRING` bit.
+The reviewed note producers do not establish a note-flag payload mapping; do not fabricate one from that numeric overlap.
+
+Trivia slice ownership follows the source, not a second concatenated copy.  Keep exactly one immutable source lease plus views; optional copied decoded names/string values belong to the snapshot and survive producer/interner teardown.
+The lexer puts each inter-token gap in the following token's `preceding_trivia`, including the final gap before EOF.
+EOF has empty original spelling and a byte origin at the end of the exact source.
+For reconstruction, concatenate each materialised token's preceding slice then original slice, including EOF; there is no separate trailing-trivia field or EOF reconstruction branch.
+Validate against the exact source; do not drop a leading BOM, comments, malformed bytes or the final gap merely because they have no semantic token value.
+Trivia classification is optional derived indexing over these slices, not a replacement for them.
+The closed kind registry is `WHITESPACE | LINE_COMMENT | BLOCK_COMMENT | SHEBANG | IGNORED`; each item carries a checked source slice and iterator-relative offset mapped back to the parent slice's start.
+Preserve `IGNORED` bytes and nested/unterminated block-comment text; classification must not assert on arbitrary source text or discard unrecognised bytes.
+A classification gap does not authorise changing the authoritative trivia/source views.
+All slices/decoded values borrow through the owning syntax/result lease; no token, trivia iterator or interned name may outlive that lease without an independent copy/retain.
+
+Future qualification vectors: each active union tag; decimal/hex/binary and overflow flags; float32-rounded values, signed zero and exact float-bit transport; quoted/unquoted notes; escaped/here strings with evaluation enabled/disabled; producer/interner teardown; BOM-only/comment-only/empty files; nested comments, ignored bytes and EOF final-gap reconstruction.
+The schema does not certify every producer route or define persistent float/text encoding; those require explicit mapping/round-trip review under C1, bounded decoding and the separate persistence contract.
+
+Local review vectors, to become executable acceptance cases only in authorised implementation:
+
+- `K("x", ["ab", "c"]) != K("x", ["a", "bc"])`; changing tag, version, field order or field count changes the key bytes.  Compare complete key bytes, not an assumed collision-free digest.
+- Equal source bytes at two document keys can have equal `SourceRevision` but cannot collapse document identity, source-visible context or world membership.  Different newline bytes produce different source descriptors; absent and present-empty remain distinct.
+- Equal provider state tokens under different documents/sessions are different revisions.  Analysis retry preserves the frontier; a save observation with unchanged selected bytes may still change provider state/frontier.
+- Wrong-world/revision spans, forged handle kind/session/generation, and released/restarted registrations reject before any payload is exposed.  A payload-local node/entry ID is never accepted as a handle or semantic declaration ID.
+
+These vectors refine C1/C2/C3, T2/T3/T5, D1/D2 and V2/V5/V6 without claiming any new behavioural test has run.
+
+#### Source Event Payloads
+
+| Tag | Required payload and transition |
+| --- | --- |
+| `SET_OVERLAY` | `{source: SourceInput, resulting_provider_revision}`.  Install the exact host-selected buffer over the separately retained disk state. |
+| `EDIT_OVERLAY` | `{base_source_revision, edits: []RangeEdit, resulting_provider_revision}`.  Reject base mismatch, invalid ranges or missing editable source; do not silently edit another revision. |
+| `OBSERVE_DISK` | `{disk: DiskObservation, resulting_provider_revision}`.  Advance acknowledged disk state, preserving any active overlay; select disk/absence only when no overlay takes precedence. |
+| `ACK_SAVE` | `{written_source_revision, disk: DiskObservation(PRESENT), expected_overlay_revision, resulting_provider_revision}`.  Record the actual written bytes and reconcile only the overlay revision the host confirms was saved; preserve a newer overlay. |
+| `RESET_OVERLAY` | `{host_confirmation, disk: DiskObservation, resulting_provider_revision}`.  Clear active overlay/recovery selection and choose this acknowledged disk observation.  No hidden latest-disk read occurs during submission. |
+| `RESTORE_OVERLAY` | `{host_confirmation, recovery_candidate_identity, source: SourceInput, resulting_provider_revision}`.  Activate only the exact host-confirmed bytes; a recovery blob alone never authorises this event. |
+
+Deletion is an absent disk observation, not an empty `SourceInput`.
+Rename/cross-document identity transfer is initially an unsupported event capability until its grammar/identity mapping is specified; callers may submit an explicit old-path absence plus new-path source selection only when the provider confirms those separate document identities and no semantic continuity is claimed.
+Closing a buffer must be expressed by the host's chosen source transition, not an implicit reset inferred from releasing a result handle.
+This proposed event subset still needs host-adapter review; it does not write editor files or implement save/recovery UI.
+
+#### Operation and Outcome Table
+
+Operation errors are tagged `INVALID_VERSION`, `INVALID_ARGUMENT`, `INVALID_HANDLE`, `BASE_MISMATCH`, `UNSUPPORTED_EVENT`, `ADMISSION_DENIED`, `ACTIVE_SESSION`, or `SERVICE_CLOSED`, with contextual details but no successful source transition.
+Provider acquisition errors during admission return a specific unavailable/failure reason without partial acceptance; cache persistence failure alone is not admission failure.
+Terminal observations are ticket outcomes `PUBLISHED | SUPERSEDED | CANCELLED | FAILED` or query outcomes `AVAILABLE | UNAVAILABLE | UNSUPPORTED | CANCELLED | FAILED`, with their original selected identities/reasons.
+Shutdown observation is `PENDING {phase: QUIESCING | DRAINING}` until terminal `STOPPED {persistence_status, cleanup_diagnostics}`; a wait deadline does not create another terminal shutdown state.
+`PENDING` and `TIMED_OUT_PENDING` are observation states, not terminal outcomes or permission to select newer input.
+
+| Operation | Input | Result and exact ownership/state effect |
+| --- | --- | --- |
+| `OpenSession` | `SessionOptions` | `OPENED {session: Handle(SESSION), description: SessionDescription}` or `REJECTED {error}`.  Allocate a fresh session identity, return the initial accepted frontier and negotiated capability/limit policy, and start with no published analysis head.  Persisted candidates do not become active overlays or live handles.  Store failure may report degraded in-memory operation; no partial session escapes rejection. |
+| `DescribeSession` | Live `SESSION` | Coherent value `SessionDescription`; does not advance source state, acquire a world/result lease or activate recovery.  Reading a frontier does not reserve it: a later submit must still validate that base. |
+| `SubmitSourceBatch` | Live `SESSION` plus matching `SourceBatch` | `REJECTED {error}` or `ACCEPTED {ticket: Handle(TICKET), accepted_frontier}`.  Own all input before one atomic source-selection transition; return a ticket even if its milestone finishes quickly.  Parse/index or durable-store completion is not implied by acceptance. |
+| `RequestAnalysis` | Live `SESSION` plus `AnalysisRequest` | `ACCEPTED {ticket: Handle(TICKET), analysed_frontier}` or `REJECTED {error}`.  Lease the exact selected revisions at that frontier and schedule/join analysis without advancing it.  Supports retry after failed/superseded work without an empty source batch, replayed save event or invented edit. |
+| `ObserveTicket` | Live `TICKET` | Atomic terminal observation or `PENDING {waiter: Handle(WAITER)}`.  Each call creating a waiter creates a separately owned notification registration; ordinary repeated polling should use `Poll`, not repeatedly register. |
+| `AcquireWorld` | Selector `PUBLISHED_UPDATE {ticket_or_update_waiter}` or `HEAD {workspace, expected_frontier}` | Owned `WORLD`, pending/unavailable, or operation error.  The ticket/update waiter must have a `PUBLISHED` outcome; `HEAD` succeeds only if the published analysis frontier matches the explicitly expected frontier.  Otherwise, report a descriptive pending/frontier-mismatch/no-head reason without creating a waiter; use the ticket or `RequestAnalysis` to obtain an observable milestone.  An omitted selector is `INVALID_ARGUMENT`; there is no implicit latest world. |
+| `Query` | `QueryRequest` | `AVAILABLE {result: Handle(RESULT)}`, an immediate terminal reason, or `PENDING {waiter: Handle(WAITER)}`.  Acquire result protection or register the waiter atomically with inspection; an immediate answer creates no completion notification. |
+| `Poll` | Live `TICKET`, `WAITER` or `SHUTDOWN` | Stable terminal observation or `PENDING`; no new waiter, no consuming transition and no new payload lease.  An available observation is descriptive until `AcquireResult`; a published observation is descriptive until `AcquireWorld`. |
+| `Wait` | Same handle plus monotonic deadline | Same observation as `Poll`, or `TIMED_OUT_PENDING`.  Does not cancel, register another completion record, block a required host dispatch thread safely by magic, or change the selected world. |
+| `AcquireResult` | Live query `WAITER` with `AVAILABLE` terminal outcome | New owned `RESULT`; pending/terminal reason otherwise.  Inspection and acquisition are atomic against registration release, so no borrowed payload escapes.  Repeated acquisition creates independent leases that must each be released. |
+| `CancelWaiter` | Live `WAITER` | `CANCELLED` if it wins the terminal race, otherwise `ALREADY_TERMINAL {observation}`.  Does not undo a source event, rewrite an update ticket, release the handle or cancel other consumers. |
+| `DrainCompletions` | Live `SESSION` plus checked maximum count | Bounded completion records for live pending registrations, at most one terminal record per registration.  Draining does not release registrations or transfer result ownership; records released/reused before later access are safely stale. |
+| `Retain` | Live `WORLD` or `RESULT` | New independently owned handle protecting the same immutable payload; copying the original handle bits is not a retain.  Operation fails safely if release won the race. |
+| `Release` | Any owned handle | Retire that registration exactly once; subsequent uses, including double release, return `INVALID_HANDLE` without touching a new generation.  A `SESSION` may be released only after `STOPPED`; otherwise return `ACTIVE_SESSION` without retiring it.  Waiter release detaches interest, not source state; active task/delivery ownership persists until its own release. |
+| `RequestShutdown` | Live `SESSION` | Owned `SHUTDOWN` observation handle; repeated calls refer to the same shutdown operation through separate owned registrations.  It rejects new work at quiescing, preserves existing leases/observation/release access, and never reports stopped merely because a wait deadline elapsed. |
+
+Payload access requires a live owning `WORLD`/`RESULT` handle.  Read-only descriptions/views borrow from that handle and cannot be used after its release; copies that must survive need their own host storage or `Retain` first.
+Tickets and their pending observation waiters each protect the published world until independently released; query waiters protect their terminal result until released.
+`AcquireWorld` accepts a published update waiter even after its original ticket registration was released; acquiring a child handle establishes independent protection before the parent can be retired.
+Polling/draining is deliberately non-owning to avoid hidden lease growth in a UI polling loop.
+No handle survives a process restart, and shutdown never turns an externally retained result into a borrowed pointer to destroyed service state.
+After releasing a stopped `SESSION`, already owned child handles remain observable/releasable through their surviving owner; no operation may require borrowing the released session handle to keep a result alive.
+
+#### Bootstrap and Retry Consistency Pass
+
+The interface consistency review identified bootstrap, first-document admission and retry gaps; the operations above now make those paths explicit rather than assuming hidden constructors or synthetic edits.
+Initial session creation and configuration have not thereby been implemented or approved.
+
+```text
+OpenSession(explicit workspace/provider/context/limits/store policy)
+    -> OPENED(owned session S, initial frontier F0, capabilities)
+SubmitSourceBatch(S, expected F0, OBSERVE_DISK or SET_OVERLAY, expected document state UNTRACKED)
+    -> ACCEPTED(ticket A, accepted frontier F1)
+Observe/Poll/Wait and AcquireWorld for ticket A as below
+    -> owned world A, or explicit terminal outcome
+If analysis failed but F1 is still selected:
+    RequestAnalysis(S, expected F1, tracked documents, SYNTAX_INDEX)
+        -> new ticket at F1, with no source mutation
+If another source event won first:
+    BASE_MISMATCH; DescribeSession(S), then explicitly select/retry
+RequestShutdown(S); Poll/Wait shutdown handle until STOPPED
+Release observation handles and stopped session when no longer needed
+    -> previously retained result/world handles remain independently valid
+```
+
+This protocol refines V5/V6 for first admission and retry, X7/X8 for open/shutdown ownership, and T8 for known unsupported capabilities without adding a claim that those tests pass.
+Complete record limits, session option validation, identity allocation and real concurrent execution remain specification/qualification work.
+
+#### Worked Edit-to-Result Protocol
+
+```text
+SubmitSourceBatch(base frontier A, overlay edit to B)
+    -> ACCEPTED(ticket B, accepted frontier B)
+ObserveTicket(ticket B)
+    -> terminal PUBLISHED, or PENDING(waiter U)
+Poll/Wait(waiter U) if created
+    -> PUBLISHED(world identity B), or explicit terminal outcome
+AcquireWorld(PUBLISHED_UPDATE(ticket B or live update waiter U))
+    -> owned world B
+Query(world B, active document, SYNTAX_SNAPSHOT)
+    -> AVAILABLE(owned result), or PENDING(waiter Q)
+Poll/Wait(waiter Q) if created; AcquireResult(waiter Q) when AVAILABLE
+    -> owned result with exact world/source identity B
+Release created waiters and ticket; use result/world while leased
+Release result and world when finished
+```
+
+Handle every rejection, supersession, timeout and terminal reason rather than assuming the happy path.
+On supersession, explicitly choose/request a successor ticket/world; do not query a head world and silently call it B.
+Multiple queries may retain the same world, and retaining world A does not prevent publishing B or permit B to mutate A.
+
+#### Latency Boundaries and Acceptance Mapping
+
+Use monotonic timestamps per operation/identity; correlate pending completion with the original ticket/waiter rather than restarting the timer at every poll.
+
+| Metric | Start and finish | Existing acceptance coverage to implement |
+| --- | --- | --- |
+| Admission latency | `SubmitSourceBatch` entry to accepted/rejected response.  Includes validation/input ownership/admission bookkeeping; report separately from analysis completion. | T2, V5, X7: stale/invalid/closed work rejects truthfully without partial acceptance. |
+| Edit-to-usable syntax/index | Submission entry through published milestone and successful `AcquireWorld` for that exact revision, plus acquisition of the requested syntax/index result.  Include queueing, acquisition, parsing, validation and publication; also report service-ready versus host-observed timestamps. | T1, T7, V6: no mixed/old-world result, no false success for superseded/failed work.  This is the main P2/user-edit path. |
+| Unchanged query latency | `Query` entry to owned `RESULT`, including `AcquireResult` if pending.  Charge validation, scheduling, rehydration and lease acquisition, not only a resident lookup or first `PENDING` response. | T5, T6, X1-X3: exact payload, safe retention, no lost completion; primary P1 comparison. |
+| Restart-to-usable result | Process entry through provider/store validation, world capture/publication and owned requested result.  Report process wall and worker phases separately, with filesystem cache condition. | S1, S2, S6, V2-V4 and T4: source authority, bounded fallback, explicit absent/unknown/recovery.  Optional AST loading is the P3 competitor, not a requirement to decode the historical graph. |
+| Delivery/host delay | Service terminal-ready timestamp through host observation/acquisition.  Show separately and within end-to-end totals; delayed host draining must not hide scheduler latency or inflate a claimed parser-only time. | X4, X5, X8: delayed/reentrant dispatch and shutdown retain truthful outcomes/leases. |
+
+Report successful latency alongside rejection, supersession, cancellation, timeout and failure counts; dropping non-successful edit samples must not manufacture a faster tail.
+Keep memory/backing/store measurements secondary but visible, with safety and leak obligations unchanged and no numerical P1-P5 cutoff newly approved.
+Exact operation signatures, consistency/identity encodings, payload schemas, admission bounds, rename capability and ABI remain review items; these records/tables are not executable acceptance tests.
+
+### Review Decisions and Completion Gate
+
+Prepared 2026-10-20; updated 2026-10-21.  **R1 scope and R3-R5 design directions approved; R2 and R6-R8 remain pending explicit approval.**
+E1-E13 provide bounded evidence, and the preceding sections now draft the major contract areas.
+That is progress in specification coverage, not evidence that the specification is complete, the proposed policies are approved, or a service has passed acceptance.
+Use this list to resolve choices rather than adding further general contract prose without a specific missing requirement.
+
+#### Decisions for Review
+
+| Decision | Recommendation or choice to resolve | Approval boundary and status |
+| --- | --- | --- |
+| R1: Initial coverage | Adopt the syntax-first qualification slice: owned whole-file syntax/diagnostics/indices and revisioned source/world operations, including source/unsaved-recovery persistence; initially qualify the recorded Windows x64 toolchain/environment.  Keep configured semantic queries, evaluator execution and higher editor features explicitly unsupported until qualified. | Scope approved 2026-10-20.  This narrows the first deliverable, not the eventual full-syntax/full-semantics goal.  Additional compiler/filesystem/platform claims require their own qualification; detailed contracts and implementation remain unapproved. |
+| R2: Persistence and recovery policy | Keep source/metadata and unsaved recovery persistence required; do not require full AST reload.  Decide whether to confirm the earlier provisionally enabled default, the private default location/override rules, recovery retention and host reset/discard/clear behaviour. | Pending policy choices; persistence itself is already confirmed.  A direction approval does not choose retention durations, erase prior private data or authorise automatic recovery activation. |
+| R3: Source/provider protocol | Adopt finite explicit captures, unknown-versus-absent states, host-controlled overlays and byte-based exact-base edit batches.  Require declared consistency and explicit successor captures for unavailable historical discovery. | Direction approved 2026-10-21.  Exact event schemas and adapter capabilities still need specification; logical source transactions are not atomic disk/editor writes. |
+| R4: Execution/delivery | Adopt a logical serialised coordinator with token-checked worker completion, host-pulled outcomes, independent waiter cancellation and lease-safe shutdown. | Direction approved 2026-10-21.  Thread model, admission/queue limits, fairness and last-consumer worker-stop policy are not chosen by approving these invariants. |
+| R5: Identity and invalidation | Preserve configured instance/load-occurrence distinctions and nominal identity; use conservative misses for uncertain matches and whole-module semantic invalidation until finer tracked facets are qualified. | Direction approved 2026-10-21.  Canonical encodings and matching algorithms are technical specifications still to write; this does not enable a semantic feature. |
+| R6: Resource/store policy | Choose workspace versus shared-store scope, supported concurrent-writer policy, absolute host memory/disk/acquisition limits, retained-history defaults and pressure/repair behaviour.  Prefer no implicit cross-workspace sharing until its identity/privacy/lease rules are approved. | Pending.  No absolute values or sharing defaults are inferred from small fixture bounds or the P4/P5 screening candidates.  Safe decoding requires concrete enforced limits before implementation qualification. |
+| R7: Performance acceptance | Approve, revise or replace P1-P5 and their paired workload/timing procedure.  Include a larger representative project; set any absolute interactive targets with host/hardware requirements rather than extrapolating E12. | Pending.  Existing relative targets are proposals, not achieved service results.  A syntax-store speed target cannot waive required source/recovery persistence. |
+| R8: Deferred qualification | Agree which initial guarantees are required for release and which claims remain explicitly excluded: OS-cold startup, power-loss durability, broader platforms, semantic/editor workflows and production concurrency. | Pending.  Excluding an optional claim is not passing its test.  Concurrency required by an adopted store/execution model still needs qualification; no cache flush, reboot, privilege change or arbitrary source evaluation is authorised. |
+
+The 2026-10-20 scope approval settled R1.  On 2026-10-21 the user explicitly approved R3-R5 as design directions and the fifteen-operation interface as the specification baseline, subject to exact schemas and API review.
+These approvals do not settle R2/R6-R8, choose detailed encodings/algorithms/threading/limits, authorise implementation, or approve a migration plan.
+The user prioritised latency over memory-related overhead on 2026-10-20; exact P1-P5 numerical cutoffs were not explicitly approved, so R7 remains pending.
+Record exactly which decisions changed, their date and any exclusions; do not turn a general continuation request into blanket approval of R1-R8.
+Approval, implementation status and qualification status are independent: an approved requirement can remain unimplemented and untested.
+
+#### Reading the Performance Candidates
+
+P1-P5 are proposed go/no-go screening criteria for future implementations/optimisations, not measured editor guarantees or runtime configuration defaults.
+Percentages compare a candidate with an equivalent fresh/owned baseline on the same workload and hardware; they are not percentages of total project compilation time.
+For latency, median is the middle-measured time; p95 is a tail statistic, estimated here by nearest rank across at least 21 trials, not a worst-case bound.
+
+| Candidate | What it compares | Example of the proposed threshold, not an observation |
+| --- | --- | --- |
+| P1: Resident unchanged request | Reuse already-resident validated syntax/index data versus fresh parsing/index construction for the same unchanged input.  Include validation and result acquisition, not just a pointer lookup. | If fresh median/p95 are 20/30 ms, candidate median must be at most 18 ms and p95 at most 31.5 ms.  This asks for a useful typical gain without more than 5% tail regression. |
+| P2: Changed-file update | Notify-to-usable-syntax/index latency versus the fresh changed-file path, with identical retained-world ownership.  This covers edits that cannot simply hit unchanged syntax. | With a 10/20 ms fresh median/p95, the candidate must be at most 10.5/21 ms.  This is an overhead/regression allowance, not a demand that edits become 5% faster. |
+| P3: Optional persisted AST reload | A fresh process validates/loads/reconstructs equivalent syntax/index data versus reading/validating source and parsing it.  Process wall and worker timing stay separate; compare each timing boundary with its own equivalent baseline. | The same 20/30 ms baseline gives an 18/31.5 ms target.  This tests whether optional AST persistence is worth adopting.  Required source/metadata and unsaved recovery persistence are not rejected if AST decoding fails this speed gate. |
+| P4: Retained memory | Peak upstream allocator backing versus owned whole-file parsing for the same live current/historical worlds, plus zero owned live allocations after final release. | A baseline peak of 100 MiB allows at most 110 MiB.  This is not a 110 MiB global budget, and zero owned allocations does not mean the OS process working set immediately falls to zero. |
+| P5: Managed store size | Steady-state total managed artifact/manifest/index bytes versus exact source bytes represented by the selected current and retained historical revisions.  Peak temporary publication space is reported separately. | If the selected retained source revisions total 10 MiB, the proposed steady-state store limit is 40 MiB.  This is not four times the entire repository size, and it does not set an absolute disk quota. |
+
+The 10% gain, 5% latency allowance, 10% backing allowance and four-times storage ratio are unapproved engineering candidates, not conclusions established by E1-E13.
+They aim to screen out complexity that buys negligible benefit or excessive overhead; different host requirements may justify different limits.
+The proposed procedure evaluates real workloads individually over two local rounds, rather than hiding a regression inside one project-wide average.
+Current experiments favour resident reuse and show the verbose graph reload is slower; they do not qualify a future editor service against these targets.
+Approval can be per candidate, and targets can be revised or left pending until actual host/workload requirements are known.
+
+User priority confirmed 2026-10-20: latency is the primary performance concern; memory/storage overhead is a secondary trade-off, not an equally weighted adoption objective.
+Prioritise P1-P3 and visible-file edit/query latency, including tail behaviour.  Continue reporting P4/P5 for informed trade-offs, but do not reject a useful latency improvement solely for missing their unapproved ratios.
+This priority does not relax lifetime correctness, safe decoding/allocation bounds, leak checks or host resource-pressure controls, and does not approve unlimited memory/disk use.
+
+#### Technical Specification Work After Direction Review
+
+| Area | Concrete next artifact required, not another general principle |
+| --- | --- |
+| Source/API records | Versioned source/capture/ticket/result schemas, edit and multi-document transaction grammar, provider capability set, and an operation/outcome table resolving rejection, timeout and supersession cases. |
+| Identity/semantic extension | Exact key canonicalisation, identity allocation/matching and query/dependency record schemas, with a supported initial catalogue and explicit unsupported extension points.  Specify semantic contracts without claiming implementation of deferred rules. |
+| Ownership/execution | Handle/lease representation, transfer/release operations, coordinator ordering, lock graph, queue/admission bounds, attempt tokens and final destruction protocol. |
+| Persistent store | Exact text grammar using `Text_File_Handler`, escaping/byte encoding, concrete bounds, manifest/operation/session ordering, lock/pin protocol and qualified platform commit/repair primitives. |
+| Acceptance mapping | Map each approved requirement to T1-T8, S1-S8, D1-D8, X1-X8 or V1-V8 and an executable oracle/negative control; explicitly mark unsupported cases and add missing cases instead of claiming the existing trace drafts are tests. |
+
+The tables above identify specification deliverables, not a dependency-ordered migration/implementation plan.
+No production edits follow merely because a record has been described, or a review item is accepted.
+
+#### Exit Criteria Before Migration Planning
+
+- [ ] Record explicit initial-scope/direction decisions and resolve or explicitly defer each R1-R8 item without leaving an implicit production default.
+- [ ] Complete exact schemas/protocols for every initial requirement, including its owner, identity/version rule, state transition, failure behaviour and acceptance oracle.
+- [ ] Check the contracts together for conflicts: provider versus analysis frontiers, current versus retained worlds, task versus waiter lifetime, source availability versus store durability, and logical identity versus artifact revision.
+- [ ] Approve the initial workload/platform matrix and acceptance thresholds; separate previously observed experimental evidence from future implementation qualification.
+- [ ] Identify later capabilities and their extension/unsupported contracts, then perform the section 14 specification-completion review before writing a separate migration plan.
+
+Production acceptance tests can only qualify an implementation that exists; this design gate requires their executable acceptance criteria and planned oracles, not false claims that unimplemented traces have passed.
+Implementation authorisation, migration sequencing and the independent AST-copier keep/drop decision remain separate.
+
 ### Experiments to Run First
 
 Use small isolated fixtures/prototypes, not a parallel implementation of the new parser.
@@ -659,6 +2023,7 @@ Language probes use the official compiler as the oracle, including separate expe
 These are proposed manual probes on authored trusted fixtures; listing them does not authorise their execution or automatic evaluation of arbitrary workspace code.
 E1-E11 have been completed as recorded below.
 E12's bounded real-source baseline and same-layout owned AST text-reload comparison are recorded below; performance-policy approval and complete semantic editor-workflow measurements remain open.
+E13 completes the bounded explicit `using,map` wrapper follow-up, not a production evaluator or general compilation-context extractor.
 
 | ID | Experiment and discriminating check | Decision it informs |
 | --- | --- | --- |
@@ -674,6 +2039,7 @@ E12's bounded real-source baseline and same-layout owned AST text-reload compari
 | E10 | Completed: five pointer-free text fixtures using `Text_File_Handler`; 153 exact record comparisons after producer/input teardown, 41 invalid cases, 2,872 rejected truncations, and 126 optimised decode/parse timing samples with independent wire-format/value/statistics audit. | An explicit bounded schema preserves exact bytes and numeric bits; the handler supplies line/version handling, not serialisation or validation.  Payload-heavy text can cost more than fresh parsing.  See results below. |
 | E11 | Completed: filesystem store/restart/overlay model with 911 parent-process checks, 32 worker processes, five killed publishers, competing publication/retry, twelve corruption cases, real cache-directory write denial, save/reset/deletion/reappearance, lease-aware GC, four broken-policy controls, and an independent saved-evidence audit. | Immutable digest-addressed blobs plus locked manifest replacement preserve complete selected states under the tested interruptions.  Recovery is host-confirmed, exact source hashing defeats stale timestamps, and cache failures must preserve source operations and surface diagnostics.  See results below. |
 | E12 | Representative project baseline: measure fresh parse, unchanged-file reuse, and text reload with validation across many small files and large active files, transitive imports, malformed edits, body/interface changes, and repeated updates.  Include hashing/I/O, tail latency, retained worlds, and disk size; distinguish process restart from OS-cold filesystem cache. | Workload selection, numerical acceptance targets, initial cache granularity, and whether syntax persistence earns its overhead.  Reuse existing benchmark/oracle infrastructure where applicable. |
+| E13 | Completed: explicit generated-array `using,map` wrapper versus real mapping, six equivalent pairs, module parameter/private-helper context, exclusions, three compiler rejections, invalid-output policy, twelve damaged-frame controls, and post-process host ownership. | The explicit wrapper works for this supported slice; preserve context and positional exclusions, require successful compilation before publication, and do not mistake a conservative identifier policy for compiler behaviour.  See results below. |
 
 #### E1 Results: Import Scope and Visibility
 
@@ -1311,7 +2677,7 @@ The p95 is the nearest-rank p95 of batch-average operation times, not individual
 | Strings | 17.203 | 19.791 | 17.886 | 21.059 |
 | Numbers | 11.931 | 17.923 | 17.673 | 26.539 |
 | Limits | 125.608 | 170.105 | 25.128 | 38.492 |
-z
+
 These are one local optimised timing round, not equivalent-work speed ratios: decoding restores synthetic node/query/diagnostic/dependency records and deliberately large payloads, whereas parsing constructs a real syntax tree without those semantic records.
 The limits artifact is about 224.5 times its tiny source size; its slower decode demonstrates payload/hex-volume cost, not a representative cache regression.
 Neither the small-fixture decode wins nor that large-fixture loss decides whether real syntax persistence is worthwhile.
@@ -1519,7 +2885,9 @@ The recorded run contains 89 source files, 979 deep snapshot comparisons, 315 ti
 The independent PowerShell audit reimplements the envelope reader and FNV arithmetic, checks exact source bytes and SHA-256 provenance, rotating order, all row counts, parse/hit/diagnostic/token consistency, phase accounting, bytes read/written, retained counts, malformed diagnostics, zero tracked teardown, and final newlines.
 It recomputes the 15 project and 30 edit median/p95 pairs from raw TSVs and separates worker clocks from parent wall clocks.
 The measurement-plus-audit invocation passes 3,329 checks, including runner setup/process checks; the subsequent standalone saved-data audit passes 3,211 checks, including its prior newline-terminated report.
-Evidence is under `examples/.build/project_baseline/40141fe0d05141dd9709bca383c951ab/`: manifests, input paths/sizes/hashes, exact text artifacts, timing/edit/memory/setup TSVs, process outputs, runtime/worker provenance, and `audit_summary.json`.
+Evidence was recorded under `examples/.build/project_baseline/40141fe0d05141dd9709bca383c951ab/`: manifests, input paths/sizes/hashes, exact text artifacts, timing/edit/memory/setup TSVs, process outputs, runtime/worker provenance, and `audit_summary.json`.
+On 2026-10-20, build cleanup had removed those raw files; the table and audit counts above are historical results, not a claim that the original audit command remains runnable.
+The fresh-process follow-up below regenerates isolated manifests and graph artifacts under new identities.
 Fast x64 probe validation, optimised LLVM workloads, shared oracle controls, and saved-evidence auditing pass; no production cache API or migration was added.
 
 Architectural consequence: use validated resident whole-file snapshots and full changed-file reparsing as the initial comparison baseline; budget retained revisions explicitly.
@@ -1604,7 +2972,9 @@ The `Check` path passes 57 checks and saves raw rejected artifacts and process d
 The independent PowerShell audit reimplements FNV/body framing, exact source/path reconstruction, scalar/string hex framing, contiguous/nonforward object IDs and layout placement, source SHA-256 provenance, mode order, parse/hit/load and byte totals, phase accounting, and all 15 median/p95 pairs.
 It checks saved backing and child rejection evidence without using the Jai codec; it is not an independent complete typed-AST decoder.
 The subsequent standalone audit passes 17,151,310 record/evidence assertions; this large number counts per-record assertions, not distinct fixtures or corruption cases.
-Saved evidence is under `examples/.build/snapshot_codec/889f05af33c94f9480a9d0b03445f2fb/`: original-manifest references, graph artifacts, raw/setup/backing TSVs, timing and follow-up worker/source hashes, compiler hash/build flags, process logs, rejection artifacts, and audit JSON.
+Evidence was recorded under `examples/.build/snapshot_codec/889f05af33c94f9480a9d0b03445f2fb/`: original-manifest references, graph artifacts, raw/setup/backing TSVs, timing and follow-up worker/source hashes, compiler hash/build flags, process logs, rejection artifacts, and audit JSON.
+Build cleanup had removed those raw files by 2026-10-20; retain the figures above as historical observations.
+Use the regenerated preparation/startup workflow below rather than assuming those original paths still contain auditable data.
 Backing/rejection modes were added and rebuilt after the saved timing round; their separate worker/source hashes are recorded rather than presented as the measured binary.
 Both fast x64 authored/probe checks and the optimised LLVM real-source, memory, rejection, and saved-evidence checks pass.
 
@@ -1612,9 +2982,131 @@ Architectural consequence: the equivalent-work comparison now supports resident 
 The backing reduction may inform a future compact read-only snapshot design, but does not offset an unapproved latency/disk budget automatically.
 Keep persistence as an architectural capability, not a demonstrated performance win for this representation.
 Compact encoding/decoder optimisation is an optional, measured follow-up, not a reason to begin production migration.
-Numerical acceptance-policy approval, actual graph-reload process-restart/OS-cold performance, semantic dependency updates and configured closures, complete editor workflows, concurrency, and cross-platform evidence remain open.
+At this stage, graph-reload process-restart performance remained open; the next follow-up measures it.
+Numerical acceptance-policy approval, OS-cold performance, semantic dependency updates and configured closures, complete editor workflows, concurrency, and cross-platform evidence remain open.
 
-Suggested order is E1-E5 for language/toolchain facts, then E6-E8 for correctness contracts, then E9-E11 for representation/storage, with E12's baseline captured early and comparisons added as prototypes become available.
+##### E12 Follow-up: Fresh-Process Graph Reload Versus Fresh Parse
+
+Captured 2026-10-20 on Windows 10.0.26200/ReFS, PowerShell 7.6.6, .NET 10.0.12, and the optimised LLVM Jai worker.
+Hypothesis: process startup can reduce the relative cost difference seen in the warm in-process comparison, but does not remove this graph-text decoder's reconstruction/I/O overhead.
+The discriminating check starts a separate bounded worker for every request, with no resident control trees, and compares actual graph reload against fresh source parsing under the same manifest/source context.
+Neither path executes application code or semantic/compiler evaluation.
+
+Cleanup left the earlier evidence directories but removed their files.
+A new `Prepare` mode in [experiment_project_baseline.ps1](examples/experiment_project_baseline.ps1) reuses the bounded five-inventory selector to write only fresh manifests, source SHA-256 provenance, and authored import-chain sources; it does not run unrelated baseline/edit timings or require a baseline executable.
+The prepared run is `examples/.build/project_baseline/45a228d89d2f47168b0ed303c19c15a6/`.
+The graph runner then regenerated artifacts under `examples/.build/snapshot_codec/4bf9ec913623496fa7ad757430dcef18/`, passing the seven authored fixtures, all 89 real-source deep producer/input-teardown comparisons, and 17,151,358 initial run/audit assertions.
+Its preparation timings are a separate round, not pooled with startup or substituted for the historical tables above.
+The regenerated chain's 108,264-byte artifact total differs slightly because its owned source filenames include the new absolute run path.
+
+From the parser examples directory:
+
+```bash
+pwsh -NoProfile -File experiment_project_baseline.ps1 -Mode Prepare
+jai experiment_snapshot_codec.jai -o -llvm -quiet -no_color -output_path .build -exe experiment_snapshot_codec_llvm
+pwsh -NoProfile -File experiment_snapshot_codec.ps1 -BaselineDirectory .build/project_baseline/45a228d89d2f47168b0ed303c19c15a6
+pwsh -NoProfile -File experiment_snapshot_codec.ps1 -Mode Startup -RunDirectory .build/snapshot_codec/4bf9ec913623496fa7ad757430dcef18
+pwsh -NoProfile -File experiment_snapshot_codec.ps1 -Mode AuditStartup -RunDirectory .build/snapshot_codec/4bf9ec913623496fa7ad757430dcef18/startup_cdeffa1e9db7429283f46ea9d7aa95c9
+```
+
+The literal paths address this recorded run.
+For a new run, use the new preparation and graph directories printed by the preceding commands; the original default baseline directory may no longer exist after cleanup.
+`Startup` creates an isolated child evidence directory and does not overwrite graph artifacts or earlier timing rows.
+
+Each inventory has one discarded fresh-process warmup per mode and 21 measured fresh processes per mode, with alternating order: 220 total processes, ten warmups, and 210 measured requests.
+Workers have the existing two-minute timeout and process-tree cleanup; they run serially.
+Each record includes the real PID, a unique invocation ID, exit status, raw worker output, and parent-observed wall nanoseconds.
+The worker clock starts before manifest reading and includes manifest/source I/O, source FNV computation, parsing or artifact read/validation/reconstruction, and snapshot/source teardown.
+It ends before stdout reporting and deferred manifest cleanup; runtime initialisation and process startup/exit are outside this clock.
+The parent `Stopwatch` starts before `Process.Start` and ends after process completion and output draining, so wall time includes startup, runtime initialisation, worker execution, reporting/draining, and exit.
+Percentiles are nearest-rank p95 of 21 individual requests per group; worker and wall percentiles are computed independently, not subtracted to claim a startup-overhead percentile.
+
+Fresh parsing reads authoritative source and computes its digest, with no historical source to compare.
+AST reload additionally validates schema/body hash, exact decoded source bytes and filename against that disk context, and constructs no fresh parse for timing or verification.
+Both modes return matching token/diagnostic totals against the deep-validated preparation world.
+The saved parse/load counters are all-files/zero for fresh and zero/all-files for reload.
+The independent audit recomputes source digests, source/artifact SHA-256 provenance, manifest bytes and exact path order, artifact I/O totals, record framing, alternating order, invocation identity/status, syntax totals, phase sums, and parent/worker clock containment.
+The XOR source digest in worker output is only a compact consistency summary; per-file SHA-256 provenance and exact decoded-source equality remain separate checks, not an authentication or race-free source-selection protocol.
+
+| Inventory | Fresh Worker Median / p95 (ms) | Reload Worker Median / p95 (ms) | Fresh Process Wall Median / p95 (ms) | Reload Process Wall Median / p95 (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Tutorials | 21.478 / 26.334 | 107.964 / 125.536 | 59.560 / 72.449 | 145.048 / 167.141 |
+| Invaders | 5.228 / 5.798 | 27.269 / 30.349 | 40.563 / 42.713 | 63.354 / 69.184 |
+| Parser | 20.250 / 24.544 | 133.164 / 151.995 | 53.367 / 72.903 | 166.709 / 188.215 |
+| Basic | 15.618 / 16.677 | 90.434 / 97.745 | 45.472 / 49.101 | 121.282 / 128.032 |
+| Authored Chain | 0.456 / 0.528 | 1.082 / 1.495 | 34.320 / 37.235 | 35.148 / 39.931 |
+
+On the four real inventories, graph-reload worker medians are about 5.0-6.6 times fresh parsing and whole-process wall medians about 1.6-3.1 times fresh parsing.
+Startup dominates the tiny authored chain's wall time; its close wall medians are not evidence of equal algorithmic cost or a robust performance threshold.
+This is one local timing round with ordinary scheduler/antivirus/runtime variability, not confidence intervals, a hard tail bound, or an approved adoption criterion.
+
+Preparation and SHA-256 provenance reads warm the filesystem; no system cache flush, reboot, privileged cache eviction, or isolated cold-storage protocol was performed.
+Consequently, every result is explicitly **fresh process, warm/unflushed filesystem**, not OS-cold storage or power-loss restart.
+This closes the bounded process-restart comparison, not the cold-storage gate.
+The same-layout read-only codec, post-read size checks, assertion-only invalid-input handling, and absence of semantic queries retain their earlier limits.
+
+The startup-plus-audit invocation passes 3,597 checks.
+A separate `AuditStartup` process reproduces all 20 worker/wall median/p95 pairs and passes 3,289 checks, excluding measurement setup/process checks and including its prior report's newline.
+Evidence is under `examples/.build/snapshot_codec/4bf9ec913623496fa7ad757430dcef18/startup_cdeffa1e9db7429283f46ea9d7aa95c9/`: exact project/artifact provenance, 220 process records, compiler/worker/source/runner hashes and build flags, explicit cache condition, and independently recomputed summary JSON.
+The parent graph directory and prepared source manifests are dependencies of re-auditing this run.
+These remain ignored build evidence, not durable archives; cleanup may remove them again.
+Fast-backend three-file probes, optimised preparation/startup, independent saved-data audit, and source/editor checks pass.
+
+Architectural consequence: process restart does not turn this verbose graph-text format into a speed improvement over fresh parsing.
+Keep resident whole-file retention and fresh changed-file parsing as the supported comparison baseline, without inferring that a compact production codec would behave identically.
+OS-cold storage requires an explicitly agreed, isolated test procedure; no machine-wide cache state was changed to obtain this result.
+Performance-policy approval, semantic dependency/configured-closure and full editor-workflow measurements, concurrency, cross-platform evidence, and production contracts remain open.
+No production cache API or migration plan was added.
+
+#### E13 Results: Explicit `using,map` Wrapper
+
+Completed 2026-10-20 on Windows with the same installed Jai beta 0.2.030 compiler and fast x64 backend.
+Runner: [experiment_using_map.ps1](examples/experiment_using_map.ps1).  From the examples directory:
+
+```bash
+pwsh -NoProfile -File experiment_using_map.ps1
+pwsh -NoProfile -File experiment_using_map.ps1 -Mode Audit -RunDirectory .build/using_map/7123e26ddfbd4d16a824c1dfaa907127
+```
+
+Hypothesis: for an explicitly supported member set, a generated mutable name array produces the same ordered mapping as real `using,map` when the callback's module context is preserved.
+The authored `Pair` has two ordinary members, `left` and `right`; the wrapper constructs its array by iterating `type_info(Pair).members`, rather than supplying literal mapped results.
+Both paths call the same callback in an imported module with explicit prefix/request/exclusion/policy parameters and a file-private formatting helper.
+Three prefix values, each with and without excluding `right`, give six real-mapping/wrapper pairs and twelve exact expected-result checks.
+Real mapping also executes writes through the resulting aliases and checks the original fields sum to 42; excluded members remain accessible through the original object, not through the absent mapped alias.
+
+Results from 18 separate compiler processes:
+
+| Check | Observed result |
+| --- | --- |
+| Six positive pairs | All agree in cardinality, order, exact mapped bytes, and retained empty exclusion slot.  Changing the module prefix changes both paths equally; the private helper remains available in the preserved module. |
+| Excluded alias | Referencing `mapped_right` after excluding `right` rejects with `Undeclared identifier 'mapped_right'`. |
+| Missing context | Removing the private helper from the direct wrapper's module rejects with `Undeclared identifier 'decorate'`.  Copying just the callback is insufficient. |
+| Duplicate mapping | Real mapping rejects with `Redeclaration of 'same'`.  The explicit wrapper call itself succeeds, but the host rejects its colliding output. |
+| Distinct punctuated names | Real mapping accepts `not-0` and `not-1` when no source expression tries to reference them.  Both real and wrapper outputs are rejected by this experiment's deliberately narrower ASCII-identifier policy.  This is a supported-subset restriction, not evidence that the compiler rejects such names or that they are convenient source-level aliases. |
+| Publication | Fifteen compilations succeed, three reject as expected.  Three successful but unsupported/colliding outputs are not published; only the twelve positive results are retained.  Frames emitted before a compiler error are never sufficient for success. |
+
+The result channel uses request-specific begin/end records, an exact slot count, zero-based positional rows, byte counts, and decimal UTF-8 bytes rather than raw callback strings as delimiters.
+The reader enforces the expected request/count/position, a 256-byte per-name bound, byte values, strict UTF-8, the supported ASCII spelling subset, and nonempty-name uniqueness.
+An empty name is retained in its original array slot as an exclusion.
+Twelve controls reject stale requests, truncation, missing/duplicate/reordered slots, extra frames, oversized lengths, invalid bytes/UTF-8, an encoded newline, incomplete byte payloads, and duplicate mapped names.
+This is authored trusted output, not an authenticated protocol: unrelated non-frame compiler text is ignored and a callback able to forge the current request is not sandboxed by framing.
+
+Results are decoded into host-owned strings only after compiler exit and process disposal.
+Replacing the input-text variable and discarding the split rows leaves the decoded values intact; a separate audit process reloads logs and reproduces the results after all evaluator processes have gone.
+This establishes host/result ownership across subprocess teardown, not a future Jai arena allocator or shared-process evaluator lifetime contract.
+
+The final Run invocation passes 985 checks; a separate Audit passes 585 checks, including six exact pair comparisons, twelve damaged-frame controls, input/log SHA-256 checks, expected diagnostic/exit checks, and absence of native outputs.
+Saved evidence is under `examples/.build/using_map/7123e26ddfbd4d16a824c1dfaa907127/`: generated source/module files, compiler logs, request/case/result/exit records, runner/compiler hashes and build flags, host versions, and the audit summary.
+It is ignored, cleanup-removable build evidence, not a durable archive.
+Each authored compilation has a 30-second process-tree timeout; the 1 MiB output bound is checked after capture, not a streaming memory limit.
+No native program is emitted; compile-time code still executes, and the runner is not permission to evaluate arbitrary workspace source.
+
+Limits: only this two-member struct and static parameter/private-helper context are covered, on one compiler/backend/platform.
+General exported-member enumeration, overloads/imports/conditional declarations, full identifier/reserved-name and receiving-scope collision rules, mutable compile-time state, source/caller context, dependency/effect tracking, concurrency, cancellation, hostile output, and sandboxing remain unvalidated or unsupported.
+No performance claim, evaluator opt-in default, production API, or migration implementation follows from this experiment.
+The bounded wrapper proposal is feasible; a future evaluator must preserve a declared supported context or return unsupported, retain positional exclusions, own its results, and publish only after validated successful completion.
+
+Suggested order is E1-E5 for language/toolchain facts, then E6-E8 for correctness contracts, then E9-E11 for representation/storage, with E12's baseline captured early and comparisons added as prototypes become available; E13 is the bounded mapping-wrapper follow-up.
 E5 is a bounded feasibility probe, not a prerequisite to implementing the syntax-first service if evaluation remains explicitly unsupported.
 Do not block the initial specification on optional syntax-chunk reuse, binary formats, mmap, packed sentinel optimisation, or full compiler-backed evaluation; retain a simple supported baseline and explicit extension boundaries.
 
@@ -1635,6 +3127,56 @@ These are design/capability goals derived from this report, not an ordered migra
 No production changes are authorised by this checklist alone.
 
 - [ ] Agree the remaining identity, persistence/privacy, workspace-trust, residency-budget, and performance policies in section 14.
+- [x] Draft an evidence-linked initial capability boundary and proposed correctness/performance gates in section 14, keeping all approvals and implementation qualification open.
+- [x] Draft core source-event, immutable-world, ownership, ticket/query-outcome contracts and eight acceptance traces in section 14; label them proposed and unimplemented.
+- [x] Draft persistence record/validation/publication/recovery/GC contracts and eight store acceptance traces in section 14, preserving source persistence and explicit durability limits.
+- [x] Draft semantic identity/revision, observed-dependency, validation and milestone contracts with eight semantic acceptance traces; retain syntax-first deferrals and conservative whole-module invalidation.
+- [x] Draft execution, host delivery, cancellation, pressure and shutdown contracts with eight concurrent/interleaving acceptance traces; distinguish terminal request outcomes from stopped workers and retained result ownership.
+- [x] Draft finite source-provider capture, unknown/absent membership, explicit dependency discovery and logical multi-document transaction contracts with eight source-capture acceptance traces.
+- [x] Draft concrete v1 source/update/query record shapes, tagged event payloads, operation/outcome and handle ownership tables, worked edit protocol and latency-to-trace mapping.
+- [x] Perform a bounded interface consistency pass and repair session bootstrap, first-document admission, unchanged-source analysis retry and stopped-session/result ownership gaps.
+- [ ] Qualify the bootstrap/retry/shutdown protocol against V5/V6, X7/X8 and T8 in the authorised implementation; document-only operation/reference checks are not behavioural qualification.
+- [x] Approve the fifteen-operation interface as the specification baseline on 2026-10-21, subject to exact schemas and API review, without authorising implementation or migration.
+- [ ] Complete the interface's exact identity/payload encoding, signatures, bounds and adapter capabilities for API review, then implement its mapped acceptance cases only after implementation authorisation.
+    - [x] Draft canonical key framing, namespace/revision authority, revision-bound syntax payload envelopes and local review vectors without choosing store defaults or authorising implementation.
+    - [x] Draft the closed syntax-context registry, all five current parser parameters, exact path encodings and session/document binding admission/restart rules; preserve unsupported semantic extensions and pending adapter review.
+    - [ ] Review the context registry and adapter descriptor/platform-policy alternatives against real adapters; qualify binding, lease and consistency claims without inferring filesystem guarantees.
+    - [x] Draft diagnostic origin/code/severity/recovery observations and syntax-only declaration-index names, containers, coverage and visibility records, preserving unmappable/raw observations and semantic deferrals.
+    - [x] Map current token forms, trivia-dependent byte origins, synthetic recovery, compound declared-versus-assigned bindings and scope-directive nodes; explicitly record export-marker, shared-owner and traversal-registry gaps.
+    - [ ] Specify exact node/token/diagnostic/index variants, optional tags, access signatures and numeric admission bounds for API review.
+    - [x] Record the accepted trivia-required full-featured scope and draft the complete current token-name/alias registry; remove the non-trivia byte-mapping requirement without changing production compatibility mode.
+    - [ ] Review and qualify token-tag/alias round trips, field-role restrictions, trivia-enabled origins and rejection of non-trivia full-featured profiles after implementation authorisation.
+    - [x] Draft tagged token values, exact integer/float bits, closed value/trivia flags and source-slice ownership, including quoted-note discrimination and uniform EOF preceding-trivia reconstruction.
+    - [ ] Qualify active union routes, flag combinations, decoded-value ownership and exact source/trivia reconstruction against fresh lexer output after implementation authorisation.
+    - [x] Draft explicit child/helper/backreference roles, candidate per-kind authored fields and index v2 shared-region containers; record the second compound-construction route that prevents a universal shape-only binding predicate.
+    - [x] Separate source `#program_export` metadata from module visibility and reserved `#export`; draft ordered occurrences, optional-name presence, final producer observations and partial-correlation rules, and exclude the stored string from child descent.
+    - [ ] Review and qualify metadata-interval correlation, repeated/bare/empty program-export observations and source/value ownership against independent expectations after implementation authorisation; establish an actual declaration `#export` producer path or retain the mapping gap.
+    - [x] Draft explicit assembly-helper variant guards and child order, including parsed modifiers on unparsed operands, opaque-region coverage, scalar mnemonic sizes and assembly-name index exclusions.
+    - [ ] Review and qualify assembly visit paths/order, active versus inactive fields, malformed/opaque regions and same-token identifier occurrences against independent expectations after implementation authorisation.
+    - [x] Draft type-instantiation source-form guards and child order, separating varargs/views, constrained polymorphic forms, recovered required children and equal-span expression wrappers without semantic descent.
+    - [ ] Review and qualify type-form/route correlation, flag conflicts, dimension/element order, recovered constraints and wrapper IDs against independent fresh-output expectations after implementation authorisation.
+    - [x] Draft literal-arm and construction-route guards, covering source null, aggregate type/member order, parser-created using-filter containers, scalar/source distinctions and unsupported alignment routes.
+    - [ ] Review and qualify literal active-arm/AST-flag mappings, aggregate/name-list route distinctions, null-pointer handling and owned values against independent fresh-output expectations after implementation authorisation.
+    - [x] Draft procedure parameter ownership/using aliases, scalar suffix metadata, header/body backlinks and quick-body normalisation rules; exclude unattached bodies and unsupported header-note routes.
+    - [ ] Review and qualify procedure visit order, parameter aliases, unnamed slots/index containers, quick-body origins and suffix value ownership against independent fresh-output expectations after implementation authorisation.
+    - [x] Draft struct/enum child ownership, scalar alignment and modifier observations, context-qualified bare enum-member entries and field-default/backreference exclusions.
+    - [ ] Review and qualify aggregate/enum-mode routes, enum-member entry origins, conditional branches, modifier observations and default-assignment exclusions against independent fresh-output expectations after implementation authorisation.
+    - [ ] Complete and review the remaining per-variant child guards/order, metadata aliases, declaration-marker mapping and compound-route classification before claiming complete index traversal; assembly's drafted helper rules still need the review and qualification above.
+    - [ ] Qualify shared-region ownership, exact nested entry counts/containers, compound routes and rejection of cycles/unregistered sharing against independent fresh-output expectations after implementation authorisation.
+    - [ ] Review diagnostic/index mappings against current parser nodes and fresh observations; qualify origins, malformed messages, repeated/compound/recovered names and visibility/traversal coverage after implementation authorisation.
+    - [ ] Turn identity/payload review vectors into executable acceptance tests after implementation authorisation; document checks do not qualify their behaviour.
+- [x] Consolidate R1-R8 review decisions, concrete remaining specification artifacts and the pre-migration completion gate without implying policy approval or executed acceptance tests.
+- [x] Record explicit R1 initial-scope approval on 2026-10-20 without extending that approval to other review decisions, detailed contracts, implementation or migration.
+- [x] Record explicit R3-R5 design-direction approval on 2026-10-21, keeping R2/R6-R8 and detailed schemas/algorithms/limits open and implementation/migration unauthorised.
+- [ ] Resolve the review packet's initial direction, policy and performance decisions explicitly; record approvals/exclusions before finalising the concrete schemas and specification-completion review.
+- [ ] Complete the source-provider contract under approved R3: specify capture consistency/capabilities, resolver membership, batch grammar, leases and host atomicity, then qualify V1-V8 against real adapters.
+- [ ] Complete the execution contract under approved R4: specify coordinator ordering, delivery/admission limits, reentrancy, worker stopping/fairness and final destruction, then qualify X1-X8 with real concurrent tests.
+- [ ] Complete the semantic contracts under approved R5: specify identity/matching/canonicalisation, supported query facets and cycle rules, then qualify D1-D8 for implemented capabilities with fresh/compiler oracles.
+    - [x] Define source-ordered ordinary/`Context_Base` member comparison and order-independent completed `#Context` additions, separate from nominal identity and layout/effect observations.
+    - [ ] Qualify context-contribution permutations, base/member changes, duplicates/provisional membership and layout-sensitive consumers against fresh/compiler oracles after implementation authorisation.
+- [ ] Review and approve or revise the persistence contract; specify text grammar/bounds, operation ordering, locks/pins, filesystem guarantees and repair/privacy policy, then qualify S1-S8 against the implementation.
+- [ ] Review and approve or revise the core contracts, including edit coordinates/batches, provider world capture, cancellation and lease semantics; turn T1-T8 into executable acceptance cases during implementation qualification.
+- [ ] Approve or revise section 14's initial scope, deferrals, C1-C5 qualification checks and P1-P5 numerical candidates before treating them as acceptance requirements.
 - [x] Run and record E1's bounded compiler import/visibility matrix, including auditing expected-failure diagnostics.
 - [x] Run and record E2's bounded module identity/parameter probes, including nominal compatibility, transitive configuration, expected diagnostics, and evaluation counts.
 - [x] Run and record E3's bounded loaded-file composition probes, including occurrence multiplicity, scope, relative paths, contextual module values/types, cycles, and diagnostic/marker audits.
@@ -1648,7 +3190,8 @@ No production changes are authorised by this checklist alone.
 - [x] Run and record E11's bounded store/restart/overlay experiment, including killed and competing publishers, corrupt/unwritable stores, exact-content restart selection, host-confirmed recovery, save/reset/deletion/reappearance, lease-aware GC, diagnostics, and independent audit.
 - [x] Capture E12's bounded real-source baseline: validated resident reuse, fresh parsing, explicit text-source-reparse control, repeated malformed/body/interface/layout edits, retained snapshot backing, process restart, and independent saved-data audit.
 - [x] Capture E12's equivalent owned AST graph-text reload comparison on the 89-source inventory, including deep producer/input/sibling-teardown checks, exact source/context validation, fresh/resident competitors, backing profiles, rejection controls, and independent saved-data audit; retain its same-layout/read-only limits.
-- [ ] Measure actual graph-reload process restart and required cold-storage conditions before making a persisted-startup performance claim; the original restart path only measured source reparsing.
+- [x] Measure E12's actual fresh-process graph reload against fresh-process parsing, with alternating order, worker/whole-process latency, exact input/artifact provenance, no resident warmup, and independent audit; label the filesystem warm/unflushed.
+- [ ] Agree and run an isolated OS-cold storage procedure before making a cold-startup claim; fresh worker processes and regenerated artifact reads do not establish cold filesystem caches.
 - [ ] Approve E12's numerical median/tail/memory/disk targets and extend the baseline to semantic dependency updates and the complete section 13 editor workflows, explicitly deferring unsupported capabilities.
 - [ ] Turn the evidence into approved initial contracts and acceptance criteria using the specification-completion gate in section 14, before writing the migration plan.
 - [ ] Define owned immutable syntax snapshots and syntax diagnostics that do not depend on semantic mutation or caller allocator lifetime.
@@ -1660,7 +3203,7 @@ No production changes are authorised by this checklist alone.
 - [ ] Define independent cache-backed source/syntax and semantic-query capabilities, retaining full changed-file parsing as the initial baseline.
 - [ ] Define change-notification/update tickets and immediate-result-or-pending world queries, including completion milestones, waiting, supersession, cancellation, and a separate later editor-feature API layer.
 - [ ] Define an optional evaluator contract with context reproduction, provenance, dependency/effect tracking, unsupported states, trust controls, and bounded subprocess execution.
-- [ ] Validate the explicit `using,map` wrapper proposal in section 10: generated exported-name arrays, contextual callback invocation, framed result capture, slot/exclusion validation, and result ownership after evaluator teardown.
+- [x] Validate E13's bounded explicit `using,map` wrapper: generated member-name arrays, contextual callback invocation, framed result capture, slot/exclusion and supported-name validation, and host-owned results after evaluator teardown; retain the documented context/enumeration/production limits.
 - [ ] Define cache-equivalence, invalidation, lifetime, restart, cancellation, corruption, and incomplete-code test matrices, including compiler verification of import/visibility rules.
 - [ ] Define inaccessible-candidate diagnostics and explicit export fix actions, separate from ordinary identifier resolution and validated against current source and export impact.
 - [ ] Benchmark the complete editor workflows in section 13 and agree acceptance thresholds before choosing chunk-level syntax reuse or finer cache granularity.

@@ -2100,7 +2100,7 @@ test_nested_type_instantiation_reuse :: () {
 		assert(it.type == other.type && it.value_flags == other.value_flags);
 		assert(it.byte_start == other.byte_start && it.byte_end == other.byte_end && it.preceding_trivia_byte_start == other.preceding_trivia_byte_start);
 		assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
-		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia);
 	}
 
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.recovery_records.count == fresh.recovery_records.count);
@@ -2148,7 +2148,7 @@ test_nested_type_instantiation_reuse :: () {
 
 	for updated.tokens {
 		other := fresh.tokens[it_index];
-		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia);
 	}
 
 	assert(name.name == "Target" && Extended.reconstruct_source(*updated) == new_source);
@@ -2262,7 +2262,7 @@ check_excluded_type_instantiation :: (type_source: string) {
 		assert(it.type == other.type && it.value_flags == other.value_flags);
 		assert(it.byte_start == other.byte_start && it.byte_end == other.byte_end && it.preceding_trivia_byte_start == other.preceding_trivia_byte_start);
 		assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
-		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia);
 	}
 
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.recovery_records.count == fresh.recovery_records.count);
@@ -4105,7 +4105,7 @@ test_scalar_literal_ast_reuse :: () {
 			assert(it.type == other.type && it.value_flags == other.value_flags);
 			assert(it.byte_start == other.byte_start && it.byte_end == other.byte_end && it.preceding_trivia_byte_start == other.preceding_trivia_byte_start);
 			assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
-			assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+			assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia);
 		}
 
 		assert(updated.diagnostics.count == fresh.diagnostics.count && updated.recovery_records.count == fresh.recovery_records.count);
@@ -4121,7 +4121,7 @@ test_scalar_literal_ast_reuse :: () {
 
 		for updated.tokens {
 			other := fresh.tokens[it_index];
-			assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+			assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia);
 		}
 
 		assert(Extended.reconstruct_source(*updated) == new_source);
@@ -4171,7 +4171,7 @@ check_source_position_edit :: (before: string, after: string, edit_start: s64, e
 		other := fresh.tokens[it_index];
 		assert(it.byte_start == other.byte_start && it.byte_end == other.byte_end && it.preceding_trivia_byte_start == other.preceding_trivia_byte_start);
 		assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
-		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia);
 	}
 
 	for statements {
@@ -4906,7 +4906,7 @@ assert_eligible_edit_matches_fresh :: (updated: *Extended.Parsed_Source, fresh: 
 		assert(it.type == other.type && it.value_flags == other.value_flags);
 		assert(it.byte_start == other.byte_start && it.byte_end == other.byte_end && it.preceding_trivia_byte_start == other.preceding_trivia_byte_start);
 		assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
-		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia);
 	}
 
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.recovery_records.count == fresh.recovery_records.count);
@@ -5792,7 +5792,7 @@ check_excluded_expression_node :: (expression: string, expected_kind: type_of(Ex
 
 	for updated.tokens {
 		other := fresh.tokens[it_index];
-		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia);
 	}
 
 	if expected_kind == {
@@ -7361,7 +7361,7 @@ test_nested_block_ast_reuse :: () {
 		assert(it.type == other.type && it.value_flags == other.value_flags);
 		assert(it.byte_start == other.byte_start && it.byte_end == other.byte_end && it.preceding_trivia_byte_start == other.preceding_trivia_byte_start);
 		assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
-		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia);
 	}
 
 	assert(updated.diagnostics.count == fresh.diagnostics.count && updated.recovery_records.count == fresh.recovery_records.count);
@@ -7378,7 +7378,7 @@ test_nested_block_ast_reuse :: () {
 
 	for updated.tokens {
 		other := fresh.tokens[it_index];
-		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia);
 	}
 
 	assert(use.name == "later" && Extended.reconstruct_source(*updated) == new_source);
@@ -7948,7 +7948,7 @@ check_regional_lex :: (old_source: string, new_source: string, start: s64, end: 
 	for updated.tokens {
 		other := fresh.tokens[it_index];
 		assert(it.type == other.type && it.value_flags == other.value_flags);
-		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia && it.trailing_trivia == other.trailing_trivia);
+		assert(it.original_text == other.original_text && it.preceding_trivia == other.preceding_trivia);
 		assert(it.byte_start == other.byte_start && it.byte_end == other.byte_end && it.preceding_trivia_byte_start == other.preceding_trivia_byte_start);
 		assert(it.l0 == other.l0 && it.c0 == other.c0 && it.l1 == other.l1 && it.c1 == other.c1);
 		if it.type == .IDENT || it.type == .NOTE || (it.type >= .__FIRST_KEYWORD && it.type <= .__LAST_KEYWORD) {

@@ -6620,7 +6620,6 @@ materialise_tokens :: (source: string, old: *Parsed_Source = null, edit_start: s
 						&& match.type == token.type
 						&& match.preceding_trivia == token.preceding_trivia
 						&& match.original_text == token.original_text
-						&& (match.type != .END_OF_INPUT || match.trailing_trivia == token.trailing_trivia)
 					) {
 						line_delta := token.l0 - match.l0;
 						column_delta := token.c0 - match.c0;
@@ -6703,9 +6702,6 @@ copy_materialised_token :: (parsed: *Parsed_Source, lexer: *Lexer, old: Parser_T
 		copy.byte_end += byte_delta;
 		copy.original_text = slice(parsed.source, copy.byte_start, old.original_text.count);
 		copy.preceding_trivia = slice(parsed.source, copy.preceding_trivia_byte_start, old.preceding_trivia.count);
-		if copy.type == .END_OF_INPUT {
-			copy.trailing_trivia = slice(parsed.source, copy.preceding_trivia_byte_start, old.trailing_trivia.count);
-		}
 
 		copy.l0 += line_delta;
 		copy.l1 += line_delta;
@@ -6750,15 +6746,9 @@ append_materialised_token :: (
 		materialised.index = xx parsed.tokens.count;
 		materialised.preceding_trivia_byte_start = source_cursor.*;
 
-		if token.type == .END_OF_INPUT {
-			source_cursor.* += token.trailing_trivia.count;
-			materialised.byte_start = source_cursor.*;
-			materialised.byte_end = source_cursor.*;
-		} else {
-			materialised.byte_start = source_cursor.* + token.preceding_trivia.count;
-			materialised.byte_end = materialised.byte_start + token.original_text.count;
-			source_cursor.* = materialised.byte_end;
-		}
+		materialised.byte_start = source_cursor.* + token.preceding_trivia.count;
+		materialised.byte_end = materialised.byte_start + token.original_text.count;
+		source_cursor.* = materialised.byte_end;
 
 		array_add(*parsed.tokens, materialised);
 	} else {
@@ -6815,12 +6805,8 @@ materialise_here_string :: (
 	reconstruct_source :: (parsed: *Parsed_Source) -> string {
 		builder: String_Builder;
 		for * token: parsed.tokens {
-			if token.type == .END_OF_INPUT {
-				append(*builder, token.trailing_trivia);
-			} else {
-				append(*builder, token.preceding_trivia);
-				append(*builder, token.original_text);
-			}
+			append(*builder, token.preceding_trivia);
+			append(*builder, token.original_text);
 		}
 
 		return builder_to_string(*builder);

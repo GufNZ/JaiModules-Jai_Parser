@@ -233,8 +233,10 @@ Lossless source text and trivia are opt-in:
 In this mode, `Token` additionally contains:
 
 - `original_text`: the exact source bytes forming the token.
-- `preceding_trivia`: whitespace, comments, and ignored source bytes before the token.
-- `trailing_trivia`: remaining trivia on the `END_OF_INPUT` token.
+- `preceding_trivia`: whitespace, comments, and ignored source bytes before the token, including the final gap before `END_OF_INPUT`.
+
+The `END_OF_INPUT` token has empty `original_text`.
+Reconstruct the exact source by appending `preceding_trivia` and `original_text` for every token, including `END_OF_INPUT`.
 
 These strings are zero-copy slices of `Lexer.input`.
 They remain valid only while that input remains installed in the lexer.

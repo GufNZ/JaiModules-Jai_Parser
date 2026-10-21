@@ -342,7 +342,6 @@ Token :: struct {
 	#if ENABLE_TRIVIA {
 		original_text:    string;
 		preceding_trivia: string;
-		trailing_trivia:  string;
 	}
 }
 
@@ -612,7 +611,6 @@ get_unused_token :: (lexer: *Lexer) -> *Token {
 	#if ENABLE_TRIVIA {
 		result.original_text	= "";
 		result.preceding_trivia	= "";
-		result.trailing_trivia	= "";
 	}
 
 	return result;
@@ -622,11 +620,6 @@ get_unused_token :: (lexer: *Lexer) -> *Token {
 	set_token_source :: (lexer: *Lexer, token: *Token, trivia_start: s64, token_start: s64, token_end: s64) {
 		token.preceding_trivia	= slice(lexer.input, trivia_start, token_start - trivia_start);
 		token.original_text		= slice(lexer.input, token_start, token_end - token_start);
-		if token.type == .END_OF_INPUT {
-			// EOF owns the final gap so reconstruction needs no token after it.
-			token.trailing_trivia = slice(lexer.input, trivia_start, token_end - trivia_start);
-			return;
-		}
 	}
 }
 

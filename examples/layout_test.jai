@@ -63,7 +63,7 @@ main :: () {
 
 	token = Extended.peek_next_token(*extended_lexer);
 	assert(token.type == .END_OF_INPUT);
-	assert(token.trailing_trivia == " // tail");
+	assert(token.preceding_trivia == " // tail");
 
 	test_structured_trivia(*extended_lexer);
 	test_eof_location();
@@ -160,7 +160,6 @@ assert_simd_lexer_parity :: (input: string) -> s64 {
 		assert(actual.l1 == expected.l1 && actual.c1 == expected.c1);
 		assert(actual.original_text == expected.original_text);
 		assert(actual.preceding_trivia == expected.preceding_trivia);
-		assert(actual.trailing_trivia == expected.trailing_trivia);
 
 		if expected.type == {
 			case .IDENT;
@@ -294,7 +293,6 @@ test_simd_identifier_tokens :: () {
 				assert(actual.l1 == expected.l1 && actual.c1 == expected.c1);
 				assert(actual.original_text == expected.original_text);
 				assert(actual.preceding_trivia == expected.preceding_trivia);
-				assert(actual.trailing_trivia == expected.trailing_trivia);
 				if expected.type == .IDENT {
 					assert(actual.ident_value.name == expected.ident_value.name);
 					assert(actual.ident_value.hash == expected.ident_value.hash);
@@ -418,7 +416,7 @@ test_eof_location :: () {
 	assert(eof.type == .END_OF_INPUT);
 	assert(eof.l0 == 2 && eof.c0 == 3);
 	assert(eof.l1 == 2 && eof.c1 == 3);
-	assert(eof.trailing_trivia == "\n  ");
+	assert(eof.preceding_trivia == "\n  ");
 }
 
 test_utf8_columns :: () {
@@ -554,7 +552,7 @@ test_directive_trivia_round_trip :: () {
 	eat_expected_source_token(*lexer, source, *source_cursor, #char ";", ";", "");
 	eof := Extended.peek_next_token(*lexer);
 	assert(eof.type == .END_OF_INPUT);
-	assert_source_span(source, *source_cursor, eof.trailing_trivia);
+	assert_source_span(source, *source_cursor, eof.preceding_trivia);
 
 	assert(source_cursor == source.count);
 	assert(!lexer.reported_error);
@@ -601,7 +599,7 @@ test_structured_trivia :: (lexer: *Extended.Lexer) {
 
 	eof := Extended.peek_next_token(lexer);
 	assert(eof.type == .END_OF_INPUT);
-	assert(eof.trailing_trivia == input);
+	assert(eof.preceding_trivia == input);
 
 	expected_kinds: [6] Extended.Trivia_Kind = .[
 		Extended.Trivia_Kind.SHEBANG,
@@ -622,7 +620,7 @@ test_structured_trivia :: (lexer: *Extended.Lexer) {
 
 	item_index: s64;
 	expected_offset: s64;
-	for trivia, offset: Extended.make_trivia_iterator(eof.trailing_trivia) {
+	for trivia, offset: Extended.make_trivia_iterator(eof.preceding_trivia) {
 		assert(item_index < expected_kinds.count);
 		assert(trivia.kind == expected_kinds[item_index]);
 		assert(trivia.text == expected_text[item_index]);

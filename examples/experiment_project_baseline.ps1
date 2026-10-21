@@ -1,5 +1,5 @@
 param(
-	[ValidateSet('Run', 'Audit')]
+	[ValidateSet('Run', 'Audit', 'Prepare')]
 	[string] $Mode = 'Run',
 	[string] $Worker = (Join-Path $PSScriptRoot '.build/experiment_project_baseline_llvm.exe'),
 	[string] $OutputDirectory = (Join-Path $PSScriptRoot '.build/project_baseline'),
@@ -75,7 +75,10 @@ function MakeProject([string] $root, [string] $name, $files, [string] $descripti
 }
 
 function RunBaseline([string] $root) {
-	Require ([IO.File]::Exists($Worker)) 'Build experiment_project_baseline.jai with LLVM first'
+	if ($Mode -cne 'Prepare') {
+		Require ([IO.File]::Exists($Worker)) 'Build experiment_project_baseline.jai with LLVM first'
+	}
+
 	[IO.Directory]::CreateDirectory($root) > $null
 	$distribution = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))
 	$parser = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -99,6 +102,13 @@ function RunBaseline([string] $root) {
 		(MakeProject $root 'basic' (Get-ChildItem "$distribution/modules/Basic" -File -Filter '*.jai') 'Basic module source inventory; cross-module instance semantics are not evaluated'),
 		(MakeProject $root 'import_chain' (Get-ChildItem $chain -Recurse -File -Filter '*.jai') 'Authored Root -> Middle -> Leaf syntax workload; no semantic resolver fan-out measurement')
 	)
+
+	if ($Mode -ceq 'Prepare') {
+		WriteJson (Join-Path $root 'projects.json') $projects
+		Write-Output "E12 prepared manifests: $root"
+		return
+	}
+
 
 	$workers = [Collections.Generic.List[object]]::new()
 
@@ -258,6 +268,9 @@ if ($Mode -ceq 'Audit') {
 } else {
 	$root = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) ([Guid]::NewGuid().ToString('N'))
 	RunBaseline $root
-	AuditBaseline $root
+	if ($Mode -cne 'Prepare') {
+		AuditBaseline $root
+	}
+
 	Write-Output "E12 evidence: $root"
 }
