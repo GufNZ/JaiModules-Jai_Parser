@@ -494,12 +494,11 @@ This is a layout proposal to test against E10/E11, including small-file overhead
 
 ## 9. Persistence and Editor Operation
 
-Earlier setup proposals, not approved defaults or final option names; milestone 6 requires explicit finite policy configuration and does not enable the proposed unlimited-disk alternative:
+Earlier setup proposals, not blanket-approved defaults or final option names; the 2026-10-23 decisions select project-relative storage and no fixed RAM/disk quota by default, with optional limits and finite effective safety bounds:
 
 - Persistence enabled by default; explicitly disabling it retains the same in-memory semantics.
 - Saved and unsaved revisions persist, with separate current-disk/active-overlay metadata, private storage, and explicit recovery/discard/cleanup behaviour.
-- Optional cache-directory override, with a documented per-user default outside source repositories.
-The concrete platform default needs a later API decision.
+- Optional cache-directory override; the selected default is `.jaiParserCache` beside the project's `.build`, resolved from the host-declared project root, not an inferred working directory.
 - Configurable memory/disk budgets (with unlimited (= all available space) as an option for disk) and retention policy, preferring resident validated data under ordinary conditions.
 - Clear/invalidate operations, format/version inspection, cache-hit/miss reasons, and a way to recover from a damaged/outdated store, probably via reparse rather than a migration or similar.
 - Independent workspace-trust and external-evaluation policy.
@@ -511,7 +510,7 @@ Do not eagerly deserialise the entire historical graph just because its files ex
 Matching hashes can avoid reparsing, but only if reading/decoding the cached artifact is itself worthwhile.
 
 Write artifacts transactionally with atomic publication, checksums, size limits, and interruption-safe manifests.
-Multiple editor processes need a defined store-ownership/publication policy; milestone 6 proposes exclusive ownership rather than concurrent shared readers/writers.
+The approved initial store-ownership policy is exclusive ownership rather than concurrent shared readers/writers; a contending editor continues in memory and reports unavailable persistence.
 Immutable content-addressed blobs with controlled manifest updates are preferable to concurrent mutation of one live arena image.
 
 Treat persisted data as untrusted input: validate bounds, schema and dependency IDs, reject corrupt/truncated entries, and reparse/recompute on failure.
@@ -690,13 +689,13 @@ Drafted 2026-10-20 from E1-E13.
 The approval covers the syntax-first initial scope and recorded Windows x64 qualification target, including source/unsaved-recovery persistence and semantic/evaluator deferrals; it does not approve cache defaults, exact APIs, implementation or a migration plan.
 This remains an initial capability boundary and acceptance proposal, not the completed specification.
 Full syntax/semantic coverage and configured-module caching remain the eventual direction; a syntax-first initial slice must not silently become the permanent product boundary.
-The numerical candidates below are engineering proposals, not requirements supplied by the user or thresholds established by the experiments.
+The performance comparisons below follow the 2026-10-23 measurement-first decision; no historical numerical candidate is an acceptance threshold.
 
 #### Initial Capability Boundary (Scope Approved)
 
 | Area | Initial candidate | Explicit boundary |
 | --- | --- | --- |
-| Qualification | Windows x64 with the recorded Jai beta 0.2.030 toolchain; fast-backend correctness and LLVM performance runs.  Start filesystem qualification on the measured ReFS environment. | This is a first qualification target, not proof of all Windows filesystems, other compiler versions, Linux, or macOS support.  Compatibility must be versioned, and additional platforms qualified separately. |
+| Qualification | Windows x64 with the recorded Jai beta 0.2.030 toolchain; fast-backend correctness and LLVM performance runs.  Test our adapter on the measured ReFS environment under stated OS/API assumptions. | Qualify our code, not the external filesystem/hardware; do not generalise results to other compiler versions/platforms or make a power-loss claim.  Compatibility remains versioned. |
 | Source and syntax | Disk and editor-buffer revisions, owned immutable whole-file syntax/diagnostics, exact source reconstruction, and syntax-derived declaration/span indices.  Reuse unchanged snapshots; fully parse changed files, including malformed edits. | No subtree-sharing, syntax-chunk store, or AST-copy requirement.  Syntax-derived indices are not resolved bindings, types, or a complete semantic declaration index. |
 | World update/query | Revision-tagged change tickets and syntax/index publication milestones; selected-world queries return available, pending, superseded, cancelled, failed, or unsupported outcomes as applicable.  Leases protect retained snapshots. | No promise that syntax publication completes all future semantic analysis.  Queries never switch to a newer world implicitly.  Exact state transitions, threading and delivery contracts still require specification. |
 | Composition and semantics | Preserve authored import/load requests and context in syntax; define the extension boundary for configured module instances and semantic query results. | The initial service does not claim semantic import closure, member/type inference, overload resolution, constant/layout evaluation, or semantic navigation/refactoring.  Requests needing these return unsupported, not a guessed binding, empty successful answer, or false language error.  Existing resolver behaviour is not silently reclassified as qualified cache-backed semantics. |
@@ -704,8 +703,8 @@ The numerical candidates below are engineering proposals, not requirements suppl
 | Recovery and failure | Exact disk/overlay selection, host-confirmed unsaved recovery, explicit save/reset/rename/delete transitions, corrupt/incompatible artifacts treated as misses, and cache diagnostics separate from language diagnostics. | No automatic resurrection of an obsolete overlay or permission to overwrite a live buffer.  Cache write failures must not reject an otherwise valid source update. |
 | Evaluation and later features | Evaluator capability initially unavailable; source-controlled opt-in and host authorisation remain mandatory prerequisites for any later backend.  Later editor features build on the same world contracts. | E5/E13 are feasibility evidence, not evaluator implementation.  No automatic compiler execution, cached effect replay, semantic rename/completion, or export-fix feature is included in this initial slice. |
 
-This candidate does not choose cache directory/size defaults, recovery retention, a public API shape, or a declaration-matching algorithm.
-Provisionally enabled persistence remains the earlier proposal, not a newly approved default; privacy and host recovery policy need an explicit decision before rollout.
+This scope approval did not itself choose defaults or detailed APIs/algorithms; milestones 3-6 supply their drafts, and the 2026-10-23 decisions select project-relative enabled persistence, no fixed RAM/disk quota, unsaved recovery without optional history and exclusive store ownership.
+These policy approvals do not approve the complete API/privacy/recovery implementation or authorise rollout; overall specification sign-off remains pending.
 In particular, deferring semantic operations is not permission to omit the semantic ownership, identity, dependency, and unsupported-state extension contracts from the specification.
 
 #### Proposed Correctness Gates
@@ -721,35 +720,37 @@ Unsupported later capabilities must be labelled explicitly and excluded from suc
 | C4: Persistent-store failure | Validate before dereference/allocation using explicit format/read/allocation bounds; reject incompatible, truncated and corrupt data.  Test interrupted and competing writers, denied writes, restart, and leased-entry GC; compare selected state with fresh source reconstruction. | E10/E11 inform the design, not a safe production loader.  The E12 assert-aborting graph reader and post-read limits do not satisfy this gate.  Source operations must survive cache failure. |
 | C5: Honest capability states | Trace notify, wait, world selection, query, supersession and cancellation; verify each promised milestone/terminal outcome.  For unsupported semantics/evaluation, assert explicit unsupported results and no compiler child process. | E8/E13 supply limited outcome/protocol evidence.  Host integration, untrusted-workspace behaviour and executable public-contract tests remain open. |
 
-#### Provisional Performance Candidates
+#### Performance Measurement Plan
 
-These are **approval candidates only; adoption is not authorised**.
-Prefer paired same-work comparisons over absolute editor promises before the actual host and service exist.
+The 2026-10-23 decision is **measure first, evaluate the observed delta afterwards**, not preselect numerical acceptance cutoffs.
+Use paired same-work comparisons rather than absolute editor promises before the actual host and service exist.
 Use the E12 inventories as the starting syntax corpus, include a representative larger project before generalising, and keep synthetic authored controls separate from real-project aggregates.
 Run at least 21 measured trials per mode after declared warmups, alternate/rotate order, and report per-workload median and nearest-rank p95 plus raw samples in at least two separate local rounds.
 This is a reproducible screening procedure, not a confidence interval or hard tail-latency guarantee; mixed or noise-sized results are inconclusive rather than a pass by averaging inventories.
 Include source validation, hashing, I/O, allocation, result publication, and lifecycle cleanup consistently in competing modes.
 
-| Gate | Candidate numerical target | Measurement and decision rule |
+| Comparison | Report, without a preselected pass/fail ratio | Measurement and review rule |
 | --- | --- | --- |
-| P1: Resident unchanged requests | At least 10% median improvement over fresh same-world parsing/index construction, with p95 no more than 5% worse, on each real inventory in both rounds. | End-to-end request through usable syntax/index result.  Exact-input checks and C1 still apply; a raw pointer lookup is not an equivalent competitor.  E12 suggests resident reuse is promising but does not qualify this future service path. |
-| P2: Changed-file updates | Median and p95 no more than 5% slower than the fresh changed-file baseline with the same retained-world policy. | Notify-edit through usable revision-tagged syntax/index publication for body/interface/layout/malformed/repair sequences.  Report unrelated-file reuse separately.  Do not substitute compiler time or an isolated parser call for service latency. |
-| P3: Optional persisted syntax reload | At least 10% median improvement and p95 no more than 5% worse than fresh-process source validation/parsing on each real inventory in both rounds. | Compare complete equivalent results, process wall time and worker phases separately.  Label filesystem conditions; only an agreed isolated cold-storage procedure supports OS-cold claims.  E12's verbose graph format shows a regression, not qualification of this candidate.  Source/metadata persistence remains required even if AST reload is deferred. |
-| P4: Memory retention | At most 10% additional peak upstream backing versus the owned whole-file baseline for the same live world set; zero owned live allocations after all leases/worlds are released. | Measure current world plus two retained historical revisions, sparse eviction, and long edit/eviction cycles.  Report upstream backing and process memory separately; zero live ownership does not require the OS working set to return to its starting value.  Choose an absolute host budget separately. |
-| P5: Persistent overhead | At most four times the exact source bytes in the steady-state managed store for the selected current plus two retained historical revisions. | Include manifests, indices and encoded source/artifacts in the numerator; count exact source bytes once per selected retained revision in the denominator.  Measure peak temporary publication space separately.  Drop/defer optional artifact encodings that fail, not required source persistence.  Absolute disk budget and pressure/GC policy still need agreement. |
+| P1: Resident unchanged requests | Absolute and relative median/p95 deltas versus fresh same-world parsing/index construction, per real inventory and round. | End-to-end request through usable syntax/index result.  Exact-input checks and C1 still apply; a raw pointer lookup is not an equivalent competitor.  Evaluate measured benefit and complexity afterwards. |
+| P2: Changed-file updates | Absolute and relative median/p95 deltas versus the fresh changed-file baseline with the same retained-world policy. | Notify-edit through usable revision-tagged syntax/index publication for body/interface/layout/malformed/repair sequences.  Report unrelated-file reuse separately; neither compiler time nor an isolated parser call substitutes for service latency. |
+| P3: Optional persisted syntax reload | If separately implemented/authorised, fresh-process wall/worker deltas versus equivalent source validation/parsing. | Report complete equivalent work and declared storage conditions.  This capability is unsupported initially; its measurements cannot waive required source/recovery persistence or imply OS-cold qualification. |
+| P4: Memory retention | Peak upstream backing/process memory and deltas versus the owned baseline for the same live world set. | Measure current world plus two retained historical revisions, sparse eviction and long edit/eviction cycles.  Zero owned live allocations after final release is mandatory correctness, not an optional performance ratio; no fixed RAM quota is the default. |
+| P5: Persistent overhead | Managed steady-state bytes/source-byte ratio and separate peak staging/cleanup overhead. | Include metadata/indices/source/artifacts, count selected retained source revisions consistently, and report quarantine/protected roots separately.  Evaluate storage cost with measured latency and recovery value; optional disk quotas remain enforceable. |
 
 No gate above is marked passed for a future service, and no absolute interactive-latency SLA is proposed without its host workload/hardware and measurements.
-Memory/disk caps, latency trade-offs, retention counts and the 10%/5%/four-times candidates require review; they are not silently selected configuration defaults.
-Before running acceptance measurements, approve the workloads, units/timing boundaries, supported host/toolchain, competing baseline and targets together.
+Optional memory/disk quotas and measured latency/storage trade-offs are separate; no fixed ratio is a gate or a default resource cap.
+Before running acceptance measurements, agree workloads, units/timing boundaries, supported host/toolchain and equivalent baselines; evaluate the reported deltas afterwards.
 Complete semantic dependency and editor-workflow measurements in section 13 remain necessary before adopting finer semantic granularity or making ReSharper-like performance claims; they are deferred from this syntax-first qualification, not declared complete.
 
 #### Approval and Specification Work Still Required
 
 - [x] Approve the syntax-first initial scope, recorded Windows x64 qualification target and semantic/evaluator deferrals, without authorising implementation or approving detailed contracts/defaults.
 - [ ] Specify and review the supported extension route to broader syntax/semantic/platform coverage within the remaining detailed contracts.
-- [ ] Approve or replace P1-P5, workload selection, larger-project coverage, retention policy, and the measurement procedure; set absolute host memory/disk budgets separately.
+- [ ] Agree P1-P5 workload selection, larger-project coverage, retention policy and measurement procedure; evaluate actual deltas afterwards and support optional RAM/disk quotas without imposing fixed defaults.
 - [ ] Decide path/context identity, source-provider/recovery/privacy rules, cache defaults and multi-process policy without treating the prototypes as production contracts.
-- [ ] Specify record/query ownership, state transitions, safe persistence, and version/unsupported behaviour for C1-C5 with executable acceptance cases.
+- [ ] Review C1-C5 contract obligations and milestone 7's executable acceptance specification, then qualify them only after implementation authorisation.
+	- [x] Draft ownership/state/persistence/version/unsupported contracts and map A1-A15, all fifteen operations/six accessors, W1-W6 workloads and independent evidence/control/verdict rules.
+	- [ ] Approve or revise the workload/profile/contract mapping at sign-off and execute all applicable implementation cases with independent oracles after separate authorisation.
 - [ ] Qualify the initial implementation against those approved gates; retain explicit unrun OS-cold, semantic-workflow, concurrency and additional-platform checks where applicable.
 
 ### Core Contract Draft
@@ -847,7 +848,8 @@ Each trace must assert the selected identities and exact fresh-oracle result whe
 | T8: Cache and capability failures | Deny store writes or corrupt an artifact, then notify/query valid source and request unsupported semantics/evaluation.  Source syntax remains usable, cache warnings stay separate, unsupported is terminal, and no compiler process launches. | C1, C4, C5 |
 
 Milestones 2-6 supply the syntax/API/provider/identity/execution/persistence drafts, including finite capture rather than implicit broader source discovery.
-Still open: policy and detailed contract approval, complete acceptance/sign-off mapping, native bindings and executable implementation qualification; unsupported discovery/semantic capabilities do not become implemented by this draft closure.
+Milestone 7 supplies the whole-system acceptance mapping/workload/evidence draft; policy/detailed contract and workload approval, cross-contract sign-off, native bindings and executable implementation qualification remain open.
+Unsupported discovery/semantic capabilities do not become implemented by this draft closure.
 The migration-plan gate and all scope/performance approval gates remain open.
 
 ### Persistence Contract Draft
@@ -856,7 +858,7 @@ Drafted 2026-10-20.
 **Proposed, not approved or implemented.**
 This refines C2-C4 and the source/world contracts using E10/E11, without adopting their experimental formats, fixed fixture limits, or filesystem guarantees as a production implementation.
 The milestone-6 sections below close the draft text grammar, record schemas, bounds, coordination, publication and maintenance protocol using `Text_File_Handler`.
-Concrete host budgets, policy choices, native bindings and supported filesystem guarantees still require approval and implementation qualification.
+The 2026-10-23 decisions select project-relative storage, optional quotas, measurement-first evaluation and testing our code under external primitive assumptions; remaining policy details and implementation qualification are still open.
 Required source/recovery persistence is distinct from optional decoded-syntax or semantic artifacts.
 
 #### Milestone 6: Store Profile, Bounds and Text Grammar
@@ -864,19 +866,22 @@ Required source/recovery persistence is distinct from optional decoded-syntax or
 The proposed initial profile is `jai-cache-store/1`: a private, workspace/provider-scoped store with one owning process and one writer session at a time, immutable content-addressed records and one replaceable head.
 Other processes/sessions do not concurrently read, publish or collect through this profile; a contending opener reports store unavailability/degradation while correct in-memory source work continues.
 Cross-workspace sharing, multi-process reader/writer leases, mmap-backed retained payloads and semantic archive loading are unsupported until separately specified and qualified.
-This is a proposed R2/R6 scope choice, not approval of the pending sharing/default/budget decisions or a claim that E11 qualified this profile.
+Exclusive ownership and the initial persistence/resource defaults were approved under R2/R6 on 2026-10-23; detailed profile sign-off and implementation qualification remain open, and E11 does not qualify this service.
 The existing fifteen public source/scheduling operations are unchanged; persistence runs through the registered store binding and its bounded lane, never while a service state gate is held.
 
 `StoreLimits` has exactly twelve required positive `u64` fields in this order: `file_bytes`, `manifest_bytes`, `line_bytes`, `value_bytes`, `key_bytes`, `records`, `elements`, `depth`, `decoded_bytes`, `transaction_bytes`, `disk_bytes`, `files`.
-Every field is at most `0x7FFFFFFFFFFFFFFF` and the native index/address-space ceiling; effective values are the checked minimum of explicit host ceilings and supported implementation ceilings.
-There are no implicit numeric defaults or unlimited decode/transaction limits; missing configuration rejects the store binding rather than silently changing source semantics.
+These are effective technical bounds, not twelve mandatory user-configured resource quotas.
+`StoreLimitRequest` has the same twelve names in the same order, each `Optional(u64)`; omitted fields mean `NONE`, the default with no configured quota, while `SOME` requires a positive value.
+Every effective field is at most `0x7FFFFFFFFFFFFFFF` and its relevant native representation/algorithm ceiling; use the checked minimum with a configured ceiling when present, otherwise the implementation ceiling.
+Implementation ceilings must reflect documented representation/algorithm constraints, not disguise an arbitrary fixed RAM/disk quota as the all-available default.
+No infinite integer/sentinel or unlimited decoder nesting follows from `NONE`; allocation/write failure remains possible at any point, and a free-space observation is not a reservation.
 `file_bytes` bounds each opened file; `manifest_bytes` additionally bounds descriptor/head/manifest records; `line_bytes` bounds every raw line before line allocation.
 `value_bytes` and `key_bytes` bound individual decoded byte values and complete keys; `records` counts all value/field/chunk rows, `elements` bounds every list/record/variant field count and `depth` bounds nested values/references.
 `decoded_bytes` bounds the entire owned reconstruction, including reference maps; `transaction_bytes` includes simultaneous input/decoded/staged/output/cleanup backing, not only the final payload.
 `disk_bytes` and `files` bound managed logical file lengths/counts, including staging, metadata, old heads and protected records; filesystem allocation/free-space failures remain independently possible and explicit.
 Check additions, multiplication, hex expansion, counts, depth and aggregate reservations before allocation or read; a small declared byte value never permits an unbounded backing file.
 Optional history/expiry choices do not weaken these bounds.
-Concrete ceilings and the supported minimum for descriptor/head/source commits remain R6 approval inputs.
+Document implementation ceilings and supported descriptor/head/source minima during implementation; optional user quotas below those minima reject explicitly instead of being silently increased.
 
 All store files use this exact ASCII envelope; the angle-bracket items below are grammar metavariables, not Jai type notation or literal text:
 
@@ -998,7 +1003,8 @@ Head generation is useful local predecessor information, not global uniqueness: 
 `previous_commit` is descriptive provenance, not a strong reference that recursively keeps every historical manifest/source alive.
 The trusted epoch issuer is outside the disposable cache and its clear/repair/rollback scope; no counter, PID, clock, lock-file contents or restored manifest replaces its durable nonreassignment contract.
 This profile supplies no unqualified local issuer fallback.
-The host must bind a qualified durable reservation authority or `OpenSession` retains the already specified configuration failure; process-atomic cache commits do not weaken that identity prerequisite.
+The host must bind a reservation authority satisfying the declared durable nonreassignment contract under documented external assumptions, or `OpenSession` retains the specified configuration failure; process-atomic cache commits do not weaken that identity prerequisite.
+Test our authority/adapter logic and failure handling, not independent certification of the OS/storage that supplies those assumed primitives.
 
 `StoreEventStamp` is `{writer_epoch:u64, source_sequence:u64, origin:StoreEventOrigin}`.
 `StoreEventOrigin` is `SOURCE {session:SessionID, operation:OperationID}` or `BOOTSTRAP` or `MAINTENANCE {action:CLEAR_HISTORY|CLEAR_RECOVERY|CLEAR_ALL|EXPIRE|REINITIALISE, host_confirmation:bytes}`.
@@ -1019,17 +1025,21 @@ On a valid source hit the initial reader reparses authoritative selected bytes u
 Future derived-record registration must specify the exact detached payload/backing/dependency schema, validate its artifact key and producer, and rebind fresh live world/result associations without restoring old handles.
 This closes the initial wire catalogue through explicit unsupported capability, not an unspecified AST serialiser or claim that source reload passed P3.
 
-The trusted host resolves `SessionOptions.store_policy` to `StorePolicy` with fields `{profile:bytes, store_namespace:bytes, workspace:WorkspaceID, provider_namespace:bytes, root:PathValue, enabled:bool, ownership:WORKSPACE_EXCLUSIVE, required_guarantee:PROCESS_ATOMIC|POWER_LOSS_DURABLE, limits:StoreLimits, recovery_retention:RecoveryRetention, history_retention:HistoryRetention, automatic_repair:DISABLED, platform_binding:bytes}` in that order.
-There is no default enablement, root, quota or retention duration in this schema; each comes from the still-pending R2/R6 decision or explicit host configuration.
-The root is an absolute native private directory outside source repositories; its concrete per-user default/override UI remains R2, not a path inferred from an opaque policy key.
+The trusted host resolves `SessionOptions.store_policy` to `StorePolicy` with fields `{profile:bytes, store_namespace:bytes, workspace:WorkspaceID, provider_namespace:bytes, root:PathValue, enabled:bool, ownership:WORKSPACE_EXCLUSIVE, required_guarantee:PROCESS_ATOMIC|POWER_LOSS_DURABLE, limits:StoreLimitRequest, recovery_retention:RecoveryRetention, history_retention:HistoryRetention, automatic_repair:DISABLED, platform_binding:bytes}` in that order.
+The selected defaults are enabled persistence at project-relative `.jaiParserCache`, no configured RAM/disk quota, `RecoveryRetention.UNTIL_HOST_DISCARD` and `HistoryRetention.NONE`, with exclusive store ownership.
+Resolve the relative root against the declared project root into an absolute contained native root; source-repository placement is allowed, with discovery/version-control exclusion and privacy handling as specified in the 2026-10-23 decision record.
+Do not infer a path from an opaque policy key, automatically share an incompatible namespace or silently fall back to a different storage location.
 `RecoveryRetention` is `UNTIL_HOST_DISCARD` or `EXPIRE {max_age_seconds:u64}`; `HistoryRetention` is `NONE` or `BOUNDED {per_document_count:u64, max_age_seconds:Optional(u64)}`.
 All present counts/durations are positive finite values bounded by the store limits.
-No implicit history or recovery expiry is selected; policy admission must state the choice explicitly.
+Initial policy selects no automatic recovery expiry and no optional persistent revision archive; the editor owns undo/redo.
+The host materialises these selected defaults in its resolved policy; alternate history/expiry choices are not silently enabled by their presence in the schema.
+Keep the current disk and latest required unsaved recovery, with save/reset/discard/replacement following the existing exact-stamp/host-authority rules; do not deliberately retain superseded revisions for undo/redo.
+This does not revoke live leased worlds or promise immediate/secure deletion of unreferenced blobs, staging or quarantined data.
 Age expiry requires a trusted host current-time observation and a valid stored creation time; missing/backward/inconsistent time retains the candidate and reports the inability to expire rather than guessing.
 Expiry removes only unprotected eligible roots in a committed manifest, never active required recovery, current disk roots or live pins; policy pressure cannot silently turn protected recovery into successful persistence loss.
 The initial profile implements only `PROCESS_ATOMIC`; `POWER_LOSS_DURABLE` is a reserved requirement that needs a separately registered/qualified binding, otherwise store access degrades explicitly without weakening the request.
-The initial native binding identifier is `jai-cache-store-windows-local/1`; admission requires its actual root/volume/primitive qualification, not simply that a machine runs Windows or has the E11 filesystem name.
-An enabled but inaccessible/contended/unqualified store reports degradation; a disabled binding performs no store reads/writes, lock acquisition, enumeration or automatic cleanup.
+The initial native binding identifier is `jai-cache-store-windows-local/1`; our adapter must correctly use documented root/lock/replacement primitives and handle their failures, without an independent filesystem/volume certification requirement.
+An enabled but inaccessible/contended/unsupported store reports degradation; a disabled binding performs no store reads/writes, lock acquisition, enumeration or automatic cleanup.
 
 #### Milestone 6: Layout, Ownership and Commit Protocol
 
@@ -1042,7 +1052,7 @@ All immutable kinds except `HEAD` are installed in the blob tree; `descriptor.tx
 This fixes the earlier directory-layout proposal for the initial source-only profile: document/context grouping and readable original paths live in validated `DOCUMENT`/`CONTEXT` records, while identical source bytes can share one immutable blob.
 Per-declaration/semantic-instance files are not silently introduced into this catalogue; a later semantic store must retain their separate configured identities.
 
-The native binding must supply the following exact contracts, qualified for the actual local Windows filesystem/volume rather than inferred from E11's ReFS result.
+The native binding must implement the following rules under explicitly documented local Windows API assumptions; test our use/error/interruption paths rather than independently qualifying the volume or extrapolating E11's ReFS result into a hardware guarantee.
 
 | Boundary | Required primitive/ownership rule |
 | --- | --- |
@@ -1050,11 +1060,11 @@ The native binding must supply the following exact contracts, qualified for the 
 | Process ownership | Open the stable `owner.lock` with `CreateFileW`/`OPEN_ALWAYS` and zero sharing, hold that handle for the entire store owner lifetime, and close it only after all store jobs/read pins stop.  Do not delete/recreate the lock file to steal ownership; a PID/timestamp timeout is not a lock break. |
 | In-process serialisation | One store mutex/lane orders manifest reads, publication, pin acquisition and GC.  Never hold it together with a service state gate or owner-directory gate; stage/pin service inputs first, then submit store work. |
 | Staging/install | Same-volume `CREATE_NEW` temporary files; exact checked writes/close before publication.  Install an immutable blob without replacing an existing name; verify any existing complete content before reuse, and report a conflicting same-key file as a cache fault. |
-| Head replacement | First head publication uses a no-replace same-volume install; later publication uses the binding's qualified atomic replacement of the complete file, such as `ReplaceFileW` on an admitted filesystem.  Copy/delete fallback or cross-volume move is forbidden. |
-| Durability | `FlushFileBuffers`/directory publication guarantees must be separately specified and qualified before a power-loss claim.  Their mere presence or a successful process-visible replacement is not such evidence; the initial profile makes only the latter claim. |
+| Head replacement | First head publication uses a no-replace same-volume install; later publication uses documented complete-file replacement, such as `ReplaceFileW`, assuming the OS honours its documented semantics.  Test our ordering/failure handling; copy/delete fallback or cross-volume move is forbidden. |
+| Durability | Use interruption-safe staging/replacement and report failures; do not claim power-loss durability from `FlushFileBuffers` or a successful process-visible replacement.  External durability certification is outside the selected initial scope. |
 | Failure/close | Report definite noncommit versus possibly committed outcome, preserve all owned handles/staging on the uncertainty path until reconciliation, and let OS handle closure after real process exit release ownership.  No callback can touch a freed store owner. |
 
-Failure to supply these primitives makes the binding unavailable/degraded; it is not permission to follow an unsafe redirect, guess stale roots or substitute an unqualified rename.
+Failure to supply/use these primitives makes the binding unavailable/degraded; it is not permission to follow an unsafe redirect, guess stale roots or substitute a knowingly non-atomic copy/delete publication.
 The exclusive process handle deliberately rejects concurrent reader/collector/editor processes instead of pretending to implement cross-process pin files or stale-lease detection.
 The descriptor/head namespace must match the host's configured binding; an incompatible/nonempty uninitialised directory is not automatically overwritten or adopted.
 Fresh initialisation requires a host-authorised empty private root, a validated descriptor and an initial empty manifest/head; interruption before the first valid head is an explicit incomplete store, not an invented empty prior state.
@@ -1093,7 +1103,7 @@ Close/drop the process ownership handle only after the lane, uncertain commit re
 
 `StoreCommitReceipt` is `{commit:StoreCommitID, generation:u64, frontier:Optional(ProviderFrontier), guarantee:PROCESS_ATOMIC|POWER_LOSS_DURABLE}` for the registered host/store binding, not a new public scheduling operation or live handle.
 The initial profile reports `PROCESS_ATOMIC` only and leaves `StoreStatus.acknowledged_frontier` `NONE`: that existing field promises confirmed durable progress, not merely a process-visible head.
-Source/recovery may survive ordinary process restart under this profile without a power-loss guarantee; release requirements under R8 must explicitly accept that boundary or require a separately qualified durable profile.
+Source/recovery may survive ordinary process restart under the stated primitive assumptions; the 2026-10-23 R8 direction accepts best-effort interruption safety in our code without an external power-loss guarantee.
 
 #### Publication, Contention and Durability
 
@@ -1106,7 +1116,7 @@ Re-read and validate the latest manifest generation before applying only this op
 3. Install validated immutable artifacts before any manifest references them.
 Reuse a verified existing artifact, or publish a complete new one with the approved filesystem primitive.
 Coordinate this step with GC so newly installed unreferenced blobs cannot be collected before commit.
-4. Build a complete next-generation manifest, validate its references, then replace the committed manifest atomically under the qualified filesystem contract.
+4. Build a complete next-generation manifest, validate its references, then replace the committed manifest atomically under the documented filesystem primitive assumptions; test our ordering/error paths rather than certifying the external system.
 Readers must select either a complete prior generation or a complete new generation, never a mixed update.
 5. Report the committed generation and release coordination/staging resources.
 If publication fails before the commit point, preserve the prior selected state and report failure/contention separately from successful in-memory syntax publication.
@@ -1139,7 +1149,7 @@ In-memory-only results may permit unlinking optional disk artifacts if every sur
 Distinguish resident eviction, removal of optional derived artifacts, expiry of historical recovery candidates and deletion of acknowledged source/recovery roots.
 Under budget pressure reclaim unleased optional/history data according to an approved retention policy; protected live data may exceed the target until released.
 If required roots cannot fit or writes fail, surface pressure/persistence degradation and continue correct source operations; do not silently drop unsaved recovery while reporting persistence success.
-Milestone 6 below specifies the proposed single-owner pin/maintenance protocol; absolute budgets, retention/default/sharing policy approval and actual native/privacy qualification remain open.
+Milestone 6 below specifies the single-owner pin/maintenance draft under the approved enabled/recovery/no-history/no-fixed-quota policy; detailed contract/privacy review and tests of our native implementation remain open.
 
 #### Milestone 6: Read Pins, Recovery and Collection
 
@@ -1179,7 +1189,7 @@ Deleting a file does not change live source selection or invalidate any owned de
 Expiry/history pruning first commits the smaller authorised root set with exact current-head/candidate preconditions, then schedules unreachable-byte GC; it does not delete a candidate file out from under an unchanged manifest.
 Keep current acknowledged disk roots and active/protected recovery; under pressure first reclaim proved orphan/staging/expired-unprotected history, never silently drop required roots to make a success receipt fit.
 If no safe reclamation fits the budget, reject/defer optional store work and report persistence pressure/degradation while source analysis remains correct.
-No implicit unlimited disk mode, automatic quarantine deletion, quota increase or changed retention choice is inferred from this profile; those require R2/R6 approval and explicit configuration.
+The approved default has no fixed disk quota; this does not authorise automatic quarantine deletion, increasing a configured quota, changing retention or bypassing effective technical bounds.
 
 #### Milestone 6: Clear, Repair and Administration
 
@@ -1238,8 +1248,8 @@ These are future executable C2-C4 qualification cases, not new passing experimen
 Milestone 6 is complete as a draft initial persistence specification on 2026-10-22.
 It specifies the canonical text grammar, seven record kinds, twelve finite store bounds, trusted policy binding, exclusive ownership/native primitive requirements, immutable-blob/atomic-head publication, independent source/recovery slot ordering, bounded read pins/GC, recovery offers and explicit clear/repair/quarantine.
 The supported initial catalogue stores exact source/context/document/recovery metadata and reparses selected bytes; optional AST/semantic persistence remains unsupported, not an unfinished implicit codec.
-This is not R2/R6/R8 policy approval, native API/platform/durability qualification, implementation authorisation or a migration plan.
-The proposed single-owner/process-atomic baseline must be explicitly accepted or revised at review; it does not settle sharing, enablement/location/retention defaults, concrete quotas or release durability guarantees.
+Draft completion on 2026-10-22 did not approve policy, native APIs, implementation or migration; the 2026-10-23 decision record now revises location/resource/performance/external-assumption choices without authorising code.
+Exclusive ownership, enabled project-relative storage, required recovery without optional history and no fixed RAM/disk quotas are selected; detailed contract sign-off remains pending and external power-loss guarantees are outside the initial scope.
 
 The following controls refine S1-S8 without claiming that E10/E11 or document checks execute the future implementation.
 Use independently encoded expected bytes/roots, external commit/source/ownership ledgers and barrier/crash controls; the store's own manifest/GC implementation is not its test oracle.
@@ -1255,8 +1265,9 @@ Use independently encoded expected bytes/roots, external commit/source/ownership
 | S7 | Hold read/transaction/recovery pins at quota, expire only explicitly eligible roots, fail deletes, disable, then explicitly maintain/re-enable.  External file/I/O/accounting logs prove bounded usage/retention, complete diagnostics and no hidden disabled-store access. | Revoke a pin, silently prune active recovery, omit staging/quarantine from quotas, equate disable with clear, or claim secure erasure. |
 | S8 | Foreign namespaces/versions, forged maintenance actions/commit preconditions, denied private paths, root replacement and required-but-unqualified durability.  Independently monitor touched paths/processes and require correct in-memory fallback with no source writes/compiler launch. | Trust a source-controlled token, adopt an unrelated directory/head, weaken requested durability, use an unsafe copy/delete replacement or clear the epoch issuer. |
 
-Remaining gates are policy/profile/API review, concrete store minima/ceilings, a qualified external epoch issuer and native root/lock/replacement/reaper/allocator bindings, real S1-S8 concurrency/process-failure qualification and any separately required power-loss profile.
-Milestones 7-8 still consolidate whole-system acceptance/workloads/oracles and cross-contract approval; no unsupported sharing/derived-artifact guarantee is added by this closure.
+Remaining gates are unresolved policy/profile/API review, documented effective safety bounds and issuer/native adapter assumptions, and real S1-S8 tests of our concurrency/interruption/failure handling.
+The selected scope does not require independent certification of the OS/filesystem/volume/issuer; our code must respect the documented nonreuse/locking/replacement assumptions, handle failed calls and avoid unsupported durability claims.
+Milestone 7 supplies whole-system acceptance/workloads/oracles as a draft; milestone 8 must review the cross-contract/policy/claim boundaries before sign-off, without adding unsupported sharing/derived-artifact guarantees.
 No store acceptance trace, power-loss claim, scope/performance approval, or migration gate is marked complete by this draft.
 
 ### Semantic Identity and Dependency Contract Draft
@@ -1567,7 +1578,7 @@ Unknown semantic language behaviour remains explicit unsupported, not an unfinis
 
 | Identity case/independent negative control | Future acceptance mapping and required oracle |
 | --- | --- |
-| Two processes reserve epochs; crash after reservation; restore an older cache; clear the cache; force token/generation exhaustion. | X7/X8, S2/S8, T5/T6.  A fake issuer with an independently recorded issuance ledger demonstrates rejection of reused epochs; no old handle becomes live.  Real issuer/platform qualification remains mandatory. |
+| Two processes reserve epochs; crash after reservation; restore an older cache; clear the cache; force token/generation exhaustion. | X7/X8, S2/S8, T5/T6.  An independently recorded issuance ledger checks our authority/adapter against the declared nonreuse contract, including locally detectable repeated/invalid responses.  Global nonreassignment is an explicit authority assumption, not something a restored cache can prove about a dishonest issuer; test our logic without external platform certification. |
 | Reopen the same workspace with and without host-confirmed provider/policy/source/context continuity. | V2/V4, S1/S2, C2.  Expected equal document/source bindings versus fresh session/live IDs are authored independently; manifests cannot establish authority. |
 | Save an older overlay after a newer byte-identical overlay; restore a candidate after restart. | V5/V7, S3/S4.  Check installation stamps independently of content identity; restore creates a new current stamp only after host confirmation. |
 | Keep a unique declaration unchanged while inserting/reordering siblings; rename/change a body; move ownership; introduce identical candidates or unnamed slots. | D2, T6.  Hand-authored old/new association tables assert exact reused/fresh IDs and descendant consequences.  Do not use the production matcher as its own oracle. |
@@ -1579,7 +1590,7 @@ Unknown semantic language behaviour remains explicit unsupported, not an unfinis
 | Supply generated output with authored spans; classify idleness as a cycle; request a reserved semantic/evaluator facet in the initial service. | T8, D8.  Explicit unsupported/unclassified outcomes, no evaluator/task creation or fabricated complete negatives/language errors; qualified future provenance/rule tests remain separate. |
 
 Document-only record/catalogue/reference checks are not executed acceptance cases.
-Milestones 5-6 supply execution/ownership and initial store grammar/coordination/publication/recovery drafts; native issuer/store qualification and policy approval remain open, while milestones 7-8 complete requirement-to-oracle mapping and whole-contract approval.
+Milestones 5-7 supply execution/ownership, initial store and whole-system requirement/oracle/workload drafts; tests of our native issuer/store adapters and remaining policy/whole-contract approval stay open under the 2026-10-23 external-assumption boundary.
 A host's unimplemented durable issuer or a deferred semantic adapter remains unimplemented after this specification is complete.
 
 #### Query Records and Observed Dependencies
@@ -1666,7 +1677,8 @@ Drafted 2026-10-20.
 This refines C3/C5 and the core ticket/lease contracts using E8's bounded scheduler evidence; E8 did not test actual concurrent workers, reentrant callbacks or stopping a running worker.
 The proposed initial delivery mechanism is host-pulled completion records plus poll/wait, not arbitrary callbacks from workers.
 Milestone 3 supplies the exact logical signatures; the milestone-5 closure below supplies the draft execution model, ordering, reservations, delivery and destruction rules.
-Native Jai bindings/platform primitives and concrete host budgets still require review and qualification; this draft neither implements a scheduler nor approves an execution platform.
+Native Jai bindings and our use of platform primitives still require review/testing; optional host quotas must be honoured without imposing fixed resource defaults.
+This draft does not implement a scheduler.
 
 #### Coordinator and Worker Boundary
 
@@ -1782,7 +1794,7 @@ Proposed host delivery is a completion registry/queue addressed by protected han
 Host draining emits at most one terminal completion record per live pending registration; a lost/coalesced wake must not lose the retained outcome.
 Registering/inspecting completion and arming a wait must prevent the classic check-then-sleep lost wakeup; poll remains authoritative if the host delays delivery.
 Queue pressure must not silently drop terminal outcomes: reserve admission/retention capacity, use a bounded indexed registry, or reject new work explicitly before acknowledgement.
-The indexed representation, reservation/consumption rules and wait predicate are specified by the milestone-5 closure; numeric host ceilings remain R6.
+The indexed representation, reservation/consumption rules and wait predicate are specified by the milestone-5 closure; the 2026-10-23 R6 decision makes configured ceilings optional without weakening those rules.
 
 Drain/delivery is host-owned and serialised for a subscription; the core never invokes a host callback inline from submission, task completion or cancellation.
 A callback adapter, if added, runs only while the host explicitly dispatches records, outside internal locks and with callback argument/result leases held through return.
@@ -1993,7 +2005,7 @@ It closes the fifteen-call ordering map, nonrecursive state-gate boundary, full-
 This is specification completion, not approval of the new profile/native API, selection of R6 host budgets, implementation authorisation or concurrent/platform qualification.
 The one-compute-worker/reaper baseline and policies are proposals for detailed R4 review, not claims added to the 2026-10-21 direction approval.
 
-The following are the discriminating controls for X1-X8; milestones 7-8 still consolidate the complete requirement/workload/oracle set and cross-contract sign-off.
+The following are the discriminating controls for X1-X8; milestone 7 consolidates the requirement/workload/oracle draft, while cross-contract approval and real-service qualification remain open.
 Use independently owned expected state/issuance/allocation ledgers and barrier-controlled producers rather than making the future scheduler's own task/completion lists the test oracle.
 Each trace must run both winning orders, the delayed-producer/host case and its listed negative control; no row is a runtime pass today.
 
@@ -2119,7 +2131,7 @@ Drafted 2026-10-20.
 **Proposed interface schema, not approved API or implemented code.**
 The fifteen-operation interface was approved as the specification baseline on 2026-10-21, subject to exact schemas and API review, not production implementation or migration.
 This makes the source/update/query portion concrete under the approved initial scope and R3-R5 directions; the milestone-3 closure fixes logical signatures, values and bounds.
-R2/R6-R8, a native ABI, concrete host policy/budget approval, persistence wire grammar and implementation authorisation remain open.
+Milestones 3-6 supply API/provider/identity/execution/store drafts, revised by the 2026-10-23 policy decisions; unanswered policy details, native ABI review and implementation authorisation remain open.
 The notation below is a logical tagged-record schema, not Jai source or a persistent memory layout.
 Outer request/session records carry the interface schema version, inherited by nested records; unknown versions/tags are rejected before accepting work, never interpreted as an empty successful operation.
 
@@ -2359,7 +2371,7 @@ The discriminating future case finishes two requested documents out of order, on
 Additional independent cases cover confirmed absence versus unknown source, required conversion/allocation failure after source acceptance, unsupported milestone admission, malformed-source parse statuses, query cancellation and optional diagnostic-presentation/store failures after publication.
 Assert exact ticket/query outcomes, requested-member bindings, immutable coverage/summaries and absence of deferred required index work after implementation authorisation.
 The milestone-3 closure supplies API signatures and explicit retention-bound inputs.
-Scheduling, concrete R6 budgets and real concurrent qualification remain open.
+The scheduling draft is supplied by milestone 5; optional R6 quotas, effective technical bounds and real concurrent implementation tests must respect the 2026-10-23 no-fixed-quota decision.
 
 ##### Whole-Document Queries and Caller-Side Selections
 
@@ -4542,12 +4554,13 @@ Required source/recovery persistence, policy approval under R2/R6 and exact stor
 
 ##### Required Limit Negotiation
 
-`requested_limits` and `effective_limits` are `Limits`: a record with exactly the following nineteen named `u64` fields in table order.
-Every requested field is required and positive; omitted/zero/unknown fields reject before input acquisition.
-A request supplies host-authorised ceilings, not performance targets or a claim that R6 has approved those values.
-For each field the service reports `effective = min(requested, implementation_ceiling)` and rejects if its safe supported minimum cannot fit; it never increases a host ceiling.
-Values must be at most `0x7FFFFFFFFFFFFFFF` and the relevant native index/address-space ceiling.
-There is no unlimited sentinel, numeric default or wraparound.
+`effective_limits` is `Limits`: a record with exactly the following nineteen named positive `u64` fields in table order.
+`requested_limits` is `LimitRequest`, with those same nineteen names/order, each `Optional(u64)`; omitted fields or an omitted request mean all corresponding fields are `NONE`, with no configured quota.
+`SOME` values must be positive and at most `0x7FFFFFFFFFFFFFFF` and the relevant native representation ceiling; zero/unknown/malformed fields reject before input acquisition.
+For a configured field report `effective = min(requested, implementation_ceiling)`; for `NONE` report the implementation ceiling, rejecting only if the supported safe minimum cannot fit.
+Implementation ceilings express documented representation/algorithm bounds, not arbitrary hidden RAM budgets; no quota is reserved or guaranteed by reporting them.
+Default memory use may grow into available RAM; actual allocator/OS failure still returns the defined resource outcome without leaking ownership or corrupting admitted state.
+There is no infinite numeric sentinel or wraparound; optional quotas do not weaken checked decoding, bounded native recursion, aggregate accounting or shutdown reservations.
 The name column is the closed `LimitName` registry.
 
 | `LimitName` | Quantity checked before allocation/admission/publication |
@@ -4585,8 +4598,8 @@ Limits apply to descriptions, completion copies and borrowed-view validation as 
 Drain maximum greater than `elements_per_list` is `INVALID_ARGUMENT`, not an implicit clamp.
 Retained immutable leases are not evicted or rewritten to meet a lowered pressure target; reject/defer new acquisition with its explicit outcome.
 This schema has no limit-changing operation.
-Absolute host values, cross-workspace sharing/accounting, disk/history quotas and pressure scheduling/repair remain R6/milestones 5-6; qualified implementations must document and enforce their concrete configuration.
-Safe technical bounds and explicit negotiation are now specified without approving any production budget.
+Optional host quotas, effective technical ceilings and resource failures must be documented/enforced in both modes; no fixed production RAM/disk budget is selected.
+Cross-workspace sharing/history details remain for review; the default all-available policy does not approve those separate choices.
 
 #### Milestone 3: Canonical Values and Snapshot Records
 
@@ -4728,9 +4741,9 @@ Executable producer round trips, adapter observation correlation and lifetime/co
 #### Milestone 3: Closure and Review Checks
 
 Milestone 3 is complete as a draft logical API/source/payload specification on 2026-10-22.
-The fifteen scheduling/source operations, six read-only accessors, response/error catalogue, six-event transaction grammar, provider and syntax-adapter admission, node/helper/token/recovery projections, canonical value encodings and nineteen required limit fields are specified above.
+The fifteen scheduling/source operations, six read-only accessors, response/error catalogue, six-event transaction grammar, provider and syntax-adapter admission, node/helper/token/recovery projections, canonical value encodings, nineteen effective bound fields and optional quota requests are specified above.
 This is not final API approval, a native ABI, a store format, an adapter implementation or production qualification.
-R2/R6-R8 remain pending; mandatory explicit configuration is a schema obligation, not approval of any selected host value.
+The 2026-10-23 R2/R6-R8 decisions select location/enablement/recovery/no-history/exclusive-ownership/resource policy and measurement-first/external-assumption boundaries; whole-contract approval stays pending.
 
 For source batches, the requested milestone document set is exactly the distinct event documents; context registration does not add members.
 `AnalysisRequest` retains its explicit requested set.
@@ -4749,7 +4762,7 @@ World identity remains distinct from configuration, document context and provide
 | Resolve every derived-result reference after releasing producer/world/snapshot siblings; inject cross-domain IDs, unknown flags, unsafe helpers and unmappable message bytes. | C1/C5, T6, X1-X3.  Exact snapshot/diagnostic conversion fails truthfully; safe partial index backing does not claim exact capture. |
 
 Document-only catalogue/source checks validate that these definitions are present and consistent; they do not execute these future acceptance cases.
-Milestone 4 supplies the separate identity allocation/matching and deferred semantic-extension draft; milestone 5 owns execution ordering/reservations/destruction; milestone 6 owns policy-dependent disk grammar/locking/recovery; milestones 7-8 own complete acceptance mapping and cross-contract sign-off.
+Milestones 4-7 supply separate identity/deferred-semantic, execution/ownership, store and complete acceptance-mapping drafts; milestone 8 owns cross-contract review/sign-off, not automatic implementation approval.
 Migration and implementation require separate authorisation.
 No pending policy, qualification checkbox or release claim is completed by this closure.
 
@@ -4778,7 +4791,7 @@ Release observation handles and stopped session when no longer needed
 This protocol refines V5/V6 for first admission and retry, X7/X8 for open/shutdown ownership, and T8 for known unsupported capabilities without adding a claim that those tests pass.
 Milestone 3 supplies record limits and session-option validation.
 Milestone 4 supplies identity allocation.
-Concrete host budgets, real issuer/concurrent execution and their qualification remain policy/implementation work in the assigned milestones.
+Optional host quotas and tests of our issuer/concurrent adapters remain implementation work; no fixed resource budget or independent external-system certification is a prerequisite under the 2026-10-23 decisions.
 
 #### Worked Edit-to-Result Protocol
 
@@ -4822,8 +4835,9 @@ The milestone-4 semantic identity/allocation draft, native ABI decisions and imp
 
 ### Review Decisions and Completion Gate
 
-Prepared 2026-10-20; updated 2026-10-21.
-**R1 scope and R3-R5 design directions approved; R2 and R6-R8 remain pending explicit approval.**
+Prepared 2026-10-20; updated 2026-10-23.
+**R1 scope and R3-R5 design directions approved; R2/R6 select enabled project-relative recovery without optional history, exclusive ownership and optional quotas; R7 is measurement-first, and R8 covers our code under stated external assumptions.
+Detailed contracts and whole-specification sign-off remain pending.**
 E1-E13 provide bounded evidence, and the preceding sections now draft the major contract areas.
 That is progress in specification coverage, not evidence that the specification is complete, the proposed policies are approved, or a service has passed acceptance.
 Use this list to resolve choices rather than adding further general contract prose without a specific missing requirement.
@@ -4833,45 +4847,63 @@ Use this list to resolve choices rather than adding further general contract pro
 | Decision | Recommendation or choice to resolve | Approval boundary and status |
 | --- | --- | --- |
 | R1: Initial coverage | Adopt the syntax-first qualification slice: owned whole-file syntax/diagnostics/indices and revisioned source/world operations, including source/unsaved-recovery persistence; initially qualify the recorded Windows x64 toolchain/environment.  Keep configured semantic queries, evaluator execution and higher editor features explicitly unsupported until qualified. | Scope approved 2026-10-20.  This narrows the first deliverable, not the eventual full-syntax/full-semantics goal.  Additional compiler/filesystem/platform claims require their own qualification; detailed contracts and implementation remain unapproved. |
-| R2: Persistence and recovery policy | Keep source/metadata and unsaved recovery persistence required; do not require full AST reload.  Decide whether to confirm the earlier provisionally enabled default, the private default location/override rules, recovery retention and host reset/discard/clear behaviour. | Pending policy choices; persistence itself is already confirmed.  A direction approval does not choose retention durations, erase prior private data or authorise automatic recovery activation. |
+| R2: Persistence and recovery policy | Enable persistence by default at `.jaiParserCache` beside the project's `.build`, with an explicit override.  Preserve current disk/latest unsaved recovery without automatic expiry or an optional persistent revision archive; the editor supplies undo/redo.  Full AST reload is not required. | Location, enablement and recovery-without-history direction approved 2026-10-23.  Recovery still requires host confirmation; complete contract sign-off remains pending, and no automatic restore, source overwrite or secure-erasure guarantee is authorised. |
 | R3: Source/provider protocol | Adopt finite explicit captures, unknown-versus-absent states, host-controlled overlays and byte-based exact-base edit batches.  Require declared consistency and explicit successor captures for unavailable historical discovery. | Direction approved 2026-10-21.  Exact event schemas and adapter capabilities still need specification; logical source transactions are not atomic disk/editor writes. |
-| R4: Execution/delivery | Adopt a logical serialised coordinator with token-checked worker completion, host-pulled outcomes, independent waiter cancellation and lease-safe shutdown. | Direction approved 2026-10-21.  Milestone 5 completes the detailed execution/ownership draft on 2026-10-22; its worker/reaper model, reservations, FIFO/stop policies and native bindings still require review/approval and concurrent qualification.  R6 numerical ceilings remain pending. |
+| R4: Execution/delivery | Adopt a logical serialised coordinator with token-checked worker completion, host-pulled outcomes, independent waiter cancellation and lease-safe shutdown. | Direction approved 2026-10-21.  Milestone 5 completes the detailed execution/ownership draft on 2026-10-22; its worker/reaper model, reservations, FIFO/stop policies and native bindings still require review/approval and concurrent tests.  R6 now selects optional configured quotas with finite effective safety bounds. |
 | R5: Identity and invalidation | Preserve configured instance/load-occurrence distinctions and nominal identity; use conservative misses for uncertain matches and whole-module semantic invalidation until finer tracked facets are qualified. | Direction approved 2026-10-21.  Milestones 3-4 supply draft canonical encodings and matching/allocation algorithms for review; API approval and executable qualification remain open, and no semantic feature is enabled. |
-| R6: Resource/store policy | Choose workspace versus shared-store scope, supported concurrent-writer policy, absolute host memory/disk/acquisition limits, retained-history defaults and pressure/repair behaviour.  Prefer no implicit cross-workspace sharing until its identity/privacy/lease rules are approved. | Pending.  No absolute values or sharing defaults are inferred from small fixture bounds or the P4/P5 screening candidates.  Safe decoding requires concrete enforced limits before implementation qualification. |
-| R7: Performance acceptance | Approve, revise or replace P1-P5 and their paired workload/timing procedure.  Include a larger representative project; set any absolute interactive targets with host/hardware requirements rather than extrapolating E12. | Pending.  Existing relative targets are proposals, not achieved service results.  A syntax-store speed target cannot waive required source/recovery persistence. |
-| R8: Deferred qualification | Agree which initial guarantees are required for release and which claims remain explicitly excluded: OS-cold startup, power-loss durability, broader platforms, semantic/editor workflows and production concurrency. | Pending.  Excluding an optional claim is not passing its test.  Concurrency required by an adopted store/execution model still needs qualification; no cache flush, reboot, privilege change or arbitrary source evaluation is authorised. |
+| R6: Resource/store policy | Default to all available RAM/disk with optional configured limits, exclusive ownership by one process/writer session per project/provider store and no optional persistent history.  Contention degrades persistence, not source analysis. | Resource-default and exclusive-ownership directions approved 2026-10-23; history is disabled as confirmed in the recovery clarification.  No concurrent shared-store claim, eager allocation, resource-availability guarantee or unchecked decoder operation follows.  Detailed contracts remain subject to sign-off. |
+| R7: Performance acceptance | Run comparable experiments, report measured deltas and evaluate the trade-off afterwards rather than choosing a pass/fail percentage in advance.  Retain declared workloads, timing boundaries, baselines and raw samples. | Measurement-first direction approved 2026-10-23.  P1-P5 numerical ratios are historical discussion examples, not acceptance gates.  Correctness/leak checks remain mandatory; no performance result is claimed before measurement and review. |
+| R8: Deferred qualification | Focus on behaviour implemented by our code: interruption-safe staging/rename, complete-or-rejected publication, ownership, cleanup and graceful failure.  State assumed filesystem/OS primitive behaviour rather than independently certifying external systems. | Direction approved 2026-10-23.  Test our interruption/race/error paths; do not make power-loss, hardware/filesystem durability or OS-cold claims.  No external certification campaign, cache flush, reboot, privilege change or arbitrary source evaluation is required or authorised by this decision. |
+
+#### Policy Decisions Recorded 2026-10-23
+
+Resolve the default relative `.jaiParserCache` against the host-declared project root containing the project's `.build` directory, not the service process's incidental working directory.
+The host resolves it to an absolute native root for contained file operations; absence of a declared project root requires explicit configuration rather than guessing.
+Project-local storage is permitted even inside the source repository; its private source/recovery bytes must not become ordinary parser input or an implicitly versioned source artifact.
+The host must exclude the managed directory from source discovery/watch ingestion and arrange version-control exclusion before first creation, or request explicit user acknowledgement if exclusion cannot be established; this specification does not authorise editing an ignore file now.
+An override may select a host-appropriate temporary location such as `/tmp/JaiParser/cache`; temporary storage can disappear and is not a stronger recovery guarantee.
+The stable default path does not weaken namespace/workspace/provider validation or authorise adopting an unrelated existing directory.
+
+Default resource policy means no configured RAM/disk quota, not reservation/preallocation of all free resources, trusted persisted lengths, unlimited nesting or a promise that a later allocation/write succeeds.
+Optional finite ceilings remain enforceable.
+Effective implementation/representation bounds, checked aggregate accounting and ordinary allocation/write failure handling apply in both modes.
+Do not convert a transient free-space/RAM observation into a guaranteed reservation or silently evict protected recovery to satisfy another allocation.
+
+Measure first, decide afterwards: preserve equivalent work/ownership and independent correctness oracles, record deltas and trade-offs, then seek a decision based on results.
+Our code must make its best interruption-safe publication effort using parallel staging files and replacement/rename with documented assumptions; it is not responsible for proving external storage honours those assumptions.
+An excluded external guarantee is neither a passed test nor permission for our code to ignore failed calls, publish partial state or violate retained ownership.
+These decisions revise conflicting earlier proposals below; they do not approve the complete API, unresolved policy details, implementation or migration.
 
 The 2026-10-20 scope approval settled R1.
 On 2026-10-21 the user explicitly approved R3-R5 as design directions and the fifteen-operation interface as the specification baseline, subject to exact schemas and API review.
 These approvals do not settle R2/R6-R8, choose detailed encodings/algorithms/threading/limits, authorise implementation, or approve a migration plan.
-The user prioritised latency over memory-related overhead on 2026-10-20; exact P1-P5 numerical cutoffs were not explicitly approved, so R7 remains pending.
+The user prioritised latency over memory-related overhead on 2026-10-20 and selected measurement-first evaluation on 2026-10-23; no P1-P5 numerical cutoff is an approved gate.
 Record exactly which decisions changed, their date and any exclusions; do not turn a general continuation request into blanket approval of R1-R8.
 Approval, implementation status and qualification status are independent: an approved requirement can remain unimplemented and untested.
 
-#### Reading the Performance Candidates
+#### Reading the Performance Measurements
 
-P1-P5 are proposed go/no-go screening criteria for future implementations/optimisations, not measured editor guarantees or runtime configuration defaults.
-Percentages compare a candidate with an equivalent fresh/owned baseline on the same workload and hardware; they are not percentages of total project compilation time.
+P1-P5 identify comparisons for future implementations/optimisations, not preapproved go/no-go thresholds, measured editor guarantees or runtime configuration defaults.
+Report percentages against an equivalent fresh/owned baseline on the same workload and hardware, not as percentages of total project compilation time.
 For latency, median is the middle-measured time; p95 is a tail statistic, estimated here by nearest rank across at least 21 trials, not a worst-case bound.
 
-| Candidate | What it compares | Example of the proposed threshold, not an observation |
+| Comparison | What it compares | Evaluation after measurement |
 | --- | --- | --- |
-| P1: Resident unchanged request | Reuse already-resident validated syntax/index data versus fresh parsing/index construction for the same unchanged input.  Include validation and result acquisition, not just a pointer lookup. | If fresh median/p95 are 20/30 ms, candidate median must be at most 18 ms and p95 at most 31.5 ms.  This asks for a useful typical gain without more than 5% tail regression. |
-| P2: Changed-file update | Notify-to-usable-syntax/index latency versus the fresh changed-file path, with identical retained-world ownership.  This covers edits that cannot simply hit unchanged syntax. | With a 10/20 ms fresh median/p95, the candidate must be at most 10.5/21 ms.  This is an overhead/regression allowance, not a demand that edits become 5% faster. |
-| P3: Optional persisted AST reload | A fresh process validates/loads/reconstructs equivalent syntax/index data versus reading/validating source and parsing it.  Process wall and worker timing stay separate; compare each timing boundary with its own equivalent baseline. | The same 20/30 ms baseline gives an 18/31.5 ms target.  This tests whether optional AST persistence is worth adopting.  Required source/metadata and unsaved recovery persistence are not rejected if AST decoding fails this speed gate. |
-| P4: Retained memory | Peak upstream allocator backing versus owned whole-file parsing for the same live current/historical worlds, plus zero owned live allocations after final release. | A baseline peak of 100 MiB allows at most 110 MiB.  This is not a 110 MiB global budget, and zero owned allocations does not mean the OS process working set immediately falls to zero. |
-| P5: Managed store size | Steady-state total managed artifact/manifest/index bytes versus exact source bytes represented by the selected current and retained historical revisions.  Peak temporary publication space is reported separately. | If the selected retained source revisions total 10 MiB, the proposed steady-state store limit is 40 MiB.  This is not four times the entire repository size, and it does not set an absolute disk quota. |
+| P1: Resident unchanged request | Validated resident syntax/index reuse versus equivalent fresh parsing/index construction, including validation and result acquisition. | Review actual typical/tail latency gain and added complexity, not a preselected percentage. |
+| P2: Changed-file update | Notify-to-usable-syntax/index latency versus a fresh changed-file path with identical retained-world ownership. | Review measured overhead/reuse across body/interface/layout/malformed/repair sequences. |
+| P3: Optional persisted AST reload | If later supported, equivalent fresh-process validation/load/reconstruction versus source validation/parsing, with wall/worker boundaries separate. | Decide from measured results whether optional AST persistence is worthwhile; required source/recovery persistence remains independent. |
+| P4: Retained memory | Peak upstream backing versus the same owned live-world set, plus mandatory zero live owned allocations after final release. | Review the measured RAM trade-off after latency results; enforce any configured quota and lifetime correctness regardless. |
+| P5: Managed store size | Steady-state managed bytes versus represented retained source bytes, with peak temporary publication space separate. | Review measured storage cost and recovery value; no fixed source-byte multiple or default disk quota is imposed. |
 
-The 10% gain, 5% latency allowance, 10% backing allowance and four-times storage ratio are unapproved engineering candidates, not conclusions established by E1-E13.
-They aim to screen out complexity that buys negligible benefit or excessive overhead; different host requirements may justify different limits.
-The proposed procedure evaluates real workloads individually over two local rounds, rather than hiding a regression inside one project-wide average.
-Current experiments favour resident reuse and show the verbose graph reload is slower; they do not qualify a future editor service against these targets.
-Approval can be per candidate, and targets can be revised or left pending until actual host/workload requirements are known.
+The earlier 10%/5%/four-times proposals are superseded by the 2026-10-23 measurement-first decision, not retained as implicit rejection criteria.
+The proposed procedure evaluates real workloads individually over two local rounds rather than hiding a regression inside one project-wide average.
+Current experiments favour resident reuse and show the verbose graph reload is slower; they do not measure the future editor service or authorise adopting a new optimisation.
+Review an actual results packet and choose whether its benefits justify its costs; an inconclusive comparison remains inconclusive rather than passing a historical threshold.
 
 User priority confirmed 2026-10-20: latency is the primary performance concern; memory/storage overhead is a secondary trade-off, not an equally weighted adoption objective.
 Prioritise P1-P3 and visible-file edit/query latency, including tail behaviour.
-Continue reporting P4/P5 for informed trade-offs, but do not reject a useful latency improvement solely for missing their unapproved ratios.
-This priority does not relax lifetime correctness, safe decoding/allocation bounds, leak checks or host resource-pressure controls, and does not approve unlimited memory/disk use.
+Continue reporting P4/P5 for informed trade-offs, without using historical ratios as rejection gates.
+This priority does not relax lifetime correctness, effective decoding/allocation bounds, leak checks or configured quotas; the selected default has no fixed RAM/disk quota, not infinite guaranteed resources.
 
 #### Technical Specification Work After Direction Review
 
@@ -4880,18 +4912,176 @@ This priority does not relax lifetime correctness, safe decoding/allocation boun
 | Source/API records | Versioned source/capture/ticket/result schemas, edit and multi-document transaction grammar, provider capability set, and an operation/outcome table resolving rejection, timeout and supersession cases. |
 | Identity/semantic extension | Milestone 4 supplies draft key canonicalisation, identity allocation/matching and query/dependency/provenance/archive records with an empty initial semantic catalogue and explicit future-profile admission.  Review/qualify those contracts without claiming implementation of deferred language rules. |
 | Ownership/execution | Milestone-5 draft supplied: handle/lease transfers, fifteen-call ordering, state-gate boundary, admission/cleanup reservations, task attempts, delivery/FIFO/stop policy and final destruction.  Detailed API/native binding approval, R6 budgets and concurrent X1-X8 qualification remain open. |
-| Persistent store | Exact text grammar using `Text_File_Handler`, escaping/byte encoding, concrete bounds, manifest/operation/session ordering, lock/pin protocol and qualified platform commit/repair primitives. |
-| Acceptance mapping | Map each approved requirement to T1-T8, S1-S8, D1-D8, X1-X8 or V1-V8 and an executable oracle/negative control; explicitly mark unsupported cases and add missing cases instead of claiming the existing trace drafts are tests. |
+| Persistent store | Milestone-6 draft supplied: exact text grammar using `Text_File_Handler`, record schemas, manifest/source ordering, pins, publication and maintenance.  Review the 2026-10-23 path/quota revisions and test our primitive/error/interruption handling under documented external assumptions. |
+| Acceptance mapping | Milestone-7 draft supplied: A1-A15 requirements, fifteen-operation/six-accessor crosswalk, W1-W6 workloads and independent case evidence/control/verdict rules.  Initial T/S/X/V cases are separated from deferred D/P3 successes and excluded external claims; workload/profile approval and implementation qualification remain open. |
 
 The tables above identify specification deliverables, not a dependency-ordered migration/implementation plan.
 No production edits follow merely because a record has been described, or a review item is accepted.
+
+#### Milestone 7: Acceptance Scope and Requirement Map
+
+Drafted 2026-10-23 against the milestone-2 through milestone-6 contracts and the policy decisions recorded above.
+This is an executable-test specification for a future implementation, not new passing evidence, approval of unresolved policies or authorisation to build/run the service.
+Acceptance checks our code under documented OS/provider/identity-authority assumptions, not external storage certification or performance percentages chosen before measurement.
+The approved initial scope remains syntax-first; source/recovery persistence is required, persisted AST reuse and semantic/evaluator execution are not.
+
+Every requirement row below needs direct assertions at its named boundary; listing a related trace does not prove coverage of every field or transition.
+T1-T8, S1-S8, X1-X8 and V1-V8 are initial trace families, with the capability-specific restrictions below; D1-D8 are deferred semantic cases, not initial feature passes.
+Where a trace describes a later capability, test its explicit rejection now and retain the successful-feature branch as deferred.
+The acceptance runner must enumerate all cases/subcases with exact contract/schema versions and independent expected outcomes; no family can pass merely because one happy-path example passed.
+
+| Requirement | Initial obligation and mapped cases | Independent oracle and discriminating failure control |
+| --- | --- | --- |
+| A1: Exact owned syntax | C1/C3; T1/T5, V7 and the milestone-2 allocation/field/helper registry.  Exercise every registered supported route, token/value/flag domain, source/recovery/span/diagnostic/index field and explicit partial disposition. | An independently owned fresh parse of the same exact bytes/context plus authored structural expectations; destroy/poison producer, input and sibling backing.  A shallow alias, omitted field, wrong active union or falsely complete partial result must fail. |
+| A2: Source selection and atomic admission | C1/C2/C5; T1-T4, V1/V2/V4-V6.  Cover empty/present/absent/unknown/unavailable, sequential edits, multi-document/context binding and stale/invalid rejection. | An external accepted-event ledger computes exact disk/overlay branches and one frontier per batch.  Inject failure at each staged member; any partial selection, accidental absence or old-base commit must fail. |
+| A3: Identity and context isolation | C2/C3; T5, X3, S8 and direct milestone-4 identity vectors.  Check all live identity domains, fresh epochs, generation reuse/exhaustion, canonical key bytes and exact producer/context separation. | Authored canonical bytes and a separately controlled issuer ledger, including rollback/fork simulations under the issuer assumptions.  Reused live IDs, wrapped counters, cross-context hits or revived archive handles must fail; semantic declaration matching stays deferred. |
+| A4: Save/reset/recovery authority | C2/C4/C5; T3/T4, S3/S6, V1.  Include a newer byte-identical overlay, failed removal commit and copied recovery with an unavailable old producer. | The host-event ledger distinguishes installation revision from content revision and committed recovery from live selection.  An old save clearing the newer overlay, orphan resurrection, automatic restore or restore without current admitted context must fail. |
+| A5: World/task publication | C1/C2/C3/C5; T1/T6/T7, V6, X1/X2/X7.  Cover complete multi-document worlds, joins, attempt/mailbox tokens, supersession and exact selected-world queries. | An external accepted-request/attempt ledger and barrier-controlled completions.  Publish duplicate/out-of-order attempts deliberately; mixed revisions, old-head overwrite, duplicate ownership transfer or an already-complete join left pending must fail. |
+| A6: Delivery and progress | C3/C5; T6, X1-X6.  Cover all fifteen calls, six borrowed accessors, poll/wait/drain semantics, terminal errors, host-helper re-entry and required/optional readiness. | Authored response/state tables, independent registration/completion ledgers and controlled wake/drain barriers.  A lost wake, double drain, consumed-on-failed-copy record, callback under a gate or starvation by optional work must fail. |
+| A7: Shutdown and final ownership | C3/C5; T5, V7/V8, X3/X7/X8.  Cover first reserved/repeated shutdown, a producer beyond deadline, retained children after `STOPPED` and final owner release. | Provider/worker barriers and independent pin/free/join ledgers.  A wait timeout treated as termination, self-dependent shutdown, leaked scheduler root, lazy store reopen after stop or freed retained payload must fail. |
+| A8: Store wire and reconstruction | C1/C4; S1/S5/S8 and direct milestone-6 grammar/schema vectors.  Check all seven record kinds, exact envelope/chunks/field order, references and implementation bounds before unsafe allocation. | Independently encoded expected files/keys plus a strict test decoder and allocation ledger; recompute outer hashes on structurally invalid inner values.  A normalised invalid frame, trusted count, unresolved reference or assertion abort must fail. |
+| A9: Store ordering and interruption | C2/C4; T4, S2/S3/S6.  Cover first initialisation, every staged/install/head boundary, exact predecessor reconciliation and stale writer/sequence rejection. | Independently recorded intents/commit IDs and raw fresh-process file inspection under stated rename assumptions.  An orphan reported committed, blindly retried uncertain commit, stale tombstone overwrite or false durable frontier must fail. |
+| A10: Pins, collection and administration | C3/C4; T5, S4-S7.  Cover old manifest/read pins, failed deletion, history/expiry, explicit maintenance preconditions and partial quarantine/reinitialisation. | Independent root/pin/file inventories with mark/open/delete barriers and action-bound host confirmations.  Deleting protected/unknown roots, inferring permission from pressure or age, fabricated offline session IDs or false secure-erasure success must fail. |
+| A11: Honest capabilities and diagnostics | C4/C5; T8, V2/V3/V8, S8 and rejection branches corresponding to D1-D8.  Check unsupported semantic/evaluator/discovery/AST capabilities before task creation. | Authored capability/error tables plus child-process, source-write and task-creation monitors.  A guessed successful binding, silent empty answer, false language error, compiler launch or source-file mutation must fail. |
+| A12: Default resources and configured quotas | C3/C4/C5; S1/S7, X5/X7/X8, V5/V8 and direct `LimitRequest`/`StoreLimitRequest` vectors.  Exercise omitted/`NONE`, positive configured values, malformed/zero values and exact/one-over effective bounds. | Independent allocation/reservation/file accounting and fail-on-requested-allocation/write controls.  A hidden fixed RAM/disk quota, unchecked count, silently raised user limit, revoked lease or failed emergency shutdown reservation must fail. |
+| A13: Project-relative/private store placement | C2/C4/C5; S8 plus direct policy-binding/host-discovery cases.  Resolve `.jaiParserCache` from the declared project root; test changed working directories, overrides, foreign namespaces and unavailable exclusion/privacy setup. | A controlled host root/discovery model and independent touched-path inventory.  Wrong-root fallback, source/watch ingestion of managed files, escape/adoption of a foreign store or implicit source/VCS edits must fail. |
+| A14: Failures and retry isolation | C1-C5; T2/T8, S1-S8, X2/X5/X8, V5/V8.  Fail each ownership-transfer/admission/store boundary and repeat the request from its permitted state. | Independent before/after source/registration/root ledgers and exact allocation/free counts.  Source rollback after acceptance, partially acquired ownership, duplicated terminal outcomes or retry replay of a committed source event must fail. |
+| A15: Measured trade-offs | P1/P2/P4/P5 on the workload matrix below; P3 successful AST reload is deferred.  Compare equivalent admitted work, retained worlds, source validation and cleanup. | Raw paired wall/worker/allocation/store observations with independently checked result equality.  An inequivalent baseline, omitted failure/sample, excluded cleanup cost or historical percentage used as a gate invalidates the comparison. |
+
+The map includes both approved scope/policy requirements and proposed detailed contract obligations; final sign-off must adopt or revise the latter before implementation planning.
+Test configurations must name the approved enabled/recovery/no-history/exclusive-owner defaults or an explicitly admitted alternative; the runner must not invent another policy.
+
+##### API Boundary Subcases
+
+These mandatory subcases expand A3/A5-A7/A11/A12/A14 against the normative milestone-3 signatures and milestone-5 ordering table; they neither add operations nor change their error/ownership semantics.
+For every row, include wrong kind/version/session, stale registration/generation, quota/allocation failure and release races where the operation admits them; record unchanged state and exact ownership on every rejection.
+
+| Operation | Required direct assertion beyond the related trace family |
+| --- | --- |
+| `OpenSession` | Missing authority/policy and failed baseline reservations expose no partial session; omitted optional quotas negotiate technical bounds, store-only failure can degrade, and archived candidates cannot become active state. |
+| `DescribeSession` | Coherent copied source/store/frontier/limit state without advancing admission or acquiring a payload lease; a later source submission still validates its base. |
+| `SubmitSourceBatch` | Atomically accept all bytes/context/document changes and one frontier with an owned ticket, or reject all; analysis/store completion and a quickly finished ticket do not alter that ownership. |
+| `RequestAnalysis` | Analyse/join the exact selected frontier without advancing it, replaying a source event or leaving an already-published join pending. |
+| `ObserveTicket` | Terminal observation is atomic; each pending observation creates one independently owned waiter, not an implicit poll or shared registration. |
+| `AcquireWorld` | Require an explicit valid published/head selector and exact expected frontier; mismatch creates neither an implicit latest world nor a hidden waiter, and successful acquisition protects backing atomically. |
+| `Query` | Exact-world immediate result/terminal/pending arms, with protection or waiter installation atomic against completion; immediate results emit no completion record and unsupported requests create no analysis task. |
+| `Poll` | Observe terminal/pending state without consuming delivery, registering another waiter or acquiring result/world ownership. |
+| `Wait` | The same observation semantics plus deadline/clock validation; timeout remains pending, and neither cancels work nor proves a producer stopped. |
+| `AcquireResult` | Require the live available query waiter and install independent result ownership against release; repeated success creates separately releasable leases. |
+| `CancelWaiter` | Exactly one terminal race winner; preserve other consumers, source state and the registration until its explicit release. |
+| `DrainCompletions` | Enforce checked maximum and once-only terminal records; a failed copy consumes none, and a successful drain neither releases registrations nor transfers result leases. |
+| `Retain` | Create a distinct world/result registration protecting identical immutable backing; copying bits does not retain, and a lost release race rejects safely. |
+| `Release` | Retire exactly once, reject stale/double release without reaching a reused generation, and preserve an active session on `ACTIVE_SESSION`; release detached client interest separately from producer ownership. |
+| `RequestShutdown` | First call reserves an observable shutdown and quiesces atomically; repeats observe the same operation through distinct registrations, and surviving payloads remain readable until their own release. |
+
+For `ReadWorld`, check the exact protected world description/membership rather than a newer head; for `ReadResult`, check exact selected-world payload/query association and explicit completeness.
+For `ReadSource`, check exact selected source bytes/bounds with no path-based recapture; for `ResolveNode`, check backing/world-local IDs, registry kind and owned-edge validation.
+For `ResolveToken`, check token range/source attribution and exact bytes; for `ResolveRecovery`, check recovery kind/references/span ownership without inventing authored source for synthetic content.
+All six are borrowed read-only accessors under the existing owner protection, not new registrations or scheduling calls; test invalid/cross-backing references, retained-owner access after stop and rejection before any unsafe dereference.
+Do not use a borrowed view after releasing its last protecting owner and call that a valid lifetime test; instead verify the required owner survives in-flight access and poison backing only after its contract permits release.
+
+#### Milestone 7: Workloads and Measurement Boundaries
+
+Use a frozen read-only source manifest for every workload: canonical relative names, exact source bytes/lengths and SHA-256, selected contexts, toolchain/adapter/schema revisions and explicit inclusion/exclusion rules.
+Never infer semantic import closure, execute source, edit project inputs or follow filesystem links merely to build a workload.
+Fixture creation, failure injection and staged store writes belong only to an explicitly authorised isolated test root; a host-declared project/cache root is not blanket test-write permission.
+
+| Workload | Required coverage and selection | Measurement/claim boundary |
+| --- | --- | --- |
+| W1: Authored contract vectors | Minimal independently expected fixtures covering every milestone-2 registry route/field/helper/flag/value disposition, canonical identity/optional arms, source transactions, exact limit edges and malformed wire bytes. | Correctness/negative-control corpus, reported separately from real-project performance.  Missing supported-route vectors block that route's qualification rather than being hidden by corpus averages. |
+| W2: Recorded real-source inventories | E12's 56 top-level tutorials, eight recursive Invaders files, four top-level parser files and 18 top-level Basic files, each separately frozen for the new run.  Keep the three-file authored import chain separate. | These are historical selections, not guaranteed current counts or complete linked programs.  Record changed inventories rather than relabelling a new checkout as the old 89-file experiment; do not inherit its old fixture limits or timing results. |
+| W3: Larger project candidate | The regular `.jai` source tree recursively under `modules/Jai_Parser`, excluding `.git`, `.build`, the configured cache root, generated/test-run output and filesystem links.  Freeze the exact manifest, active-file selection and size distribution. | Proposed larger parser-development workload, not an already approved/measured application.  Review its actual file/byte/active-file distribution against W2 and the intended host use before generalising; inadequate scale/representativeness requires an explicit replacement or a narrower claim. |
+| W4: Stateful edit workload | For each selected real workload, authored body/interface/trivia/layout changes, malformed edit/repair, multi-file batch, save race, reset and repeated unchanged requests; retain current plus two historical worlds for the ownership comparison. | Log exact input batches and independently computed accepted states; do not write edits into original project files.  Historical live-world count is a benchmark configuration, not approved disk-history/retention policy or evidence of semantic invalidation. |
+| W5: Interleaving/failure workload | T1-T8, S1-S8, X1-X8, V1-V8 and direct A1-A14 vectors under controlled barriers, duplicate tokens, allocation/provider/store failures and configured-quota/no-quota modes. | Record each attained barrier/fault and expected outcome.  Stress schedules supplement reproducible cases; a random run that never reaches the intended race is not its test.  Process interruption tests are distinct from external power-loss guarantees. |
+| W6: Restart and resource workload | Fresh service/process with existing source/recovery metadata; source changed without trusted timestamps; unavailable old producer; preserved recovery; staging/quarantine/failed deletion and optional quotas. | Compare authoritative source validation/reparse with equivalent required metadata/recovery work.  No persisted-AST/P3 success, OS-cold condition or durable frontier is implied by fresh-process startup. |
+
+For P1/P2, time host request/edit submission through acquisition of the exact usable syntax/index result, including admission, acquisition/validation, hashing, queueing, parsing/reuse and publication.
+Report worker phases separately; an isolated parser call or pointer lookup is not the end-to-end competitor.
+For W6, report process wall time separately from worker validation/read/reparse time and separate setup/artifact creation from the measured request; perform equivalent required store/recovery work in both modes.
+Keep equal retained ownership and cleanup boundaries in paired modes, report teardown separately where outside request latency, and include it in complete lifecycle/resource totals.
+Record monotonic clock identity/frequency/units, ordered raw samples, mode order, warmups, environment/compiler/build options and declared storage conditions; checked timestamp differences precede unit conversion.
+Use the existing plan of at least 21 measured trials per mode, alternating/rotating order, in two separate local rounds; nearest-rank p95 is a sample statistic, not a hard latency guarantee.
+Report per-workload median/p95, absolute/relative deltas, failed/cancelled samples and reason codes; do not silently trim failures, average away a regressing inventory or manufacture a percentage when a baseline is zero.
+Report peak owned/upstream backing and process memory separately, final live-owned allocations, logical managed file bytes/counts and peak staging/quarantine/cleanup overhead.
+Instrumentation/oracle work excluded from a timed boundary must be excluded equivalently and still run for every compared result; a correctness failure invalidates that sample's performance comparison.
+Evaluate measured results afterwards under the 2026-10-23 direction; no historical percentage/byte ratio is an implicit pass/fail threshold or default quota.
+
+#### Milestone 7: Case Records, Controls and Verdicts
+
+An acceptance case is identified by its requirement row, trace/subcase, fixture manifest, contract/build/profile versions and named policy configuration.
+Its record must contain the following independently auditable information; these are test-evidence obligations, not a new public API or adopted persistent schema.
+
+| Record part | Required content and validity rule |
+| --- | --- |
+| Preconditions and scope | Initial successful feature, initial rejection, deferred successful feature or excluded claim; exact host authority/context, quota mode, retention/enablement/ownership configuration, isolated root and external assumptions.  A missing unresolved policy binding blocks that configuration; the runner cannot choose it silently. |
+| Planned schedule | Authored ordered calls/events, expected admission/frontier/terminal transitions, retained registrations and exact barrier/fault sites.  Each call/error/accessor arm must have explicit expected ownership on success and failure. |
+| Independent expectations | Fresh-owned syntax and authored field/route expectations, canonical expected bytes, host event/issuer/attempt ledgers and expected root/pin/allocation accounting as appropriate.  Do not derive expected values from the production coordinator, matcher, wire decoder or collector being checked. |
+| Observed evidence | Actual calls/outcomes/tokens, barrier/fault acknowledgements, diagnostics, allocation/free/pin/worker events, touched-file/process inventory and raw measurements.  Preserve complete ordering/provenance and distinguish source acceptance, syntax publication and store commit. |
+| Negative control | One named deliberately broken implementation path or independently mutated fixture/result per distinct invariant/oracle.  It must produce the expected mismatch/failure without depending on the production assertion that is being tested. |
+| Cleanup and rerun | Close the test's workers/handles, reconcile uncertainty, release all owned registrations/backing and verify the expected isolated-store inventory; retain only explicitly recorded evidence.  Record seed/schedule/build, so the failure can be replayed. |
+| Verdict and review | One explicit verdict, expected-versus-observed differences, links/keys to immutable evidence and reviewer/decision.  Record performance observations separately from correctness outcomes and final adoption decisions. |
+
+Use only `NOT_RUN`, `BLOCKED`, `PASS`, `FAIL`, `DEFERRED` or `EXCLUDED` as correctness/coverage verdicts; unresolved measurement trade-offs use a separate review decision, not a fabricated correctness pass.
+`NOT_RUN` means the applicable case has no executed evidence; `BLOCKED` means a named missing implementation/configuration/fixture/barrier/oracle prevents a valid run.
+`PASS` requires every expected assertion, the attained planned interleaving/fault, a detecting negative control and clean ownership/cleanup; any wrong observable result, undetected broken control or missing required cleanup is `FAIL`.
+If the planned barrier/fault was not reached, report `BLOCKED`/`NOT_RUN` as appropriate, never a race pass from the absence of a crash.
+`DEFERRED` is a later supported-feature test not enabled initially; its initial unsupported-rejection case has a separate ordinary verdict.
+`EXCLUDED` is a documented claim outside the agreed scope, such as external power-loss/OS-cold guarantees; neither verdict contributes to initial successful-feature counts.
+All cases in this document begin `NOT_RUN`, except explicitly classified deferred/excluded branches; E1-E13 retain their historical experimental evidence but do not change future-service case verdicts.
+
+For T/V source traces, author the event ledger before executing the calls and compare each admission/rejection, exact source branch and frontier, not only the final tree.
+For X traces, place barriers around each relevant gate/registration/publication/free boundary and run both orderings and duplicate/late callbacks where admitted; a scheduler model alone cannot qualify real concurrent service code.
+For S traces, use independently encoded files and root inventories, check corrupt-but-rehashed records and interrupt our code at each staged/installed/head boundary; only our handling under the documented primitive assumptions is tested.
+For syntax/identity vectors, mutate an expected field/tag/reference/epoch or poison released backing and demonstrate that the independent oracle rejects it; fresh and cached results sharing the same faulty converter are not independent proof of complete syntax projection.
+Fault injection uses bounded fail-at-boundary cases with recorded allocation indices and expected release counts, not an attempt to exhaust the real machine's RAM/disk to test the all-available default.
+A stuck worker test must have an external test-owned release/abort mechanism; a missed test deadline cannot authorise freeing service backing still used by that worker.
+Where delete/cleanup failure is intentionally injected, the expected surviving file/accounting inventory is part of the assertion rather than an unexplained leak exemption.
+
+#### Milestone 7: Coverage Ledger and Closure
+
+Milestone 7 is complete as a draft whole-system acceptance specification on 2026-10-23: A1-A15 map initial obligations to direct checks and trace families; W1-W6 define workloads; case records, independent controls and verdict rules define executable qualification evidence.
+Before accepting an implementation, expand the ledger by every supported registry route, public operation/accessor/error arm, source-event/optional variant, bound edge and fault boundary; retain explicit unimplemented/unsupported dispositions instead of claiming coverage from a family label.
+Every T1-T8, S1-S8, X1-X8 and V1-V8 case must have initial positive/rejection subcases as applicable, mapped requirement IDs and attained controls; D1-D8 successful semantic branches and P3 AST reload remain deferred, with initial rejection checks retained.
+Coverage totals must separately list applicable/passed/failed/blocked/not-run cases, deferred successes and excluded claims; no denominator may hide missing supported syntax, unexecuted concurrency or required source/recovery persistence.
+Acceptance requires no `FAIL`, `BLOCKED` or `NOT_RUN` applicable correctness obligation and no unexplained live ownership; performance remains a measured results packet for later evaluation, not a percentage gate.
+Workload/profile approval and whole-contract sign-off remain milestone 8 responsibilities; the selected enablement/recovery/no-history/exclusive-owner policy is recorded below, and the W3 manifest must be reviewed before a generalised performance claim.
+No production/service test, benchmark, interruption run or new compiler experiment is executed by this documentation milestone; no implementation/migration permission or final release approval is implied.
+
+#### Milestone 8: Cross-Contract Review
+
+Document review performed 2026-10-23 against the milestone-2 through milestone-7 drafts and the recorded scope/policy decisions.
+The review checks the following controlling boundaries, not an implemented service or externally certified platform; acceptance verdicts remain unchanged.
+
+| Boundary | Reconciled rule and required evidence | Review disposition |
+| --- | --- | --- |
+| B1: Admission versus analysis | A source batch commits exact bindings/bytes and one frontier before syntax/index readiness.  Parse/store failure cannot undo admission; a retry uses `RequestAnalysis`, not replayed edits/saves.  A2/A5/A14, T1/T2/T7, V5/V6. | Drafts distinguish accepted source, published analysis and failed/retried work; implementation tests remain required. |
+| B2: Disk versus overlay/recovery | Save removal compares installation and content revisions; a newer byte-identical overlay survives.  Reset/removal requires a committed tombstone, and a failed removal leaves only a host-confirmed recovery candidate on restart.  A4/A9, T3/T4, S3/S6. | Enabled recovery without automatic expiry or optional revision history is selected; no disk timestamp, orphan blob or copied offer selects live source or replaces editor undo/redo. |
+| B3: Identity versus archived content | Content/context/artifact identity never revives session/world/result/operation registrations; source reuse reparses under the admitted current context.  Epoch authority lives outside disposable cache/clear scope.  A1/A3/A8, T5, X3, S8. | Preserve nonreuse assumptions and conservative misses; stale external-certification wording corrected without claiming that a cache can verify a dishonest global issuer. |
+| B4: Task versus observer ownership | Shared tasks have generation/attempt-checked single publication; `ObserveTicket` can register a waiter, `Poll`/`Wait` only observe, acquisition/retain protects separate ownership, and drain transfers no payload lease.  A5/A6, T6/T7, X1-X5. | Fifteen operations and six borrowed accessors retain their distinct ownership rules; no implicit callback/retain or new call is introduced. |
+| B5: Terminal versus stopped versus destroyed | Cancellation/deadline is not producer termination.  `STOPPED` requires safe compute/provider/store finalisation, while retained resident child backing survives session release until final ordinary release.  A7/A12, X7/X8, V7/V8. | Reserved shutdown/reaper and surviving-owner lifetime agree; neither a wait timeout nor store degradation frees in-use backing. |
+| B6: Store commit versus durability | Immutable records precede complete-file head replacement; uncertain replacement reconciles exact predecessor/proposed commit.  `PROCESS_ATOMIC` receipts leave durable `StoreStatus.acknowledged_frontier` at `NONE`.  A8-A10, S1-S6. | Our interruption/error handling is required under stated primitive assumptions; no power-loss/external filesystem guarantee is promoted to an initial release gate. |
+| B7: Quotas versus safety | Omitted `LimitRequest`/`StoreLimitRequest` fields mean no configured quota; effective `Limits`/`StoreLimits` remain checked technical bounds.  Allocator/write failure preserves source, protection and shutdown reservations.  A12/A14, S7, X5/X8. | No mandatory fixed RAM/disk budget or infinite numeric sentinel; optional ceilings must be enforced without silently increasing them. |
+| B8: Location/privacy versus ownership | Resolve `.jaiParserCache` from the declared project root, exclude managed data from source/watch/VCS ingestion and reject incompatible namespaces/unsafe paths.  Exclusive ownership is approved; contention degrades only persistence.  A10/A13, S4/S8. | No concurrent shared-store/multiwriter approval; the contending editor must report that its recovery is not being persisted. |
+| B9: Supported versus reserved capability | Initial owned syntax/source/recovery is required; semantic/evaluator/discovery and persisted-AST successful-feature paths remain unsupported/deferred.  Initial rejection checks remain required and create no compiler/task side effects.  A1/A11, T8, V2/V3/V8. | D1-D8/P3 success is not initial coverage; no implementation of deferred semantics is inferred from its extension schema. |
+| B10: Draft/evidence versus approval | A1-A15/W1-W6 specify future cases and measured comparisons; E1-E13 remain bounded historical evidence.  Negative controls, attained barriers, independent oracles and clean ownership are required for applicable correctness passes. | No document audit passes a runtime case; workload/profile acceptance, complete specification sign-off and implementation/migration permission are separate decisions. |
+
+The identified local inconsistencies were stale external-authority certification language, not a reason to drop nonreuse or independent tests of our adapters.
+No runtime race/lifetime/durability/performance claim follows from these review dispositions.
+#### Milestone 8: Policy Answers and Pending Sign-Off
+
+Recorded 2026-10-23: persistence is enabled by default; the initial project/provider store has one owning process/writer session; recovery is enabled but optional persistent history is not, because the editor handles undo/redo.
+Recovery protects current unsaved content until it is superseded or removed through the established host save/reset/discard protocol; it is not a time-expiring revision archive or an automatic restore command.
+Older live leased versions remain protected, while unreachable physical files follow safe GC rather than a promise of immediate erasure.
+The user explicitly kept overall specification sign-off pending and paused to finish reading; these policy answers do not approve planning, implementation, migration or runtime acceptance.
+No further review questions or approval requests are implied by recording this clarification.
+The larger-project W3 exact manifest/representativeness must still be recorded before a generalised performance claim; accepting a workload selection/procedure is not approving an unrecorded measurement result.
 
 #### Exit Criteria Before Migration Planning
 
 - [ ] Record explicit initial-scope/direction decisions and resolve or explicitly defer each R1-R8 item without leaving an implicit production default.
 - [ ] Complete exact schemas/protocols for every initial requirement, including its owner, identity/version rule, state transition, failure behaviour and acceptance oracle.
 - [ ] Check the contracts together for conflicts: provider versus analysis frontiers, current versus retained worlds, task versus waiter lifetime, source availability versus store durability, and logical identity versus artifact revision.
-- [ ] Approve the initial workload/platform matrix and acceptance thresholds; separate previously observed experimental evidence from future implementation qualification.
+- [ ] Agree the initial workload/platform matrix and measurement procedure, then evaluate measured deltas rather than preselecting performance thresholds; keep experimental evidence separate from future implementation qualification.
 - [ ] Identify later capabilities and their extension/unsupported contracts, then perform the section 14 specification-completion review before writing a separate migration plan.
 
 Production acceptance tests can only qualify an implementation that exists; this design gate requires their executable acceptance criteria and planned oracles, not false claims that unimplemented traces have passed.
@@ -6036,7 +6226,7 @@ No production changes are authorised by this checklist alone.
 	- [ ] Review the context registry and adapter descriptor/platform-policy alternatives against real adapters; qualify binding, lease and consistency claims without inferring filesystem guarantees.
 	- [x] Draft diagnostic origin/code/severity/recovery observations and syntax-only declaration-index names, containers, coverage and visibility records, preserving unmappable/raw observations and semantic deferrals.
 	- [x] Map current token forms, trivia-dependent byte origins, synthetic recovery, compound declared-versus-assigned bindings and scope-directive nodes; explicitly record export-marker, shared-owner and traversal-registry gaps.
-	- [x] Specify exact node/helper/token/diagnostic/index projections, optional tags, access signatures and required numeric-limit negotiation for API review; concrete host budget approval remains R6.
+	- [x] Specify exact node/helper/token/diagnostic/index projections, optional tags and access signatures for API review; revise limit negotiation to optional quota requests and finite effective bounds under the 2026-10-23 R6 decision.
 	- [x] Record the accepted trivia-required full-featured scope and draft the complete current token-name/alias registry; remove the non-trivia byte-mapping requirement without changing production compatibility mode.
 	- [ ] Review and qualify token-tag/alias round trips, field-role restrictions, trivia-enabled origins and rejection of non-trivia full-featured profiles after implementation authorisation.
 	- [x] Draft tagged token values, exact integer/float bits, closed value/trivia flags and source-slice ownership, including quoted-note discrimination and uniform EOF preceding-trivia reconstruction.
@@ -6140,6 +6330,10 @@ No production changes are authorised by this checklist alone.
 - [x] Record explicit R1 initial-scope approval on 2026-10-20 without extending that approval to other review decisions, detailed contracts, implementation or migration.
 - [x] Record explicit R3-R5 design-direction approval on 2026-10-21, keeping R2/R6-R8 and detailed schemas/algorithms/limits open and implementation/migration unauthorised.
 - [ ] Resolve the review packet's initial direction, policy and performance decisions explicitly; record approvals/exclusions before finalising the concrete schemas and specification-completion review.
+	- [x] Record the 2026-10-23 project-relative cache location, all-available RAM/disk default with optional limits, measurement-first performance evaluation and focus on our code under external primitive assumptions.
+	- [x] Reconcile source/store quota schemas, root resolution, performance tables and external-certification wording with those decisions without authorising implementation.
+	- [x] Record explicit enabled-by-default persistence, exclusive store ownership and recovery without optional persistent history; preserve the editor's undo/redo responsibility and live leased versions.
+	- [ ] Obtain explicit whole-specification sign-off after the user finishes reading; current policy approvals do not authorise planning, implementation or migration.
 - [ ] Approve and qualify the milestone-3 source-provider contract under R3 against real adapters.
 	- [x] Specify finite capture consistency/capabilities, explicit bindings and contexts, batch/edit grammar, source leases and host confirmations; keep resolver discovery unsupported and disk/editor atomicity outside logical admission.
 	- [ ] Qualify V1-V8 and the host's authority/immutability claims against actual adapters after implementation authorisation.
@@ -6147,7 +6341,7 @@ No production changes are authorised by this checklist alone.
 	- [x] Specify the fifteen-operation ordering map, nonrecursive state-gate/worker/reaper boundary and complete reservation ledger, including shutdown at ordinary resource exhaustion.
 	- [x] Close capture/task/attempt validation, publication/head ordering, indexed completion/wait delivery, host-helper re-entry and queued-discard/running-finish/FIFO policies.
 	- [x] Specify independently driven shutdown, surviving child/borrowed-owner lifetime and final destruction; map X1-X8 to independent interleavings, ledgers and negative controls without claiming runtime passes.
-	- [ ] Obtain detailed execution/profile/native-API approval, size and approve R6 minima/ceilings, and bind provider/store finalisation to the approved platform contracts.
+	- [ ] Obtain detailed execution/profile/native-API approval, document effective safety minima/ceilings and optional R6 quotas, and bind provider/store finalisation to stated OS/API assumptions.
 	- [ ] Implement and qualify X1-X8 under real concurrent workers/provider/allocator failures with independent ownership/order/deadline oracles after implementation authorisation.
 - [ ] Approve the milestone-4 identity/semantic-extension draft under R5 and qualify its implemented capabilities after implementation authorisation.
 	- [x] Complete milestone 4's allocation/nonreuse/exhaustion, restart authority, injective cross-edit matching, typed instance/load/type/context keys and archive continuity rules.
@@ -6156,13 +6350,13 @@ No production changes are authorised by this checklist alone.
 	- [x] Define source-ordered ordinary/`Context_Base` member comparison and order-independent completed `#Context` additions, separate from nominal identity and layout/effect observations.
 	- [ ] Qualify context-contribution permutations, base/member changes, duplicates/provisional membership and layout-sensitive consumers against fresh/compiler oracles after implementation authorisation.
 - [ ] Approve the milestone-6 persistence draft and qualify its implementation after separate authorisation.
-	- [x] Specify the canonical text envelope/typed grammar, seven source/metadata record kinds, twelve finite store bounds and trusted configuration/retention schema without choosing R2/R6 defaults.
+	- [x] Specify the canonical text envelope/typed grammar, seven source/metadata record kinds, twelve effective store bounds and optional quota requests; apply enabled project-local recovery, no optional history, exclusive ownership and no fixed resource quota.
 	- [x] Close exclusive owner/native primitive requirements, source-slot ordering, immutable blob/atomic head commit and uncertain-outcome reconciliation, preserving the external epoch issuer and truthful durability boundary.
 	- [x] Specify read pins/owned recovery offers, fail-closed GC, explicit maintenance/quarantine and S1-S8 independent oracles/negative controls; keep optional AST/semantic persistence unsupported.
-	- [ ] Approve or revise the proposed ownership/durability/profile and R2/R6 policy values, review native/API/issuer bindings and complete cross-contract sign-off.
-	- [ ] Implement and qualify S1-S8 with independent strict-wire, source/commit/pin/allocation oracles and real native failure/interruption tests; separately qualify any required power-loss profile.
+	- [ ] Review the detailed store/native/API/issuer contracts under the selected policy and stated external assumptions; obtain explicit cross-contract sign-off without treating policy approvals as full approval.
+	- [ ] Implement and qualify S1-S8 with independent strict-wire, source/commit/pin/allocation oracles and tests of our native failure/interruption paths; make no power-loss guarantee or external-certification requirement.
 - [ ] Review and approve or revise the core contracts, including edit coordinates/batches, provider world capture, cancellation and lease semantics; turn T1-T8 into executable acceptance cases during implementation qualification.
-- [ ] Approve or revise section 14's initial scope, deferrals, C1-C5 qualification checks and P1-P5 numerical candidates before treating them as acceptance requirements.
+- [ ] Approve or revise section 14's initial scope, deferrals and C1-C5 correctness checks; agree P1-P5 measurement workloads/procedure, then evaluate actual deltas without preselected percentage gates.
 - [x] Run and record E1's bounded compiler import/visibility matrix, including auditing expected-failure diagnostics.
 - [x] Run and record E2's bounded module identity/parameter probes, including nominal compatibility, transitive configuration, expected diagnostics, and evaluation counts.
 - [x] Run and record E3's bounded loaded-file composition probes, including occurrence multiplicity, scope, relative paths, contextual module values/types, cycles, and diagnostic/marker audits.
@@ -6177,8 +6371,8 @@ No production changes are authorised by this checklist alone.
 - [x] Capture E12's bounded real-source baseline: validated resident reuse, fresh parsing, explicit text-source-reparse control, repeated malformed/body/interface/layout edits, retained snapshot backing, process restart, and independent saved-data audit.
 - [x] Capture E12's equivalent owned AST graph-text reload comparison on the 89-source inventory, including deep producer/input/sibling-teardown checks, exact source/context validation, fresh/resident competitors, backing profiles, rejection controls, and independent saved-data audit; retain its same-layout/read-only limits.
 - [x] Measure E12's actual fresh-process graph reload against fresh-process parsing, with alternating order, worker/whole-process latency, exact input/artifact provenance, no resident warmup, and independent audit; label the filesystem warm/unflushed.
-- [ ] Agree and run an isolated OS-cold storage procedure before making a cold-startup claim; fresh worker processes and regenerated artifact reads do not establish cold filesystem caches.
-- [ ] Approve E12's numerical median/tail/memory/disk targets and extend the baseline to semantic dependency updates and the complete section 13 editor workflows, explicitly deferring unsupported capabilities.
+- [x] Explicitly exclude OS-cold/external storage guarantees from the initial scope under the 2026-10-23 decision; fresh worker processes/artifact reads do not establish cold filesystem caches and no cold-start claim is made.
+- [ ] Evaluate measured E12/future-service median/tail/memory/disk deltas without preselected cutoffs; extend to semantic dependency/editor workflows only under separate scope/implementation authorisation.
 - [ ] Turn the evidence into approved initial contracts and acceptance criteria using the specification-completion gate in section 14, before writing the migration plan.
 - [ ] Define owned immutable syntax snapshots and syntax diagnostics that do not depend on semantic mutation or caller allocator lifetime.
 - [ ] Define coherent semantic worlds, declaration/type identities, versioned handles, and query-result states through full Jai coverage.
@@ -6190,8 +6384,13 @@ No production changes are authorised by this checklist alone.
 - [ ] Define change-notification/update tickets and immediate-result-or-pending world queries, including completion milestones, waiting, supersession, cancellation, and a separate later editor-feature API layer.
 - [ ] Define an optional evaluator contract with context reproduction, provenance, dependency/effect tracking, unsupported states, trust controls, and bounded subprocess execution.
 - [x] Validate E13's bounded explicit `using,map` wrapper: generated member-name arrays, contextual callback invocation, framed result capture, slot/exclusion and supported-name validation, and host-owned results after evaluator teardown; retain the documented context/enumeration/production limits.
-- [ ] Define cache-equivalence, invalidation, lifetime, restart, cancellation, corruption, and incomplete-code test matrices, including compiler verification of import/visibility rules.
+- [ ] Review the milestone-7 whole-system acceptance draft and qualify only separately authorised implemented capabilities.
+	- [x] Map A1-A15 initial correctness/resource/policy obligations to direct API/registry/wire cases and T1-T8/S1-S8/X1-X8/V1-V8 controls, keeping D1-D8 semantic successes deferred.
+	- [x] Specify W1-W6 frozen workload manifests, equivalent baseline/timing/ownership boundaries and measurement-first P1/P2/P4/P5 reporting with optional AST/P3 success deferred.
+	- [x] Define independent expectations, attained barriers/faults, detecting negative controls, complete cleanup/accounting and distinct not-run/blocked/pass/fail/deferred/excluded evidence verdicts.
+	- [ ] Approve or revise the larger-project manifest, workload/profile configurations and remaining policy/contract boundaries at milestone-8 sign-off; do not infer unresolved defaults from test fixtures.
+	- [ ] Implement/run every applicable initial case with independent oracles and replayable evidence after separate authorisation; qualify compiler-backed semantic import/visibility/invalidation cases only with a separately admitted future profile.
 - [ ] Define inaccessible-candidate diagnostics and explicit export fix actions, separate from ordinary identifier resolution and validated against current source and export impact.
-- [ ] Benchmark the complete editor workflows in section 13 and agree acceptance thresholds before choosing chunk-level syntax reuse or finer cache granularity.
+- [ ] Benchmark separately authorised supported editor workflows in section 13 and evaluate measured trade-offs before choosing chunk-level syntax reuse or finer cache granularity; do not impose historical percentage cutoffs.
 - [ ] Revisit the existing AST-copier decision independently of the future architecture, using its measured benefit and preserved correctness contracts.
 - [ ] After the target model is agreed, write a separate migration/implementation plan from the current parser; do not treat this report as that plan.
