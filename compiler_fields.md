@@ -1,6 +1,6 @@
 # Public Compiler AST Field Inventory
 
-Scope: the installed Jai compiler's public `Code_*` records reachable from the parser's 49 concrete node types, `Code_Node`, their public child records, the literal-value unions, and the public records for compiler-only node kinds.
+Scope: the installed Jai compiler's public `Code_*` records reachable from the parser's 50 concrete node types, `Code_Node`, their public child records, the literal-value unions, and the public records for compiler-only node kinds.
 Run `examples/code_field_inventory.jai` from `examples` to repeat the reflection dump after a compiler upgrade.
 Fields are declared fields only: embedded `base`/`entry` fields are listed on each owner, but their members are classified on their defining record, not duplicated for every descendant.
 Anonymous union arms are listed under their containing field.
