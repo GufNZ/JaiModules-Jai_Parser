@@ -25,7 +25,7 @@ They should survive editor restarts, remain resident in memory when useful, and 
 The exact configuration contract is still proposed below.
 - Persist unsaved revisions as well as saved revisions when persistence is enabled, with explicit document-state tracking and recovery/cleanup controls.
 Restoring or discarding a buffer must not accidentally select its obsolete unsaved revision.
-- Eventually use isolated official-compiler subprocesses for evaluations such as `#insert` and `using,map`, where necessary.
+- Eventually use isolated official-compiler subprocesses for evaluations such as `#insert`, `using,map`, `#modify` blocks and `#run`, where necessary.
 A future bootstrapped language-service evaluator could replace that backend, but its availability and API are not assumed.
 - Compiler subprocess evaluation requires explicit opt-in through a program/module parameter, plus host permission where applicable.
 Workspace trust is an external integration responsibility, not something the parser can infer.
@@ -529,7 +529,8 @@ Provide an evaluator boundary whose input is a semantic/evaluation request, reso
 Its output is structured values or generated syntax, diagnostics, provenance/source maps, observed dependencies, and an explicit support/completeness state.
 
 Initially the evaluator may be unavailable.
-Later a subprocess backend can wrap supported snippets and use the official compiler (on generated source with build options including `do_output`=false and an `#insert` in it, then reading back the `.build/.added_strings_w#.jai` file(s)); eventually a bootstrapped language-service backend may interpret the corresponding AST.
+Later a subprocess backend can wrap supported `#insert`, `using,map`, `#modify` and `#run` evaluations and use the official compiler; eventually a bootstrapped language-service backend may interpret the corresponding AST.
+For generated text, the proposed channel uses generated source with build options including `do_output`=false and an `#insert` in it, then reads back the `.build/.added_strings_w#.jai` file(s); this is not a universal result channel for the other evaluation kinds.
 Keep frontend query/ownership contracts independent of that choice.
 E5 below verifies this text channel on trusted fixtures, but not as a self-contained semantic-result protocol.
 Use request-owned intermediate directories, inspect all relevant workspace outputs, and distinguish successful results from stale or failed-compilation artifacts.
@@ -541,6 +542,7 @@ A backend must reproduce the required context, evaluate a larger unit, or return
 
 Separate computed values from action execution.
 A `#run` may mutate compile-time state, read files, use environment variables, launch processes, or produce outputs.
+Include it explicitly in the proposed compiler-subprocess evaluator, preserving the required compilation context and capturing supported values/diagnostics/effects through the result protocol rather than assuming an added-string dump records them.
 Reusing its old return value does not reproduce those effects.
 Cache/replay only explicitly supported deterministic evaluations or an action model with sufficient input/output/effect tracking.
 Otherwise, re-execute under an authorised policy or retain an unknown/provisional result.
@@ -556,6 +558,12 @@ Extracting just the procedure is insufficient if it depends on imports, private 
 E5 observed the real callback and its instrumented names, but did not test this explicit generated-array wrapper or its result protocol.
 E13 below now validates a bounded generated-array wrapper against real mapping, including parameter/private-helper context, exclusions, framed results, and host-owned output after process teardown; general context extraction and production evaluation remain unsupported.
 The absence of automatic mapping output in added-string dumps is not evidence against this proposed wrapper.
+
+Include `#modify` blocks in the same proposed compiler-subprocess boundary: they can change polymorphic variables or accept/reject a procedure or struct instantiation.
+Preserve the enclosing declaration, actual polymorphic arguments, call/instantiation context and required dependency closure; evaluating the block as a detached snippet is not an equivalent substitute.
+Capture the supported modified parameter values/types and acceptance/rejection outcome through an explicit structured protocol; added-string dumps alone do not describe those changes, and an arbitrary compiler failure is not proof that the block rejected a polymorph.
+Own returned observations independently of compiler-process storage, track context/effects as for other evaluations, and report unsupported when the required context or outcome cannot be reproduced/captured safely.
+E5/E13 do not qualify `#modify` evaluation; compiler-backed checks of changed parameters, accepted/rejected instantiations and context dependence remain future authorised work, not an enabled initial semantic capability.
 
 Keep compiler subprocess evaluation disabled unless a program/module parameter explicitly enables the capability.
 That opt-in is necessary but not sufficient: the embedding host must also authorise execution and apply its workspace-trust policy.
@@ -642,22 +650,32 @@ Measure cold start, validated warm restart, unchanged-project queries, a local b
 Report median/tail editor latency, hashing/validation/deserialisation costs, memory high-water/residency, disk size, bytes read/written, invalidation fan-out, and retained old worlds.
 Keep external compiler startup/evaluation costs visible rather than hiding them inside a generic cache metric.
 
-There is not yet an agreed numerical acceptance threshold.
-Whole-project warm restart and edit-to-editor-result measurements are needed before setting one.
+The agreed policy is to measure comparable deltas and evaluate the trade-offs afterwards, not set numerical acceptance thresholds in advance.
+The workload/procedure still needs approval, and future whole-project warm-restart/edit-to-result measurements must not be confused with the existing bounded experiments.
 Earlier hypothetical large-file savings for a broader copier are not evidence for this architecture's performance, and syntax persistence should earn its complexity relative to simply reparsing the selected files.
 
 ## 14. Decisions Still Open
 
-These should be resolved as the model is refined, not silently encoded as implementation defaults:
+The remaining items are approvals or choices within drafted contracts, not a claim that previously selected policies are undecided.
+Enabled project-relative `.jaiParserCache`, no fixed RAM/disk quota with optional limits, recovery without optional persistent history, exclusive store ownership and measurement-first performance evaluation are settled directions.
+Overall specification sign-off remains pending while the user reviews the document; implementation, migration and runtime qualification are not authorised by this list.
 
-- Retention/cleanup defaults and the host recovery handshake for persisted unsaved revisions; persistence itself is agreed, not still an open choice.
-- The default cache directory, budget defaults, shared versus workspace-local manifests, and multi-process sharing policy.
-- Exact path/symlink identity and source-visible filename rules across Windows and other supported platforms.
-- How much parameter canonicalisation and compiler-backed evaluation is available before full semantics exists.
-- The explicit evaluation opt-in parameter and host-authorisation contract, including how an embedding editor supplies its external workspace-trust decision.
-- API approval and executable qualification of milestone 4's declaration identity/matching and restart contracts; uncertainty remains a valid cache miss.
-- Whether a syntax chunk store is worth maintaining after whole-file/query caching is measured.
-- Numerical acceptance criteria for warm restart, steady editor edits, memory retention, and persistent-storage overhead.
+- Approve or revise the drafted host-confirmation, recovery/clear/repair and privacy contracts, including their concrete host binding.
+Enabled recovery without automatic expiry, no optional revision history and editor-owned undo/redo are already selected; their defaults are not open again.
+- Review the concrete host/store/native bindings and their enforcement of project-root resolution, discovery/version-control exclusion, permissions and contention diagnostics.
+The cache location, optional-quota policy and exclusive project/provider store ownership are decided; detailed implementation choices still belong in a separately authorised plan.
+- Review the initial provider adapter's declared case/alias/link/reappearance policy and source-visible path binding against the drafted canonical encodings.
+The service already preserves source-visible spelling separately and delegates physical document identity to that versioned provider policy; additional-platform adapters remain deferred rather than requiring one universal path rule now.
+- Approve the drafted typed parameter/context encodings and conservative identity rules; decide which later compiler-compatible semantic/evaluation profiles can actually support them.
+The initial semantic/evaluator catalogue is unsupported, not an undecided promise to canonicalise/evaluate arbitrary Jai before full semantics exists.
+- For a later evaluator, choose the exact program/module opt-in parameter and host permission API, supported compilation-context reproduction and structured result/effect protocols for `#insert`, `using,map`, `#modify` and `#run`.
+Explicit source opt-in plus separate host authorisation/workspace trust is already required; safe supported scope and concrete API names remain open.
+- Approve or revise milestone 4's identity allocation/matching/restart contracts and their API bindings as part of whole-contract sign-off.
+Nonreuse, trusted continuity and conservative misses are drafted; executable qualification is future implementation work, and semantic matching does not become an initial supported feature merely through approval.
+- Decide whether optional syntax chunks/finer cache granularity are worthwhile only after comparable whole-file/query measurements.
+They are deferred optimisation choices, not gaps that block the initial whole-file design.
+- Approve the workload/profile matrix, larger-project manifest selection and measurement procedure, then evaluate observed latency/memory/storage deltas.
+Do not restore the superseded percentage gates or interpret measurement-first evaluation as a request to choose numerical cutoffs now.
 
 ### What a Completed Specification Must Define
 
@@ -5069,7 +5087,7 @@ The identified local inconsistencies were stale external-authority certification
 No runtime race/lifetime/durability/performance claim follows from these review dispositions.
 #### Milestone 8: Policy Answers and Pending Sign-Off
 
-Recorded 2026-10-23: persistence is enabled by default; the initial project/provider store has one owning process/writer session; recovery is enabled but optional persistent history is not, because the editor handles undo/redo.
+Recorded 2026-10-23: persistence is enabled by default; the initial project/provider store has one owning process/writer session; recovery is enabled, but optional persistent history is not, because the editor handles undo/redo.
 Recovery protects current unsaved content until it is superseded or removed through the established host save/reset/discard protocol; it is not a time-expiring revision archive or an automatic restore command.
 Older live leased versions remain protected, while unreachable physical files follow safe GC rather than a promise of immediate erasure.
 The user explicitly kept overall specification sign-off pending and paused to finish reading; these policy answers do not approve planning, implementation, migration or runtime acceptance.
