@@ -25,29 +25,29 @@ Status conventions apply to all four documents:
 
 | Milestone. | Scope. | Status. |
 | --- | --- | --- |
-| 2 | [Current-producer syntax registry closure](CACHE_SYNTAX_REGISTRY.md#milestone-2-syntax-registry-closure). | Drafted; qualification open. |
-| 3 | [Exact logical interface](CACHE_CONTRACTS.md#milestone-3-exact-logical-call-signatures): signatures, responses, provider admission, bounds and canonical values. | Drafted; API review open. |
-| 4 | [Identity allocation, matching and semantic keys](CACHE_CONTRACTS.md#milestone-4-allocation-and-restart-continuity), with deferred semantic records. | Drafted; review open. |
-| 5 | [Execution coordination, delivery, cancellation and shutdown](CACHE_CONTRACTS.md#milestone-5-coordination-ordering-and-reservations). | Drafted; review open. |
-| 6 | [Persistent store](CACHE_CONTRACTS.md#milestone-6-store-profile-bounds-and-text-grammar): grammar, records, commit, recovery and administration. | Drafted; review open. |
-| 7 | [Whole-system acceptance map](CACHE_CONTRACTS.md#milestone-7-acceptance-scope-and-requirement-map). | Drafted; workload approval open. |
-| 8 | [Cross-contract review and sign-off](CACHE_CONTRACTS.md#milestone-8-cross-contract-review). | Pending sign-off. |
+| 2. | [Current-producer syntax registry closure](CACHE_SYNTAX_REGISTRY.md#milestone-2-syntax-registry-closure). | Drafted; qualification open. |
+| 3. | [Exact logical interface](CACHE_CONTRACTS.md#milestone-3-exact-logical-call-signatures): signatures, responses, provider admission, bounds and canonical values. | Drafted; API review open. |
+| 4. | [Identity allocation, matching and semantic keys](CACHE_CONTRACTS.md#milestone-4-allocation-and-restart-continuity), with deferred semantic records. | Drafted; review open. |
+| 5. | [Execution coordination, delivery, cancellation and shutdown](CACHE_CONTRACTS.md#milestone-5-coordination-ordering-and-reservations). | Drafted; review open. |
+| 6. | [Persistent store](CACHE_CONTRACTS.md#milestone-6-store-profile-bounds-and-text-grammar): grammar, records, commit, recovery and administration. | Drafted; review open. |
+| 7. | [Whole-system acceptance map](CACHE_CONTRACTS.md#milestone-7-acceptance-scope-and-requirement-map). | Drafted; workload approval open. |
+| 8. | [Cross-contract review and sign-off](CACHE_CONTRACTS.md#milestone-8-cross-contract-review). | Pending sign-off. |
 
 No milestone 1 was designated; the unnumbered initial-scope and core-contract drafts of 2026-10-20 preceded milestone 2.
 
 | Labels. | Meaning. | Defined in. |
 | --- | --- | --- |
-| R1-R8 | Review decisions. | [Decision record](#decision-record). |
-| C1-C5 | Correctness gates. | [Correctness gates](#correctness-gates). |
-| P1-P5 | Performance comparisons. | [Performance comparisons](#performance-comparisons). |
-| E1-E13 | Experiments. | [CACHE_EXPERIMENTS.md](CACHE_EXPERIMENTS.md); summary in [section 14](#experiment-summary). |
-| T1-T8 | Core contract acceptance traces. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#acceptance-trace-drafts). |
-| S1-S8 | Store acceptance traces. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#store-acceptance-trace-drafts). |
-| D1-D8 | Semantic identity traces (deferred). | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#semantic-acceptance-trace-drafts). |
-| X1-X8 | Execution traces. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#execution-acceptance-trace-drafts). |
-| V1-V8 | Source-capture traces. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#source-capture-acceptance-trace-drafts). |
-| A1-A15 | Milestone-7 requirements. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#milestone-7-acceptance-scope-and-requirement-map). |
-| W1-W6 | Milestone-7 workloads. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#milestone-7-workloads-and-measurement-boundaries). |
+| R1-R8. | Review decisions. | [Decision record](#decision-record). |
+| C1-C5. | Correctness gates. | [Correctness gates](#correctness-gates). |
+| P1-P5. | Performance comparisons. | [Performance comparisons](#performance-comparisons). |
+| E1-E13. | Experiments. | [CACHE_EXPERIMENTS.md](CACHE_EXPERIMENTS.md); summary in [section 14](#experiment-summary). |
+| T1-T8. | Core contract acceptance traces. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#acceptance-trace-drafts). |
+| S1-S8. | Store acceptance traces. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#store-acceptance-trace-drafts). |
+| D1-D8. | Semantic identity traces (deferred). | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#semantic-acceptance-trace-drafts). |
+| X1-X8. | Execution traces. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#execution-acceptance-trace-drafts). |
+| V1-V8. | Source-capture traces. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#source-capture-acceptance-trace-drafts). |
+| A1-A15. | Milestone-7 requirements. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#milestone-7-acceptance-scope-and-requirement-map). |
+| W1-W6. | Milestone-7 workloads. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#milestone-7-workloads-and-measurement-boundaries). |
 
 ## 1. Purpose and Confirmed Direction
 
@@ -108,15 +108,15 @@ Combining them into one universal hash would obscure invalidation and make ordin
 
 | Identity. | Meaning. |
 | --- | --- |
-| `DocumentID` | A resolved source-document identity, including its absolute path and filesystem identity policy. |
-| `SourceRevision` | Exact source bytes plus their content digest.  An unsaved editor buffer is a revision even if disk contents differ. |
-| `SyntaxKey` | Document identity, source digest, syntax configuration, and parser/schema version. |
-| `ModuleInstanceID` | Resolved module source plus compiler-compatible import-request identity, ordered explicitly supplied typed module arguments, and that module's effective program settings.  E2 shows that canonical filepath plus effective values alone is insufficient. |
-| `SemanticContextID` | Module instance, target/type environment, resolution configuration, evaluator policy/version, and relevant language configuration. |
-| `DeclarationID` | A declaration within its owning module instance, load occurrence where applicable, and revision mapping; not just its name, physical filepath, or syntax hash. |
-| `TypeID` | Nominal semantic identity rooted in the defining declaration, with canonical instantiation arguments where applicable. |
-| `QueryKey` | The semantic operation, subject identity, explicit arguments, context, and query implementation version. |
-| `ArtifactKey` | A validated query or syntax result together with the versioned input/dependency fingerprints needed to reuse it. |
+| `DocumentID`. | A resolved source-document identity, including its absolute path and filesystem identity policy. |
+| `SourceRevision`. | Exact source bytes plus their content digest.  An unsaved editor buffer is a revision even if disk contents differ. |
+| `SyntaxKey`. | Document identity, source digest, syntax configuration, and parser/schema version. |
+| `ModuleInstanceID`. | Resolved module source plus compiler-compatible import-request identity, ordered explicitly supplied typed module arguments, and that module's effective program settings.  E2 shows that canonical filepath plus effective values alone is insufficient. |
+| `SemanticContextID`. | Module instance, target/type environment, resolution configuration, evaluator policy/version, and relevant language configuration. |
+| `DeclarationID`. | A declaration within its owning module instance, load occurrence where applicable, and revision mapping; not just its name, physical filepath, or syntax hash. |
+| `TypeID`. | Nominal semantic identity rooted in the defining declaration, with canonical instantiation arguments where applicable. |
+| `QueryKey`. | The semantic operation, subject identity, explicit arguments, context, and query implementation version. |
+| `ArtifactKey`. | A validated query or syntax result together with the versioned input/dependency fingerprints needed to reuse it. |
 
 The names above describe responsibilities, not final Jai API declarations.
 

@@ -23,6 +23,7 @@ The index traversal follows authored syntax ownership/child edges only; it must 
 Snapshot-local node IDs identify syntax occurrences, not names; assign index-local entry IDs independently, preserving the declared enclosing-before-nested and per-binding order.
 For nested syntax within a shared compound initialiser, use the proposed shared-region representation below rather than selecting one binding as its sole enclosing declaration.
 Until that representation and the reached child mappings are reviewed and qualified, report partial coverage for that region rather than duplicate it or invent container identity.
+
 `COMPLETE_SYNTAX_TRAVERSAL` requires a reviewed child-edge/variant registry covering every reached authored node kind and every required route, origin/name, visibility, metadata and recovery-attribution observation.
 An unknown node or unmapped required field makes coverage partial with a reason; successful parsing alone is not that proof.
 
@@ -63,6 +64,7 @@ Never use condition truth, symbol lookup or file following to repair the syntax 
 
 Declaration markers remain separately observed under their qualified producer routes; scope provenance cannot fill the reserved declaration `EXPORT` marker.
 Program/linker export metadata remains separate from both.
+
 `COMPLETE_SYNTAX_TRAVERSAL` may include `UNSPECIFIED` same-list summaries where absence of a direct directive is established; it may not conceal an unavailable list/marker mapping as that absence.
 This refinement deliberately provides no effective-visibility query, inheritance algorithm, branch-join operation or extra service operation.
 
@@ -74,32 +76,52 @@ Compiler visibility/default/inheritance behaviour remains separate pending quali
 ## Program Export Metadata Versus Visibility
 
 Proposed 2026-10-21 for the declaration-index/2 draft; no producer adapter or source-observation pass is implemented by this refinement.
+
 `parse_declaration_metadata` recognises `align`, `no_reset`, `uninitialized`, `elsewhere` and `program_export`; its default branch stops without consuming an unknown directive.
+
 That path does not recognise `export`.
+
 This establishes a limit of the reviewed producer path, not that `#export` is supported elsewhere or that every remaining source token was inspected as declaration metadata.
 Keep declaration-marker `EXPORT` reserved and the earlier unknown-observation rule intact.
+
 Neither `PROGRAM_EXPORT` nor `program_export_name` supplies a declaration-marker or scope-directive value.
 
 `program_export_syntax` is `{coverage, occurrences: []ProgramExportOccurrence, producer_observation}`.
+
 Its `coverage` is `COMPLETE_METADATA_OBSERVATION. | PARTIAL_METADATA_OBSERVATION {reasons: []CoverageReason}` for this declaration's metadata, not semantic export validity or whole-index traversal.
+
 Metadata and `UNMAPPED` name reasons use the same structured record and propagate to the index's partial reasons.
+
 `ProgramExportOccurrence` is `{marker_origin:SOURCE, name_argument: Optional(ProgramExportName)}`; `ProgramExportName` is `{origin:SOURCE, value_bytes}`.
+
 The marker origin covers the authored `#` and `program_export` tokens; a name origin covers the consumed string token.
+
 Trivia between tokens remains in the protected source, not in decoded `value_bytes`.
+
 Preserve occurrences in token order, including repeats.
+
 `NONE` means no string token was consumed for that occurrence; `SOME` with empty bytes means an explicitly present empty string.
+
 Do not substitute the declaration's name when the argument is absent.
+
 `value_bytes` is the exact lexer string value under the captured `EVALUATE_STRING_ESCAPES` profile, not a host-decoded or normalised linker name; raw spelling and malformed-input observations remain protected separately.
+
 `producer_observation` is `Optional({requested:bool, stored_name_bytes})` from `PROGRAM_EXPORT` and `program_export_name`, even when source correlation is incomplete.
+
 Use `SOME` for declaration-properties records and `NONE` for index occurrences such as bare enum members that have no such producer record; do not manufacture a false flag/empty string pair.
+
 Copy/lease these bytes independently of producer allocator lifetime; they are not pointer identity or an identifier-interner key.
 
 The producer loop sets the flag on every recognised occurrence and overwrites the stored name only when the following token is a string.
 Thus, a later bare `#program_export` does not clear an earlier stored name.
+
 With complete correlation, `requested` must equal whether any occurrence was consumed and the stored name must match the last consumed name, or the producer's initial empty value if none was consumed.
+
 Do not infer occurrence count, argument presence or ordering from that final flag/string pair; it loses information, particularly for explicit empty names and repeated markers.
 An adapter must correlate exact metadata tokens with the owning declaration's parse route and recovery, not search all tokens within its full span: an initialiser, nested procedure, comment or string can contain unrelated text.
+
 A complete observation requires a qualified metadata interval and all consumed occurrences; otherwise retain verified occurrences and producer data, report partial metadata coverage and propagate a declaration-index partial reason.
+
 A zero flag alone does not prove complete absence.
 
 For a compound declaration, source metadata belongs to the shared region.
@@ -108,9 +130,13 @@ The compound with no declared bindings still retains this data in its protected 
 No helper token span may be fabricated to recover the metadata interval; compound properties require correlation through the owning compound and actual parse boundaries.
 
 The cheap discriminating source check is the assignment in `parse_declaration_metadata`: it copies `parser_eat(parser).string_value`, not a `Parser_Node` pointer, and only inside the `.STRING` branch.
+
 Existing `parser_tokens_test.jai` fixtures exercise named exports and incremental owned-byte comparisons, but they are not qualification of the new occurrence schema.
+
 Future independent acceptance vectors: absent/bare/named/explicit-empty requests; repeated named then bare and named then empty requests; evaluated versus unevaluated escapes; compound metadata; nested initialiser decoys; unknown directives and malformed/recovered string tokens; byte ownership after producer teardown.
+
 Check exact source origins, occurrence order, absent-versus-empty names, final producer observations and partial reasons.
+
 Leave declaration `#export` mapping open until supported producer evidence exists; do not invent a syntax adapter or change parser behaviour to close it on paper.
 
 ## Authored Child Edges and Shared Compound Regions
@@ -121,10 +147,15 @@ A discriminating future check is a compound initialiser containing a nested decl
 Duplicating the nested entry per binding or assigning it to the first binding falsifies this contract.
 
 `SharedRegion` is `{local_region_id, compound_node_id, parent_container, binding_entries: []local_entry_id}`.
+
 Region IDs are zero-based payload-local `u64` in a separate domain from entry IDs.
+
 `parent_container` uses the same container union as `IndexEntry`; it identifies the enclosing ownership context outside this compound, never one of this region's bindings.
+
 `binding_entries` contains exactly this compound's newly declared binding entries in authored argument order, preserving duplicate spellings as distinct entries.
+
 Assigned targets are not members.
+
 An empty list is valid for a pure assignment and does not fabricate a declaration.
 Every listed entry must reference this `compound_node_id` and have `container == parent_container`; a binding cannot belong to two regions.
 Create the region and emit all its binding entries before descending into shared properties, alignment or notes.
@@ -199,6 +230,7 @@ The registry has a source-reviewed draft boundary, not a behaviourally qualified
 
 Proposed declaration-index/2 refinement grounded in `add_missing_token`, `add_expected_expression_at`, `add_unexpected_token` and the cursor-only checkpoint/restore implementation.
 Recovery records retain diagnostic references and, for missing tokens, a synthetic-token reference; they do not identify an owning declaration node.
+
 `parser_restore` restores only the cursor, so observations from an abandoned attempt cannot automatically be attributed to the syntax later published at that position.
 The result-wide parse status and diagnostic/token spans are therefore insufficient by themselves to classify each entry's recovery.
 
@@ -279,17 +311,25 @@ This draft resolves ordering/representation rules, not a production visitor, cro
 ## Structured Coverage Reasons and Consumer Guarantees
 
 Proposed declaration-index/2 refinement; reason records describe incomplete observations, not source-language diagnostics, successful semantic facts or service failures.
+
 `CoverageReason` is `{code, subject, field_path: []PathStep, impacts: []CoverageImpact, origin: Optional(Origin), detail_utf8}`.
+
 `subject` is `DOCUMENT` or `NODE {local_node_id}` in the protected syntax snapshot of this exact envelope; it is not an entry ID, pointer or cross-result reference.
+
 `PathStep` is `FIELD {name_ascii}` or `ELEMENT {index:u64}`; field names and list steps resolve through the bound registry, with checked list indices.
+
 An empty path refers to the whole subject; `DOCUMENT` requires an empty path.
+
 For an unrecognised field/kind without a safe registered path, identify the containing safe node or document rather than manufacturing a dereferenceable path.
 Retain unsupported raw observations in the protected snapshot only where its schema safely represents them.
 An unavailable origin is `NONE`, not an invented zero-width source range; an available `Origin` must pass the common revision/span checks and indicates the known affected observation, not necessarily the full extent of missing syntax.
 
 `CoverageImpact` is `DECLARATION_SET. | CONTAINMENT. | NAMES. | SOURCE_MAPPING. | VISIBILITY. | ORDER. | METADATA. | RECOVERY`.
+
 The list is nonempty, has no duplicates and follows that registry order.
+
 State all known impacts: uncertainty about which bindings exist is not merely a display-name issue, and uncertain child ownership can affect both containment and declaration enumeration.
+
 `detail_utf8` is explanatory text, not a machine-readable classification or an authority for coverage; clients must not parse it to recover a missing code/impact.
 
 | Exact reason code. | Intended missing observation. |
@@ -307,29 +347,43 @@ State all known impacts: uncertainty about which bindings exist is not merely a 
 | `UNREGISTERED_SHARING`. | A safe repeated node lacks a qualified alias/single-owner rule; stop the unqualified descent rather than duplicate it. |
 
 Codes and impacts are closed ASCII tags; unknown tags reject this schema rather than silently becoming generic success.
+
 Numeric admission/text ceilings follow the milestone-3 `Limits` contract; concrete host values require explicit configuration/R6 approval, not defaults chosen here.
+
 Retain reasons in deterministic traversal-discovery order, with owning-node observations before descendant observations and registry/field/list order for ties.
+
 Independent occurrences are not deduplicated by equal code/message, and a copied metadata/name reason retains its original subject/path/impacts when propagated to top-level coverage.
+
 Top-level `PARTIAL_SYNTAX_TRAVERSAL` requires at least one reason.
+
 `COMPLETE_SYNTAX_TRAVERSAL` requires no unresolved required observation anywhere in the traversed captured parse; an empty reason list must not be used to hide an unsupported producer route.
+
 Local `UNMAPPED` names and partial metadata must have corresponding top-level reasons.
+
 Propagating a reason does not promote a local partial record to complete or fabricate an entry for an unclassified declaration.
 
 Safe positive records can still be returned when unrelated observations are incomplete.
 Their explicit recovered/unknown fields remain authoritative: a partial result must not silently choose one uncertain container/name/visibility value and present it as proved.
+
 This schema provides no subrange-completeness certificate.
+
 A client cannot infer complete local coverage merely because no reason's known origin overlaps its requested range; an unlocated gap or uncertain container may affect that range too.
 In particular, no matching entry in a partial index is not proof that a declaration is absent, and complete syntax traversal still proves nothing about imports, evaluated/generated membership, semantic lookup or accessibility.
 
 Malformed references, conflicting snapshot-bound evidence, invalid source spans and downward ownership cycles remain validation/conversion failures under the earlier contracts, not successful partial results with unsafe graphs.
+
 Cancellation, unsupported payload kinds and resource/internal failures retain their existing request outcomes; do not disguise them as `OPAQUE_SYNTAX` or source diagnostics.
 Conversely, ordinary fully mapped parser recovery needs no coverage reason merely because diagnostics exist.
+
 Cache/result reuse preserves the exact reasons, impacts, bindings and coverage state.
+
 A later adapter or newer parse cannot relabel a retained partial result complete without a newly validated result under the appropriate context/world.
 
 The discriminating future vector is an unclassified compound: return safely known syntax with a `UNCLASSIFIED_ROUTE` reason affecting `DECLARATION_SET`, not an empty complete binding list.
 Additional independent cases cover unmapped names, metadata propagation, opaque assembly, unlocated/overlapping gaps, safe sharing without an owner rule, invalid paths/tags, recovered-but-complete parses, empty partial-reason lists and corrupt/cancelled/unsupported outcomes.
+
 Assert exact reason records/order, impacts, coverage aggregation and forbidden negative inferences against independent expectations.
+
 This draft defines the observation contract, not an implemented coverage engine or approved numeric/API bounds.
 
 ## Name Spelling, Producer Values and Recovery
@@ -339,8 +393,11 @@ The producer's name string is an observation, not necessarily an exact contiguou
 Keep it separate from source bytes; neither equality by name nor interner-address identity establishes a declaration occurrence or nominal identity.
 
 For `SPELLED`, `origin` covers the actual name occurrence's source tokens, and `spelling_bytes` equals that exact half-open source slice without removing comments, whitespace or backticks.
+
 `producer_name_bytes` is the owned exact name value stored by the producer for this occurrence; it need not equal `spelling_bytes` and is not an editor-normalised display name.
+
 `form == IDENTIFIER` applies to ordinary/compound binding identifiers and context-qualified bare enum members; `OPERATOR` requires the qualified operator-declaration route, not punctuation anywhere in an expression.
+
 Preserve modifier/keyword source observations outside the name separately; do not include the declaration's type, initialiser or `operator` keyword in the symbol-name slice merely because they share its node interval.
 
 | Qualified occurrence. | Spelling/value distinction. |
@@ -352,22 +409,34 @@ Preserve modifier/keyword source observations outside the name separately; do no
 | Recovered operator punctuation. | `parser_expect` can record a missing `]` while the operator parser still returns `*[]`/`[]`/`[]=`.  Keep only the actual source bytes in the name slice and correlate missing punctuation separately; never insert expected bytes into `spelling_bytes`. |
 
 `recovery_origins` preserves the ordered recovery observations specifically correlated to this name parse, using the existing `INSERTED`/`UNLOCATED` origin rules.
+
 An inserted punctuation origin is not an authored name fragment or a spelling edit.
+
 An empty list is valid for a mapped unrecovered name.
+
 Do not attach unrelated declaration/initialiser diagnostics merely because they overlap the enclosing node span.
+
 A mapped recovered name remains `SPELLED` with `recovery_status == RECOVERED` on its entry; producer-name bytes may include expected punctuation absent from the source.
+
 If no trustworthy name interval or name-route/recovery correlation is available, use `UNMAPPED` with the retained producer value and a partial-index reason, not a guessed/clamped span or a false `MISSING` tag.
 
 `ANONYMOUS` denotes a qualified grammar slot with intentionally no name, such as a supported unnamed parameter/return slot.
+
 `MISSING` requires evidence that this grammar expected a name, but recovery did not produce one, with its insertion/unlocated origin.
+
 A zero-length producer string alone proves neither state.
+
 Do not fabricate an index entry for an unattached declaration parse that returned null; retained source/diagnostics still describe that failure.
+
 Repeated names and equal interpreted operator strings retain distinct entry/node IDs and source occurrences.
+
 No Unicode/case normalisation, concatenation of arbitrary tokens or scope lookup is permitted to manufacture the producer value.
+
 Keep source slices under the source/result lease and copy/lease interpreted name bytes independently of parser/interner teardown; malformed non-UTF-8 source/name bytes remain exact byte observations, not lossy UTF-8 presentation text.
 
 The discriminating future vectors are `[ ] =` versus `[]=` source spellings with the same operator value, and a backticked identifier whose spelling differs from its producer name.
 Additional independent cases cover all operator-name routes, missing closing punctuation, prefixed declaration names, duplicate bindings/operators, unnamed versus missing slots, absent correlation, unrelated diagnostics and owned bytes after producer teardown.
+
 Assert exact byte slices, producer values, name form/recovery origins, entry recovery status, local IDs and partial reasons against independent expectations.
 This is a draft schema correction, not implemented name correlation, compiler-validity checking or qualification of the `name_origins` capability.
 
@@ -379,10 +448,15 @@ Changing a route classifier, child/alias registry, name/origin mapping or suppor
 A complete index from an older binding cannot be relabelled under the new one, even when exact source and parser build are unchanged.
 
 The proposed capability schema is `jai-cache-syntax-adapter/1`, encoded as `K("syntax-adapter", [schema_id, registry_binding, feature_records...])`.
+
 `registry_binding` names the exact registered authored-edge, origin/name and payload mappings used by this adapter.
+
 Feature records appear in the following table order and use `K(feature_name, [method_tag, observation_schema])`.
+
 `method_tag` is exactly `UNAVAILABLE`, `CAPTURED` or `RECONSTRUCTED`; `observation_schema` is empty bytes only for `UNAVAILABLE`, otherwise the exact registered producer-observation or correlation schema identifier.
+
 Reject unknown/missing/reordered/duplicate features and unsupported schemas; these are not free-form claims or a generic extension map.
+
 The adapter build identity is a separate service-verified value in the `producer` context field, not inferred from this descriptor's text or a host-selected label.
 
 | Feature name. | Required evidence and current review status. |
@@ -395,17 +469,24 @@ The adapter build identity is a separate service-verified value in the `producer
 | `declaration_markers`. | Authored declaration-marker observations distinct from scope and program exports.  The reviewed parser paths have not established declaration `#export` support; this gap must stay explicit rather than be declared captured. |
 
 `CAPTURED` proposes retaining evidence at the owning parse/construction point; `RECONSTRUCTED` proposes a separately registered, producer-version-bound correlation.
+
 Neither tag is qualification by itself: the service must bind the actual supported implementation/schema and its review evidence, not trust an arbitrary descriptor supplied by a caller or manifest.
 An unavailable feature does not make exact source/tokens or independently supported diagnostics unavailable.
 It prevents complete declaration-index coverage wherever the missing feature is required; preserve safe supported records and report the affected region/reason, not an empty complete result.
 Likewise, a globally available feature does not prove that a recovered/unknown source region was mapped: coverage is computed from the observations actually obtained for that result.
+
 If a requested query kind/schema is not implemented at all, use the existing unsupported outcome; partial index coverage is for an implemented mapping with explicit local gaps, not a substitute for an absent payload implementation.
+
 Invalid cross-snapshot evidence, conflicting route records or unsafe references remain conversion/validation failures, not ordinary partial results containing untrusted references.
 
 Expose the registered capability binding through the existing session description/capability reporting and retain its exact context binding on each world/result; this requires no additional service operation.
+
 Do not upgrade an already captured world's capabilities in place when an adapter is installed or revised.
+
 New analysis under a new context can publish a successor result; independently retained old results keep their old binding, coverage and ownership.
+
 Do not silently replace an admitted profile's advertised guarantees with weaker ones.
+
 Unsupported profile/schema admission must be explicit, while supported partial coverage and its reasons remain truthful under that profile.
 
 The discriminating future check keeps source/parser identity fixed and changes only adapter build, registry binding or one observation feature: the context must change and derived index reuse must miss.
@@ -416,8 +497,11 @@ This matrix records the integration choices still requiring review; it does not 
 ## Compound Route Evidence and Binding Classification
 
 Proposed producer-adapter refinement; neither parser instrumentation nor a reconstruction adapter is implemented here.
+
 `parse_statement` can construct expression-led multi-target assignments for any operator reported at assignment precedence by `binary_operator_info`; it consumes that operator without storing it in the resulting compound's `operator_type`.
+
 The declaration route instead records shared `=` reassignment, or takes the declaration-properties branch after expecting `:`.
+
 Default `operator_type` and default target modifiers therefore cannot distinguish all produced compounds.
 
 The proposed logical observation is `CompoundRoute`:
@@ -668,20 +752,26 @@ The two token fields exist only under `ENABLE_TRIVIA`; the full-featured cache p
 Their presence does not authorise reading nonexistent fields from a non-trivia producer, silently synthesising offsets from coordinates or treating an interval as a child edge.
 Source-origin/range validation and qualified recovery/normalisation rules remain unchanged.
 The nested location row enumerates all five fields of the installed compiler's `Code_Node.Location` declaration.
+
 Its `#as using location` embedding and inherited coordinate aliases refer to the same observations, not another node, location occurrence or independently owned source range.
+
 `finish_node` copies the four endpoint values from the first and last consumed tokens; retain those raw values under the existing source-origin/range rules rather than silently converting columns to characters or treating coordinates alone as exact byte offsets.
+
 Empty/recovered/normalised builder functions still require their own qualified interval observations.
 Do not copy the whole location record into owned syntax: that would retain compiler provenance alongside scalar coordinates.
 Never dereference or serialise `enclosing_load`, and do not call compiler filename/location helpers to recover a filename during conversion; the protected source revision and captured syntax context supply qualified document/path identity.
+
 A null load pointer is not proof of missing source, and a nonnull pointer is not proof of a captured dependency or retained compiler workspace.
 Do not serialise opaque common storage, padding or overlay bytes.
 Exact flag masks, location schemas and lifetime qualification remain open.
 The reviewed base-only route retains an ordinary snapshot node ID at first downward encounter, even without a generated layout.
+
 `#this` does not itself add a declaration-index entry or trigger receiver/context resolution.
 Unknown base-only kinds require the established mapping outcome, not a guessed derived layout; this one reviewed builder function is not proof of a closed base-kind universe.
 The focused static check compares all five inventoried compiler-base fields and all three declared parser-base fields, including the conditional token fields, and checks the direct `#this` construction shape.
 This base-field check validates transcription only; the milestone-2 closure separately binds the base-kind and nested-helper inventory.
 Executable visitor qualification remains open.
+
 The location-specific static check separately compares all five nested declared fields and the four `finish_node` endpoint assignments.
 It does not qualify other builder functions, reuse rebasing, coordinate-to-byte conversion, filename resolution or producer-teardown behaviour.
 
@@ -1233,9 +1323,12 @@ Do not reorder children by these backreferences or create index container entrie
 Branch-local declaration/visibility state remains branch-local, including enum-member grammar inherited from the enum routes; no merged visibility, selected-case membership or branch activation is inferred.
 
 For dynamic for-flags, `parse_for_statement` can parse and diagnose duplicate flag expressions without publishing those discarded expressions in `want_*` fields.
+
 Retain published nodes plus exact source/diagnostics; do not scan allocator storage or reconstruct an attached child for each flag token.
 The traversal must not claim it inspected unpublished duplicate-expression subtrees.
+
 `want_replacement_for_expansion` is an authored source expression and must be visited even though executing the requested expansion is unsupported.
+
 Compiler `macro_expansion_procedure_call`, `ident_decl` and `index_decl` remain excluded generated data.
 Explicit `ident_it`/`ident_it_index` are visited source identifiers, not those generated declaration fields.
 The current three-kind declaration index does not add loop-binding entries or implicit `it`/index bindings; exposing a separate loop-binding kind requires its own schema review rather than mislabelling these identifiers `DECLARATION`.
@@ -1353,6 +1446,7 @@ The header builder function's parameter/return wrapper allocation does not estab
 `parse_procedure_flags` assigns `foreign_function_name` and `deprecation_string` from a string token's value.
 Preserve their owned bytes separately from raw spelling; final empty values alone do not distinguish omitted versus explicitly empty strings or retain repeated suffix occurrences.
 Its `library_identifier` is an actual `Parser_Ident` child.
+
 Resolving that identifier or importing a library is outside syntax traversal.
 The reviewed routes do not attach `Procedure_Header.notes`; declaration notes are attached by `parse_declaration_notes` to the enclosing declaration/compound instead.
 A populated header-notes list needs a reviewed producer route, not silent omission or assumed duplicate ownership.
@@ -1496,7 +1590,9 @@ Traverse each qualified wrapper's active children in the table order; for fixed 
 Do not resolve postfix calls/member expressions, evaluate dimensions/constraints, instantiate types or follow compiler `result` while traversing these fields.
 
 The discriminating future vectors are `..T` versus `[]T`, fixed arrays with a recovered missing dimension, and `$T` versus a consumed but missing `/` constraint.
+
 Additional independent cases cover nested pointer/array combinations; both `#type` modifiers and malformed modifiers; procedure-type parameters/returns; postfix member/call wrappers; contextual aggregate-type wrappers; inactive populated fields; conflicting flags; and equal-span wrapper/child IDs.
+
 Existing nested-type reuse/fallback fixtures in `parser_tokens_test.jai` contain relevant forms, including cases deliberately excluded from reuse; non-reusability does not exclude them from complete fresh-syntax traversal.
 Future qualification must assert exact paths/order, retained flags, recovery holes and partial reasons against independently authored expectations.
 This draft neither implements form correlation nor certifies the remaining procedure/literal child registries.
@@ -1665,24 +1761,39 @@ Performance comparisons for this profile must use an equivalent trivia-enabled f
 | AST-only operators. | `OPERATOR_ARRAY_SUBSCRIPT`, `OPERATOR_ASSIGNMENT_TO_ARRAY_SUBSCRIPT`. |
 
 `BYTE_CHAR` represents an unsigned byte value from `0` through `255`; representability does not claim that every byte is a valid source token.
+
 Preserve inactive/default diagnostic token observations without fabricating source spelling.
+
 Producer aliases `BITWISE_XOR`, `BITWISE_NOT`, `BITWISE_AND`, `BITWISE_OR` encode as `BYTE_CHAR` values `94`, `126`, `38`, `124` respectively.
+
 `__FIRST_KEYWORD` normalises to `NAMED {KEYWORD_FOR}` and `__LAST_KEYWORD` to `NAMED {KEYWORD_INTERFACE}`.
+
 Those six alias spellings are not accepted as canonical `NAMED` payloads; payload decoding accepts only the table's exact names or a valid byte-character value.
+
 The two AST-only operator names may appear in registered operator fields, not as claimed lexer-emitted source tokens.
+
 Other token-role constraints must likewise agree with the actual producer; registration alone does not prove a value can occur in every field.
+
 Duplicate canonical names, unregistered producer values and malformed tags fail conversion.
+
 Adding/renaming/remapping a token or alias requires an explicit registry/schema compatibility change, not reliance on a changed native enum number.
+
 This closes the current tag-name/alias inventory; the token-value/trivia draft below and complete node/child variants still need payload-schema review and executable producer round-trip checks.
 
 ## Token Values, Flags and Trivia Ownership
 
 Proposed 2026-10-21 under `jai-cache-source-tokens/1`, for materialised source tokens in the required trivia-enabled profile; synthetic tokens remain separate recovery records, not fabricated source tokens.
+
 `TokenRecord` is `{tag, origin:SOURCE, coordinates, value_flags:u32, ident_is_backticked:bool, original, preceding, value}`.
+
 `coordinates` preserves `{l0:s32, c0:s32, l1:s32, c1:s32}` verbatim as producer observations, independently of validated byte origins; unset/error coordinates are not clamped into valid editor positions.
+
 `original` and `preceding` are checked half-open byte slices of the envelope's exact source, not producer pointers or independently mutable strings.
+
 Preserve empty slices and validate their offsets before exposing views.
+
 The token origin agrees with its materialised `byte_start`/`byte_end`; `original` preserves the producer's `original_text` slice.
+
 If a producer route makes these differ, retain both observations and qualify that mapping explicitly rather than silently rewriting either.
 
 | Active `value` tag. | Producer discriminator and exact payload. |

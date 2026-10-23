@@ -8,6 +8,7 @@ Status conventions, the decision record, the milestone index and the label gloss
 Each experiment uses small isolated fixtures/prototypes, not a parallel implementation of the new parser, and records its hypothesis, exact compiler/build configuration, commands, observed output, limitations, and resulting decision.
 Language probes use the official compiler as the oracle, including separate expected-failure cases; prototype cache tests compare against fresh computation.
 All probes ran manually on authored trusted fixtures, not by automatic evaluation of arbitrary workspace code.
+
 E1-E13 are complete within their stated bounds.
 Complete semantic editor-workflow measurements remain open, and E13 is not a production evaluator or general compilation-context extractor.
 
