@@ -857,7 +857,7 @@ The specification is ready for migration planning when:
 Only then write the migration plan, mapping current code, tests, and public operations to the approved contracts.
 That plan must identify replacement/reuse/removal boundaries, dependency-ordered buildable steps, temporary adapters or deliberate API breaks, test/oracle preservation, persistence rollout/version rejection, cutover criteria, and cleanup.
 Audit the current implementation again at that point: the present inventory is a starting point, not a promise that every migration task is already known.
-Implementation authorisation, migration sequencing and the AST-copier keep/drop decision remain separate; the copier decision is an independent measured decision, not a consequence of the new model.
+Implementation authorisation, migration sequencing and the AST-copier keep/drop decision remain separate; the copier decision is an independent, measured decision, not a consequence of the new model.
 
 ## 15. High-Level TODO
 

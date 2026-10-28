@@ -201,24 +201,135 @@ SHA-256 checks confirmed all four module copies were byte-identical in every cas
 Seven rejections report `Non-matching Windows file case`; one reports an unable-to-open-file error for the missing relative neighbour.
 No native process failure, timeout, or unrelated error was accepted as a semantic outcome; no executable/object outputs were found.
 
-| Probe family. | Observed result. |
-| --- | --- |
-| `#filepath` and `#location(anchor)` | The former returns the containing directory, including its trailing separator; the latter reports a full filename plus line/column. Module anchor locations were line 6, column 11; entrypoint anchors were line 4, column 11. |
-| Dot and parent aliases in loads/file imports/directory imports. | Accepted; the observed source-visible filename/directory retains `./` or `Branch/../`. Paired imports produce distinct nominal types and two executions. |
-| Relative versus absolute file import. | The tested pair shares one nominal instance and one execution, with identical reported paths. Different textual requests are not universally distinct. |
-| Repeated exact file/directory imports. | One nominal instance and one execution. |
-| Backslash load path. | Accepted; reported paths use forward slashes in this load case. |
-| Backslash versus forward-slash file imports. | Distinct nominal instances and two executions; the backslash spelling remains in that import's reported filename/directory. Do not infer one universal separator-normalisation stage. |
-| Wrong filename case in a load/file import; wrong final directory case in a directory import. | Rejected with the Windows file-case portability diagnostic even though the filesystem can reach the existing source. |
-| Lowercase containing directory in a load/file import, with exact filename case. | Accepted; reports retain `original/`. Paired file imports using `Original/` and `original/` have distinct nominal types and two executions. The observed validation is not uniform full-path case enforcement. |
-| Byte-identical modules relocated beside different neighbours. | Distinct nominal types and values 11 versus 22 for both the relative load and the relative file import. Content equality does not establish dependency or result equality. |
-| Byte-identical files with different filenames in the same directory. | Same `#filepath`, different filenames in `#location`, distinct nominal types, and two executions. Directory context alone is insufficient. |
-| Compile `../probe.jai` with the child process working in `Branch` | Entrypoint reports its normalised source path and still finds the source-relative `Original` module, not an unrelated directory under the process working directory. |
-| Missing source-relative neighbour. | Explicit missing-file error naming `Isolated/neighbor.jai`; the root decoy is not substituted. |
-| Directory junction or native directory symlink, through load/file import. | Accepted; reports retain `Alias/`. Paired file imports through original and alias paths have distinct nominal types and two executions, while both relative lookups yield 11. |
-| Directory import through junction/symlink named `Alias` targeting `Original` | Rejected with the same file-case diagnostic, naming `Original` as the almost-matching basename. This is an observed alias validation result, not proof that all directory links are unsupported. |
-| Junction named `Branch/Original` targeting `Original` | Directory import succeeds; paired with the original it has a distinct nominal type and two executions. This control discriminates the basename-dependent rejection above. |
-| Native file symlink named `module_alias.jai` targeting `Original/module.jai` | Both load and file import reject it with the file-case diagnostic, naming `module.jai`. Its relative-lookup semantics therefore remain unobserved. |
+#### Reading the Results: Fixture and Observations
+
+Each named case has its own directory, abbreviated below as `R/`; this stands for that case's absolute directory, not a literal compiler output or one shared compilation.
+The following sketch combines the common files and optional links to explain the cases; the links are prepared only for the cases that need them.
+
+```text
+R/
++-- probe.jai                     entrypoint for this case
++-- neighbor.jai                  neighbor_value = 99 (decoy)
++-- sibling.jai                   value = 99 (decoy)
++-- Original/
+|   +-- module.jai                common module bytes
+|   +-- copy.jai                  identical module bytes, different filename
+|   +-- neighbor.jai              neighbor_value = 11
+|   `-- sibling.jai               value = 11
++-- Copy/
+|   +-- module.jai                identical module bytes, different directory
+|   +-- neighbor.jai              neighbor_value = 22
+|   `-- sibling.jai               value = 22
++-- Isolated/
+|   `-- module.jai                identical module bytes, no neighbours
++-- Branch/
+|   `-- Original/ -> R/Original/  junction in the same-basename control only
++-- Alias/ -> R/Original/         junction OR directory symlink, depending on case
+`-- module_alias.jai
+	-> R/Original/module.jai      file symlink in the file-link cases only
+```
+
+The common module declares an empty `Nominal` struct and records `source_directory :: #filepath` and `source_location :: #location(anchor)`.
+It also executes `#load "neighbor.jai"`, imports `Sibling :: #import,file "sibling.jai"`, and prints `E4_UNIT` from a `#run` directive.
+Its source bytes are identical in all four copies; the values 11, 22 and 99 come from the separate neighbouring files, not different module contents.
+
+The tables distinguish four observations:
+
+- **Reported path:** `#filepath` gives the containing directory, including its trailing separator; `#location(anchor)` gives the filename and anchor position.
+These are source-visible strings, not proof of a canonical physical path.
+- **Same type:** paired cases compare `Left.Nominal == Right.Nominal`.
+`true` means those imports share this nominal type; `false` means they do not, despite identical struct declarations.
+- **Executions:** the number of `E4_UNIT` markers in a successful compilation, not a runtime invocation count.
+Two means the common module's `#run` executed twice.
+- **Neighbour values:** the value from the module's relative `#load` and the value from its relative file import.
+Each accepted module observes the same value through both routes; the tables show that value once per side.
+
+For example, `dot_file_pair` compiles these two imports together:
+
+```jai
+Left :: #import,file "Original/module.jai";
+Right :: #import,file "./Original/module.jai";
+```
+
+Both reach the same existing file and both obtain 11 from its neighbours, but the reported filenames are `R/Original/module.jai` and `R/./Original/module.jai`, the type comparison is `false`, and there are two executions.
+By contrast, replacing the right request with the absolute `R/Original/module.jai` in `absolute_file_pair` produces identical reported paths, a `true` comparison and one execution.
+Thus, neither "same physical file always shares an instance" nor "different request text always creates another instance" describes all the observations.
+
+#### Successful Single-Source Cases
+
+Requests below appear in `R/probe.jai`, except where the working-directory change is explicit.
+In module rows, the reported location is the listed filename at line 6, column 11; entrypoint rows use line 4, column 11.
+The directory reported by `#filepath` is the listed filename with its basename removed, retaining the trailing separator.
+These are individual loads/imports, not paired type-comparison tests.
+
+| Case in the runner. | Request or invocation. | Reported filename from `#location(anchor)`. | Neighbour value; executions. |
+| --- | --- | --- | --- |
+| `entry_location` | Inspect `#filepath` and `#location(anchor)` in the entrypoint. | `R/probe.jai` | No module queried; 0. |
+| `loaded_location` | `#load "Original/module.jai";` | `R/Original/module.jai` | 11; 1. |
+| `module_location` | `Unit :: #import,dir "Original";` | `R/Original/module.jai` | 11; 1. |
+| `relocated_location` | `Unit :: #import,dir "Copy";` | `R/Copy/module.jai` | 22; 1. |
+| `dot_load` | `#load "./Original/module.jai";` | `R/./Original/module.jai` | 11; 1. |
+| `parent_load` | `#load "Branch/../Original/module.jai";` | `R/Branch/../Original/module.jai` | 11; 1. |
+| `directory_case_load` | `#load "original/module.jai";` | `R/original/module.jai` | 11; 1. |
+| `separator_load` | `#load "Original\\module.jai";` | `R/Original/module.jai`, with forward slashes. | 11; 1. |
+| `absolute_load` | `#load "R/Original/module.jai";`, substituting the actual absolute path for `R/`. | `R/Original/module.jai` | 11; 1. |
+| `entry_from_branch` | Compile `../probe.jai` with the process working directory set to `R/Branch/`; the entrypoint imports directory `Original`. | `R/probe.jai`, not `R/Branch/../probe.jai`. | 11, not the root decoy's 99; 1. |
+| `junction_load` | `#load "Alias/module.jai";`, with a directory junction. | `R/Alias/module.jai`, not the target spelling. | 11; 1. |
+| `symlink_load` | Same load, with a native directory symlink. | `R/Alias/module.jai`, not the target spelling. | 11; 1. |
+
+In `entry_from_branch`, the entrypoint's relative import still selects `R/Original`, not a lookup rooted in the process working directory.
+In `separator_load`, the doubled backslash is Jai string escaping for one requested backslash; the compiler reports forward slashes in this load case.
+
+#### Successful Paired-Import Cases
+
+Every row is a separate compilation with two named imports, `Left` and `Right`, as in the example above.
+For file rows, both use `#import,file`; for directory rows, both use `#import,dir`.
+The left request is always `Original/module.jai` for file rows or `Original` for directory rows, and its reported filename is always `R/Original/module.jai`.
+Directory imports select the directory's `module.jai`; the request is a directory name, not a filename.
+Both reported locations use line 6, column 11.
+
+| Case in the runner. | Import form; right request. | Right reported filename. | Same type? | Executions. | Neighbour values, left/right. |
+| --- | --- | --- | --- | --- | --- |
+| `exact_file_pair` | File; `Original/module.jai` | `R/Original/module.jai` | `true` | 1 | 11/11. |
+| `dot_file_pair` | File; `./Original/module.jai` | `R/./Original/module.jai` | `false` | 2 | 11/11. |
+| `parent_file_pair` | File; `Branch/../Original/module.jai` | `R/Branch/../Original/module.jai` | `false` | 2 | 11/11. |
+| `separator_file_pair` | File; `Original\module.jai`, one actual backslash. | `R/Original\module.jai` | `false` | 2 | 11/11. |
+| `copy_file_pair` | File; `Copy/module.jai` | `R/Copy/module.jai` | `false` | 2 | 11/22. |
+| `same_directory_copy_pair` | File; `Original/copy.jai` | `R/Original/copy.jai` | `false` | 2 | 11/11. |
+| `exact_dir_pair` | Directory; `Original` | `R/Original/module.jai` | `true` | 1 | 11/11. |
+| `dot_dir_pair` | Directory; `./Original` | `R/./Original/module.jai` | `false` | 2 | 11/11. |
+| `parent_dir_pair` | Directory; `Branch/../Original` | `R/Branch/../Original/module.jai` | `false` | 2 | 11/11. |
+| `copy_dir_pair` | Directory; `Copy` | `R/Copy/module.jai` | `false` | 2 | 11/22. |
+| `absolute_file_pair` | File; absolute `R/Original/module.jai` | `R/Original/module.jai` | `true` | 1 | 11/11. |
+| `junction_file_pair` | File; `Alias/module.jai`, through a directory junction. | `R/Alias/module.jai` | `false` | 2 | 11/11. |
+| `symlink_file_pair` | File; `Alias/module.jai`, through a native directory symlink. | `R/Alias/module.jai` | `false` | 2 | 11/11. |
+| `directory_case_file_pair` | File; `original/module.jai` | `R/original/module.jai` | `false` | 2 | 11/11. |
+| `junction_same_leaf_dir_pair` | Directory; `Branch/Original`, a junction to `R/Original`. | `R/Branch/Original/module.jai` | `false` | 2 | 11/11. |
+
+The backslash file import retains a backslash in both the filename and the trailing directory separator reported by `#filepath`, unlike the backslash load above.
+The same-directory copy pair reports the same `#filepath` on both sides but different filenames in `#location(anchor)`; the relocated copy pairs instead change both the directory and the neighbours.
+These distinguish filename-sensitive context from directory-relative dependency context.
+
+#### Rejected Cases
+
+Paired rows have the same valid left import as above; the table identifies the rejected right request.
+No stable type comparison, execution count or relative-lookup result is inferred from a failed compilation.
+
+| Case in the runner. | Rejected request. | Observed diagnostic and what it distinguishes. |
+| --- | --- | --- |
+| `case_load` | `#load "original/MODULE.JAI";` | `Non-matching Windows file case`.  This changes both directory and filename case; the accepted `directory_case_load` isolates a directory-only case change. |
+| `case_file_pair` | File import `original/MODULE.JAI`. | Same case diagnostic; compare with accepted `directory_case_file_pair`, which keeps the filename case exact. |
+| `case_dir_pair` | Directory import `original`. | Same case diagnostic, despite directory-only lowercase being accepted in the file-import case.  Do not generalise one full-path case rule across import forms. |
+| `missing_relative_neighbor` | Directory import `Isolated`, whose module loads `neighbor.jai`. | Unable to open `Isolated/neighbor.jai`; the existing `R/neighbor.jai` with value 99 is not substituted. |
+| `junction_dir_pair` | Directory import `Alias`, a junction to `Original`. | Case diagnostic naming `Original` as the almost-matching basename.  File import through this junction succeeds in `junction_file_pair`. |
+| `symlink_dir_pair` | Directory import `Alias`, a native directory symlink to `Original`. | Same basename diagnostic; file import through this link succeeds in `symlink_file_pair`. |
+| `file_symlink_load` | `#load "module_alias.jai";`, a file symlink to `Original/module.jai`. | Case diagnostic naming `module.jai`; no conclusion about where its relative dependencies would resolve. |
+| `file_symlink_pair` | File import `module_alias.jai`, the same kind of file symlink. | Same filename diagnostic; relative-lookup semantics remain unobserved. |
+
+The accepted `junction_same_leaf_dir_pair` is the control for the rejected directory import through `Alias`: its link is still an alias, but the requested final directory name is `Original`, matching the target's basename.
+That comparison supports the reported basename-dependent distinction; it does not prove a universal rule for all links.
+Together, the cases show three separate concerns: which source is reached, which source-visible path/context it has, and whether the compiler shares its nominal module instance.
+Equal bytes settle none of the latter two on their own, and an alias accepted by one request form need not be accepted by another.
 
 Native directory/file symlink creation initially failed with `Administrator privilege required for this operation`; those cases were recorded as setup skips, not compiler rejections.
 The user ran a narrowly scoped self-elevating PowerShell setup script, with transcript and JSON results written to the fixture directory, and all five native symlink cases then ran unelevated.

@@ -2007,7 +2007,7 @@ A field named `observation` never transfers a result/world lease.
 | `QueryTerminal`. | `AVAILABLE {result_identity:ResultID}` or `UNAVAILABLE {reason:UnavailableReason}` or `UNSUPPORTED {reason:UnsupportedReason}` or `CANCELLED {reason:CancellationReason}` or `FAILED {failure:Failure}`. |
 | `ShutdownTerminal`. | `STOPPED {persistence_status:StoreStatus, cleanup_diagnostics:[]ServiceDiagnostic}`. |
 | `TicketObservation`. | `TERMINAL {observation:UpdateObservation}` or `PENDING {waiter:Handle(WAITER)}`.  Only the pending arm allocates a notification registration. |
-| `UpdateObservation`. | `{operation_identity:OperationID, provider_frontier:ProviderFrontier, documents:[]DocumentID, outcome:TicketTerminal}`; documents are the exact requested milestone set in canonical membership order. |
+| `UpdateObservation`. | `{operation_identity:OperationID, provider_frontier:ProviderFrontier, documents:[]DocumentID, outcome:TicketTerminal}`; documents are the exact, requested milestone set in canonical membership order. |
 | `QueryObservation`. | `{operation_identity:OperationID, world_identity:WorldID, document:DocumentID, context:ContextID, kind:QueryKind, outcome:QueryTerminal}`. |
 | `Observation`. | `UPDATE {value:UpdateObservation}` or `QUERY {value:QueryObservation}` or `SHUTDOWN {value:ShutdownTerminal}` or `PENDING {operation_identity:OperationID, phase:QUEUED|RUNNING|QUIESCING|DRAINING}`.  Update/query handles admit only `QUEUED`/`RUNNING`; shutdown admits only `QUIESCING`/`DRAINING`. |
 | `WaitObservation`. | `OBSERVED {value:Observation}` or `TIMED_OUT_PENDING {operation_identity:OperationID}`.  Timeout is not a terminal state. |
