@@ -11,8 +11,8 @@ The AST-copier keep/drop decision remains separate and unresolved.
 | Document. | Contents. |
 | --- | --- |
 | This document. | Architecture (sections 1-13), the decision record, initial scope, correctness gates, performance comparisons, open decisions, experiment summary and TODO (sections 14-15). |
-| [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md) | Detailed contract drafts: core source/world contracts, persistence, semantic identity, execution, source capture, interface schema, and acceptance (milestones 3-8). |
-| [CACHE_SYNTAX_REGISTRY.md](CACHE_SYNTAX_REGISTRY.md) | Projection of the current parser's nodes, helpers and tokens onto the syntax payloads (milestone 2). |
+| [CACHE_SYNTAX_REGISTRY.md](CACHE_SYNTAX_REGISTRY.md) | Projection of the current parser's nodes, helpers and tokens onto the syntax payloads (milestone 1). |
+| [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md) | Detailed contract drafts: core source/world contracts, persistence, semantic identity, execution, source capture, interface schema, and acceptance (milestones 2-7). |
 | [CACHE_EXPERIMENTS.md](CACHE_EXPERIMENTS.md) | Procedures, measurements and limits of experiments E1-E13. |
 
 Status conventions apply to all four documents:
@@ -25,15 +25,15 @@ Status conventions apply to all four documents:
 
 | Milestone. | Scope. | Status. |
 | --- | --- | --- |
-| 2. | [Current-producer syntax registry closure](CACHE_SYNTAX_REGISTRY.md#milestone-2-syntax-registry-closure). | Drafted; qualification open. |
-| 3. | [Exact logical interface](CACHE_CONTRACTS.md#milestone-3-exact-logical-call-signatures): signatures, responses, provider admission, bounds and canonical values. | Drafted; API review open. |
-| 4. | [Identity allocation, matching and semantic keys](CACHE_CONTRACTS.md#milestone-4-allocation-and-restart-continuity), with deferred semantic records. | Drafted; review open. |
-| 5. | [Execution coordination, delivery, cancellation and shutdown](CACHE_CONTRACTS.md#milestone-5-coordination-ordering-and-reservations). | Drafted; review open. |
-| 6. | [Persistent store](CACHE_CONTRACTS.md#milestone-6-store-profile-bounds-and-text-grammar): grammar, records, commit, recovery and administration. | Drafted; review open. |
-| 7. | [Whole-system acceptance map](CACHE_CONTRACTS.md#milestone-7-acceptance-scope-and-requirement-map). | Drafted; workload approval open. |
-| 8. | [Cross-contract review and sign-off](CACHE_CONTRACTS.md#milestone-8-cross-contract-review). | Pending sign-off. |
+| 1. | [Current-producer syntax registry closure](CACHE_SYNTAX_REGISTRY.md#milestone-1-syntax-registry-closure). | Drafted; qualification open. |
+| 2. | [Exact logical interface](CACHE_CONTRACTS.md#milestone-2-exact-logical-call-signatures): signatures, responses, provider admission, bounds and canonical values. | Drafted; API review open. |
+| 3. | [Identity allocation, matching and semantic keys](CACHE_CONTRACTS.md#milestone-3-allocation-and-restart-continuity), with deferred semantic records. | Drafted; review open. |
+| 4. | [Execution coordination, delivery, cancellation and shutdown](CACHE_CONTRACTS.md#milestone-4-coordination-ordering-and-reservations). | Drafted; review open. |
+| 5. | [Persistent store](CACHE_CONTRACTS.md#milestone-5-store-profile-bounds-and-text-grammar): grammar, records, commit, recovery and administration. | Drafted; review open. |
+| 6. | [Whole-system acceptance map](CACHE_CONTRACTS.md#milestone-6-acceptance-scope-and-requirement-map). | Drafted; workload approval open. |
+| 7. | [Cross-contract review and sign-off](CACHE_CONTRACTS.md#milestone-7-cross-contract-review). | Pending sign-off. |
 
-No milestone 1 was designated; the unnumbered initial-scope and core-contract drafts of 2026-10-20 preceded milestone 2.
+The unnumbered initial-scope and core-contract drafts of 2026-10-20 preceded milestone 1.
 
 | Labels. | Meaning. | Defined in. |
 | --- | --- | --- |
@@ -46,8 +46,8 @@ No milestone 1 was designated; the unnumbered initial-scope and core-contract dr
 | D1-D8. | Semantic identity traces (deferred). | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#semantic-acceptance-trace-drafts). |
 | X1-X8. | Execution traces. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#execution-acceptance-trace-drafts). |
 | V1-V8. | Source-capture traces. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#source-capture-acceptance-trace-drafts). |
-| A1-A15. | Milestone-7 requirements. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#milestone-7-acceptance-scope-and-requirement-map). |
-| W1-W6. | Milestone-7 workloads. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#milestone-7-workloads-and-measurement-boundaries). |
+| A1-A15. | Milestone-6 requirements. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#milestone-6-acceptance-scope-and-requirement-map). |
+| W1-W6. | Milestone-6 workloads. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#milestone-6-workloads-and-measurement-boundaries). |
 
 ## 1. Purpose and Confirmed Direction
 
@@ -79,6 +79,24 @@ Expose unavailable operations honestly until they block a required feature.
 **Recommendation:** reuse whole immutable file snapshots first, represent semantic work as dependency-tracked queries, and persist explicit pointer-free artifacts.
 Reparse changed files by default.
 Add syntax chunks or finer semantic caches where they produce measured editor benefits, not merely higher reuse counts.
+
+### Intended End State
+
+This summarises where the design is heading; the linked sections and drafts remain authoritative.
+
+1. **Edit:** reparse the whole changed file ([E12](CACHE_EXPERIMENTS.md#e12-results-real-source-baseline-and-source-reload-control)).
+Match its declarations against the previous revision; unmatched, ambiguous, renamed or moved declarations receive fresh identities ([milestone 3](CACHE_CONTRACTS.md#milestone-3-allocation-and-restart-continuity)).
+2. **Reuse:** keep a declaration's semantic results only when its own syntax is unchanged (fingerprint confirmed by exact comparison) and every recorded dependency still validates, including missing-name lookups, overload candidate sets, constants, conditions, imports and module parameters ([section 7](#7-dependency-tracking-and-invalidation), [E7](CACHE_EXPERIMENTS.md#e7-results-dependency-and-revision-validation)).
+3. **Facets:** cache signature, body, layout and similar facets separately, so body-only edits do not invalidate callers ([section 6.4](#64-procedures-separate-signature-body-and-instantiation)).
+4. **Cutoff:** when a recomputed result equals the previous one, its dependents keep their results.
+5. **Restart:** read and hash every source file, reparse, then rehydrate persisted semantic results only after all of their recorded inputs validate: exact source digests, producer/schema versions, module parameters, resolver paths and configuration.
+Persisted data never overrides current source; failures recompute ([section 9](#9-persistence-and-editor-operation)).
+The saving comes from skipped semantic and evaluator work, not from avoiding parsing.
+6. **Evaluation:** compiler-evaluated results (`#run`, `#insert`, `using,map`) are persistable only when their dependencies are completely tracked ([section 10](#10-compile-time-execution-and-the-official-compiler)).
+7. **Format:** persisted artifacts must be compact, bounded and validated; the measured text formats decode slower than fresh parsing ([E10](CACHE_EXPERIMENTS.md#e10-results-bounded-text-artifact-round-trip), [E12](CACHE_EXPERIMENTS.md#e12-results-real-source-baseline-and-source-reload-control)).
+
+Only the syntax and source parts are in the [initial capability boundary](#initial-capability-boundary): resident whole-file snapshots, changed-file reparsing, and persistence of source and unsaved-revision recovery.
+Semantic queries, per-declaration reuse, semantic persistence and compiler evaluation are deferred; conservative whole-module invalidation is the acceptable first semantic baseline.
 
 ## 2. What Exists Today
 
@@ -526,7 +544,7 @@ Cross-version or missing dependencies cause a miss, not a best-effort pointer re
 Also, at least initially, make it a text-based format so we can more easily debug it - leverage the `Text_File_Handler` module.
 Later we can consider moving to a binary format for speed.
 
-Future derived-artifact layout proposal, not the initial milestone-6 source-only layout: under the configured cache directory, keep a directory per canonical source-file/context identity, with separate filenames/artifacts for declarations belonging to that source file.
+Future derived-artifact layout proposal, not the initial milestone-5 source-only layout: under the configured cache directory, keep a directory per canonical source-file/context identity, with separate filenames/artifacts for declarations belonging to that source file.
 A module instantiated with different parameters must have a distinct directory identity; include other required program/semantic context discriminators rather than keying semantic storage by filepath alone.
 E2 additionally requires preserving compiler-observed import-request distinctions when mapping semantic instances to directories; physical-source deduplication must not merge their nominal declarations.
 Use safe encoded names or identity digests with a readable manifest mapping back to paths/parameters, not unescaped absolute paths as directory names.
@@ -548,7 +566,7 @@ Earlier setup proposals, not blanket-approved defaults or final option names; th
 Enabling persistence is not permission to execute source code.
 
 On restart, load a lightweight manifest and validate relevant revisions/configuration.
-The initial milestone-6 profile offers verified recovery bytes and reparses authoritative current source; lazy persisted-result rehydration is a future derived-artifact capability, not an initial hit guarantee.
+The initial milestone-5 profile offers verified recovery bytes and reparses authoritative current source; lazy persisted-result rehydration is a future derived-artifact capability, not an initial hit guarantee.
 Do not eagerly deserialise the entire historical graph just because its files exist.
 Matching hashes can avoid reparsing, but only if reading/decoding the cached artifact is itself worthwhile.
 
@@ -712,8 +730,8 @@ The fifteen-operation interface in [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#opera
 | R1: Initial coverage. | Syntax-first qualification slice: owned whole-file syntax/diagnostics/indices and revisioned source/world operations, including source/unsaved-recovery persistence, qualified on the recorded Windows x64 toolchain.  Configured semantic queries, evaluator execution and higher editor features are explicitly unsupported until qualified. | 2026-10-20. | Narrows the first deliverable, not the eventual full-syntax/full-semantics goal.  Other compilers, filesystems and platforms need their own qualification. |
 | R2: Persistence and recovery. | Persistence enabled by default at `.jaiParserCache` beside the project's `.build`, with an explicit override.  Preserve current disk and latest unsaved revisions without automatic expiry or optional persistent history; the editor supplies undo/redo.  Full AST reload is not required. | 2026-10-23. | Recovery requires host confirmation; no automatic restore, source overwrite or secure-erasure guarantee. |
 | R3: Source/provider protocol. | Finite explicit captures, unknown-versus-absent states, host-controlled overlays and byte-based exact-base edit batches, with declared consistency and explicit successor captures for unavailable historical discovery. | 2026-10-21. | Logical source transactions are not atomic disk/editor writes. |
-| R4: Execution/delivery. | Logical serialised coordinator with token-checked worker completion, host-pulled outcomes, independent waiter cancellation and lease-safe shutdown. | 2026-10-21. | Milestone 5's worker/reaper model, reservations, FIFO/stop policies and native bindings need review and concurrent tests. |
-| R5: Identity and invalidation. | Preserve configured instance/load-occurrence distinctions and nominal identity; miss conservatively on uncertain matches; invalidate semantics per whole module until finer tracked facets are qualified. | 2026-10-21. | Milestones 3-4 supply the draft encodings and algorithms; no semantic feature is enabled. |
+| R4: Execution/delivery. | Logical serialised coordinator with token-checked worker completion, host-pulled outcomes, independent waiter cancellation and lease-safe shutdown. | 2026-10-21. | Milestone 4's worker/reaper model, reservations, FIFO/stop policies and native bindings need review and concurrent tests. |
+| R5: Identity and invalidation. | Preserve configured instance/load-occurrence distinctions and nominal identity; miss conservatively on uncertain matches; invalidate semantics per whole module until finer tracked facets are qualified. | 2026-10-21. | Milestones 2-3 supply the draft encodings and algorithms; no semantic feature is enabled. |
 | R6: Resources and store ownership. | No configured RAM/disk quota by default, with optional finite limits; exclusive ownership by one process/writer session per project/provider store; no optional persistent history.  Contention degrades persistence, not source analysis. | 2026-10-23. | No shared-store concurrency, eager allocation, resource-availability guarantee or unchecked decoding follows. |
 | R7: Performance evaluation. | Measure comparable deltas first and evaluate the trade-offs afterwards; no preselected pass/fail percentages.  Latency, including tail latency, is the primary concern; memory and storage are secondary trade-offs (confirmed 2026-10-20). | 2026-10-23. | Correctness and leak checks remain mandatory.  The earlier 10%/5%/four-times proposals are withdrawn. |
 | R8: External assumptions. | Qualify behaviour implemented by our code (interruption-safe staging/rename, complete-or-rejected publication, ownership, cleanup and graceful failure) under stated filesystem/OS primitive assumptions. | 2026-10-23. | No power-loss, hardware/filesystem durability or OS-cold claims, and no external certification campaign. |
@@ -748,7 +766,7 @@ Deferring semantic operations is not permission to omit the semantic ownership, 
 | Source and syntax. | Disk and editor-buffer revisions, owned immutable whole-file syntax/diagnostics, exact source reconstruction, and syntax-derived declaration/span indices.  Reuse unchanged snapshots; fully parse changed files, including malformed edits. | No subtree-sharing, syntax-chunk store, or AST-copy requirement.  Syntax-derived indices are not resolved bindings, types, or a complete semantic declaration index. |
 | World update/query. | Revision-tagged change tickets and syntax/index publication milestones; selected-world queries return available, pending, superseded, cancelled, failed, or unsupported outcomes as applicable.  Leases protect retained snapshots. | No promise that syntax publication completes all future semantic analysis.  Queries never switch to a newer world implicitly. |
 | Composition and semantics. | Preserve authored import/load requests and context in syntax; define the extension boundary for configured module instances and semantic query results. | The initial service does not claim semantic import closure, member/type inference, overload resolution, constant/layout evaluation, or semantic navigation/refactoring.  Requests needing these return unsupported, not a guessed binding, empty successful answer, or false language error.  Existing resolver behaviour is not silently reclassified as qualified cache-backed semantics. |
-| Persistence. | A versioned pointer-free text store for exact source revisions, document/recovery metadata, and manifests, with safe validation and fresh parsing as a valid reconstruction path (R2/R6).  Preserve the future syntax/semantic artifact boundaries. | Persisting a complete AST is not required; the experimental graph codec is not adopted.  Milestone 6 supplies the format/publication/recovery draft; its API review and native/runtime qualification remain open. |
+| Persistence. | A versioned pointer-free text store for exact source revisions, document/recovery metadata, and manifests, with safe validation and fresh parsing as a valid reconstruction path (R2/R6).  Preserve the future syntax/semantic artifact boundaries. | Persisting a complete AST is not required; the experimental graph codec is not adopted.  Milestone 5 supplies the format/publication/recovery draft; its API review and native/runtime qualification remain open. |
 | Recovery and failure. | Exact disk/overlay selection, host-confirmed unsaved recovery, explicit save/reset/rename/delete transitions, corrupt/incompatible artifacts treated as misses, and cache diagnostics separate from language diagnostics. | No automatic resurrection of an obsolete overlay or permission to overwrite a live buffer.  Cache write failures must not reject an otherwise valid source update. |
 | Evaluation and later features. | Evaluator capability initially unavailable; source-controlled opt-in and host authorisation remain mandatory prerequisites for any later backend.  Later editor features build on the same world contracts. | E5/E13 are feasibility evidence, not evaluator implementation.  No automatic compiler execution, cached effect replay, semantic rename/completion, or export-fix feature is included in this initial slice. |
 
@@ -794,7 +812,7 @@ These are approvals or choices within the drafted contracts; the decision record
 - Review the concrete host/store/native bindings and their enforcement of project-root resolution, discovery/version-control exclusion, permissions and contention diagnostics.
 - Review the initial provider adapter's declared case/alias/link/reappearance policy and source-visible path binding against the drafted canonical encodings.
 Additional-platform adapters remain deferred rather than requiring one universal path rule now.
-- Approve the drafted typed parameter/context encodings and conservative identity rules (milestone 4); decide which later compiler-compatible semantic/evaluation profiles can support them.
+- Approve the drafted typed parameter/context encodings and conservative identity rules (milestone 3); decide which later compiler-compatible semantic/evaluation profiles can support them.
 - For a later evaluator, choose the exact program/module opt-in parameter and host permission API, supported compilation-context reproduction and structured result/effect protocols for `#insert`, `using,map`, `#modify` and `#run`.
 - Approve the workload/profile matrix and larger-project (W3) manifest, then evaluate observed latency/memory/storage deltas.
 - Decide whether optional syntax chunks or finer cache granularity are worthwhile only after comparable whole-file/query measurements; they do not block the initial whole-file design.
@@ -871,24 +889,24 @@ Qualification items apply only after separate implementation authorisation, usin
 - [x] Draft the core source-event, world, ownership, ticket and query-outcome contracts with T1-T8.
 - [x] Draft the source-provider capture contract with V1-V8.
 - [x] Draft the source/update/query interface schema, operation/outcome table, worked edit protocol and latency mapping, and repair bootstrap/retry/shutdown gaps in a consistency pass.
-- [x] Complete milestone 2: close the current-producer syntax registry for all 50 generated layouts, the base-node `DIRECTIVE_THIS` route and all auxiliary helpers.
-- [x] Complete the milestone-3 draft: exact values, signatures, accessors, provider/adapter admission, optional quota requests and finite effective bounds, plus the trivia-required token registry and value encodings.
-- [x] Complete the milestone-4 draft: identity allocation, restart continuity, declaration matching, typed keys, completed `#Context` comparison and deferred semantic records, with D1-D8.
-- [x] Complete the milestone-5 draft: ordering, reservations, task attempts, delivery, cancellation and shutdown, with X1-X8.
-- [x] Complete the milestone-6 draft: store grammar, record schemas, commit protocol, pins, recovery, collection and administration, with S1-S8.
-- [x] Draft milestone 7: A1-A15, W1-W6 and evidence verdict rules.
+- [x] Complete milestone 1: close the current-producer syntax registry for all 50 generated layouts, the base-node `DIRECTIVE_THIS` route and all auxiliary helpers.
+- [x] Complete the milestone-2 draft: exact values, signatures, accessors, provider/adapter admission, optional quota requests and finite effective bounds, plus the trivia-required token registry and value encodings.
+- [x] Complete the milestone-3 draft: identity allocation, restart continuity, declaration matching, typed keys, completed `#Context` comparison and deferred semantic records, with D1-D8.
+- [x] Complete the milestone-4 draft: ordering, reservations, task attempts, delivery, cancellation and shutdown, with X1-X8.
+- [x] Complete the milestone-5 draft: store grammar, record schemas, commit protocol, pins, recovery, collection and administration, with S1-S8.
+- [x] Draft milestone 6: A1-A15, W1-W6 and evidence verdict rules.
 - [x] Run and record E1-E13 and the two E12 reload follow-ups.
 - [x] Exclude OS-cold and external storage guarantees from the initial scope (R8).
 
 ### Approval and Sign-Off
 
-- [ ] Obtain explicit whole-specification sign-off (milestone 8) after the user finishes reading.
+- [ ] Obtain explicit whole-specification sign-off (milestone 7) after the user finishes reading.
 	- [ ] Resolve each [open decision](#open-decisions).
-	- [ ] Obtain API review of the milestone-3 interface, including context registry and adapter descriptor/platform-policy alternatives.
-	- [ ] Obtain API/identity-authority review of milestone 4.
-	- [ ] Obtain detailed execution/profile/native-API approval for milestone 5, documenting effective safety minima/ceilings and optional quotas and binding provider/store finalisation to stated OS/API assumptions.
-	- [ ] Review milestone 6's store/native/API/issuer contracts.
-	- [ ] Approve the milestone-7 larger-project manifest and workload/profile configurations; do not infer unresolved defaults from test fixtures.
+	- [ ] Obtain API review of the milestone-2 interface, including context registry and adapter descriptor/platform-policy alternatives.
+	- [ ] Obtain API/identity-authority review of milestone 3.
+	- [ ] Obtain detailed execution/profile/native-API approval for milestone 4, documenting effective safety minima/ceilings and optional quotas and binding provider/store finalisation to stated OS/API assumptions.
+	- [ ] Review milestone 5's store/native/API/issuer contracts.
+	- [ ] Approve the milestone-6 larger-project manifest and workload/profile configurations; do not infer unresolved defaults from test fixtures.
 	- [ ] Specify and review the extension route to broader syntax/semantic/platform coverage.
 	- [ ] Confirm that the approved drafts define owned immutable syntax snapshots, explicit ownership/reclamation, the safe versioned persistent store, cache-backed source/syntax capabilities, and update-ticket/pending-query APIs.
 
@@ -898,7 +916,7 @@ Qualification items apply only after separate implementation authorisation, usin
 	- [ ] Turn T1-T8 into executable acceptance cases.
 	- [ ] Qualify V1-V8 and the host's authority/immutability claims against actual adapters.
 	- [ ] Qualify the bootstrap/retry/shutdown protocol against V5/V6, X7/X8 and T8.
-- [ ] Qualify the milestone-3 syntax projections against fresh lexer/parser output.
+- [ ] Qualify the milestone-2 syntax projections against fresh lexer/parser output.
 	- [ ] Token tags/aliases, field-role restrictions, trivia-enabled origins and rejection of non-trivia full-featured profiles.
 	- [ ] Token value union routes, flag combinations, decoded-value ownership and exact source/trivia reconstruction.
 	- [ ] Shared-region ownership, nested entry counts/containers, compound routes, and rejection of cycles/unregistered sharing.
@@ -928,11 +946,11 @@ Qualification items apply only after separate implementation authorisation, usin
 	- [ ] Wrong/unknown schema tuples, unsupported outcomes, legacy-store misses and retained-schema access.
 	- [ ] Diagnostic/index mappings: origins, malformed messages, repeated/compound/recovered names and visibility/traversal coverage.
 	- [ ] Executable identity/payload review vectors.
-- [ ] Qualify milestone 4's allocation/restart/matching boundary cases, and D1-D8 for any separately authorised semantic profile, using fresh/compiler oracles.
+- [ ] Qualify milestone 3's allocation/restart/matching boundary cases, and D1-D8 for any separately authorised semantic profile, using fresh/compiler oracles.
 	- [ ] Qualify context-contribution permutations, base/member changes, duplicates/provisional membership and layout-sensitive consumers.
 - [ ] Implement and qualify X1-X8 under real concurrent workers and provider/allocator failures with ownership/order/deadline oracles.
 - [ ] Implement and qualify S1-S8 with strict-wire, source/commit/pin/allocation oracles and our native failure/interruption paths; make no power-loss guarantee.
-- [ ] Run every applicable milestone-7 case with replayable evidence; qualify compiler-backed semantic cases only under a separately admitted future profile.
+- [ ] Run every applicable milestone-6 case with replayable evidence; qualify compiler-backed semantic cases only under a separately admitted future profile.
 - [ ] Measure P1-P5 on the agreed workloads and evaluate the deltas; extend to semantic dependency/editor workflows only under separate scope.
 
 ### Later Design Goals

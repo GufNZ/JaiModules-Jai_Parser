@@ -87,8 +87,8 @@ For the separate AVX-512 frequency investigation, follow [the clock measurement 
 The real-file AST-reuse benchmark runs independently of that hardware collection:
 
 ```bash
-jai benchmark_ast_reuse.jai -o -llvm -output_path .build -exe benchmark_ast_reuse
-./.build/benchmark_ast_reuse.exe ../../../examples/invaders > .build/ast_reuse_workloads.log
+jai benchmark_ast_reuse.jai -o -llvm
+./benchmark_ast_reuse.exe ../../../examples/invaders > .build/ast_reuse_workloads.log
 ```
 
 It inventories bytes, line positions (one plus LF bytes per nonempty file), tokens including EOF, parse status, diagnostics, and exact reconstruction for each independent source file.
@@ -149,8 +149,8 @@ The fast run is a harness check, not optimised performance evidence.
 For deep correctness and actual reuse counts, compile a separate verification-only executable:
 
 ```bash
-jai benchmark_ast_reuse.jai -o -llvm -output_path .build -exe verify_ast_reuse - verify-only
-./.build/verify_ast_reuse.exe ../../../examples/invaders > .build/ast_reuse_verified.log
+jai benchmark_ast_reuse.jai -o -llvm -exe verify_ast_reuse - verify-only
+./verify_ast_reuse.exe ../../../examples/invaders > .build/ast_reuse_verified.log
 ```
 
 Repeat with `-x64` instead of `-o -llvm` for the fast backend.

@@ -80,7 +80,7 @@ Each ticket/waiter has at most one terminal transition; observation/waiting afte
 Check operation generation and terminal state at publication so duplicate/late completion cannot resurrect cancelled work, overwrite a superseded ticket or deliver a payload to a released waiter.
 A retained old world and its already published results remain readable, but its unfinished work is cancelled when its captured source frontier becomes obsolete; it is not kept running by retained-world waiters.
 Never silently switch the selected world or automatically reissue a cancelled query; already terminal results and independent leases remain unchanged.
-Milestone 5 specifies the draft execution/delivery/ownership model; its approval, native bindings and real concurrent qualification remain open.
+Milestone 4 specifies the draft execution/delivery/ownership model; its approval, native bindings and real concurrent qualification remain open.
 
 ### Acceptance Trace Drafts
 
@@ -98,8 +98,8 @@ Each trace must assert the selected identities and exact fresh-oracle result whe
 | T7: Superseded update and query. | Keep two waiters on shared B work, accept newer source C and delay B's producer return.  B's unfinished update is `SUPERSEDED`, all still-pending B query waiters receive `WORLD_SUPERSEDED`, B cannot publish a late result/head and its pins survive until safe stop.  Already acquired B results remain readable; each client independently decides whether to request C, with no automatic reissue. | C2, C3, C5 |
 | T8: Cache and capability failures. | Deny store writes or corrupt an artifact, then notify/query valid source and request unsupported semantics/evaluation.  Source syntax remains usable, cache warnings stay separate, unsupported is terminal, and no compiler process launches. | C1, C4, C5 |
 
-Milestones 2-6 supply the syntax/API/provider/identity/execution/persistence drafts, including finite capture rather than implicit broader source discovery.
-Milestone 7 supplies the whole-system acceptance mapping/workload/evidence draft; policy/detailed contract and workload approval, cross-contract sign-off, native bindings and executable implementation qualification remain open.
+Milestones 1-5 supply the syntax/API/provider/identity/execution/persistence drafts, including finite capture rather than implicit broader source discovery.
+Milestone 6 supplies the whole-system acceptance mapping/workload/evidence draft; policy/detailed contract and workload approval, cross-contract sign-off, native bindings and executable implementation qualification remain open.
 Unsupported discovery/semantic capabilities do not become implemented by this draft closure.
 The migration-plan gate and all scope/performance approval gates remain open.
 
@@ -107,11 +107,11 @@ The migration-plan gate and all scope/performance approval gates remain open.
 
 Drafted 2026-10-20.
 This refines C2-C4 and the source/world contracts using E10/E11, without adopting their experimental formats, fixed fixture limits, or filesystem guarantees as a production implementation.
-The milestone-6 sections below close the draft text grammar, record schemas, bounds, coordination, publication and maintenance protocol using `Text_File_Handler`.
+The milestone-5 sections below close the draft text grammar, record schemas, bounds, coordination, publication and maintenance protocol using `Text_File_Handler`.
 The 2026-10-23 decisions select project-relative storage, optional quotas, measurement-first evaluation and testing our code under external primitive assumptions; remaining policy details and implementation qualification are still open.
 Required source/recovery persistence is distinct from optional decoded-syntax or semantic artifacts.
 
-### Milestone 6: Store Profile, Bounds and Text Grammar
+### Milestone 5: Store Profile, Bounds and Text Grammar
 
 The proposed initial profile is `jai-cache-store/1`: a private, workspace/provider-scoped store with one owning process and one writer session at a time, immutable content-addressed records and one replaceable head.
 Other processes/sessions do not concurrently read, publish or collect through this profile; a contending opener reports store unavailability/degradation while correct in-memory source work continues.
@@ -179,7 +179,7 @@ A byte count/chunk count mismatch, odd/lowercase/invalid hex or an extra `H` row
 Field names and enum/arm tags are any valid jai identifier.
 Raw float observations use their declared `u64` bit-pattern field with `U`, never host float parsing or a decimal approximation.
 Opaque canonical identities/descriptors use `B`; records, optionals and arrays preserve the existing logical schema's types/order rather than guessing a type from equal-looking scalar bytes.
-This grammar is a text encoding of the canonical values, not a replacement for the milestone-3 `V`/`K` identity recipes; readers reconstruct and validate those logical values before comparing identity.
+This grammar is a text encoding of the canonical values, not a replacement for the milestone-2 `V`/`K` identity recipes; readers reconstruct and validate those logical values before comparing identity.
 
 First bound/read the actual open stream into protected storage, check raw line/envelope grammar and the exact checksum, then use `start_from_memory` with a `Text_File_Handler` over that same bounded immutable buffer.
 Do not call `start_file` for an untrusted store record: its whole-file read precedes application bounds.
@@ -235,12 +235,12 @@ Recovery candidates are a separate host-confirmed source input and may be inspec
 Do not eagerly decode historical graphs; validate/load only the records needed for the selected source or query, and bound each resulting dependency traversal.
 Concrete numeric limits must be approved and enforced before qualifying a loader; E12's assert-aborting reader and post-read checks do not meet this contract.
 
-### Milestone 6: Record Schemas and Configured Policy
+### Milestone 5: Record Schemas and Configured Policy
 
 `StoreRef` is `{kind:StoreRecordKind, schema:bytes, key:StoreBlobKey, wire_bytes:u64}`; each reference carries the full expected kind/schema and actual complete encoded length, not only a filename digest.
 
 `StoreRecordKind` has exactly seven tags in the following table.
-Its schemas use the exact written field order and the milestone-3 logical encodings/types, with the milestone-6 text grammar for their wire representation.
+Its schemas use the exact written field order and the milestone-2 logical encodings/types, with the milestone-5 text grammar for their wire representation.
 Canonical document/history arrays are duplicate-free and sorted by complete canonical identity/value bytes, never display paths, hash alone or native table iteration order.
 
 | Kind and exact schema. | Body record and validation. |
@@ -303,7 +303,7 @@ The initial profile implements only `PROCESS_ATOMIC`; `POWER_LOSS_DURABLE` is a 
 The initial native binding identifier is `jai-cache-store-windows-local/1`; our adapter must correctly use documented root/lock/replacement primitives and handle their failures, without an independent filesystem/volume certification requirement.
 An enabled but inaccessible/contended/unsupported store reports degradation; a disabled binding performs no store reads/writes, lock acquisition, enumeration or automatic cleanup.
 
-### Milestone 6: Layout, Ownership and Commit Protocol
+### Milestone 5: Layout, Ownership and Commit Protocol
 
 Within the trusted workspace/provider-specific root, the exact relative names are `owner.lock`, `descriptor.txt`, `head.txt`, `blobs/HH/<StoreBlobKey>.txt` and `staging/<owner-epoch>-<commit-sequence>-<ordinal>.tmp`.
 `HH` is the first two uppercase hex digits of the complete blob key; staging components are fixed-width 16-digit uppercase hex for checked `u64` values, with a positive per-commit ordinal.
@@ -344,7 +344,7 @@ Do not roll back accepted source state or a ticket outcome because its store int
 | --- | --- |
 | `SET_OVERLAY`, `EDIT_OVERLAY`, `RESTORE_OVERLAY`. | Replace recovery with a candidate for the resulting overlay installation revision/source/context; preserve the independently acknowledged disk branch.  Restore is a fresh host-confirmed installation, not activation by scanning the store. |
 | `OBSERVE_DISK`. | Replace the acknowledged disk slot only; retain the existing overlay candidate/installation stamp.  Absence stays an explicit disk state. |
-| `ACK_SAVE`. | Record the supplied written disk observation; clear recovery only when both the saved overlay installation revision and exact source revision match the still-selected overlay, exactly as in milestone 3.  A newer byte-identical overlay survives. |
+| `ACK_SAVE`. | Record the supplied written disk observation; clear recovery only when both the saved overlay installation revision and exact source revision match the still-selected overlay, exactly as in milestone 2.  A newer byte-identical overlay survives. |
 | `RESET_OVERLAY`. | Record the supplied host-confirmed disk state and stamped empty recovery slot together.  Missing disk bytes/failed persistence cannot stand in for a committed empty slot. |
 | Explicit candidate discard/expiry. | Remove only the authorised, precondition-matched candidate/history root in a new manifest; it does not edit an active buffer, acknowledge a save or select cached disk bytes. |
 
@@ -361,7 +361,7 @@ On definite precommit failure, keep the old head and release this transaction's 
 On an uncertain replacement, stop new mutation and reread `head.txt` under ownership: an exact matching commit/manifest means committed; the exact recorded predecessor means not committed and permits an explicit retry with a fresh commit identity; any other valid head is reconciled as a different commit, never blindly overwritten.
 An unreadable/corrupt head keeps mutation/GC disabled until explicit repair; do not scan blobs to guess which source/recovery projection was committed.
 Repeated commit acknowledgement never schedules source events again, revives old writer jobs or republishes an earlier recovery slot over a newer committed tombstone.
-Close/drop the process ownership handle only after the lane, uncertain commit reconciliation and all file-backed pins have returned or safely detached; an M5 shutdown deadline cannot free a still-running store operation.
+Close/drop the process ownership handle only after the lane, uncertain commit reconciliation and all file-backed pins have returned or safely detached; an M4 shutdown deadline cannot free a still-running store operation.
 
 `StoreCommitReceipt` is `{commit:StoreCommitID, generation:u64, frontier:Optional(ProviderFrontier), guarantee:PROCESS_ATOMIC|POWER_LOSS_DURABLE}` for the registered host/store binding, not a new public scheduling operation or live handle.
 The initial profile reports `PROCESS_ATOMIC` only and leaves `StoreStatus.acknowledged_frontier` `NONE`: that existing field promises confirmed durable progress, not merely a process-visible head.
@@ -385,7 +385,7 @@ If publication fails before the commit point, preserve the prior selected state 
 Uncertain commit outcomes require reconciliation by re-reading the committed generation/operation identity, not blind replay.
 
 An update racing another save/reset must validate its host event/session ordering before replacing recovery metadata; a late writer cannot resurrect an older recovery root simply because it acquired the lock later.
-The milestone-6 owner/commit protocol supplies lock ownership, idempotence, crash release and stale-writer rules; native implementation/qualification remains open, and process-ID reuse or a timeout alone is never proof that an owner died.
+The milestone-5 owner/commit protocol supplies lock ownership, idempotence, crash release and stale-writer rules; native implementation/qualification remains open, and process-ID reuse or a timeout alone is never proof that an owner died.
 Do not hold service/world locks while waiting for store coordination, and do not make store contention block otherwise valid source selection indefinitely.
 The cache never writes editor source files as a side effect of committing a manifest.
 
@@ -411,13 +411,13 @@ In-memory-only results may permit unlinking optional disk artifacts if every sur
 Distinguish resident eviction, removal of optional derived artifacts, expiry of historical recovery candidates and deletion of acknowledged source/recovery roots.
 Under budget pressure reclaim unleased optional/history data according to an approved retention policy; protected live data may exceed the target until released.
 If required roots cannot fit or writes fail, surface pressure/persistence degradation and continue correct source operations; do not silently drop unsaved recovery while reporting persistence success.
-Milestone 6 below specifies the single-owner pin/maintenance draft under the approved enabled/recovery/no-history/no-fixed-quota policy; detailed contract/privacy review and tests of our native implementation remain open.
+Milestone 5 below specifies the single-owner pin/maintenance draft under the approved enabled/recovery/no-history/no-fixed-quota policy; detailed contract/privacy review and tests of our native implementation remain open.
 
-### Milestone 6: Read Pins, Recovery and Collection
+### Milestone 5: Read Pins, Recovery and Collection
 
 At open, validate the trusted binding/root/ownership and the exact descriptor/head before offering any persisted state; mismatches report a bounded cache fault/degradation, not source absence.
 A missing head in a nonempty or partially initialised store is a fault requiring explicit maintenance, not an automatic empty store that discards surviving recovery.
-At restart, require the milestone-4 trusted `ContinuityProof` and current document/binding validation; no descriptor, archived `SessionID` or stored disk observation authorises current source selection.
+At restart, require the milestone-3 trusted `ContinuityProof` and current document/binding validation; no descriptor, archived `SessionID` or stored disk observation authorises current source selection.
 Reusing syntax requires the current admitted producer/context, but an unavailable old producer does not invalidate otherwise verified recovery source bytes.
 Keep a readable old canonical context as provenance and require a freshly admitted current context for restoration rather than executing or silently reusing the old producer.
 Current disk/overlay bytes or confirmed absence come from the authoritative host/provider.
@@ -427,7 +427,7 @@ Under the store mutex, select the exact validated head/manifest and install an i
 That pin roots the manifest's validated transitive closure, including old generations while a read is active; GC cannot race the interval between selection and first open.
 Read actual bounded open-stream bytes into owned storage, verify the complete file key/length/schema and release file pins only after all returned backing is independent of the files.
 Decoding/conversion may proceed outside the store mutex under the pin and its charged ownership; returning to the lane revalidates the captured record identity, never a newer path-selected file.
-The initial profile returns resident owned copies, so retained M5 `WORLD`/`RESULT` access after `STOPPED` does not lazily reopen a blob or require a surviving store worker.
+The initial profile returns resident owned copies, so retained M4 `WORLD`/`RESULT` access after `STOPPED` does not lazily reopen a blob or require a surviving store worker.
 Pins, reference maps and decoded copies all count against the configured byte/record/file limits; failure returns a miss/fault without exposing partial backing or revoking an earlier successful copy.
 There are no cross-process lease records to expire: another process must acquire the real exclusive owner handle before reading or collecting, and contention fails safely.
 
@@ -454,7 +454,7 @@ Keep current acknowledged disk roots and active/protected recovery; under pressu
 If no safe reclamation fits the budget, reject/defer optional store work and report persistence pressure/degradation while source analysis remains correct.
 The approved default has no fixed disk quota; this does not authorise automatic quarantine deletion, increasing a configured quota, changing retention or bypassing effective technical bounds.
 
-### Milestone 6: Clear, Repair and Administration
+### Milestone 5: Clear, Repair and Administration
 
 Administrative requests belong to a trusted host/store-management binding, not persisted input or a sixteenth source/scheduling operation in `jai-cache-interface/1`.
 
@@ -511,16 +511,16 @@ Use independently encoded expected bytes/roots, external commit/source/ownership
 | S7: Pressure and disable. | Hold world/recovery pins while exceeding the configured budget, then disable persistence.  Report protected pressure/degradation without false durable success or source failure; no further store access occurs while disabled and prior `data` is not falsely reported deleted. | Hold read/transaction/recovery pins at quota, expire only explicitly eligible roots, fail deletes, disable, then explicitly maintain/re-enable.  External file/I/O/accounting logs prove bounded usage/retention, complete diagnostics and no hidden disabled-store access. | Revoke a pin, silently prune active recovery, omit staging/quarantine from quotas, equate disable with clear, or claim secure erasure. |
 | S8: Namespace and permission failure. | Supply unsafe keys/out-of-store redirects, foreign namespace/version data and denied paths.  Reject or miss with cache diagnostics, never escape the store, modify editor source or launch a compiler. | Foreign namespaces/versions, forged maintenance actions/commit preconditions, denied private paths, root replacement and required-but-unqualified durability.  Independently monitor touched paths/processes and require correct in-memory fallback with no source writes/compiler launch. | Trust a source-controlled token, adopt an unrelated directory/head, weaken requested durability, use an unsafe copy/delete replacement or clear the epoch issuer. |
 
-### Milestone 6: Closure and Review Checks
+### Milestone 5: Closure and Review Checks
 
-Milestone 6 is complete as a draft initial persistence specification on 2026-10-22.
+Milestone 5 is complete as a draft initial persistence specification on 2026-10-22.
 It specifies the canonical text grammar, seven record kinds, twelve finite store bounds, trusted policy binding, exclusive ownership/native primitive requirements, immutable-blob/atomic-head publication, independent source/recovery slot ordering, bounded read pins/GC, recovery offers and explicit clear/repair/quarantine.
 The supported initial catalogue stores exact source/context/document/recovery metadata and reparses selected bytes; optional AST/semantic persistence remains unsupported, not an unfinished implicit codec.
 It applies the R2/R6/R8 decisions; S1-S8 above carry its discriminating controls.
 
 Remaining gates are unresolved policy/profile/API review, documented effective safety bounds and issuer/native adapter assumptions, and real S1-S8 tests of our concurrency/interruption/failure handling.
 The selected scope does not require independent certification of the OS/filesystem/volume/issuer; our code must respect the documented nonreuse/locking/replacement assumptions, handle failed calls and avoid unsupported durability claims.
-Milestone 7 supplies whole-system acceptance/workloads/oracles as a draft; milestone 8 must review the cross-contract/policy/claim boundaries before sign-off, without adding unsupported sharing/derived-artifact guarantees.
+Milestone 6 supplies whole-system acceptance/workloads/oracles as a draft; milestone 7 must review the cross-contract/policy/claim boundaries before sign-off, without adding unsupported sharing/derived-artifact guarantees.
 No store acceptance trace, power-loss claim, scope/performance approval, or migration gate is marked complete by this draft.
 
 ## Semantic Identity and Dependency Contract Draft
@@ -528,7 +528,7 @@ No store acceptance trace, power-loss claim, scope/performance approval, or migr
 Drafted 2026-10-20.
 **R5 direction approved 2026-10-21; detailed schemas/algorithms remain proposed and unimplemented.**
 This refines the eventual semantic extension using E1-E8; it does not add semantics to the proposed syntax-first initial slice or qualify the current resolver as a cache-backed typechecker.
-Milestone 4 below specifies allocation, restart continuity, conservative matching, typed parameter/context encodings and semantic query/dependency/unsupported-state boundaries.
+Milestone 3 below specifies allocation, restart continuity, conservative matching, typed parameter/context encodings and semantic query/dependency/unsupported-state boundaries.
 API approval and executable qualification remain open; no language-specific semantic rule or stage implementation is enabled by the draft.
 The following records are logical obligations, not public API names or a compiler-internal pipeline claim.
 
@@ -548,12 +548,12 @@ The following records are logical obligations, not public API names or a compile
 A retained old world keeps its original identities, revisions and lookup views even when a new world chooses different matches.
 Matching identifies the logical subject; it does not certify that its old result remains valid after an edit.
 The provider's explicit admitted path/alias policy remains a host configuration input, not a hidden default.
-Milestone 4 below supplies typed-value canonicalisation, conservative declaration matching and persisted-versus-live ID allocation/validation; approval and implementation qualification remain separate.
+Milestone 3 below supplies typed-value canonicalisation, conservative declaration matching and persisted-versus-live ID allocation/validation; approval and implementation qualification remain separate.
 
-### Milestone 4: Allocation and Restart Continuity
+### Milestone 3: Allocation and Restart Continuity
 
 Draft identity contract `jai-cache-identity/1`, completed for review under R5, not implementation or store-policy approval.
-This section fixes the allocation/continuity rules left open by the logical keys in milestone 3.
+This section fixes the allocation/continuity rules left open by the logical keys in milestone 2.
 K/V retain their exact existing framing.
 Full descriptors and their authority bindings remain equality evidence; matching digests, source text, paths or allocator addresses cannot establish an allocated subject's identity.
 
@@ -570,7 +570,7 @@ Persistent reservation may be supplied by the host's existing durable authority;
 An issuer unable to prove reservation returns `UNAVAILABLE`, never an old epoch, timestamp, process ID or probabilistic substitute.
 
 Bootstrap/`OpenSession` then fails `ADMISSION_DENIED`/`CONFIGURATION_REQUIRED` without exposing a session.
-Native reservation/locking qualification is an implementation obligation, coordinated with milestone 6, not performed by writing this contract.
+Native reservation/locking qualification is an implementation obligation, coordinated with milestone 5, not performed by writing this contract.
 
 `service_incarnation_namespace = K("service-incarnation", [authority_namespace, epoch_u64_LE])`.
 Each successful service bootstrap obtains a new epoch even if no session was opened.
@@ -587,7 +587,7 @@ This chooses allocation semantics, not the coordinator's thread/locking implemen
 | Identity domain. | Allocator, scope and non-interchangeability. |
 | --- | --- |
 | `SessionID` | Fresh `SESSION` counter under one service incarnation; independent of `WorkspaceID` and persisted artifacts.  Closing/reopening the same workspace in the same process still creates another `SessionID`. |
-| `WorldID`, `ResultID`, `OperationID` | Separate session-local counters and the milestone-3 typed K recipes.  Equal numeric tokens across domains/sessions are distinct.  Retry at the same frontier gets a fresh `OperationID`, and exact result reuse never imports a foreign `ResultID` into the requesting session. |
+| `WorldID`, `ResultID`, `OperationID` | Separate session-local counters and the milestone-2 typed K recipes.  Equal numeric tokens across domains/sessions are distinct.  Retry at the same frontier gets a fresh `OperationID`, and exact result reuse never imports a foreign `ResultID` into the requesting session. |
 | `ClockIdentity` | `K("service-clock", [service_incarnation_namespace])`, bound to that service's actual monotonic clock and returned as `Capabilities.clock_identity`.  It is not comparable to another incarnation's clock or wall time. |
 | `ProviderRevision` | Nonempty provider-issued state token scoped by provider namespace, `SessionID` and `DocumentID` as already keyed.  The registered provider must attest nonreassignment and the exact disk/overlay state.  A new combined state uses a new token even with equal bytes; the overlay installation stamp remains the earlier installing `ProviderRevision` until replaced/cleared. |
 | `ProviderFrontier` | The registered provider/coordinator issues a fresh nonempty frontier token for the empty initial state and every accepted transaction.  Its accepted predecessor relation is coordinator state, not lexicographic token order.  Rejection and `RequestAnalysis` do not advance it. |
@@ -611,7 +611,7 @@ A process cannot use an untrusted manifest as an `IdentityAuthority` or a reques
 #### Restart and Reuse Admission
 
 `ContinuityProof` is `{workspace:WorkspaceID, provider_namespace:bytes, document_policy_version:u32, provider_descriptor:bytes, document_bindings:[]DocumentBinding}` supplied by the trusted host/provider for the current opening.
-The descriptor is the exact canonical milestone-3 provider descriptor, and bindings are duplicate-free in canonical `DocumentID` order.
+The descriptor is the exact canonical milestone-2 provider descriptor, and bindings are duplicate-free in canonical `DocumentID` order.
 This is an admission attestation, not an authentication token self-certified by cache contents.
 An omitted, unverifiable or unequal field means fresh binding/no identity continuity for that scope; it does not authorise best-effort matching by path.
 Availability of the host's authority channel is separate from source hashes and cache integrity.
@@ -629,13 +629,13 @@ Host-confirmed `RESTORE_OVERLAY` installs a new current stamp; a recovery candid
 
 Deferred `DeclarationID`/`TypeID` continuity additionally requires the semantic archive validation below, not merely this source continuity proof.
 Unavailable/corrupt archives do not make authoritative source unavailable.
-Required source/recovery persistence, disabled/degraded store behaviour and reset/discard policy remain R2/R6 and milestone 6; none may reset a nonreassignment authority or turn a candidate into current source.
+Required source/recovery persistence, disabled/degraded store behaviour and reset/discard policy remain R2/R6 and milestone 5; none may reset a nonreassignment authority or turn a candidate into current source.
 
-### Milestone 4: Declaration Matching and Semantic Keys
+### Milestone 3: Declaration Matching and Semantic Keys
 
 This is the deferred semantic identity schema `jai-cache-semantic-identity/1`, not a `DeclarationID` field added to declaration-index/2.
 Its record schema identifiers are that ASCII prefix followed by `/` and the exact case-sensitive record name, unless a separately named schema or explicit K recipe is given; typed values use `jai-cache-typed-value/1`.
-Parameterised type identifiers retain milestone 3's framed parameterised-type recipe, with no ambiguous concatenation or open extension fields.
+Parameterised type identifiers retain milestone 2's framed parameterised-type recipe, with no ambiguous concatenation or open extension fields.
 The syntax-first API still publishes only result-local syntax/index references.
 A future admitted semantic producer owns the following immutable records; no current resolver or parser node pointer is implicitly that producer.
 
@@ -788,7 +788,7 @@ Target includes architecture/ABI/data layout and language-relevant target option
 An unavailable required descriptor prevents semantic reuse; do not reuse the syntax-only `ContextID` or ignore a changed target because the source bytes match.
 The completed `#Context` descriptor retains the ordered base and canonical name-sorted additions from [architecture section 6.3](CACHE_ARCHITECTURE.md#member-order-and-the-completed-context-type), with duplicate/conflicting additions rejected and incomplete discovery explicitly incomplete; layout/reflection/effect ordering remain separate facets.
 
-### Milestone 4: Deferred Semantic Query and Archive Boundary
+### Milestone 3: Deferred Semantic Query and Archive Boundary
 
 The supported initial semantic query catalogue is empty.
 
@@ -808,7 +808,7 @@ Semantic admission needs a new context schema that supplies every field above, a
 Unknown schema/facet/subject combinations are unsupported, not newly discovered functionality.
 Exact language-specific request and payload schemas must be registered before a reserved facet is admitted; this milestone does not claim every Jai rule has been specified.
 
-`SemanticAttemptKey = K("semantic-attempt", [QueryKey, WorldID])`; execution adds its separately checked generation/attempt token under milestone 5.
+`SemanticAttemptKey = K("semantic-attempt", [QueryKey, WorldID])`; execution adds its separately checked generation/attempt token under milestone 4.
 
 Equivalent logical queries can share work only within the same immutable selected semantic world/qualified inputs.
 Cross-world hits require full dependency validation and a new result association for the requesting world; they do not join an old attempt by `QueryKey` alone.
@@ -859,12 +859,12 @@ A restarted producer allocates new subjects in its fresh `AllocationNamespace`; 
 A stale/rolled-back/forked archive therefore cannot make new declarations collide with previously issued tokens.
 Conflicting bindings for the same old ID reject that archive scope; do not choose the newest timestamp or reconcile by name.
 Full missing/unverifiable semantic continuity creates fresh IDs and conservative recomputation, not an implicit same-owner match.
-Archive publication/locking/GC/text encoding remain milestone 6, with no initial requirement to persist these deferred semantic records.
+Archive publication/locking/GC/text encoding remain milestone 5, with no initial requirement to persist these deferred semantic records.
 
-### Milestone 4: Identity Closure and Review Checks
+### Milestone 3: Identity Closure and Review Checks
 
-Milestone 4 is complete as a draft identity and deferred-semantic-extension specification on 2026-10-22.
-It covers allocation, restart continuity, cross-edit matching and semantic-extension boundaries; it does not reopen the milestone-2 syntax registry.
+Milestone 3 is complete as a draft identity and deferred-semantic-extension specification on 2026-10-22.
+It covers allocation, restart continuity, cross-edit matching and semantic-extension boundaries; it does not reopen the milestone-1 syntax registry.
 The initial service still exposes no semantic query implementation or `DeclarationID` in its syntax index.
 API review and host issuer qualification remain open.
 
@@ -886,7 +886,7 @@ Unknown semantic language behaviour remains explicit unsupported, not an unfinis
 | Supply generated output with authored spans; classify idleness as a cycle; request a reserved semantic/evaluator facet in the initial service. | T8, D8.  Explicit unsupported/unclassified outcomes, no evaluator/task creation or fabricated complete negatives/language errors; qualified future provenance/rule tests remain separate. |
 
 Document-only record/catalogue/reference checks are not executed acceptance cases.
-Milestones 5-7 supply execution/ownership, initial store and whole-system requirement/oracle/workload drafts; tests of our native issuer/store adapters and remaining policy/whole-contract approval stay open under the 2026-10-23 external-assumption boundary.
+Milestones 4-6 supply execution/ownership, initial store and whole-system requirement/oracle/workload drafts; tests of our native issuer/store adapters and remaining policy/whole-contract approval stay open under the 2026-10-23 external-assumption boundary.
 A host's unimplemented durable issuer or a deferred semantic adapter remains unimplemented after this specification is complete.
 
 ### Query Records and Observed Dependencies
@@ -943,8 +943,8 @@ These are a query catalogue outline, not one mandatory total order: inferred typ
 Detect cycles from required unresolved graph edges and classify them using the supported declaration rules; report blocking identities/milestones for an illegal cycle.
 External pending work and scheduler idleness alone do not establish a cycle.
 No generic recursion guard, global fixed-point solver, or compiler evaluator is required merely to complete this draft.
-Milestone 4 fixes the reserved facet, generated provenance and rule-admission records with an empty supported semantic catalogue.
-Language-specific stage payloads/legal recursion rules are explicitly deferred until a future semantic profile is separately specified and qualified; cancellation/retry execution ownership remains milestone 5.
+Milestone 3 fixes the reserved facet, generated provenance and rule-admission records with an empty supported semantic catalogue.
+Language-specific stage payloads/legal recursion rules are explicitly deferred until a future semantic profile is separately specified and qualified; cancellation/retry execution ownership remains milestone 4.
 
 ### Semantic Acceptance Trace Drafts
 
@@ -962,7 +962,7 @@ Use fresh same-world computation as the cache oracle and isolated official-compi
 | D7: Equal result, new observation. | Change an upstream revision while preserving an observed value, then change it again.  The first edit may stop propagation, but refreshed edge stamps make the second edit invalidate correctly; changed spans are remapped separately. |
 | D8: Provisional work and cycles. | Discover a generated/imported name after an initial miss, and contrast legal pointer recursion, illegal by-value recursion and externally pending work.  Provisional results never become false complete negatives; only qualified actual cycles produce cycle diagnostics. |
 
-Milestone 4 supplies identity/canonicalisation/matching algorithms, the empty initial semantic catalogue, reserved query/dependency/facet records and generated/evaluator/cycle admission boundaries.
+Milestone 3 supplies identity/canonicalisation/matching algorithms, the empty initial semantic catalogue, reserved query/dependency/facet records and generated/evaluator/cycle admission boundaries.
 Future language profiles must supply their exact payload/rule mappings before admission; API approval and executable fresh/compiler-oracle qualification remain open.
 
 ## Execution and Shutdown Contract Draft
@@ -971,7 +971,7 @@ Drafted 2026-10-20.
 **R4 direction approved 2026-10-21; detailed execution/limit contracts remain proposed and unimplemented.**
 This refines C3/C5 and the core ticket/lease contracts using E8's bounded scheduler evidence; E8 did not test actual concurrent workers, reentrant callbacks or stopping a running worker.
 The proposed initial delivery mechanism is host-pulled completion records plus poll/wait, not arbitrary callbacks from workers.
-Milestone 3 supplies the exact logical signatures; the milestone-5 closure below supplies the draft execution model, ordering, reservations, delivery and destruction rules.
+Milestone 2 supplies the exact logical signatures; the milestone-4 closure below supplies the draft execution model, ordering, reservations, delivery and destruction rules.
 Native Jai bindings and our use of platform primitives still require review/testing; optional host quotas must be honoured without imposing fixed resource defaults.
 This draft does not implement a scheduler.
 
@@ -992,9 +992,9 @@ Every externally visible transition must have a defined ordering against competi
 
 Do not invoke filesystem/compiler/provider callbacks, wait on dependencies, or block on store coordination while holding service state locks.
 Acquire external inputs through an explicit asynchronous or bounded operation, then revalidate its captured identity at publication; returning from an external call does not make its result current.
-Provider re-entry, lock ordering and cross-component ownership transfer follow the milestone-5 rules below, not recursive locks.
+Provider re-entry, lock ordering and cross-component ownership transfer follow the milestone-4 rules below, not recursive locks.
 
-### Milestone 5: Coordination, Ordering and Reservations
+### Milestone 4: Coordination, Ordering and Reservations
 
 The initial execution profile is `jai-cache-execution/1`.
 Its baseline is one nonrecursive state gate per session, entered briefly by public callers and completion producers, plus one service-owned compute worker per session that progresses independently of host polling/draining.
@@ -1002,7 +1002,7 @@ There is no dedicated coordinator thread, host-dispatch progress requirement, in
 The compute worker runs only already protected immutable inputs and cannot perform provider acquisition, filesystem/store access or host dispatch.
 `OpenSession` also reserves an independently progressing service-owned shutdown/reaper job and its execution/control backing; first shutdown makes it runnable without ordinary admission or host polling.
 That job drives stop/detachment, joins the compute worker outside the state gate and publishes the shutdown observation; it is not a coordinator thread on which ordinary calls/worker completions depend.
-Provider hooks run synchronously on their acquiring/releasing call path outside the state gate, with at most `concurrent_acquisitions` admitted acquisitions; optional store work uses a separately progressing, bounded lane whose publication protocol remains milestone 6.
+Provider hooks run synchronously on their acquiring/releasing call path outside the state gate, with at most `concurrent_acquisitions` admitted acquisitions; optional store work uses a separately progressing, bounded lane whose publication protocol remains milestone 5.
 Neither a provider/store stall nor a host that stops draining may hold the state gate or prevent unrelated ready compute work from progressing.
 One compute worker is a conservative draft baseline, not a throughput qualification or approval of a multi-session resource budget; any parallel-compute profile needs separate scheduling/ownership qualification.
 
@@ -1089,7 +1089,7 @@ Proposed host delivery is a completion registry/queue addressed by protected han
 Host draining emits at most one terminal completion record per live pending registration; a lost/coalesced wake must not lose the retained outcome.
 Registering/inspecting completion and arming a wait must prevent the classic check-then-sleep lost wakeup; poll remains authoritative if the host delays delivery.
 Queue pressure must not silently drop terminal outcomes: reserve admission/retention capacity, use a bounded indexed registry, or reject new work explicitly before acknowledgement.
-The indexed representation, reservation/consumption rules and wait predicate are specified by the milestone-5 closure; the 2026-10-23 R6 decision makes configured ceilings optional without weakening those rules.
+The indexed representation, reservation/consumption rules and wait predicate are specified by the milestone-4 closure; the 2026-10-23 R6 decision makes configured ceilings optional without weakening those rules.
 
 Drain/delivery is host-owned and serialised for a subscription; the core never invokes a host callback inline from submission, task completion or cancellation.
 A callback adapter, if added, runs only while the host explicitly dispatches records, outside internal locks and with callback argument/result leases held through return.
@@ -1136,14 +1136,14 @@ Delivery obligations for live registered handles remain observable through the s
 The owner/destruction rules below distinguish scheduler shutdown from the last external result lease without adding a public destroy operation.
 Blocking shutdown from inside a dispatch callback cannot wait for that same callback to return; request shutdown there and observe completion after unwinding.
 
-### Milestone 5: Task Attempts and Publication
+### Milestone 4: Task Attempts and Publication
 
 An analysis candidate has `CaptureKey = K("execution-capture", [SessionID, ProviderFrontier, canonical_selected_members, milestone_ASCII])`.
 `canonical_selected_members` is the canonical value of the exact ordered selected-document bindings, including source/absence/context and consistency evidence, not only a document-name list or hash.
 At admission, a matching pending or successfully published candidate can be joined; a failed/superseded/cancelled candidate is not an implicit retry.
 Joining an already published candidate resolves the new ticket and, if it is the current head target/frontier, installs its head at that same admission transition; it does not wait for a nonexistent new worker completion.
 An explicit later `RequestAnalysis` may create a fresh candidate for the same capture after terminal failure, with a fresh `WorldID` and task stamps.
-Allocate a new candidate's `WorldID` before publication under the milestone-4 allocator; that internal identity grants no readable `WORLD` handle or published-head status.
+Allocate a new candidate's `WorldID` before publication under the milestone-3 allocator; that internal identity grants no readable `WORLD` handle or published-head status.
 
 `TaskKey = K("execution-task", [SessionID, WorldID, task_kind_ASCII, canonical_task_descriptor])`.
 The initial task kinds are `PARSE_INDEX` and `QUERY_PAYLOAD`; the descriptor binds exact document/source/context, producer/schema tuple and query kind where applicable.
@@ -1155,7 +1155,7 @@ Initial semantic/evaluator query kinds still return `UNSUPPORTED` before either 
 `AttemptStamp` is `{session:SessionID, world:WorldID, task_key:bytes, slot:u64, generation:u64, attempt:u64}`.
 `task_key` is the complete canonical key; `slot`/`generation` identify the live task record, not a public handle, and `attempt` is a positive checked counter local to that allocation.
 Start `generation`/`attempt` at 1; advance `attempt` before a permitted replacement dispatch, never reuse it, and retire the task allocation on exhaustion rather than wrap.
-A fresh allocation uses a fresh nonreassigned slot/generation association; milestone-4 generation retirement rules apply.
+A fresh allocation uses a fresh nonreassigned slot/generation association; milestone-3 generation retirement rules apply.
 Replacing a running attempt is not allowed until that producer returned or acknowledged stop, so retries cannot create an unbounded tail of abandoned workers/mailboxes.
 The initial profile does not silently retry failures: a later explicit request can establish a new attempt/candidate after the old producer is safe, while previously observed terminal outcomes stay terminal.
 Task phases are `WAITING_INPUTS. | READY. | RUNNING. | STOP_REQUESTED. | TERMINAL. | REAPED`; a prerequisite failure can terminate `WAITING_INPUTS` without worker dispatch.
@@ -1195,14 +1195,14 @@ Required consumers and shared waiters cannot keep obsolete computation running a
 Keep its mailbox, inputs, scratch, task reservation and owner pins charged until safe producer/cleanup completion; reject and release any late payload exactly once without replacing the cancellation outcome.
 
 Every still-pending waiter attached to that shared work receives one terminal `CANCELLED {reason:WORLD_SUPERSEDED}` through ordinary poll/wait/completion delivery.
-Store intents protecting accepted source/recovery are independent of these compute-task cancellations and retain their milestone-6 commit/coalescing obligations.
+Store intents protecting accepted source/recovery are independent of these compute-task cancellations and retain their milestone-5 commit/coalescing obligations.
 This tells each client to decide whether to submit a fresh request against an explicitly acquired current world, wait, or abandon the request; do not automatically reissue, rebind or transfer old waiters to a successor task.
 If `CALLER` or successful completion won before the source commit, preserve that already terminal observation; a later world change does not rewrite it.
 If supersession won first, a subsequent `CancelWaiter` returns the existing `ALREADY_TERMINAL` observation, preserving `WORLD_SUPERSEDED` rather than relabelling it `CALLER`.
 New queries against a retained obsolete world may acquire already available protected results, but requests needing fresh work return `WORLD_SUPERSEDED` cancellation without scheduling/joining a task or registering a pending waiter.
 Current-world `CancelWaiter` remains waiter-specific even when several clients share one task; cancellation must never be inferred from a UI label or implemented by stopping that shared producer while another current consumer needs it.
 
-### Milestone 5: Delivery, Cancellation and Progress
+### Milestone 4: Delivery, Cancellation and Progress
 
 Completion storage is a bounded index of reserved `WAITER` entries, not a dynamically growing message stream.
 Each entry owns its generation-checked registration link, terminal-ready flag, `delivered` flag and intrusive ready-list link; its immutable terminal observation/backing is separately protected by the waiter owner.
@@ -1256,7 +1256,7 @@ An indivisible parser/foreign call may only observe stop when it returns; the sc
 Optional store work and synchronous provider hooks have their own registered return/stop ownership; they cannot block the compute worker waiting for host dispatch.
 The single compute worker never waits on a task queued behind itself: suspend `WAITING_INPUTS` and dispatch its ready prerequisite instead; all initial parse inputs are already protected before becoming ready.
 
-### Milestone 5: Shutdown and Final Ownership
+### Milestone 4: Shutdown and Final Ownership
 
 The first reserved shutdown request publishes one shutdown operation and changes lifecycle at the same transition that rejects new submissions/analysis/queries/`ObserveTicket` registrations.
 Already available `WORLD`/`RESULT` access, `Poll`/`Wait`, `CancelWaiter`, bounded drain, `AcquireWorld` from surviving publication, `AcquireResult`, `Retain`, `Release`, `DescribeSession` and repeated shutdown observation remain supported under ordinary limits.
@@ -1267,7 +1267,7 @@ No provider callback may revive a retired registration or admit source work afte
 Preserve every existing terminal observation; terminally cancel unfinished update/query interests with `SHUTDOWN`, remove their queued tasks and request cooperative stop of running producers.
 Keep accepted source state and published payloads intact; cancellation of an update milestone is not reset/discard or a persistence acknowledgement.
 Detach acquisition/watch ingress under the registered adapter's no-future-entry protocol, retaining a producer pin for every already entered call until return/acknowledged detachment.
-The initial provider boundary admits only the synchronous hooks specified in milestone 3; no unstated asynchronous callback source is registered by this profile.
+The initial provider boundary admits only the synchronous hooks specified in milestone 2; no unstated asynchronous callback source is registered by this profile.
 An adapter unable to establish safe detachment cannot report that ingress stopped; shutdown remains pending rather than freeing its completion sink.
 After closing ingress and recording stop/terminal intents, enter `DRAINING`; internal shutdown/cleanup/store-finalisation steps may progress there, but ordinary compute dispatch does not resume.
 
@@ -1283,7 +1283,7 @@ Deadline expiry changes none of these predicates; a stuck producer leaves `DRAIN
 There is no forced thread termination, unsafe detach, implicit compiler launch or false durable-success fallback in this profile.
 
 Store finalisation may report `DISABLED`/`DEGRADED` and a bounded aggregate service diagnostic; only genuinely confirmed persistence progress enters `acknowledged_frontier`.
-Durable flush/reset/discard and store-lane stop primitives remain the milestone-6/R2/R6 contract, not a new guarantee derived from `STOPPED`.
+Durable flush/reset/discard and store-lane stop primitives remain the milestone-5/R2/R6 contract, not a new guarantee derived from `STOPPED`.
 Failure to finish a still-running store call remains pending shutdown; a returned store failure is a truthful degraded status and does not revoke surviving source/result leases.
 
 The session owner has a surviving control lifetime distinct from the stopped scheduler and released `SESSION` registration.
@@ -1318,13 +1318,13 @@ Each trace must run both winning orders, the delayed-producer/host case and its 
 | X7: Shutdown racing submission. | Order submissions around quiescing, run repeated shutdown, and attempt duplicate/late completions.  Every accepted request gets a truthful observable outcome; new work rejects and preserved result leases remain readable/releasable after stopped. | Barrier submissions and provider re-entry around quiescing; compare every acknowledged source frontier/ticket against a separate acceptance ledger.  Join an already published candidate, reorder older candidate completion, release `SESSION` after `STOPPED` and read/release retained child payloads. | A post-quiesce commit, old-head overwrite, published-join ticket left pending, restarted shutdown operation or destruction with live children is rejected. |
 | X8: Worker outlives deadline. | Hold a worker/provider operation beyond a shutdown wait deadline, then allow it to stop.  Report incomplete shutdown initially, preserve protected inputs/completion sink, and enter stopped only after safe termination without use-after-free or false durable-success status. | Fake monotonic deadlines and hold provider/compute/store completion beyond expiry, with no host polling to drive shutdown; an independent liveness/allocator ledger observes `DRAINING` and live pins, then completion, worker join, `STOPPED` and final release. | Timeout-as-stop, self-join, dependence on host drain, premature owner/provider release or an unconfirmed durable frontier fails. |
 
-### Milestone 5: Closure and Review Checks
+### Milestone 4: Closure and Review Checks
 
-Milestone 5 is complete as a draft execution and ownership specification on 2026-10-22.
+Milestone 4 is complete as a draft execution and ownership specification on 2026-10-22.
 It closes the fifteen-call ordering map, nonrecursive state-gate boundary, full-key task/capture/attempt checks, reservation/cleanup protocol, indexed delivery/wait predicate, host-helper re-entry, current-world queued-discard/running-finish policy, required FIFO progress, independently driven shutdown and surviving-owner destruction.
 The 2026-10-23 cancellation clarification adds task-wide obsolete-world cooperative stop and `WORLD_SUPERSEDED` outcomes for all still-pending query waiters, distinct from waiter-local `CALLER` stop; producer safety and already terminal results remain unchanged.
 The one-compute-worker/reaper baseline and policies are proposals for detailed R4 review, not claims added to the 2026-10-21 direction approval.
-X1-X8 above carry its discriminating controls; milestone 7 consolidates the requirement/workload/oracle draft.
+X1-X8 above carry its discriminating controls; milestone 6 consolidates the requirement/workload/oracle draft.
 
 Required detailed review remains: native mutex/condition/thread/reaper/allocator bindings and minimum reservation sizing, actual provider ownership/stop compliance, R6 finite ceilings, R2/R6 store-lane/finalisation policy and the exact public API/profile approval.
 Unsupported async provider ingress, semantic/evaluator work, callback core delivery, parallel compute, cross-session sharing and forced thread termination gain no capability from this closure.
@@ -1425,7 +1425,7 @@ These are future executable source-provider cases for C1/C2/C5, not tests alread
 | V7: Capture lifetime. | Close/reset a host buffer and release acquisition callback storage while an old capture is leased.  Published bytes remain exact; an adapter unable to protect them must have copied/rejected before acknowledgement. |
 | V8: Provider failure and stop. | Race delayed provider completion with permission failure, cancellation and shutdown.  Return truthful outcomes, reject obsolete completion tokens and keep inputs alive until safe stop; never execute source or write editor files. |
 
-The milestone-3 closure below specifies provider schemas/capability admission, namespace/path bindings, finite captures, transaction grammar, host attestations and checked limit negotiation.
+The milestone-2 closure below specifies provider schemas/capability admission, namespace/path bindings, finite captures, transaction grammar, host attestations and checked limit negotiation.
 Resolver discovery remains explicitly unsupported in this initial interface.
 Real adapter/host guarantees and executable qualification remain open; no document schema proves filesystem/editor atomicity.
 No source-capture trace is marked passed here; policy/scope/performance approvals, production implementation and the migration-plan gate remain open.
@@ -1434,7 +1434,7 @@ No source-capture trace is marked passed here; policy/scope/performance approval
 
 Drafted 2026-10-20.
 The fifteen-operation interface is the approved specification baseline (2026-10-21), subject to exact schemas and API review.
-This makes the source/update/query portion concrete under R1 and R3-R5; the milestone-3 closure fixes logical signatures, values and bounds.
+This makes the source/update/query portion concrete under R1 and R3-R5; the milestone-2 closure fixes logical signatures, values and bounds.
 Native ABI review remains open.
 The notation below is a logical tagged-record schema, not Jai source or a persistent memory layout.
 Outer request/session records carry the interface schema version, inherited by nested records; unknown versions/tags are rejected before accepting work, never interpreted as an empty successful operation.
@@ -1485,7 +1485,7 @@ Diagnostic emission, declaration-event order, related messages and source-visibl
 Any canonical captured member table is built from the validated transaction's resulting selection, not by reordering or replaying the transaction differently.
 
 An invalid/duplicate/foreign member rejects the whole analysis request before task/ticket acceptance; it neither changes the provider frontier nor publishes the valid subset as a successful aggregate.
-The milestone-3 `Limits` contract requires explicit `capture_documents` and `elements_per_list` ceilings before allocating/sorting; their absolute host values remain an R6 policy input, not a default chosen here.
+The milestone-2 `Limits` contract requires explicit `capture_documents` and `elements_per_list` ceilings before allocating/sorting; their absolute host values remain an R6 policy input, not a default chosen here.
 
 The discriminating future cases compare `[A, B]` with `[B, A]` at one frontier and reject `[A, A]`: the first pair has equal logical membership but distinct caller registrations, while the duplicate request admits no partial work.
 Additional independent cases cover equal source bytes in distinct documents, provider-qualified aliases, digest-collision safeguards, foreign identities, worker completion permutations and sequential source edits whose order must not change.
@@ -1496,7 +1496,7 @@ This draft selects no path-alias policy or new shared-task key format.
 
 Proposed 2026-10-21 under the approved specification baseline; not final API, persistent wire grammar or implementation approval.
 The following defines equality and hash-input bytes independently of Jai struct padding, native pointers and text-file formatting.
-The milestone-3 closure supplies logical provider and node/value records; milestone 4 supplies live namespace allocation/continuity and conservative semantic identity matching.
+The milestone-2 closure supplies logical provider and node/value records; milestone 3 supplies live namespace allocation/continuity and conservative semantic identity matching.
 Adapter/API approval and executable qualification remain separate.
 No store defaults or resource budgets are selected here.
 
@@ -1512,7 +1512,7 @@ This is a canonical fingerprint input, not a replacement for the proposed versio
 | Namespace token. | Nonempty opaque bytes issued by its responsible owner, compared byte-for-byte without Unicode normalisation, case folding or separator rewriting.  The adapter must bind the token to one authority/configuration and never reassign it to a different one while references/recovery records can survive.  An unverified binding is rejected or assigned a fresh namespace, not guessed from a display path. |
 | `WorkspaceID`. | `K("workspace", [host_namespace, workspace_token])`.  The host decides whether a reopened workspace has the same identity; cache discovery cannot choose it.  Shared project paths do not implicitly merge separate workspaces. |
 | `DocumentID`. | `K("document", [provider_namespace, document_policy_version, provider_document_key])`.  The provider registers the resolved absolute-path binding and its alias/case/link policy; the service does not independently lowercase or resolve it.  Source-visible path/directory spelling remains separate context input.  Deletion/reappearance preserves or changes this key only according to the declared provider policy. |
-| `SessionID`. | `K("session", [service_incarnation_namespace, session_token])`, issued by the service.  The incarnation namespace is never reassigned while old references/records can survive; session tokens are not reused within it.  Neither is derived from workspace/path/content; owner routing is validated before slot lookup.  Restart creates a new incarnation and rejects every old handle even if persisted workspace/document keys match.  Milestone 4 specifies the reserved-epoch/checked-counter allocator; issuer qualification and API review remain open. |
+| `SessionID`. | `K("session", [service_incarnation_namespace, session_token])`, issued by the service.  The incarnation namespace is never reassigned while old references/records can survive; session tokens are not reused within it.  Neither is derived from workspace/path/content; owner routing is validated before slot lookup.  Restart creates a new incarnation and rejects every old handle even if persisted workspace/document keys match.  Milestone 3 specifies the reserved-epoch/checked-counter allocator; issuer qualification and API review remain open. |
 | `ProviderRevision`. | `K("provider-revision", [provider_namespace, session_identity, document_identity, provider_state_token])`.  A token identifies one accepted combined disk/overlay state, not just selected bytes.  The provider cannot reuse it for a different state; rejected batches do not install a new token. |
 | `ProviderFrontier`. | `K("provider-frontier", [provider_namespace, session_identity, frontier_token])`.  The coordinator records the accepted-event order; token bytes/digests are not lexicographic clocks.  Retry analysis leaves the frontier unchanged, and a rejected transaction creates no accepted successor. |
 | `SourceRevision`. | `K("source", [source_key_version_u32, byte_count_u64, SHA256(exact_source_bytes)])`, with source-key version `1`.  Exact bytes remain the authority; collision ambiguity rejects affected reuse rather than merging different sources.  Equal empty/present sources can share this value across documents, but confirmed absence has no source revision.  No BOM stripping, newline conversion, decoding or trailing-NUL insertion is part of identity. |
@@ -1585,7 +1585,7 @@ Do not perform filesystem I/O merely to compare context descriptors, or compare 
 
 Registry/binding review cases to implement later: toggle each of the five module parameters; change producer/schema/profile; preserve bytes while changing visible alias/base/encoding; reject unknown fields, invalid boolean/path encodings and conflicting document bindings; restart with confirmed versus unconfirmed namespace continuity; reject one bad context in a multi-document batch with no partial admission.
 These refine C1/C2, T2/T5 and V1/V4/V5 without qualifying any adapter or executing semantic evaluation.
-Exact payload projection, provider-policy alternatives, access signatures and admission-bound negotiation are supplied by the milestone-3 closure below.
+Exact payload projection, provider-policy alternatives, access signatures and admission-bound negotiation are supplied by the milestone-2 closure below.
 
 All three supported query payloads use a versioned envelope `{payload_schema, world_identity, document, source_revision, context, completeness, data}`.
 Identity bindings must equal the `ResultDescription` and the selected present member of the queried world; `completeness` must agree with the result description under the kind-specific rules below.
@@ -1605,7 +1605,7 @@ Source bytes and spelled-name bytes preserve exact parser input slices; producer
 Neither byte domain is required to be valid UTF-8 for this interface.
 Any line/column or editor UTF-16 conversion belongs to an explicit adapter mapping for the same source revision; byte ranges never silently become character indices.
 The existing syntax payload must preserve malformed/incomplete-source observations under C1 even where a diagnostic/index presentation needs an explicit unavailable field.
-The logical optional/tag records below and the milestone-3 snapshot projection are drafts for review, not an implemented wire format or qualified adapter.
+The logical optional/tag records below and the milestone-2 snapshot projection are drafts for review, not an implemented wire format or qualified adapter.
 
 #### Query Schema Selection and No-Fallback Binding
 
@@ -1638,7 +1638,7 @@ Such support requires its own exact registered mapping and qualification; a vers
 The discriminating future case queries declaration-index/2 in a world whose diagnostic profile uses diagnostic/1: return each exact admitted schema, and reject an unsupported tuple without guessing a fallback.
 Additional independent cases cover interface-versus-payload version confusion, changed advertised session capabilities with a retained old world, mismatched token/node/recovery registries, unknown envelope fields and a stored legacy index with unchanged source bytes.
 Assert exact context/envelope bindings, unsupported-versus-failed outcomes and retained old-result access.
-The milestone-3 closure supplies the snapshot schema and public accessor signatures.
+The milestone-2 closure supplies the snapshot schema and public accessor signatures.
 Implemented registry/compatibility validation and executable retained-schema qualification remain open.
 
 #### Syntax-Index Milestone and Per-Query Readiness
@@ -1673,8 +1673,8 @@ In particular, a failed optional cache write does not make syntax/index publicat
 The discriminating future case finishes two requested documents out of order, one with a valid partial index: publish only after both required indices/backing are valid, preserving partial coverage, then allow independently delayed query packaging without changing that world.
 Additional independent cases cover confirmed absence versus unknown source, required conversion/allocation failure after source acceptance, unsupported milestone admission, malformed-source parse statuses, query cancellation and optional diagnostic-presentation/store failures after publication.
 Assert exact ticket/query outcomes, requested-member bindings, immutable coverage/summaries and absence of deferred required index work.
-The milestone-3 closure supplies API signatures and explicit retention-bound inputs.
-The scheduling draft is supplied by milestone 5; optional R6 quotas, effective technical bounds and real concurrent implementation tests must respect the 2026-10-23 no-fixed-quota decision.
+The milestone-2 closure supplies API signatures and explicit retention-bound inputs.
+The scheduling draft is supplied by milestone 4; optional R6 quotas, effective technical bounds and real concurrent implementation tests must respect the 2026-10-23 no-fixed-quota decision.
 
 #### Whole-Document Queries and Caller-Side Selections
 
@@ -1718,7 +1718,7 @@ Existing shutdown and final-lease rules still apply.
 Provide borrowed access to the referenced backing records through the result's payload access contract, with checked kind/domain/range validation.
 A public full-snapshot query is not a prerequisite for resolving a supported index node or coverage-reason subject.
 This borrowed view does not claim that every backing record is an index declaration or that every query kind is implemented.
-Exact accessor signatures and the backing node/helper projection are supplied by the milestone-3 closure; API approval and executable backing/lifetime qualification remain open.
+Exact accessor signatures and the backing node/helper projection are supplied by the milestone-2 closure; API approval and executable backing/lifetime qualification remain open.
 Do not resolve an index node ID against whichever snapshot query most recently completed.
 A separately acquired snapshot result may use a different graph/numbering namespace even when document, source revision and context agree.
 Only an explicit validated association can establish shared backing internally; it does not make bare numeric IDs portable between result envelopes or relax the result-local reference contract.
@@ -1793,7 +1793,7 @@ It distinguishes malformed source from an incomplete payload conversion, without
 The discriminating future case completes an index query with `PARTIAL_SYNTAX_TRAVERSAL`: `Available`, description completeness, envelope completeness and inner coverage must all agree, while parse status and world membership retain their independent values.
 Additional independent cases cover an incomplete parse with fully preserved diagnostics, zero diagnostics, empty complete/partial indices, wrong-kind arms, mismatched/reordered reasons, cancelled publication and attempted snapshot/diagnostic truncation.
 Assert the exact outcomes and immutable outer/inner values against independent expectations.
-The milestone-3 closure supplies detailed signatures, snapshot-schema projection and required numeric-limit negotiation.
+The milestone-2 closure supplies detailed signatures, snapshot-schema projection and required numeric-limit negotiation.
 Concrete R6 values, API approval and release qualification remain open.
 
 #### Diagnostic Origins and Declaration Index Records
@@ -1927,7 +1927,7 @@ Shutdown observation is `PENDING {phase: QUIESCING. | DRAINING}` until terminal 
 | `Release`. | Any owned handle. | Retire that registration exactly once; subsequent uses, including double release, return `INVALID_HANDLE` without touching a new generation.  A `SESSION` may be released only after `STOPPED`; otherwise return `ACTIVE_SESSION` without retiring it.  Waiter release detaches interest, not source state; active task/delivery ownership persists until its own release. |
 | `RequestShutdown`. | Live `SESSION`. | Owned `SHUTDOWN` observation handle; repeated calls refer to the same shutdown operation through separate owned registrations.  It rejects new work at quiescing, preserves existing leases/observation/release access, and never reports stopped merely because a wait deadline elapsed. |
 
-### Milestone 3: Exact Logical Call Signatures
+### Milestone 2: Exact Logical Call Signatures
 
 The following is the closed logical interface `jai-cache-interface/1`, drafted for API review, not a machine ABI, generated Jai module or transport protocol.
 
@@ -1963,7 +1963,7 @@ These are checked handle-kind restrictions, not unchecked casts.
 The first arm requires an update ticket/waiter, not a query waiter; its surviving registration routes to its owner even after the original session registration is released.
 The second requires the named live session and its workspace; there is no implicit process-wide current workspace/head.
 
-The exact response records, payload access family, adapter descriptors, canonical value grammar and checked bound negotiation are specified by the milestone-3 closure below.
+The exact response records, payload access family, adapter descriptors, canonical value grammar and checked bound negotiation are specified by the milestone-2 closure below.
 They refine this unimplemented draft and do not add a sixteenth scheduling/source operation.
 An implementation may expose equivalent typed Jai procedures, but must not change ownership, invent success defaults, or claim binary ABI compatibility from this notation.
 Disk serialisation, store policy defaults, scheduling policy and semantic query implementation remain their separate milestones.
@@ -1977,7 +1977,7 @@ Polling/draining is deliberately non-owning to avoid hidden lease growth in a UI
 No handle survives a process restart, and shutdown never turns an externally retained result into a borrowed pointer to destroyed service state.
 After releasing a stopped `SESSION`, already owned child handles remain observable/releasable through their surviving owner; no operation may require borrowing the released session handle to keep a result alive.
 
-### Milestone 3: Response Catalogue and Borrowed Access
+### Milestone 2: Response Catalogue and Borrowed Access
 
 The records in this section complete the call signatures above.
 Record field order is the order written here; unions have exactly the listed arms, including explicit empty arms.
@@ -1985,7 +1985,7 @@ Record field order is the order written here; unions have exactly the listed arm
 `Optional(T)` retains the previously defined `NONE. | SOME {value:T}` convention.
 
 `WorldID`, `ResultID` and `OperationID` mean the distinct session-scoped world/result/operation identities already specified, not new handle kinds.
-Their canonical recipes are respectively `K("world", [SessionID, token])`, `K("result", [SessionID, token])` and `K("operation", [SessionID, token])`, with a nonempty service-issued token never reassigned within its typed session domain; milestone 4 specifies allocation/continuity mechanics, with implementation qualification still open.
+Their canonical recipes are respectively `K("world", [SessionID, token])`, `K("result", [SessionID, token])` and `K("operation", [SessionID, token])`, with a nonempty service-issued token never reassigned within its typed session domain; milestone 3 specifies allocation/continuity mechanics, with implementation qualification still open.
 
 `QueryKind` has the five tags listed in `QueryRequest`, in that registry order.
 
@@ -2046,7 +2046,7 @@ It is neither wall time nor a persisted timestamp; wrap/overflow rejects, and no
 
 `Wait` first makes the same atomic observation as `Poll`; a terminal outcome already visible is returned even for an expired deadline.
 Otherwise, expiry returns `TIMED_OUT_PENDING` without changing work/registration state.
-Host dispatch-thread suitability and actual wait primitives remain milestone 5, not a promise that blocking a host thread is safe.
+Host dispatch-thread suitability and actual wait primitives remain milestone 4, not a promise that blocking a host thread is safe.
 
 The following read-only accessor family is part of payload interpretation, not additional source/scheduling operations.
 It performs no provider read, parsing, registration, waiting or implicit retain:
@@ -2074,7 +2074,7 @@ Out-of-range slices/IDs return `INVALID_ARGUMENT`; unknown/wrong-kind/released h
 `ReadSource` accepts zero-width slices through exact-source length.
 No public deep-copy API or mutable field accessor is implied; a host copy must include/translate all referenced backing as already required.
 
-### Milestone 3: Provider Admission and Bounded Values
+### Milestone 2: Provider Admission and Bounded Values
 
 The provider schema identifier is ASCII `jai-cache-source-provider/1`.
 
@@ -2167,7 +2167,7 @@ It is accepted only from the registered authoritative host channel and must matc
 
 Tokens are nonempty, action-bound attestations, not user-interface prompts issued by the cache or proof inferred from a recovery file.
 
-`RecoveryCandidateRef` is `{store_namespace:bytes, candidate_key:bytes, source_revision:SourceRevision}` issued by the supported store reader; candidate-key bytes are opaque to this API and interpreted only by the milestone-6 store schema.
+`RecoveryCandidateRef` is `{store_namespace:bytes, candidate_key:bytes, source_revision:SourceRevision}` issued by the supported store reader; candidate-key bytes are opaque to this API and interpreted only by the milestone-5 store schema.
 
 No path or live handle is reconstructed from them.
 - `ACK_SAVE.expected_overlay_revision` is the `ProviderRevision` of the event that installed that overlay, not its content `SourceRevision` or the latest combined disk/overlay state.
@@ -2211,7 +2211,7 @@ Its lifecycle is `OPEN. | QUIESCING. | DRAINING. | STOPPED`.
 `SessionOptions.store_policy` is `{policy_schema:bytes, policy_key:bytes}` identifying explicit host configuration resolved by the registered store-policy implementation.
 Missing required policy returns `ADMISSION_DENIED`/`CONFIGURATION_REQUIRED`; unknown policy schemas return `ADMISSION_DENIED`/`CAPABILITY`.
 This API cannot interpret an opaque key as a path or choose persistence defaults.
-Required source/recovery persistence (R2) and the exact store configuration/grammar (milestone 6) are unchanged.
+Required source/recovery persistence (R2) and the exact store configuration/grammar (milestone 5) are unchanged.
 
 #### Required Limit Negotiation
 
@@ -2252,7 +2252,7 @@ The service checks count multiplication, length-prefix additions, sequential edi
 Two individually valid values can still exceed request/aggregate limits.
 Validate cheap structural/version/base checks before provider acquisition, reserve the complete admission bookkeeping and stage ownership, then revalidate the authoritative base before one commit.
 Reserve completion capacity before creating a pending waiter; a later full queue cannot drop its only terminal record.
-Shutdown/cleanup must remain possible at the handle/resource ceiling through the milestone-5 reservation protocol, including its charged first shutdown slot/operation/reaper and fixed cleanup capacity; this is not an exception that permits unbounded allocation.
+Shutdown/cleanup must remain possible at the handle/resource ceiling through the milestone-4 reservation protocol, including its charged first shutdown slot/operation/reaper and fixed cleanup capacity; this is not an exception that permits unbounded allocation.
 Failure before commit is `ADMISSION_DENIED`/`LIMIT` or `RESOURCE_EXHAUSTED` and changes no source/frontier.
 A post-admission limit failure is `FAILED` with `RESOURCE_LIMIT`, never a successfully truncated snapshot/diagnostic payload or a partial index missing records solely because of pressure.
 A bounded emergency failure record must not depend on allocating an unbounded diagnostic string.
@@ -2264,7 +2264,7 @@ This schema has no limit-changing operation.
 Optional host quotas, effective technical ceilings and resource failures must be documented/enforced in both modes; no fixed production RAM/disk budget is selected.
 Cross-workspace sharing/history details remain for review; the default all-available policy does not approve those separate choices.
 
-### Milestone 3: Canonical Values and Snapshot Records
+### Milestone 2: Canonical Values and Snapshot Records
 
 `InterfaceVersion` is exactly ASCII `jai-cache-interface/1`.
 Version is explicit on outer session/request/batch/query records and inherited by nested records; it is not duplicated into every span/array element.
@@ -2272,7 +2272,7 @@ Unknown versions, fields, tags and trailing data reject the selected schema.
 There is no implicit latest version, optional-field elision, lossy converter or open extension map.
 A change to field order/type, enum registry, active guard, ownership or meaning requires a new schema identifier and an explicitly reviewed compatibility mapping.
 Previously retained results keep their admitted schema/access contract.
-This specifies logical values and canonical descriptor/fingerprint bytes, not a network transport, native layout or the milestone-6 text-file format.
+This specifies logical values and canonical descriptor/fingerprint bytes, not a network transport, native layout or the milestone-5 text-file format.
 
 For canonical values not already assigned a specific K recipe, define `V(schema, value)` by the following grammar.
 K and B retain their exact earlier definitions; these rules do not rewrite existing source/path/context key recipes.
@@ -2306,7 +2306,7 @@ In-memory implementations may avoid materialising V/K buffers but must compare/h
 Source is exactly the envelope's revision bytes.
 
 Its node schema is `jai-cache-authored-nodes/1`, source token schema is `jai-cache-source-tokens/1`, recovery schema is `jai-cache-recovery/1`, and all four bind to the admitted `SchemaTuple`.
-The initial whole-document service uses the registered `FILE` root; the six parser entrypoints audited in milestone 2 are not six implicit `QueryRequest` root selectors.
+The initial whole-document service uses the registered `FILE` root; the six parser entrypoints audited in milestone 1 are not six implicit `QueryRequest` root selectors.
 A root of `-1` records a safely retained failed parse, never a fabricated empty file node; a nonnegative root is a checked local node ID, and values below `-1` reject.
 Materialised token IDs follow lexer order including EOF; node IDs follow first registered owning-edge encounter; helper IDs follow first active helper-field encounter.
 Each domain is dense zero-based `u64` and independent of every other domain.
@@ -2317,12 +2317,12 @@ Inline/by-value helpers have distinct helper occurrences, not extra node identit
 Neither record authorises dereferencing invalid token indices.
 
 Only qualified origin mapping produces `SOME`.
-`MAPPED` kind is exactly a named published kind in the milestone-2 50-layout registry plus base `DIRECTIVE_THIS`; compiler-only kinds are not additional supported syntax variants.
+`MAPPED` kind is exactly a named published kind in the milestone-1 50-layout registry plus base `DIRECTIVE_THIS`; compiler-only kinds are not additional supported syntax variants.
 `OPAQUE` is permitted only in the safe backing of a partial derived result, with its required coverage reason and no unqualified child/scalar reads.
 An exact `SYNTAX_SNAPSHOT` contains no `OPAQUE` records; encountering an unrepresentable active kind/field fails that conversion, not a falsely exact snapshot.
 
 `HelperRecord` is `{local_helper_id:u64, layout:bytes, fields:[]FieldObservation}`.
-Its layout is one of the active non-node helper layouts in the milestone-2 auxiliary/shared-record inventory; assembly helpers retain their full `Parser_Asm_`* layout names.
+Its layout is one of the active non-node helper layouts in the milestone-1 auxiliary/shared-record inventory; assembly helpers retain their full `Parser_Asm_`* layout names.
 
 Structural base/entry/compiler-overlay embeddings flatten into the same node's qualified field paths and do not allocate helper IDs.
 Pointer-literal null has the dedicated `SOURCE_NULL` scalar arm below, not a serialised compiler pointer helper.
@@ -2334,7 +2334,7 @@ Paths are nonempty qualified field paths from that node/helper's registered layo
 `FieldPath` in operation errors is an alias for `[]PathStep`, using the same `FIELD`/`ELEMENT` arms already specified for [coverage reasons](CACHE_SYNTAX_REGISTRY.md#structured-coverage-reasons-and-consumer-guarantees).
 Field observations are unique and sorted by complete canonical path bytes; this representation order does not replace the separately registered authored child traversal order.
 Base kind/location/token-span observations already in the node header are not duplicated as fields.
-M2's per-layout/shared/helper field tables define the exact required paths, active guards, owning edges, aliases, scalar domains and excluded fields; the field projection is normative reuse of that registry, not a fresh walk over every public compiler field.
+M1's per-layout/shared/helper field tables define the exact required paths, active guards, owning edges, aliases, scalar domains and excluded fields; the field projection is normative reuse of that registry, not a fresh walk over every public compiler field.
 Changing those tables changes this schema and must revise its binding.
 
 `FieldValue` is exactly `INACTIVE`, `BOOL {value:bool}`, `SIGNED {value:s64}`, `UNSIGNED {value:u64}`, `FLOAT64_BITS {bits:u64}`, `BYTES {value:bytes}`, `TOKEN_TAG {value:TokenTag}`, `ENUM {domain:bytes, name_ascii:bytes}`, `FLAGS {domain:bytes, names:[]bytes}`, `NODE {local_node_id:s64, relationship:OWNED|ALIAS}`, `HELPER {local_helper_id:s64}`, `LIST {elements:[]FieldValue}`, `TOKEN_SPAN {value:TokenSpan}`, or `SOURCE_NULL`.
@@ -2382,11 +2382,11 @@ Names are sorted by unsigned ASCII bytes with no duplicates; an empty set is exp
 Native named bits map by those exact names under the verified SDK; four compatibility names map explicitly to parser constants: `LITERAL`/`SIGNIFICANT_DIGITS` = `0x400`, `CODE`/`CALLER_CODE` = `0x4`, `IMPORT`/`SOURCE_PATH` = `0x4`, `RUN`/`HOST` = `0x10`.
 
 The lexer token `Value_Flags` mask remains its separate `0x1070001F` domain.
-Known semantic/generated bits classified out by the M2 registry are excluded, not copied into source flags; an otherwise unknown bit or an unsupported source bit fails conversion rather than being silently discarded.
+Known semantic/generated bits classified out by the M1 registry are excluded, not copied into source flags; an otherwise unknown bit or an unsupported source bit fails conversion rather than being silently discarded.
 A name being in this registry does not prove it is active in every producer route.
 This is conservative source projection, not acceptance of compiler-processed nodes or instrumenting a missing parser path.
 
-Guarded aliases encode `NODE`/`ALIAS` only under the six M2 alias rules; other backreferences are absent.
+Guarded aliases encode `NODE`/`ALIAS` only under the six M1 alias rules; other backreferences are absent.
 Owning edges are acyclic and in range; permitted alias cycles do not become traversal edges.
 Conflicting IDs, unsafe pointers or unregistered active helpers fail conversion.
 
@@ -2416,14 +2416,14 @@ Raw token spans/indices retain observations even when not valid source maps, whi
 
 Diagnostic counts, order and recovery relationships agree with the protected producer; a well-owned fatal parse can still have available observations.
 
-The three envelope schemas and backing resolvers are now fixed by these records plus the existing diagnostic/1, declaration-index/2, token, origin, coverage and M2 field registries.
+The three envelope schemas and backing resolvers are now fixed by these records plus the existing diagnostic/1, declaration-index/2, token, origin, coverage and M1 field registries.
 An implementation lacking one mapping must truthfully reject its tuple/query or fail the affected conversion; partial declaration coverage cannot launder an inexact snapshot.
 Full snapshot access is not required for an independently supported partial index with safe `OPAQUE` backing.
 Executable producer round trips, adapter observation correlation and lifetime/concurrency qualification remain future implementation work.
 
-### Milestone 3: Closure and Review Checks
+### Milestone 2: Closure and Review Checks
 
-Milestone 3 is complete as a draft logical API/source/payload specification on 2026-10-22.
+Milestone 2 is complete as a draft logical API/source/payload specification on 2026-10-22.
 The fifteen scheduling/source operations, six read-only accessors, response/error catalogue, six-event transaction grammar, provider and syntax-adapter admission, node/helper/token/recovery projections, canonical value encodings, nineteen effective bound fields and optional quota requests are specified above.
 This is not final API approval, a native ABI, a store format, an adapter implementation or production qualification.
 The 2026-10-23 R2/R6-R8 decisions select location/enablement/recovery/no-history/exclusive-ownership/resource policy and measurement-first/external-assumption boundaries; whole-contract approval stays pending.
@@ -2447,7 +2447,7 @@ World identity remains distinct from configuration, document context and provide
 | Resolve every derived-result reference after releasing producer/world/snapshot siblings; inject cross-domain IDs, unknown flags, unsafe helpers and unmappable message bytes. | C1/C5, T6, X1-X3.  Exact snapshot/diagnostic conversion fails truthfully; safe partial index backing does not claim exact capture. |
 
 Document-only catalogue/source checks validate that these definitions are present and consistent; they do not execute these future acceptance cases.
-Milestones 4-7 supply separate identity/deferred-semantic, execution/ownership, store and complete acceptance-mapping drafts; milestone 8 owns cross-contract review/sign-off, not automatic implementation approval.
+Milestones 3-6 supply separate identity/deferred-semantic, execution/ownership, store and complete acceptance-mapping drafts; milestone 7 owns cross-contract review/sign-off, not automatic implementation approval.
 Migration and implementation require separate authorisation.
 No pending policy, qualification checkbox or release claim is completed by this closure.
 
@@ -2474,8 +2474,8 @@ Release observation handles and stopped session when no longer needed
 ```
 
 This protocol refines V5/V6 for first admission and retry, X7/X8 for open/shutdown ownership, and T8 for known unsupported capabilities without adding a claim that those tests pass.
-Milestone 3 supplies record limits and session-option validation.
-Milestone 4 supplies identity allocation.
+Milestone 2 supplies record limits and session-option validation.
+Milestone 3 supplies identity allocation.
 Optional host quotas and tests of our issuer/concurrent adapters remain implementation work; no fixed resource budget or independent external-system certification is a prerequisite under the 2026-10-23 decisions.
 
 ### Worked Edit-to-Result Protocol
@@ -2515,12 +2515,12 @@ Use monotonic timestamps per operation/identity; correlate pending completion wi
 
 Report successful latency alongside rejection, supersession, cancellation, timeout and failure counts; dropping non-successful edit samples must not manufacture a faster tail.
 Keep memory/backing/store measurements secondary but visible, with safety and leak obligations unchanged and no numerical P1-P5 cutoff newly approved.
-Milestone 3 supplies logical operation signatures, syntax/source encodings, payload schemas and admission bounds for API review; rename is explicitly unsupported.
-The milestone-4 semantic identity/allocation draft, native ABI decisions and implementation qualification remain separate concerns; these records/tables are not executable acceptance tests.
+Milestone 2 supplies logical operation signatures, syntax/source encodings, payload schemas and admission bounds for API review; rename is explicitly unsupported.
+The milestone-3 semantic identity/allocation draft, native ABI decisions and implementation qualification remain separate concerns; these records/tables are not executable acceptance tests.
 
-### Milestone 7: Acceptance Scope and Requirement Map
+### Milestone 6: Acceptance Scope and Requirement Map
 
-Drafted 2026-10-23 against the milestone-2 through milestone-6 contracts and the [decision record](CACHE_ARCHITECTURE.md#decision-record).
+Drafted 2026-10-23 against the milestone-1 through milestone-5 contracts and the [decision record](CACHE_ARCHITECTURE.md#decision-record).
 This is an executable-test specification for a future implementation, not new passing evidence, approval of unresolved policies or authorisation to build/run the service.
 Acceptance checks our code under documented OS/provider/identity-authority assumptions, not external storage certification or performance percentages chosen before measurement.
 The approved initial scope remains syntax-first; source/recovery persistence is required, persisted AST reuse and semantic/evaluator execution are not.
@@ -2532,14 +2532,14 @@ The acceptance runner must enumerate all cases/subcases with exact contract/sche
 
 | Requirement. | Initial obligation and mapped cases. | Independent oracle and discriminating failure control. |
 | --- | --- | --- |
-| A1: Exact owned syntax. | C1/C3; T1/T5, V7 and the milestone-2 allocation/field/helper registry.  Exercise every registered supported route, token/value/flag domain, source/recovery/span/diagnostic/index field and explicit partial disposition. | An independently owned fresh parse of the same exact bytes/context plus authored structural expectations; destroy/poison producer, input and sibling backing.  A shallow alias, omitted field, wrong active union or falsely complete partial result must fail. |
+| A1: Exact owned syntax. | C1/C3; T1/T5, V7 and the milestone-1 allocation/field/helper registry.  Exercise every registered supported route, token/value/flag domain, source/recovery/span/diagnostic/index field and explicit partial disposition. | An independently owned fresh parse of the same exact bytes/context plus authored structural expectations; destroy/poison producer, input and sibling backing.  A shallow alias, omitted field, wrong active union or falsely complete partial result must fail. |
 | A2: Source selection and atomic admission. | C1/C2/C5; T1-T4, V1/V2/V4-V6.  Cover empty/present/absent/unknown/unavailable, sequential edits, multi-document/context binding and stale/invalid rejection. | An external accepted-event ledger computes exact disk/overlay branches and one frontier per batch.  Inject failure at each staged member; any partial selection, accidental absence or old-base commit must fail. |
-| A3: Identity and context isolation. | C2/C3; T5, X3, S8 and direct milestone-4 identity vectors.  Check all live identity domains, fresh epochs, generation reuse/exhaustion, canonical key bytes and exact producer/context separation. | Authored canonical bytes and a separately controlled issuer ledger, including rollback/fork simulations under the issuer assumptions.  Reused live IDs, wrapped counters, cross-context hits or revived archive handles must fail; semantic declaration matching stays deferred. |
+| A3: Identity and context isolation. | C2/C3; T5, X3, S8 and direct milestone-3 identity vectors.  Check all live identity domains, fresh epochs, generation reuse/exhaustion, canonical key bytes and exact producer/context separation. | Authored canonical bytes and a separately controlled issuer ledger, including rollback/fork simulations under the issuer assumptions.  Reused live IDs, wrapped counters, cross-context hits or revived archive handles must fail; semantic declaration matching stays deferred. |
 | A4: Save/reset/recovery authority. | C2/C4/C5; T3/T4, S3/S6, V1.  Include a newer byte-identical overlay, failed removal commit and copied recovery with an unavailable old producer. | The host-event ledger distinguishes installation revision from content revision and committed recovery from live selection.  An old save clearing the newer overlay, orphan resurrection, automatic restore or restore without current admitted context must fail. |
 | A5: World/task publication. | C1/C2/C3/C5; T1/T6/T7, V6, X1/X2/X7.  Cover complete multi-document worlds, joins, attempt/mailbox tokens, supersession and exact selected-world queries. | An external accepted-request/attempt ledger and barrier-controlled completions.  Publish duplicate/out-of-order attempts deliberately; mixed revisions, old-head overwrite, duplicate ownership transfer or an already-complete join left pending must fail. |
 | A6: Delivery and progress. | C3/C5; T6, X1-X6.  Cover all fifteen calls, six borrowed accessors, poll/wait/drain semantics, terminal errors, host-helper re-entry and required/optional readiness. | Authored response/state tables, independent registration/completion ledgers and controlled wake/drain barriers.  A lost wake, double drain, consumed-on-failed-copy record, callback under a gate or starvation by optional work must fail. |
 | A7: Shutdown and final ownership. | C3/C5; T5, V7/V8, X3/X7/X8.  Cover first reserved/repeated shutdown, a producer beyond deadline, retained children after `STOPPED` and final owner release. | Provider/worker barriers and independent pin/free/join ledgers.  A wait timeout treated as termination, self-dependent shutdown, leaked scheduler root, lazy store reopen after stop or freed retained payload must fail. |
-| A8: Store wire and reconstruction. | C1/C4; S1/S5/S8 and direct milestone-6 grammar/schema vectors.  Check all seven record kinds, exact envelope/chunks/field order, references and implementation bounds before unsafe allocation. | Independently encoded expected files/keys plus a strict test decoder and allocation ledger; recompute outer hashes on structurally invalid inner values.  A normalised invalid frame, trusted count, unresolved reference or assertion abort must fail. |
+| A8: Store wire and reconstruction. | C1/C4; S1/S5/S8 and direct milestone-5 grammar/schema vectors.  Check all seven record kinds, exact envelope/chunks/field order, references and implementation bounds before unsafe allocation. | Independently encoded expected files/keys plus a strict test decoder and allocation ledger; recompute outer hashes on structurally invalid inner values.  A normalised invalid frame, trusted count, unresolved reference or assertion abort must fail. |
 | A9: Store ordering and interruption. | C2/C4; T4, S2/S3/S6.  Cover first initialisation, every staged/install/head boundary, exact predecessor reconciliation and stale writer/sequence rejection. | Independently recorded intents/commit IDs and raw fresh-process file inspection under stated rename assumptions.  An orphan reported committed, blindly retried uncertain commit, stale tombstone overwrite or false durable frontier must fail. |
 | A10: Pins, collection and administration. | C3/C4; T5, S4-S7.  Cover old manifest/read pins, failed deletion, history/expiry, explicit maintenance preconditions and partial quarantine/reinitialisation. | Independent root/pin/file inventories with mark/open/delete barriers and action-bound host confirmations.  Deleting protected/unknown roots, inferring permission from pressure or age, fabricated offline session IDs or false secure-erasure success must fail. |
 | A11: Honest capabilities and diagnostics. | C4/C5; T8, V2/V3/V8, S8 and rejection branches corresponding to D1-D8.  Check unsupported semantic/evaluator/discovery/AST capabilities before task creation. | Authored capability/error tables plus child-process, source-write and task-creation monitors.  A guessed successful binding, silent empty answer, false language error, compiler launch or source-file mutation must fail. |
@@ -2553,7 +2553,7 @@ Test configurations must name the approved enabled/recovery/no-history/exclusive
 
 #### API Boundary Subcases
 
-These mandatory subcases expand A3/A5-A7/A11/A12/A14 against the normative milestone-3 signatures and milestone-5 ordering table; they neither add operations nor change their error/ownership semantics.
+These mandatory subcases expand A3/A5-A7/A11/A12/A14 against the normative milestone-2 signatures and milestone-4 ordering table; they neither add operations nor change their error/ownership semantics.
 For every row, include wrong kind/version/session, stale registration/generation, quota/allocation failure and release races where the operation admits them; record unchanged state and exact ownership on every rejection.
 
 | Operation. | Required direct assertion beyond the related trace family. |
@@ -2581,7 +2581,7 @@ For every row, include wrong kind/version/session, stale registration/generation
 All six are borrowed read-only accessors under the existing owner protection, not new registrations or scheduling calls; test invalid/cross-backing references, retained-owner access after stop and rejection before any unsafe dereference.
 Do not use a borrowed view after releasing its last protecting owner and call that a valid lifetime test; instead verify the required owner survives in-flight access and poison backing only after its contract permits release.
 
-### Milestone 7: Workloads and Measurement Boundaries
+### Milestone 6: Workloads and Measurement Boundaries
 
 Use a frozen read-only source manifest for every workload: canonical relative names, exact source bytes/lengths and SHA-256, selected contexts, toolchain/adapter/schema revisions and explicit inclusion/exclusion rules.
 Never infer semantic import closure, execute source, edit project inputs or follow filesystem links merely to build a workload.
@@ -2589,7 +2589,7 @@ Fixture creation, failure injection and staged store writes belong only to an ex
 
 | Workload. | Required coverage and selection. | Measurement/claim boundary. |
 | --- | --- | --- |
-| W1: Authored contract vectors. | Minimal independently expected fixtures covering every milestone-2 registry route/field/helper/flag/value disposition, canonical identity/optional arms, source transactions, exact limit edges and malformed wire bytes. | Correctness/negative-control corpus, reported separately from real-project performance.  Missing supported-route vectors block that route's qualification rather than being hidden by corpus averages. |
+| W1: Authored contract vectors. | Minimal independently expected fixtures covering every milestone-1 registry route/field/helper/flag/value disposition, canonical identity/optional arms, source transactions, exact limit edges and malformed wire bytes. | Correctness/negative-control corpus, reported separately from real-project performance.  Missing supported-route vectors block that route's qualification rather than being hidden by corpus averages. |
 | W2: Recorded real-source inventories. | E12's 56 top-level tutorials, eight recursive Invaders files, four top-level parser files and 18 top-level Basic files, each separately frozen for the new run.  Keep the three-file authored import chain separate. | These are historical selections, not guaranteed current counts or complete linked programs.  Record changed inventories rather than relabelling a new checkout as the old 89-file experiment; do not inherit its old fixture limits or timing results. |
 | W3: Larger project candidate. | The regular `.jai` source tree recursively under `modules/Jai_Parser`, excluding `.git`, `.build`, the configured cache root, generated/test-run output and filesystem links.  Freeze the exact manifest, active-file selection and size distribution. | Proposed larger parser-development workload, not an already approved/measured application.  Review its actual file/byte/active-file distribution against W2 and the intended host use before generalising; inadequate scale/representativeness requires an explicit replacement or a narrower claim. |
 | W4: Stateful edit workload. | For each selected real workload, authored body/interface/trivia/layout changes, malformed edit/repair, multi-file batch, save race, reset and repeated unchanged requests, with only the current world retained normally.  In a separate ownership stress variant, clients explicitly lease two older worlds across edits. | Log exact input batches and independently computed accepted states; do not write edits into original project files.  Report normal and stress results separately, compare equal ownership in paired modes, and release the older leases when their checks finish.  These temporary live leases are not persistent history, editor undo/redo or evidence of semantic invalidation. |
@@ -2607,7 +2607,7 @@ Report peak owned/upstream backing and process memory separately, final live-own
 Instrumentation/oracle work excluded from a timed boundary must be excluded equivalently and still run for every compared result; a correctness failure invalidates that sample's performance comparison.
 Evaluate measured results afterwards under the 2026-10-23 direction; no historical percentage/byte ratio is an implicit pass/fail threshold or default quota.
 
-### Milestone 7: Case Records, Controls and Verdicts
+### Milestone 6: Case Records, Controls and Verdicts
 
 An acceptance case is identified by its requirement row, trace/subcase, fixture manifest, contract/build/profile versions and named policy configuration.
 Its record must contain the following independently auditable information; these are test-evidence obligations, not a new public API or adopted persistent schema.
@@ -2644,21 +2644,21 @@ Fault injection uses bounded fail-at-boundary cases with recorded allocation ind
 A stuck worker test must have an external test-owned release/abort mechanism; a missed test deadline cannot authorise freeing service backing still used by that worker.
 Where delete/cleanup failure is intentionally injected, the expected surviving file/accounting inventory is part of the assertion rather than an unexplained leak exemption.
 
-### Milestone 7: Coverage Ledger and Closure
+### Milestone 6: Coverage Ledger and Closure
 
-Milestone 7 is complete as a draft whole-system acceptance specification on 2026-10-23: A1-A15 map initial obligations to direct checks and trace families; W1-W6 define workloads; case records, independent controls and verdict rules define executable qualification evidence.
+Milestone 6 is complete as a draft whole-system acceptance specification on 2026-10-23: A1-A15 map initial obligations to direct checks and trace families; W1-W6 define workloads; case records, independent controls and verdict rules define executable qualification evidence.
 Before accepting an implementation, expand the ledger by every supported registry route, public operation/accessor/error arm, source-event/optional variant, bound edge and fault boundary; retain explicit unimplemented/unsupported dispositions instead of claiming coverage from a family label.
 
 Every T1-T8, S1-S8, X1-X8 and V1-V8 case must have initial positive/rejection subcases as applicable, mapped requirement IDs and attained controls; D1-D8 successful semantic branches and P3 AST reload remain deferred, with initial rejection checks retained.
 Coverage totals must separately list applicable/passed/failed/blocked/not-run cases, deferred successes and excluded claims; no denominator may hide missing supported syntax, unexecuted concurrency or required source/recovery persistence.
 
 Acceptance requires no `FAIL`, `BLOCKED` or `NOT_RUN` applicable correctness obligation and no unexplained live ownership; performance remains a measured results packet for later evaluation, not a percentage gate.
-Workload/profile approval and whole-contract sign-off remain milestone 8 responsibilities; the selected enablement/recovery/no-history/exclusive-owner policy is recorded in the [decision record](CACHE_ARCHITECTURE.md#decision-record), and the W3 manifest must be reviewed before a generalised performance claim.
+Workload/profile approval and whole-contract sign-off remain milestone 7 responsibilities; the selected enablement/recovery/no-history/exclusive-owner policy is recorded in the [decision record](CACHE_ARCHITECTURE.md#decision-record), and the W3 manifest must be reviewed before a generalised performance claim.
 No production/service test, benchmark, interruption run or new compiler experiment is executed by this documentation milestone; no implementation/migration permission or final release approval is implied.
 
-### Milestone 8: Cross-Contract Review
+### Milestone 7: Cross-Contract Review
 
-Document review performed 2026-10-23 against the milestone-2 through milestone-7 drafts and the recorded scope/policy decisions.
+Document review performed 2026-10-23 against the milestone-1 through milestone-6 drafts and the recorded scope/policy decisions.
 The review checks the following controlling boundaries, not an implemented service or externally certified platform; acceptance verdicts remain unchanged.
 
 | Boundary. | Reconciled rule and required evidence. | Review disposition. |
@@ -2677,7 +2677,7 @@ The review checks the following controlling boundaries, not an implemented servi
 The identified local inconsistencies were stale external-authority certification language, not a reason to drop nonreuse or independent tests of our adapters.
 No runtime race/lifetime/durability/performance claim follows from these review dispositions.
 
-### Milestone 8: Policy Answers and Pending Sign-Off
+### Milestone 7: Policy Answers and Pending Sign-Off
 
 Recorded 2026-10-23: persistence is enabled by default; the initial project/provider store has one owning process/writer session; recovery is enabled, but optional persistent history is not, because the editor handles undo/redo.
 Recovery protects current unsaved content until it is superseded or removed through the established host save/reset/discard protocol; it is not a time-expiring revision archive or an automatic restore command.

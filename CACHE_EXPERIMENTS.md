@@ -331,6 +331,8 @@ That comparison supports the reported basename-dependent distinction; it does no
 Together, the cases show three separate concerns: which source is reached, which source-visible path/context it has, and whether the compiler shares its nominal module instance.
 Equal bytes settle none of the latter two on their own, and an alias accepted by one request form need not be accepted by another.
 
+#### Setup, Evidence and Limits
+
 Native directory/file symlink creation initially failed with `Administrator privilege required for this operation`; those cases were recorded as setup skips, not compiler rejections.
 The user ran a narrowly scoped self-elevating PowerShell setup script, with transcript and JSON results written to the fixture directory, and all five native symlink cases then ran unelevated.
 Junction creation worked unelevated on this ReFS volume.
@@ -361,6 +363,8 @@ Hardlinks, UNC/network paths, drive-letter aliases, case-sensitive volumes, othe
 Architectural consequence: physical-source/content reuse, source-visible location/resolution context, and compiler-compatible request/nominal identity need separate validation rules.
 Do not canonicalise away observable location strings, bypass case/link request diagnostics on a cache hit, or key contextual relative lookup solely by source bytes.
 
+Observed rule of thumb: two argument-free imports of the same form shared an instance exactly when their reported filenames were identical strings; relative and absolute requests that yield the same string shared one, while any surviving `./`, `..`, backslash, case, link or copy difference made a separate instance of the same physical file (E2 adds import form and module arguments as further distinctions).
+
 ### E5 Results: Compiler-Evaluation Feasibility
 
 Completed 2026-10-19 on Windows with Jai beta 0.2.030, built 2 July 2026, using the fast x64 backend.
@@ -381,6 +385,7 @@ These include five no-insert baseline compilations and a separate replay of the 
 The final audit checked all 24 archived artifact files, including intentionally stale snapshots, nine compiler `Error:` lines, one deliberate compile-time assertion failure, exact callback order/results, workspace boundaries, generated locations, and three SHA-256 stale-file comparisons.
 No executable, object, PDB, DLL, or library output was found in the fixture tree.
 Compiler identity was separately confirmed with `jai -version`; the timed version-only subprocess captures were empty despite successful exits, so they are not used as version evidence.
+The user confirms this is a known default-metaprogram issue: redirected `-version` output is not flushed before process exit, so an empty capture is not evidence of a failed or skipped version query.
 
 | Probe family. | Observed result. |
 | --- | --- |
@@ -429,8 +434,8 @@ Reproducible runner: [experiment_syntax_independence.jai](examples/experiment_sy
 From the parser's examples directory:
 
 ```bash
-jai experiment_syntax_independence.jai -x64 -quiet -no_color -output_path .build -exe experiment_syntax_independence
-./.build/experiment_syntax_independence.exe
+jai experiment_syntax_independence.jai -x64 -quiet -no_color
+./experiment_syntax_independence.exe
 ```
 
 Hypothesis: a small, independently owned syntax projection can outlive the parser/input that produced it and support independent semantic side tables without mutation or lifetime coupling between those contexts.
@@ -475,7 +480,7 @@ The negative control uses the actual `resolve_lexical_references` operation on o
 The second alias observes the same identifier node and newly written `resolved_declaration` pointer.
 This confirms the current shared-node mutation boundary without changing the production parser or resolver.
 
-`summary.tsv`, `audit_summary.json`, and `compiler_version.txt` remain under `examples/.build/syntax_independence/`; native verifier/linker outputs are under `examples/.build/` and cleanup may remove them.
+`summary.tsv`, `audit_summary.json`, and `compiler_version.txt` remain under `examples/.build/syntax_independence/`; the native verifier is written beside the runner in `examples/`, linker intermediates are under `examples/.build/`, and cleanup may remove both.
 The saved-summary audit checks all four lifetime permutations per fixture, context-independent status/metadata counts, exact aggregate counts, compiler identity, and runtime completion counters.
 Creation/release counters are logical ownership evidence, not a measured zero-leak, allocator high-water, or operating-system residency result.
 
@@ -487,7 +492,6 @@ No production syntax/cache implementation or migration plan was added.
 The prototype does not provide full syntax coverage, a real semantic typechecker, dependency tracking, lease enforcement, concurrent readers, cancellation, persistence, allocation benchmarks, or cross-backend/platform guarantees.
 It deliberately does not release syntax while live semantic contexts still refer to it; enforcing that lifetime rule belongs to the owner/lease contract.
 No claim of complete diagnostic-related-information variants or synthetic literal-payload coverage follows from these fixtures.
-E7-E11 test the separate dependency/revision, scheduling, allocation, text-representation, and store/restart contracts below; E12 retains the representative-performance question.
 
 ### E7 Results: Dependency and Revision Validation
 
@@ -496,8 +500,8 @@ Reproducible runner: [experiment_dependency_revisions.jai](examples/experiment_d
 From `examples/`:
 
 ```bash
-jai experiment_dependency_revisions.jai -x64 -quiet -no_color -output_path .build -exe experiment_dependency_revisions
-./.build/experiment_dependency_revisions.exe
+jai experiment_dependency_revisions.jai -x64 -quiet -no_color
+./experiment_dependency_revisions.exe
 ```
 
 Hypothesis: validating the parent's current relationship and independently validating its target in the requesting world permits safe reuse, including when a changed target revision has an unchanged observable value.
@@ -548,7 +552,7 @@ This is an authored acyclic integer-query model, not real Jai overload resolutio
 It assumes immutable uniquely identified worlds, truthful source/module revisions, complete predeclared dependency lists, and cache-local monotonic result revisions.
 The equal-value comparison is exact status/integer equality, not a hash; no collision handling or general semantic fingerprint contract was tested.
 The experiment covers isolated two-world edits, not a long edit stream, concurrency, cycles, scheduling, cancellation, leases, eviction, persistence/reload, memory bounds, or performance.
-No production cache implementation or migration plan was added; E8-E11 test the separate scheduling, allocation, text-representation, and store/restart contracts below, while E12 remains a separate experiment.
+No production cache implementation or migration plan was added.
 
 ### E8 Results: Pipeline Milestones and Scheduler Outcomes
 
@@ -557,8 +561,8 @@ Reproducible runner: [experiment_pipeline_scheduler.jai](examples/experiment_pip
 From `examples/`:
 
 ```bash
-jai experiment_pipeline_scheduler.jai -x64 -quiet -no_color -output_path .build -exe experiment_pipeline_scheduler
-./.build/experiment_pipeline_scheduler.exe
+jai experiment_pipeline_scheduler.jai -x64 -quiet -no_color
+./experiment_pipeline_scheduler.exe
 ```
 
 Hypothesis: world-keyed declaration milestones can publish independently and share one computation among multiple pending requests; legal recursion depends on which milestone is required, not merely whether declarations refer to one another.
@@ -611,8 +615,6 @@ Integer arithmetic and manually authored prerequisite lists stand in for semanti
 The graph assumes fixed mandatory prerequisites, no dependency alternatives, and external leaf tasks; dynamic/generated work discovery, actual asynchronous processes, reentrant callbacks, concurrency/races, priorities/fairness, leases/reclamation, cancellation of a running worker, update tickets/coalescing, and persistent publication are untested.
 The small transitive-closure cycle detector establishes classification only, not a scalable algorithm or complete user-facing cycle diagnostic.
 No latency, allocation, or throughput claims follow, and no production API, cache, or migration plan was added.
-E9-E11 test allocation/reclamation, text representation, and store/restart below; E12's bounded baseline follows them.
-The separate explicit `using,map` wrapper probe remains unrun.
 
 ### E9 Results: Allocation, Eviction, and Retained Snapshots
 
@@ -622,10 +624,10 @@ Both the fast x64 build and optimised LLVM build passed all lifetime checks; the
 From `examples/`:
 
 ```bash
-jai experiment_allocation_eviction.jai -x64 -quiet -no_color -output_path .build -exe experiment_allocation_eviction
-./.build/experiment_allocation_eviction.exe
-jai experiment_allocation_eviction.jai -o -llvm -quiet -no_color -output_path .build -exe experiment_allocation_eviction_llvm
-./.build/experiment_allocation_eviction_llvm.exe
+jai experiment_allocation_eviction.jai -x64 -quiet -no_color
+./experiment_allocation_eviction.exe
+jai experiment_allocation_eviction.jai -o -llvm -quiet -no_color -exe experiment_allocation_eviction_llvm
+./experiment_allocation_eviction_llvm.exe
 ```
 
 Hypothesis: independently reclaimable typed records can reuse slots during sparse eviction, but reducing retained backing additionally depends on owned-payload cleanup and the allocator's bucket/group release policy.
@@ -704,8 +706,6 @@ Limits: this is a bounded synthetic, single-threaded ownership workload, not par
 It covers one fixed record size, one bucket size, one arena block size, small payloads, six edits, and a two-snapshot retention window; it does not test size-class tuning, oversized/aligned allocations, allocator failure, concurrent access, graph-cycle reclamation, explicit slab trimming, OS working-set reduction, or long-running fragmentation.
 Tracked backing is requested bytes retained from the upstream allocator, excluding allocator-private metadata/rounding, temporary internal resize overlap, control/ledger storage, and operating-system residency; returning memory upstream does not prove pages were returned to the OS.
 No production cache, allocator API, or migration plan was added.
-E10 and E11 test text representation and store/restart below; E12's bounded baseline follows them.
-The explicit `using,map` wrapper probe remains unrun.
 
 ### E10 Results: Bounded Text Artifact Round Trip
 
@@ -714,8 +714,8 @@ Reproducible runner: [experiment_text_artifacts.jai](examples/experiment_text_ar
 From the parser's examples directory:
 
 ```bash
-jai experiment_text_artifacts.jai -x64 -quiet -no_color -output_path .build -exe experiment_text_artifacts && ./.build/experiment_text_artifacts.exe
-jai experiment_text_artifacts.jai -o -llvm -quiet -no_color -output_path .build -exe experiment_text_artifacts_llvm && ./.build/experiment_text_artifacts_llvm.exe
+jai experiment_text_artifacts.jai -x64 -quiet -no_color && ./experiment_text_artifacts.exe
+jai experiment_text_artifacts.jai -o -llvm -quiet -no_color -exe experiment_text_artifacts_llvm && ./experiment_text_artifacts_llvm.exe
 pwsh -NoProfile -File .build/text_artifacts/audit.ps1
 ```
 
@@ -801,8 +801,6 @@ Limits: fixed-capacity synthetic records, one artifact, local dependencies, in-m
 There is no complete AST reconstruction, cross-artifact/world-key validation, compiler/schema migration compatibility, checksum/authentication, allocation-failure/denial-of-service fuzzing, allocator-leak accounting, partial loading, concurrency, crash-safe publication, store restart, or OS-cold read measurement.
 The convenience disk reads used for evidence are not an untrusted bounded disk-loader API: production loading must impose its byte bound before reading/allocating the file.
 No production persistence API or migration plan was added.
-E11 tests store/restart below; E12's bounded baseline follows it.
-The explicit `using,map` wrapper probe remains unrun.
 
 ### E11 Results: Store Publication, Restart, and Overlay Recovery
 
@@ -896,7 +894,6 @@ File flush and process-kill tests do not establish power-loss durability or dire
 The harness probes nonempty authored disk sources; E10's empty fixture does not establish an empty-source store workflow here.
 Private-storage permissions, crash durability, richer identity/version keys, repair policy, budgets, and process-wide lease tracking still require approved production contracts.
 No production persistence API or migration plan was added.
-E12's bounded baseline follows; the explicit `using,map` wrapper probe remains unrun.
 
 ### E12 Results: Real-Source Baseline and Source-Reload Control
 
@@ -905,7 +902,7 @@ Runners: [experiment_project_baseline.jai](examples/experiment_project_baseline.
 From the parser's examples directory:
 
 ```bash
-jai experiment_project_baseline.jai -o -llvm -quiet -no_color -output_path .build -exe experiment_project_baseline_llvm
+jai experiment_project_baseline.jai -o -llvm -quiet -no_color -exe experiment_project_baseline_llvm
 pwsh -NoProfile -File experiment_project_baseline.ps1
 pwsh -NoProfile -File experiment_project_baseline.ps1 -Mode Audit -RunDirectory .build/project_baseline/40141fe0d05141dd9709bca383c951ab
 ```
@@ -918,7 +915,7 @@ The largest file is first in each manifest and supplies the active-file edits an
 Bounds are 64 files, 512 KiB per source, 2 MiB per inventory, serial workers, and a two-minute timeout per worker.
 
 Hypothesis: retaining complete owned file snapshots avoids parsing on validated unchanged requests, whereas persisting source text alone adds I/O/decoding without eliminating real parse work.
-The discriminating checks compare three modes against the same disk source and resident control snapshots, require exact bytes as well as an FNV-1a digest, and deep-compare independently owned parses using the existing snapshot oracle.
+The discriminating checks compare three modes against the same disk source and resident control snapshots, require exact bytes as well as a 64-bit FNV-1a (Fowler-Noll-Vo) digest, computed with `fnv1a_hash` from the SDK `Hash` module, and deep-compare independently owned parses using the existing snapshot oracle.
 The tutorial corpus exposed a missing oracle registry entry for `DIRECTIVE_THIS`: the parser allocates it as a base `Parser_Node`, not a generated concrete node.
 The oracle now compares that actual base layout and still rejects unsupported kinds.
 Its existing mutation/alias negative controls and bounded three-file lifecycle verification also pass.
@@ -1009,7 +1006,7 @@ It does not change production parser, resolver, or cache APIs.
 The original source-reparse evidence above is preserved; the follow-up is a separate timing round and must be compared against its own fresh-parse competitor, not the earlier round's milliseconds.
 
 ```bash
-jai experiment_snapshot_codec.jai -o -llvm -quiet -no_color -output_path .build -exe experiment_snapshot_codec_llvm
+jai experiment_snapshot_codec.jai -o -llvm -quiet -no_color -exe experiment_snapshot_codec_llvm
 pwsh -NoProfile -File experiment_snapshot_codec.ps1
 pwsh -NoProfile -File experiment_snapshot_codec.ps1 -Mode Check -RunDirectory .build/snapshot_codec/889f05af33c94f9480a9d0b03445f2fb
 pwsh -NoProfile -File experiment_snapshot_codec.ps1 -Mode Audit -RunDirectory .build/snapshot_codec/889f05af33c94f9480a9d0b03445f2fb
@@ -1109,7 +1106,7 @@ From the parser examples directory:
 
 ```bash
 pwsh -NoProfile -File experiment_project_baseline.ps1 -Mode Prepare
-jai experiment_snapshot_codec.jai -o -llvm -quiet -no_color -output_path .build -exe experiment_snapshot_codec_llvm
+jai experiment_snapshot_codec.jai -o -llvm -quiet -no_color -exe experiment_snapshot_codec_llvm
 pwsh -NoProfile -File experiment_snapshot_codec.ps1 -BaselineDirectory .build/project_baseline/45a228d89d2f47168b0ed303c19c15a6
 pwsh -NoProfile -File experiment_snapshot_codec.ps1 -Mode Startup -RunDirectory .build/snapshot_codec/4bf9ec913623496fa7ad757430dcef18
 pwsh -NoProfile -File experiment_snapshot_codec.ps1 -Mode AuditStartup -RunDirectory .build/snapshot_codec/4bf9ec913623496fa7ad757430dcef18/startup_cdeffa1e9db7429283f46ea9d7aa95c9

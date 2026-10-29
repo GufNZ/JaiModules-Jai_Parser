@@ -3,7 +3,7 @@ param(
 	[string] $Mode = 'Run',
 	[string] $BaselineDirectory = (Join-Path $PSScriptRoot '.build/project_baseline/40141fe0d05141dd9709bca383c951ab'),
 	[string] $RunDirectory = '',
-	[string] $Worker = (Join-Path $PSScriptRoot '.build/experiment_snapshot_codec_llvm.exe')
+	[string] $Worker = (Join-Path $PSScriptRoot 'experiment_snapshot_codec_llvm.exe')
 )
 
 $ErrorActionPreference = 'Stop'

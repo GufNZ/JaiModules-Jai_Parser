@@ -1,7 +1,7 @@
 param(
 	[ValidateSet('Run', 'Audit', 'Prepare')]
 	[string] $Mode = 'Run',
-	[string] $Worker = (Join-Path $PSScriptRoot '.build/experiment_project_baseline_llvm.exe'),
+	[string] $Worker = (Join-Path $PSScriptRoot 'experiment_project_baseline_llvm.exe'),
 	[string] $OutputDirectory = (Join-Path $PSScriptRoot '.build/project_baseline'),
 	[string] $RunDirectory = ''
 )

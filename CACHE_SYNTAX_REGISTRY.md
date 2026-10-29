@@ -175,7 +175,7 @@ Register field paths and variant guards against the exact producer/schema bindin
 Reflection over all pointers, the compiler inventory's broad `S` category, or successful parsing is not an ownership registry.
 In particular, syntactic backlinks remain backlinks even when classified `S` in `compiler_fields.md`.
 
-The following is the summary of the registered draft field paths for the current parser-owned shapes; the milestone-2 closure below binds it to the detailed per-layout rules and explicit exclusions.
+The following is the summary of the registered draft field paths for the current parser-owned shapes; the milestone-1 closure below binds it to the detailed per-layout rules and explicit exclusions.
 Names without a prefix refer to `Parser_*` records; grouped rows do not waive per-variant review.
 
 | Owner. | Candidate downward paths/active helpers. |
@@ -220,7 +220,7 @@ Until a qualified producer observation distinguishes these routes and non-identi
 The proposed route-evidence contract below defines that requirement without claiming the current parser already supplies it.
 Do not repurpose resolver bindings as authored ownership to hide this gap.
 
-The milestone-2 closure below fixes the draft's current-producer guards/order, alias ownership and explicit marker/compound/metadata limitations.
+The milestone-1 closure below fixes the draft's current-producer guards/order, alias ownership and explicit marker/compound/metadata limitations.
 Remaining qualification must exercise those rules, producer-version drift and truthful partial coverage; closing the registry does not make unavailable observations available.
 Future C1/C5 vectors must cover shared initialisers with nested anonymous/ordinary/compound declarations, zero/one/multiple declared bindings, repeated names, both compound construction routes, recovered null/unlocated helpers, injected cycles/unregistered sharing, inactive literal arms and deliberately populated semantic backlinks.
 Assert exact entry/region counts, IDs, association order, parent containers and coverage reasons against independently authored expectations, not only a second traversal using the same registry.
@@ -348,7 +348,7 @@ State all known impacts: uncertainty about which bindings exist is not merely a 
 
 Codes and impacts are closed ASCII tags; unknown tags reject this schema rather than silently becoming generic success.
 
-Numeric admission/text ceilings follow the milestone-3 `Limits` contract; concrete host values require explicit configuration/R6 approval, not defaults chosen here.
+Numeric admission/text ceilings follow the milestone-2 `Limits` contract; concrete host values require explicit configuration/R6 approval, not defaults chosen here.
 
 Retain reasons in deterministic traversal-discovery order, with owning-node observations before descendant observations and registry/field/list order for ties.
 
@@ -461,7 +461,7 @@ The adapter build identity is a separate service-verified value in the `producer
 
 | Feature name. | Required evidence and current review status. |
 | --- | --- |
-| `authored_edges`. | Exact reachable-kind/field/variant/order registry, including base `DIRECTIVE_THIS`, guarded aliases and recovered holes.  The milestone-2 closure fixes the current-producer draft and its exclusions; implementing and qualifying a bound adapter remain open. |
+| `authored_edges`. | Exact reachable-kind/field/variant/order registry, including base `DIRECTIVE_THIS`, guarded aliases and recovered holes.  The milestone-1 closure fixes the current-producer draft and its exclusions; implementing and qualifying a bound adapter remain open. |
 | `builder_function_routes`. | Qualified source-form/context evidence for types, literals, enum-member mode, parameter usings, import callees and arrow-run headers, plus committed published-syntax recovery attribution under the rules above.  Do not infer a universal route from equal/default field values or recovery ownership from diagnostic overlap.  Capture versus reconstruction remains review work. |
 | `compound_routes`. | Snapshot-bound `CompoundRoute` and separator observations under the following contract.  Current AST fields alone are insufficient; no qualified capture/reconstruction adapter is supplied yet. |
 | `name_origins`. | Exact spelled/anonymous/missing observations, separate source spelling and producer-name values, name-specific recovery and explicit unmapped outcomes, including operator names, unnamed slots and context-qualified enum members.  A copied/normalised producer name is not automatically a single source slice.  The draft's unavailable-evidence disposition is fixed; implementing and qualifying actual source correlation remain open. |
@@ -546,7 +546,7 @@ This narrows the unresolved gap to route capability/correlation review and execu
 
 ## Generated Layout Inventory and Registry Closure
 
-Inventory baseline for the milestone-2 registry closure, taken from `parser.jai`'s `TYPES` array.
+Inventory baseline for the milestone-1 registry closure, taken from `parser.jai`'s `TYPES` array.
 It contains 50 distinct compiler layouts whose parser counterparts are generated; this is not a count of qualified reachable variants or a completed snapshot field schema.
 Names below are exact `TYPES` members, grouped only for review.
 Their `Parser_` counterparts follow the existing generator; neither a payload tag nor an active field mapping may be inferred merely from a layout name.
@@ -572,10 +572,10 @@ Mere presence in `TYPES` cannot justify complete traversal, nor can absence from
 
 The focused inventory check compares this table's exact names with the live `TYPES` list, requiring equal sets, no duplicate names and the declared group counts.
 That static check can validate inventory transcription now; it does not qualify builder function reachability, field ownership or a future visitor.
-The milestone-2 closure below supplies the current-source builder crosswalk and explicit supported-profile limits alongside the subsequent field/variant rules.
+The milestone-1 closure below supplies the current-source builder crosswalk and explicit supported-profile limits alongside the subsequent field/variant rules.
 Independently authorised behavioural qualification remains a separate gate, not a prerequisite for calling the draft specification enumerated.
 
-## Milestone 2: Syntax Registry Closure
+## Milestone 1: Syntax Registry Closure
 
 Draft registry closure completed 2026-10-22 for the current parser source and installed compiler declarations.
 This closes the specification's layout/helper inventory, named allocation-owner crosswalk, traversal/alias rules and disposition of known mapping gaps.
@@ -584,7 +584,7 @@ The bound producer/context must identify this exact registry; a producer change 
 
 The normative draft is the detailed field-role and source-form sections below, the common origin/name/recovery rules, the compound shared-region policy and the restrictions in this closure.
 The summary tables are not alternative traversal algorithms.
-Exact wire tags, scalar/flag encodings, public access signatures and numeric bounds belong to milestone 3; implementation and behavioural qualification belong to their separately authorised gates.
+Exact wire tags, scalar/flag encodings, public access signatures and numeric bounds belong to milestone 2; implementation and behavioural qualification belong to their separately authorised gates.
 
 ### Producer Roots and Published Graph
 
@@ -730,9 +730,9 @@ The source crosswalk checks every generated layout and its fresh/copy allocation
 The helper/variant checks cover the handwritten records, spans, overlays and embedded value fields.
 These are source/declaration checks, not execution of a cache visitor.
 
-Milestone 2 is complete as a draft specification with these explicit partial/unsupported boundaries.
+Milestone 1 is complete as a draft specification with these explicit partial/unsupported boundaries.
 The existing registry review gate's inventory, field, alias and gap-disposition requirements are discharged here; its post-implementation C1/C5 behavioural requirement remains open.
-Milestone 3 must finalise API/encoding/bounds and real adapter admission.
+Milestone 2 must finalise API/encoding/bounds and real adapter admission.
 Later acceptance work must independently exercise node/entry/region IDs, order, malformed variants, aliases, lost metadata, unavailable evidence, producer drift and teardown.
 This closure does not settle the AST-copier keep/drop decision or migration planning.
 
@@ -769,7 +769,7 @@ The reviewed base-only route retains an ordinary snapshot node ID at first downw
 `#this` does not itself add a declaration-index entry or trigger receiver/context resolution.
 Unknown base-only kinds require the established mapping outcome, not a guessed derived layout; this one reviewed builder function is not proof of a closed base-kind universe.
 The focused static check compares all five inventoried compiler-base fields and all three declared parser-base fields, including the conditional token fields, and checks the direct `#this` construction shape.
-This base-field check validates transcription only; the milestone-2 closure separately binds the base-kind and nested-helper inventory.
+This base-field check validates transcription only; the milestone-1 closure separately binds the base-kind and nested-helper inventory.
 Executable visitor qualification remains open.
 
 The location-specific static check separately compares all five nested declared fields and the four `finish_node` endpoint assignments.
@@ -802,7 +802,7 @@ Separately, `parser.jai` contains 13 direct `New` call sites: the generic wrappe
 The focused static check compares all named wrapper references, literal argument sets/counts, the 50-name `TYPES` correspondence and all direct `New` argument classes with these tables.
 These are current source-site inventories, not runtime allocation counts or proof of every reachable variant.
 They do not enumerate embedded/by-value helpers, array backing allocations, other allocation APIs, generated/indirect invocations, external callers, discarded nodes or builder-to-owner publication for every supported root.
-Allocation counts alone do not close the auxiliary registry or publication rules; the milestone-2 closure binds those draft inventories and dispositions separately.
+Allocation counts alone do not close the auxiliary registry or publication rules; the milestone-1 closure binds those draft inventories and dispositions separately.
 Executable publication and behavioural/lifetime qualification stay open.
 
 ## Direct Base-Node Builder Reachability
@@ -936,13 +936,13 @@ A missing identifier does not make the saved token's identifier union arm valid:
 If safe scalar conversion cannot be established, retain independently safe source/diagnostics and report the appropriate mapping/conversion outcome under the existing snapshot/index contracts; do not dereference an unqualified string value or invent an empty name.
 An index-only partial state does not authorise an unsafe snapshot payload.
 Likewise, the current note builder function's default flags are not proof that every possible `note_flags` bit is source syntax.
-The milestone-3 canonical value section supplies the Ident, Note and common source-flag registries; these field roles do not approve a raw native bitmask encoding or qualify unobserved producer routes.
+The milestone-2 canonical value section supplies the Ident, Note and common source-flag registries; these field roles do not approve a raw native bitmask encoding or qualify unobserved producer routes.
 
 The focused review vectors are `context`, a backticked identifier, an attached note with producer text distinct from spelling, and `#placeholder` with present versus missing/non-identifier name tokens.
 Further qualification must preserve duplicate/equal-span identifier occurrences and reject traversal through deliberately populated `resolved_declaration`/common semantic pointers.
 Independently owned name/text bytes must survive producer teardown.
 This closes the draft field-role enumeration for these four layouts only.
-The subsequent literal-arm rules and milestone-2 crosswalk complete the current draft field/route inventory.
+The subsequent literal-arm rules and milestone-1 crosswalk complete the current draft field/route inventory.
 Exact scalar/flag schemas, producer-version drift checks and executable builder/reuse/visitor qualification remain open.
 
 ## Operator, Cast and Query Layout Field Roles
@@ -1038,7 +1038,7 @@ Preserve that recovery evidence and any established coverage gap without inserti
 Parser-created single-statement, quick-body and conditional blocks retain their own node IDs and qualified origin rules; the absence of authored braces does not make them backlinks or permit deleting the block.
 Do not infer authored delimiters from `IS_PARENTHESIZED` or default block flags alone.
 The static check covers all seven layout-specific fields.
-Exact block-category/flag schemas and executable builder/reuse and statement/alias qualification remain open; the current-source allocation/root crosswalk is closed by milestone 2.
+Exact block-category/flag schemas and executable builder/reuse and statement/alias qualification remain open; the current-source allocation/root crosswalk is closed by milestone 1.
 
 ## Declaration Metadata, Using Order and Registry Review Gate
 
@@ -1090,7 +1090,7 @@ The lexical scope's `usings` list is an auxiliary registry, not a second ownersh
 Missing consumed-filter/target expressions retain recovery observations instead of becoming equivalent to no filter/target request.
 
 Registry review has the following concrete closure gate.
-Items 1-4 govern draft specification closure and are discharged by the milestone-2 crosswalk and explicit limits above; item 5 remains the separate implementation qualification gate:
+Items 1-4 govern draft specification closure and are discharged by the milestone-1 crosswalk and explicit limits above; item 5 remains the separate implementation qualification gate:
 
 1. Inventory every node kind and auxiliary variant actually reachable from each supported parse root/route, including direct base-node allocations such as `.DIRECTIVE_THIS`.
 Comparing only the 50 generated `TYPES` entries inventoried above is insufficient.
@@ -1104,7 +1104,7 @@ A documented gap is not reviewed complete coverage; any exclusion must be reflec
 
 The cheap discriminating vectors are a prefix-filtered using whose filter precedes its target, a compound with alignment/notes stored on the compound rather than the properties helper, and `#this` reached without a generated concrete type.
 Document whitespace/diagnostics or a match against the current field inventory do not satisfy this gate.
-The milestone-2 closure binds these cases to the current producer and explicit partial dispositions, but no visitor, complete-coverage adapter or behavioural acceptance tests are implemented here.
+The milestone-1 closure binds these cases to the current producer and explicit partial dispositions, but no visitor, complete-coverage adapter or behavioural acceptance tests are implemented here.
 Exact API/schema review remains open.
 
 ## Directive Payloads and Registered Backreferences
@@ -1535,7 +1535,7 @@ Keep wrapper and child IDs distinct even when their spans coincide, and do not d
 The discriminating future vectors are source `null` versus an unsupported pointer payload, and an untyped aggregate array versus a using-filter name-list array with no `WAS_UNTYPED` flag.
 Further independent cases cover typed/untyped empty and nested aggregates; repeated named member expressions; scalar/float bit preservation; `#char`, here strings and `#filepath`; standalone versus declaration `---`; missing helpers; inactive union-pointer controls; unexpected alignment; and owned bytes after producer teardown.
 Assert exact active paths/order, source/value observations, local node IDs and partial reasons against independent expectations.
-The milestone-3 closure supplies AST flag/value payload schemas; executable producer mapping and traversal qualification remain open.
+The milestone-2 closure supplies AST flag/value payload schemas; executable producer mapping and traversal qualification remain open.
 
 ## Type Instantiation Source-Form Guards
 
@@ -1644,7 +1644,7 @@ The shared span's field names describe token coordinates; validate them against 
 The statement builder function retains its full span before classification.
 Empty/non-identifier content and rejected declaration/pinning forms can remain unparsed; retain their opaque region and partial-coverage observation rather than inventing an instruction or following a leftover inactive slot.
 A selected helper follows its own required-field/recovery rules, while an unknown kind is unmapped rather than an instruction fallback.
-The focused static checks compare fields and enum members with their declarations; the milestone-2 closure completes the current auxiliary field/variant inventory, while executable builder/reuse and variant qualification remain open.
+The focused static checks compare fields and enum members with their declarations; the milestone-1 closure completes the current auxiliary field/variant inventory, while executable builder/reuse and variant qualification remain open.
 
 The instruction/size slice adds seven declared fields across two records and both current size kinds.
 The reviewed builder function selects a fixed size from an adjacent numeric token, or a polymorphic size from an adjacent question mark and identifier; a separated operand is not reclassified merely because its spelling looks like a size.
