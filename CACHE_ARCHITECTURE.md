@@ -473,7 +473,7 @@ Eviction must never invalidate a leased snapshot, and retention should not grow 
 
 Retaining declarations across all visibilities means preserving their discoverability and reloadable identity/metadata, not requiring every declaration's syntax and semantic payload to stay in RAM.
 A bare import does not by itself demand full analysis or residency of all exports, still less all internals; materialise results according to actual query demand.
-Under memory pressure, prefer evicting cold, unreferenced internal payloads before actively used results, provided they are not pinned by live requests or required resident dependencies.
+Under memory pressure, evict least-recently-used unreferenced payloads first, provided they are not pinned by live requests or required resident dependencies; cold internal payloads naturally precede actively used results.
 Unused exported payloads can also be evicted; visibility is a useful preference, not proof of liveness.
 
 An internal declaration can be needed by a used export through types, constants, layout, inlining, compile-time evaluation, or reflection, even if no external call names it.
@@ -747,6 +747,7 @@ The stable default path does not weaken namespace/workspace/provider validation 
 
 No configured quota does not mean reserving all free resources, trusting persisted lengths, unlimited nesting or a promise that a later allocation/write succeeds.
 Optional finite ceilings remain enforceable.
+Each positive budget evicts its own least-recently-used unprotected entries to make space; if a byte budget still cannot fit after evicting everything evictable, that one oversized item is admitted and reported ([budget eviction rule](CACHE_CONTRACTS.md#budget-eviction-and-oversized-admission)).
 Effective implementation/representation bounds, checked aggregate accounting and ordinary allocation/write failure handling apply in both modes.
 Do not convert a transient free-space/RAM observation into a guaranteed reservation or silently evict protected recovery to satisfy another allocation.
 

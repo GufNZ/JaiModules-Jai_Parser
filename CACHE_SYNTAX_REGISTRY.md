@@ -1829,7 +1829,7 @@ A classification gap does not authorise changing the authoritative trivia/source
 All slices/decoded values borrow through the owning syntax/result lease; no token, trivia iterator or interned name may outlive that lease without an independent copy/retain.
 
 Future qualification vectors: each active union tag; decimal/hex/binary and overflow flags; `float32`-rounded values, signed zero and exact float-bit transport; quoted/unquoted notes; escaped/here strings with evaluation enabled/disabled; producer/interner teardown; BOM-only/comment-only/empty files; nested comments, ignored bytes and EOF final-gap reconstruction.
-The schema does not certify every producer route or define persistent float/text encoding; those require explicit mapping/round-trip review under C1, bounded decoding and the separate persistence contract.
+The schema does not certify every producer route; persisted float bits use the milestone-5 hex-float `X` row, and routes require explicit mapping/round-trip review under C1, bounded decoding and the separate persistence contract.
 
 Local review vectors, to become executable acceptance cases only in authorised implementation:
 

@@ -168,6 +168,7 @@ Counts determine exactly how many following rows belong to a value; there are no
 | `U <decimal>`. | One unsigned `u64`; canonical decimal has no sign or leading zero except `0`. |
 | `S <decimal>`. | One signed `s64`; optional minus only for a negative nonzero value, no plus/leading zeros/negative zero. |
 | `T 0` or `T 1`. | One boolean, not an arbitrary integer. |
+| `X 0h<hex>`. | One IEEE-754 floating-point value as a Jai-style hex-float bit-pattern literal: exactly 16 uppercase hex digits for binary64 or 8 for binary32, matching the declared field format, most significant bit first.  Never decimal text. |
 | `B <byte-count> <chunk-count>`. | One byte string followed by exactly that many `H <hex>` rows.  Empty is exactly `B 0 0`; otherwise chunk count is checked ceiling of byte count divided by 64. |
 | `E <tag>`. | One exact enum tag from the declared field's closed registry, not its native ordinal. |
 | `R <field-count>`. | One record followed by that many `F <field-name>` rows, each immediately followed by its typed value, in declared schema order. |
@@ -178,7 +179,8 @@ Every `H` row except the last encodes exactly 64 bytes as 128 uppercase hex digi
 Chunk size 64 is a wire-canonicalisation constant, not a production resource budget.
 A byte count/chunk count mismatch, odd/lowercase/invalid hex or an extra `H` row rejects.
 Field names and enum/arm tags are any valid jai identifier.
-Raw float observations use their declared `u64` bit-pattern field with `U`, never host float parsing or a decimal approximation.
+Every floating-point field, including `FLOAT64_BITS` field/token values, `float64-bits` observations and `TypedValue.FLOAT`, uses `X`, never `U`/`B`, host float parsing or a decimal approximation; this preserves signed zero, infinities and NaN payloads exactly.
+The initial source-only catalogue persists no floating-point fields; the rule binds any later record kind that does.
 Opaque canonical identities/descriptors use `B`; records, optionals and arrays preserve the existing logical schema's types/order rather than guessing a type from equal-looking scalar bytes.
 This grammar is a text encoding of the canonical values, not a replacement for the milestone-2 `V`/`K` identity recipes; readers reconstruct and validate those logical values before comparing identity.
 
@@ -187,7 +189,7 @@ Do not call `start_file` for an untrusted store record: its whole-file read prec
 Set `strip_comments_from_ends_of_lines = false` and `auto_skip_blank_lines = false`; keep version processing enabled only after the strict `[1]` preflight and require `version == 1` with `failed == false`.
 The handler still trims spaces/skips full-line comments and its version parser tolerates a suffix, so its successful parse is not the canonical-input validator.
 Retain input/name buffers for the handler lifetime; `deinit` does not free the borrowed `start_from_memory` buffer.
-Release both handler and separately owned input on every failure/return.
+Release both handler and separately owned input on every failure/return, or write to the field that indicates `Text_File_Handler` can free on `deinit`.
 Use checked iterative value/reference stacks under `depth`; malformed input returns a cache fault/miss with complete partial cleanup, never an assertion-aborting process or source-language diagnostic.
 
 ### Records and Persistent Identity
@@ -410,7 +412,7 @@ Readers must pin the selected generation/artifacts or hold a qualified open back
 In-memory-only results may permit unlinking optional disk artifacts if every surviving result is independent of those bytes, but never revoke required recovery/source roots as an unnoticed optimisation.
 
 Distinguish resident eviction, removal of optional derived artifacts, expiry of historical recovery candidates and deletion of acknowledged source/recovery roots.
-Under budget pressure reclaim unleased optional/history data according to an approved retention policy; protected live data may exceed the target until released.
+Under budget pressure reclaim unleased optional/history data in least-recently-used order under the [budget eviction rule](#budget-eviction-and-oversized-admission); protected live data may exceed the target until released.
 If required roots cannot fit or writes fail, surface pressure/persistence degradation and continue correct source operations; do not silently drop unsaved recovery while reporting persistence success.
 Milestone 5 below specifies the single-owner pin/maintenance draft under the approved enabled/recovery/no-history/no-fixed-quota policy; detailed contract/privacy review and tests of our native implementation remain open.
 
@@ -453,7 +455,7 @@ Deleting a file does not change live source selection or invalidate any owned de
 Expiry/history pruning first commits the smaller authorised root set with exact current-head/candidate preconditions, then schedules unreachable-byte GC; it does not delete a candidate file out from under an unchanged manifest.
 Keep current acknowledged disk roots and active/protected recovery; under pressure first reclaim proved orphan/staging/expired-unprotected history, never silently drop required roots to make a success receipt fit.
 If no safe reclamation fits the budget, reject/defer optional store work and report persistence pressure/degradation while source analysis remains correct.
-The approved default has no fixed disk quota; this does not authorise automatic quarantine deletion, increasing a configured quota, changing retention or bypassing effective technical bounds.
+The approved default has no fixed disk quota; this does not authorise automatic quarantine deletion, increasing a configured quota beyond the single reported oversized item of the [budget eviction rule](#budget-eviction-and-oversized-admission), changing retention or bypassing effective technical bounds.
 
 ### Milestone 5: Clear, Repair and Administration
 
@@ -732,7 +734,7 @@ Binding/default evaluation is validated separately.
 | --- | --- |
 | `BOOL` | `{value:bool}` with its registered `bool` type. |
 | `INTEGER` | `{signed:bool, bit_width:u32, little_endian:bytes}`.  `bit_width` is positive, byte count equals checked `(bit_width + 7)/8`, signed values use two's complement, and unused high bits are zero for unsigned or sign extension for signed.  The type profile fixes width/signedness; no decimal string or minimal-byte ambiguity. |
-| `FLOAT` | `{format:BINARY32|BINARY64, little_endian_bits:bytes}` of exactly four/eight bytes.  Preserve every bit, signed zero and NaN payload; semantic/compiler argument equivalence still needs its qualified policy, not host floating-point ==. |
+| `FLOAT` | `{format:BINARY32|BINARY64, little_endian_bits:bytes}` of exactly four/eight bytes; the text store writes it as an `X` hex-float bit pattern, not `B` bytes.  Preserve every bit, signed zero and NaN payload; semantic/compiler argument equivalence still needs its qualified policy, not host floating-point ==. |
 | `BYTES` | `{value:bytes}` with the registered string/byte-sequence type and exact bytes, including empty/non-UTF-8 values. |
 | `TYPE` | `{value:TypedTypeRef}`.  Types are identities/descriptors, not source-spelling strings. |
 | `ENUM` | `{type_identity:TypeID, representation:TypedValue(INTEGER)}`; aliases retain their actual typed value, and named spelling is not a new nominal identity. |
@@ -1076,8 +1078,24 @@ Public `Release`, cancellation, completion consumption and transition to `STOPPE
 A worker may allocate only within its reserved scratch allowance and checked session total; failure terminates that attempt with the preallocated `FAILED`/`RESOURCE_LIMIT` observation, not truncated successful output.
 Unknown output size does not justify reserving an unbounded result: grow through checked reservations outside the gate, or fail honestly when either limit/allocation fails.
 State installing a payload, dependency links and all terminal observations must have sufficient reservations for the whole transition before publishing any of it.
-Memory pressure rejects new work; the initial profile does not pressure-cancel already accepted required work or revoke retained results.
+Memory pressure first evicts under the budget rule below, then rejects new work; the initial profile does not pressure-cancel already accepted required work or revoke retained results.
 The `PRESSURE` cancellation reason remains reserved for a separately approved policy, not this profile's ordinary admission failure.
+
+#### Budget Eviction and Oversized Admission
+
+Proposed 2026-10-29 for every positive configured budget that charges evictable data; it adds no public operation or limit field.
+
+- Each budgeted resource keeps its own recency order over its evictable entries: unprotected resident payloads charged to `owned_bytes`/`retained_source_bytes`, and optional/history store records charged to `disk_bytes`/`files`.
+An entry is evictable only while no registration, call/producer/read pin, task input, required disk root or recovery protection holds it; protected entries are skipped, never revoked.
+A successful acquisition, cache hit or read pin moves an entry to the most-recently-used end.
+- When a reservation would exceed the budget, evict that budget's least-recently-used evictable entries in order until it fits.
+Eviction never changes results: a later request rehydrates or recomputes, and store removals still commit the smaller root set before collection.
+- If every evictable entry has been evicted and a byte budget still cannot fit the request, admit that one oversized item and report a pressure diagnostic.
+At most one admitted oversized item exceeds each budget at a time; it is the first eviction candidate once unprotected, and a further request that cannot fit while it remains protected is rejected.
+- The oversized exception does not apply to count budgets (handles, registrations, operations, records, elements, files), to a budget of `0`, to per-item or decoding bounds such as `value_bytes`, `source_bytes`, `line_bytes`, `decoded_bytes` and `transaction_bytes`, to implementation ceilings or to actual allocation/write failure; those reject as before.
+With `-1` there is no quota to evict for; only technical bounds and resource failure apply.
+
+The initial profile discards unconsumed output and keeps no optional history, so it has few evictable entries; the rule governs any retention it does hold and every later retention policy.
 
 ### Completion Observation and Host Delivery
 
@@ -2545,7 +2563,7 @@ The acceptance runner must enumerate all cases/subcases with exact contract/sche
 | A9: Store ordering and interruption. | C2/C4; T4, S2/S3/S6.  Cover first initialisation, every staged/install/head boundary, exact predecessor reconciliation and stale writer/sequence rejection. | Independently recorded intents/commit IDs and raw fresh-process file inspection under stated rename assumptions.  An orphan reported committed, blindly retried uncertain commit, stale tombstone overwrite or false durable frontier must fail. |
 | A10: Pins, collection and administration. | C3/C4; T5, S4-S7.  Cover old manifest/read pins, failed deletion, history/expiry, explicit maintenance preconditions and partial quarantine/reinitialisation. | Independent root/pin/file inventories with mark/open/delete barriers and action-bound host confirmations.  Deleting protected/unknown roots, inferring permission from pressure or age, fabricated offline session IDs or false secure-erasure success must fail. |
 | A11: Honest capabilities and diagnostics. | C4/C5; T8, V2/V3/V8, S8 and rejection branches corresponding to D1-D8.  Check unsupported semantic/evaluator/discovery/AST capabilities before task creation. | Authored capability/error tables plus child-process, source-write and task-creation monitors.  A guessed successful binding, silent empty answer, false language error, compiler launch or source-file mutation must fail. |
-| A12: Default resources and configured quotas. | C3/C4/C5; S1/S7, X5/X7/X8, V5/V8 and direct `LimitRequest`/`StoreLimitRequest` vectors.  Exercise omitted/`-1`, zero (none allowed, including below-minimum rejection), positive configured values, malformed/below-`-1` values and exact/one-over effective bounds. | Independent allocation/reservation/file accounting and fail-on-requested-allocation/write controls.  A hidden fixed RAM/disk quota, unchecked count, silently raised user limit, revoked lease or failed emergency shutdown reservation must fail. |
+| A12: Default resources and configured quotas. | C3/C4/C5; S1/S7, X5/X7/X8, V5/V8 and direct `LimitRequest`/`StoreLimitRequest` vectors.  Exercise omitted/`-1`, zero (none allowed, including below-minimum rejection), positive configured values, malformed/below-`-1` values and exact/one-over effective bounds. | Independent allocation/reservation/file accounting and fail-on-requested-allocation/write controls.  Exercise least-recently-used eviction order, skipped protected entries and the single oversized byte-budget admission.  A hidden fixed RAM/disk quota, unchecked count, silently raised user limit, unreported or second concurrent oversized admission, oversized admission for a count/`0`/per-item bound, eviction of a protected or more recently used entry first, revoked lease or failed emergency shutdown reservation must fail. |
 | A13: Project-relative/private store placement. | C2/C4/C5; S8 plus direct policy-binding/host-discovery cases.  Resolve `.jaiParserCache` from the declared project root; test changed working directories, overrides, foreign namespaces and unavailable exclusion/privacy setup. | A controlled host root/discovery model and independent touched-path inventory.  Wrong-root fallback, source/watch ingestion of managed files, escape/adoption of a foreign store or implicit source/VCS edits must fail. |
 | A14: Failures and retry isolation. | C1-C5; T2/T8, S1-S8, X2/X5/X8, V5/V8.  Fail each ownership-transfer/admission/store boundary and repeat the request from its permitted state. | Independent before/after source/registration/root ledgers and exact allocation/free counts.  Source rollback after acceptance, partially acquired ownership, duplicated terminal outcomes or retry replay of a committed source event must fail. |
 | A15: Measured trade-offs. | P1/P2/P4/P5 on the workload matrix below; P3 successful AST reload is deferred.  Compare equivalent admitted work, retained worlds, source validation and cleanup. | Raw paired wall/worker/allocation/store observations with independently checked result equality.  An inequivalent baseline, omitted failure/sample, excluded cleanup cost or historical percentage used as a gate invalidates the comparison. |
@@ -2671,7 +2689,7 @@ The review checks the following controlling boundaries, not an implemented servi
 | B4: Task versus observer ownership. | Shared tasks have generation/attempt-checked single publication; current-world UI stop is waiter-local, while source-frontier supersession cancels obsolete shared work and all still-pending query waiters with a distinct reason.  Observation/acquisition/drain ownership stays separate.  A5/A6, T6/T7, X1-X5. | No automatic world switch/retry or revoked published result; retain cancelled producer ownership until safe stop.  Fifteen operations and six borrowed accessors remain unchanged; detailed updated contracts still await sign-off. |
 | B5: Terminal versus stopped versus destroyed. | Cancellation/deadline is not producer termination.  `STOPPED` requires safe compute/provider/store finalisation, while retained resident child backing survives session release until final ordinary release.  A7/A12, X7/X8, V7/V8. | Reserved shutdown/reaper and surviving-owner lifetime agree; neither a wait timeout nor store degradation frees in-use backing. |
 | B6: Store commit versus durability. | Immutable records precede complete-file head replacement; uncertain replacement reconciles exact predecessor/proposed commit.  `PROCESS_ATOMIC` receipts leave durable `StoreStatus.acknowledged_frontier` at `NONE`.  A8-A10, S1-S6. | Our interruption/error handling is required under stated primitive assumptions; no power-loss/external filesystem guarantee is promoted to an initial release gate. |
-| B7: Quotas versus safety. | Omitted or `-1` `LimitRequest`/`StoreLimitRequest` fields mean no configured quota, `0` allows none of that resource and a positive value is an allowed-up-to limit; effective `Limits`/`StoreLimits` remain checked technical bounds.  Allocator/write failure preserves source, protection and shutdown reservations.  A12/A14, S7, X5/X8. | No mandatory fixed RAM/disk budget or infinite numeric sentinel; optional ceilings must be enforced without silently increasing them. |
+| B7: Quotas versus safety. | Omitted or `-1` `LimitRequest`/`StoreLimitRequest` fields mean no configured quota, `0` allows none of that resource and a positive value is an allowed-up-to limit; effective `Limits`/`StoreLimits` remain checked technical bounds.  Positive budgets evict their own least-recently-used unprotected entries first and may admit one reported oversized item per byte budget.  Allocator/write failure preserves source, protection and shutdown reservations.  A12/A14, S7, X5/X8. | No mandatory fixed RAM/disk budget or infinite numeric sentinel; optional ceilings must be enforced without silently increasing them. |
 | B8: Location/privacy versus ownership. | Resolve `.jaiParserCache` from the declared project root, exclude managed data from source/watch/VCS ingestion and reject incompatible namespaces/unsafe paths.  Exclusive ownership is approved; contention degrades only persistence.  A10/A13, S4/S8. | No concurrent shared-store/multiwriter approval; the contending editor must report that its recovery is not being persisted. |
 | B9: Supported versus reserved capability. | Initial owned syntax/source/recovery is required; semantic/evaluator/discovery and persisted-AST successful-feature paths remain unsupported/deferred.  Initial rejection checks remain required and create no compiler/task side effects.  A1/A11, T8, V2/V3/V8. | D1-D8/P3 success is not initial coverage; no implementation of deferred semantics is inferred from its extension schema. |
 | B10: Draft/evidence versus approval. | A1-A15/W1-W6 specify future cases and measured comparisons; E1-E13 remain bounded historical evidence.  Negative controls, attained barriers, independent oracles and clean ownership are required for applicable correctness passes. | No document audit passes a runtime case; workload/profile acceptance, complete specification sign-off and implementation/migration permission are separate decisions. |
