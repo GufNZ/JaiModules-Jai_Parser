@@ -560,7 +560,7 @@ Earlier setup proposals, not blanket-approved defaults or final option names; th
 - Persistence enabled by default; explicitly disabling it retains the same in-memory semantics.
 - Saved and unsaved revisions persist, with separate current-disk/active-overlay metadata, private storage, and explicit recovery/discard/cleanup behaviour.
 - Optional cache-directory override; the selected default is `.jaiParserCache` beside the project's `.build`, resolved from the host-declared project root, not an inferred working directory.
-- Configurable memory/disk budgets (with unlimited (= all available space) as an option for disk) and retention policy, preferring resident validated data under ordinary conditions.
+- Configurable memory/disk budgets and retention policy, preferring resident validated data under ordinary conditions.  Each quota uses `-1` for no configured limit (all available), `0` for not allowed and a positive value for an allowed-up-to limit.
 - Clear/invalidate operations, format/version inspection, cache-hit/miss reasons, and a way to recover from a damaged/outdated store, probably via reparse rather than a migration or similar.
 - Independent workspace-trust and external-evaluation policy.
 Enabling persistence is not permission to execute source code.
