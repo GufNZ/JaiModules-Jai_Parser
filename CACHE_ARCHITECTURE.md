@@ -65,7 +65,7 @@ Absolute file location, module parameters, and the current program parameters ar
 - Design for persistent caches now.
 They should survive editor restarts, remain resident in memory when useful, and be evicted only when necessary rather than routinely discarded after requests.
 - Persistence should be configurable, provisionally enabled by default, with a caller-supplied storage location option.
-The exact configuration contract is still proposed below.
+The selected defaults are recorded under R2/R6 in the [decision record](#decision-record), and milestone 5 drafts the store-policy contract.
 - Persist unsaved revisions as well as saved revisions when persistence is enabled, with explicit document-state tracking and recovery/cleanup controls.
 Restoring or discarding a buffer must not accidentally select its obsolete unsaved revision.
 - Eventually use isolated official-compiler subprocesses for evaluations such as `#insert`, `using,map`, `#modify` blocks and `#run`, where necessary.
@@ -153,7 +153,7 @@ Neither filesystem equivalence nor a syntax/content cache hit permits rewriting 
 
 Use exact content digests to establish reusable revisions.
 Modification time, size, and file watchers can schedule validation, but are not proof that bytes match.
-A warm restart may still need to read/hash files while avoiding lexing, parsing, and analysis.
+A warm restart still needs to read and hash files; its main saving is skipped analysis, since the measured persisted-syntax formats were slower than reparsing ([E12](CACHE_EXPERIMENTS.md#e12-results-real-source-baseline-and-source-reload-control)).
 Faster trusted manifest validation, if offered, must be a separately documented weaker policy.
 
 Unsaved buffers take precedence over disk for that editor workspace.
@@ -685,7 +685,7 @@ They are a higher and later API layer, not prerequisites for defining the lower-
 | Whole-file snapshot cache. | Avoids all syntax work for unchanged files. | Requires owned immutable lifetime and validation. | Primary syntax reuse boundary. |
 | Module/query semantic cache. | Reuses expensive meaning across files and sessions. | Needs context identities, dependencies, persistence, and invalidation. | Primary semantic direction. |
 | Immutable syntax chunks. | Can share unchanged declaration storage and fingerprinting. | Boundary, identity, source-map, and ownership complexity. | Optional optimisation after measurement. |
-| Persist source only and reparse. | Very simple format; source retrieval can be cheap. | Does not satisfy avoiding repeated syntax parsing by itself. | Fallback, not the complete restart cache. |
+| Persist source only and reparse. | Very simple format; source retrieval can be cheap. | Does not avoid repeated syntax parsing by itself. | Selected initial restart path (R2); E12's graph-text reload was slower than reparsing. |
 
 The module cache and declaration-query cache are complementary layers, not two independent copies of every AST and semantic object.
 A module artifact indexes/references its files and results.

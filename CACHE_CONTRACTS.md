@@ -18,27 +18,28 @@ Provider ordering tokens distinguish successive events even if their resulting b
 Reject an invalid event explicitly without changing the current selection or reporting a successful update ticket.
 Before acknowledging accepted input, acquire owned bytes or an explicit immutable provider lease; no deferred work may borrow the caller's temporary edit buffer.
 
-Proposed ranged-edit coordinates are zero-based byte offsets into the exact base revision, with half-open ranges.
+Ranged-edit coordinates are zero-based byte offsets into the exact base revision, with half-open ranges.
 Adapters convert editor-specific UTF-16/line coordinates using that same revision, not the latest buffer.
 Require matching base revision, in-range endpoints and a documented batch convention: initially one ordered sequence, with each edit applied to the result of the preceding edit.
 Reject mismatched bases and invalid ranges rather than silently rebasing, clipping, or partially applying the batch; a full-replacement event is the recovery path.
-These coordinate/batch rules are approval candidates, not assertions about existing parser APIs or a new UTF-8-validity restriction on source bytes.
+R3 approved this byte-based exact-base batch direction on 2026-10-21, and [`RangeEdit`](#record-shapes-and-value-types) fixes its record; these rules are not assertions about existing parser APIs or a new UTF-8-validity restriction on source bytes.
 
 | Event. | Proposed source selection and observable result. |
 | --- | --- |
 | Open or replace overlay. | Select the host-supplied revision over disk.  Retain disk state separately; identical bytes alone do not acknowledge a save or discard. |
 | External disk update. | Advance the acknowledged disk reference; an active overlay remains selected.  Without an overlay, select the new disk revision and schedule its syntax milestone. |
-| Save acknowledgement. | Record the exact revision actually written and acknowledged by the host.  Clear/reconcile the overlay only if the host confirms that it is that saved revision; a newer overlay edit remains selected.  A failed or delayed save must not mark the newer buffer saved. |
+| Save acknowledgement. | Record the exact revision actually written and acknowledged by the host.  Clear the overlay only when both its installation `ProviderRevision` and its content `SourceRevision` match the saved revision, as specified for [`ACK_SAVE`](#source-event-payloads); a newer overlay edit remains selected, even with identical bytes.  A failed or delayed save must not mark the newer buffer saved. |
 | Reset/discard. | On host confirmation, remove the active overlay and its active recovery reference, then select freshly validated disk bytes or explicit absence.  Cached history cannot reactivate the discarded overlay. |
 | Delete. | Mark the disk reference absent.  Preserve an active host buffer as an overlay; without one, publish source absence, not an empty parsed file or an old cached revision. |
-| Rename/replacement. | Accept an explicit host event and revalidate source-visible context and resolution inputs.  Do not infer declaration/module continuity or alias equivalence from matching bytes.  Exact physical identity and cross-file atomic-event policy remain decisions. |
+| Rename/replacement. | Accept an explicit host event and revalidate source-visible context and resolution inputs.  Do not infer declaration/module continuity or alias equivalence from matching bytes.  `jai-cache-interface/1` does not support rename: the host reports the old path's absence and a separate new document, with document identity governed by the [provider policy](#milestone-2-provider-admission-and-bounded-values). |
 | Restart/recovery. | Validate disk/configuration; expose persisted overlays only as recovery candidates.  Activate a candidate only after host confirmation, through a new source event. |
 | Cache failure. | Preserve the accepted in-memory source selection, reconstruct from authoritative bytes where possible, and report a separate cache diagnostic.  Source acquisition failure is explicit unavailability/failure, not permission to use a stale revision. |
 
 A captured world contains immutable selected document-revision/context references and the source-provider event frontier used to choose them.
 Publication installs a coherent world atomically; completion of old work never rewrites an already captured world or silently makes an old world current.
 If later dependency discovery requires a source not captured in that world, use an immutable provider snapshot capable of supplying that frontier's bytes, or return an explicit unavailable/incomplete result requiring a new world.
-Do not read today's disk file and attach it silently to yesterday's world; the exact provider snapshot/discovery mechanism remains to be specified.
+Do not read today's disk file and attach it silently to yesterday's world.
+The initial interface captures only an explicit finite document set and rejects resolver discovery as unsupported; a future discovery capability must specify its historical snapshot mechanism.
 Initial syntax publication does not assert a complete import closure or semantic world.
 
 ### Ownership and Publication
@@ -233,7 +234,7 @@ Parsing malformed source may produce an available syntax result with diagnostics
 Loading a source artifact requires exact authoritative disk/overlay selection first; a cached saved revision is not a substitute for checking current disk bytes.
 Recovery candidates are a separate host-confirmed source input and may be inspected without first being activated as an overlay.
 Do not eagerly decode historical graphs; validate/load only the records needed for the selected source or query, and bound each resulting dependency traversal.
-Concrete numeric limits must be approved and enforced before qualifying a loader; E12's assert-aborting reader and post-read checks do not meet this contract.
+Documented implementation bounds, and any optional configured quotas, must be enforced before qualifying a loader; E12's assert-aborting reader and post-read checks do not meet this contract.
 
 ### Milestone 5: Record Schemas and Configured Policy
 
@@ -1326,7 +1327,7 @@ The 2026-10-23 cancellation clarification adds task-wide obsolete-world cooperat
 The one-compute-worker/reaper baseline and policies are proposals for detailed R4 review, not claims added to the 2026-10-21 direction approval.
 X1-X8 above carry its discriminating controls; milestone 6 consolidates the requirement/workload/oracle draft.
 
-Required detailed review remains: native mutex/condition/thread/reaper/allocator bindings and minimum reservation sizing, actual provider ownership/stop compliance, R6 finite ceilings, R2/R6 store-lane/finalisation policy and the exact public API/profile approval.
+Required detailed review remains: native mutex/condition/thread/reaper/allocator bindings and minimum reservation sizing, actual provider ownership/stop compliance, documented implementation ceilings with optional R6 quotas, the milestone-5 store-lane/finalisation contract and the exact public API/profile approval.
 Unsupported async provider ingress, semantic/evaluator work, callback core delivery, parallel compute, cross-session sharing and forced thread termination gain no capability from this closure.
 
 ## Source Provider and Capture Contract Draft
@@ -1408,7 +1409,7 @@ An unavailable uncaptured revision is distinct from an already published lease b
 Acquisition limits, retry/cancellation and shutdown follow the execution contract: external provider calls run outside internal locks, return under captured operation identity, and retain ownership until stopped/detached safely.
 Provider failure, permission denial and incomplete capture are service/capability outcomes, not fabricated parse errors or successful empty source.
 Expose consistency/completeness and selected identities with results, so the host can decide whether a syntax-only result is sufficient; do not bury a weakened capture guarantee in a cache hit counter.
-Path-alias rules, per-document versus workspace-frontier conflict checks, snapshot capability names, retained-provider storage and absolute acquisition bounds remain approval decisions.
+Milestone 2 below defines the alias/link and reappearance policy arms, consistency/lease capability names, frontier/base checks and acquisition limits; their API review remains open.
 
 ### Source Capture Acceptance Trace Drafts
 
@@ -1485,7 +1486,7 @@ Diagnostic emission, declaration-event order, related messages and source-visibl
 Any canonical captured member table is built from the validated transaction's resulting selection, not by reordering or replaying the transaction differently.
 
 An invalid/duplicate/foreign member rejects the whole analysis request before task/ticket acceptance; it neither changes the provider frontier nor publishes the valid subset as a successful aggregate.
-The milestone-2 `Limits` contract requires explicit `capture_documents` and `elements_per_list` ceilings before allocating/sorting; their absolute host values remain an R6 policy input, not a default chosen here.
+The milestone-2 `Limits` contract requires checked `capture_documents` and `elements_per_list` bounds before allocating/sorting; under R6 these are documented implementation ceilings unless the host configures an optional lower quota.
 
 The discriminating future cases compare `[A, B]` with `[B, A]` at one frontier and reject `[A, A]`: the first pair has equal logical membership but distinct caller registrations, while the duplicate request admits no partial work.
 Additional independent cases cover equal source bytes in distinct documents, provider-qualified aliases, digest-collision safeguards, foreign identities, worker completion permutations and sequential source edits whose order must not change.
@@ -1794,7 +1795,7 @@ The discriminating future case completes an index query with `PARTIAL_SYNTAX_TRA
 Additional independent cases cover an incomplete parse with fully preserved diagnostics, zero diagnostics, empty complete/partial indices, wrong-kind arms, mismatched/reordered reasons, cancelled publication and attempted snapshot/diagnostic truncation.
 Assert the exact outcomes and immutable outer/inner values against independent expectations.
 The milestone-2 closure supplies detailed signatures, snapshot-schema projection and required numeric-limit negotiation.
-Concrete R6 values, API approval and release qualification remain open.
+Documented implementation ceilings, API approval and release qualification remain open.
 
 #### Diagnostic Origins and Declaration Index Records
 
@@ -1966,7 +1967,7 @@ The second requires the named live session and its workspace; there is no implic
 The exact response records, payload access family, adapter descriptors, canonical value grammar and checked bound negotiation are specified by the milestone-2 closure below.
 They refine this unimplemented draft and do not add a sixteenth scheduling/source operation.
 An implementation may expose equivalent typed Jai procedures, but must not change ownership, invent success defaults, or claim binary ABI compatibility from this notation.
-Disk serialisation, store policy defaults, scheduling policy and semantic query implementation remain their separate milestones.
+Disk serialisation (milestone 5), scheduling (milestone 4) and semantic query implementation remain separate; store-policy defaults are recorded under R2/R6.
 
 Payload access requires a live owning `WORLD`/`RESULT` handle.
 Read-only descriptions/views borrow from that handle and cannot be used after its release; copies that must survive need their own host storage or `Retain` first.

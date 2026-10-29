@@ -348,7 +348,7 @@ State all known impacts: uncertainty about which bindings exist is not merely a 
 
 Codes and impacts are closed ASCII tags; unknown tags reject this schema rather than silently becoming generic success.
 
-Numeric admission/text ceilings follow the milestone-2 `Limits` contract; concrete host values require explicit configuration/R6 approval, not defaults chosen here.
+Numeric admission/text ceilings follow the milestone-2 `Limits` contract: documented implementation ceilings, lowered only by optional host-configured quotas under R6.
 
 Retain reasons in deterministic traversal-discovery order, with owning-node observations before descendant observations and registry/field/list order for ties.
 
