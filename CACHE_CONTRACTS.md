@@ -734,7 +734,7 @@ Binding/default evaluation is validated separately.
 | --- | --- |
 | `BOOL` | `{value:bool}` with its registered `bool` type. |
 | `INTEGER` | `{signed:bool, bit_width:u32, little_endian:bytes}`.  `bit_width` is positive, byte count equals checked `(bit_width + 7)/8`, signed values use two's complement, and unused high bits are zero for unsigned or sign extension for signed.  The type profile fixes width/signedness; no decimal string or minimal-byte ambiguity. |
-| `FLOAT` | `{format:BINARY32|BINARY64, little_endian_bits:bytes}` of exactly four/eight bytes; the text store writes it as an `X` hex-float bit pattern, not `B` bytes.  Preserve every bit, signed zero and NaN payload; semantic/compiler argument equivalence still needs its qualified policy, not host floating-point ==. |
+| `FLOAT` | `{format:BINARY32\|BINARY64, little_endian_bits:bytes}` of exactly four/eight bytes; the text store writes it as an `X` hex-float bit pattern, not `B` bytes.  Preserve every bit, signed zero and NaN payload; semantic/compiler argument equivalence still needs its qualified policy, not host floating-point ==. |
 | `BYTES` | `{value:bytes}` with the registered string/byte-sequence type and exact bytes, including empty/non-UTF-8 values. |
 | `TYPE` | `{value:TypedTypeRef}`.  Types are identities/descriptors, not source-spelling strings. |
 | `ENUM` | `{type_identity:TypeID, representation:TypedValue(INTEGER)}`; aliases retain their actual typed value, and named spelling is not a new nominal identity. |
