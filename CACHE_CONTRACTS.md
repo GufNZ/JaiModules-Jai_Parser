@@ -2264,7 +2264,7 @@ Required source/recovery persistence (R2) and the exact store configuration/gram
 
 #### Required Limit Negotiation
 
-`effective_limits` is `Limits`: a record with exactly the following nineteen named nonnegative `u64` fields in table order.
+`effective_limits` is `Limits`: a record with exactly the following nineteen named `s64` fields in table order.
 
 `requested_limits` is `LimitRequest`, with those same nineteen names/order, each `s64`; omitted fields or an omitted request mean all corresponding fields are `-1`, with no configured quota.
 Set values must be nonnegative and at most the relevant native representation ceiling: `0` allows none of that resource and a positive value is the maximum allowed; values below `-1` and unknown/malformed fields reject before input acquisition.
