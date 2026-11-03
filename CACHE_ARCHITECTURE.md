@@ -674,7 +674,7 @@ Callers wanting information after a notified edit can wait for the relevant upda
 
 Define cancellation, result/handle lifetimes, and notification delivery without requiring a particular threading, coroutine, or event-loop API.
 Caller/UI cancellation of one current-world waiter must not discard shared work still needed by other requests.
-World supersession instead cancels unfinished obsolete-world work and all its still-pending shared query waiters with a distinct `WORLD_SUPERSEDED` reason; clients decide whether to reissue against an explicitly selected current world.
+World supersession instead cancels unfinished obsolete-world work and all its still-pending shared query waiters with a distinct `.WORLD_SUPERSEDED` reason; clients decide whether to reissue against an explicitly selected current world.
 
 ### Later Editor-Feature APIs
 
@@ -898,7 +898,7 @@ Qualification items apply only after separate implementation authorisation, usin
 - [x] Draft the core source-event, world, ownership, ticket and query-outcome contracts with T1-T8.
 - [x] Draft the source-provider capture contract with V1-V8.
 - [x] Draft the source/update/query interface schema, operation/outcome table, worked edit protocol and latency mapping, and repair bootstrap/retry/shutdown gaps in a consistency pass.
-- [x] Complete milestone 1: close the current-producer syntax registry for all 50 generated layouts, the base-node `DIRECTIVE_THIS` route and all auxiliary helpers.
+- [x] Complete milestone 1: close the current-producer syntax registry for all 50 generated layouts, the base-node `.DIRECTIVE_THIS` route and all auxiliary helpers.
 - [x] Complete the milestone-2 draft: exact values, signatures, accessors, provider/adapter admission, optional quota requests and finite effective bounds, plus the trivia-required token registry and value encodings.
 - [x] Complete the milestone-3 draft: identity allocation, restart continuity, declaration matching, typed keys, completed `#Context` comparison and deferred semantic records, with D1-D8.
 - [x] Complete the milestone-4 draft: ordering, reservations, task attempts, delivery, cancellation and shutdown, with X1-X8.

@@ -9,22 +9,22 @@ Proposed mapping review 2026-10-21; this is a producer-adapter contract, not an 
 
 | Producer surface. | Required payload mapping or explicit gap. |
 | --- | --- |
-| `Token_Type` in `lexer.jai`. | `TokenTag` is `BYTE_CHAR {value:u8}` or `NAMED {name_ascii}` under `jai-cache-token-tags/1`, registered below.  Normalise producer aliases before encoding; reject unknown/noncanonical payload names rather than serialising enum ordinals. |
+| `Token_Type` in `lexer.jai`. | `TokenTag` is `.BYTE_CHAR {value:u8}` or `.NAMED {name_ascii}` under `jai-cache-token-tags/1`, registered below.  Normalise producer aliases before encoding; reject unknown/noncanonical payload names rather than serialising enum ordinals. |
 | `Parser_Token` with `ENABLE_TRIVIA`. | Use checked `byte_start`/`byte_end` against the owned exact source.  For a nonempty token interval, map the first token's start through the last included token's end; do not include preceding/trailing trivia implicitly.  Preserve token intervals as separate observations. |
 | `Parser_Token` without `ENABLE_TRIVIA`. | This aliases `Token`, which has line/column observations but no byte-offset fields.  It is outside the full-featured service profile: no non-trivia byte-mapping adapter is required.  Existing AST-compatibility mode may remain in the current parser independently; this specification does not require preserving that mode in the future owned-syntax API. |
-| `add_missing_token`. | Correlate the diagnostic's recovery record with `synthetic_tokens` and `insertion_index`; map the insertion position to a checked zero-width source anchor.  At end of input use the exact source length when the token/source mapping validates it.  No synthetic token bytes are inserted into the authoritative source.  Missing/ambiguous correlation remains `UNLOCATED`, not a guessed inserted origin. |
+| `add_missing_token`. | Correlate the diagnostic's recovery record with `synthetic_tokens` and `insertion_index`; map the insertion position to a checked zero-width source anchor.  At end of input use the exact source length when the token/source mapping validates it.  No synthetic token bytes are inserted into the authoritative source.  Missing/ambiguous correlation remains `.UNLOCATED`, not a guessed inserted origin. |
 | `Parser_Declaration`/`.DECLARATION`. | Emit the authored declaration with its actual name and origin, retaining recovery state and containing syntax ownership.  A synthetic helper `declaration_properties` inside a compound node is not an additional standalone declaration entry. |
-| `Parser_Compound_Declaration`/`.COMPOUND_DECLARATION`. | Read `comma_separated_assignment.arguments` in authored order and shared `declaration_properties`.  For a qualified `parse_declaration_node` construction, the binding predicate is `(!reassignment && modifier != ASSIGN) || modifier == DECLARE`, where reassignment is the shared `operator_type` equal to the `=` character.  Emit only arguments satisfying this predicate; `ASSIGN` targets and ordinary multi-target reassignment remain uses.  The separate expression-led construction needs route classification as described below; do not apply this predicate universally.  Do not collapse names or duplicate the shared properties node as an entry. |
-| `Parser_Directive_Scope`/`.DIRECTIVE_SCOPE`. | Map `scope_type` `EXPORT`, `INTERNAL`, `FILE` to `SCOPE_EXPORT`, `SCOPE_MODULE`, `SCOPE_FILE` respectively, preserving the directive origin.  Track direct same-list provenance under the rules below; conditional branches retain branch-local observations without evaluation or a guessed merged visibility state. |
-| Declaration `#export` observation. | The reviewed scope-directive parser does not establish a declaration-marker mapping.  `EXPORT` in `declaration_marker` is reserved until a real producer path or qualified lossless syntax adapter is identified.  Do not infer it from scope `EXPORT`, resolved visibility, string matching inside comments/literals, or absent metadata.  Unrepresentable relevant observations require `RECOVERED_UNKNOWN`/partial coverage, not a false `UNSPECIFIED` assertion. |
-| Declaration `#program_export` metadata. | `parse_declaration_metadata` sets `PROGRAM_EXPORT` and optionally stores a string token's value in `program_export_name`.  This requests a program/linker export, not module visibility or the reserved declaration `EXPORT` marker.  Preserve it separately as specified below; the stored string is scalar data, not an AST child. |
+| `Parser_Compound_Declaration`/`.COMPOUND_DECLARATION`. | Read `comma_separated_assignment.arguments` in authored order and shared `declaration_properties`.  For a qualified `parse_declaration_node` construction, the binding predicate is `(!reassignment && modifier != .ASSIGN) || modifier == .DECLARE`, where reassignment is the shared `operator_type` equal to the `=` character.  Emit only arguments satisfying this predicate; `.ASSIGN` targets and ordinary multi-target reassignment remain uses.  The separate expression-led construction needs route classification as described below; do not apply this predicate universally.  Do not collapse names or duplicate the shared properties node as an entry. |
+| `Parser_Directive_Scope`/`.DIRECTIVE_SCOPE`. | Map `scope_type` `.EXPORT`, `.INTERNAL`, `.FILE` to `.SCOPE_EXPORT`, `.SCOPE_MODULE`, `.SCOPE_FILE` respectively, preserving the directive origin.  Track direct same-list provenance under the rules below; conditional branches retain branch-local observations without evaluation or a guessed merged visibility state. |
+| Declaration `#export` observation. | The reviewed scope-directive parser does not establish a declaration-marker mapping.  `.EXPORT` in `declaration_marker` is reserved until a real producer path or qualified lossless syntax adapter is identified.  Do not infer it from scope `.EXPORT`, resolved visibility, string matching inside comments/literals, or absent metadata.  Unrepresentable relevant observations require `.RECOVERED_UNKNOWN`/partial coverage, not a false `.UNSPECIFIED` assertion. |
+| Declaration `#program_export` metadata. | `parse_declaration_metadata` sets `.PROGRAM_EXPORT` and optionally stores a string token's value in `program_export_name`.  This requests a program/linker export, not module visibility or the reserved declaration `.EXPORT` marker.  Preserve it separately as specified below; the stored string is scalar data, not an AST child. |
 
 The index traversal follows authored syntax ownership/child edges only; it must not follow resolved declarations, lexical binding/reference tables or inferred semantic backreferences.
 Snapshot-local node IDs identify syntax occurrences, not names; assign index-local entry IDs independently, preserving the declared enclosing-before-nested and per-binding order.
 For nested syntax within a shared compound initialiser, use the proposed shared-region representation below rather than selecting one binding as its sole enclosing declaration.
 Until that representation and the reached child mappings are reviewed and qualified, report partial coverage for that region rather than duplicate it or invent container identity.
 
-`COMPLETE_SYNTAX_TRAVERSAL` requires a reviewed child-edge/variant registry covering every reached authored node kind and every required route, origin/name, visibility, metadata and recovery-attribution observation.
+`.COMPLETE_SYNTAX_TRAVERSAL` requires a reviewed child-edge/variant registry covering every reached authored node kind and every required route, origin/name, visibility, metadata and recovery-attribution observation.
 An unknown node or unmapped required field makes coverage partial with a reason; successful parsing alone is not that proof.
 
 Mapping checks to implement after authorisation: raw punctuation versus named/aliased tokens; trivia-enabled origins and rejection of a non-trivia full-featured profile; EOF insertion/recovery correlations; `a, b := values` versus `a, b = values` and mixed declare/assign modifiers; shared compound initialiser ownership; sequential/conditional scope directives; unmapped declaration markers and unknown child variants.
@@ -34,7 +34,7 @@ The initial fifteen-operation interface and all pending policy/implementation ga
 ## Same-List Scope Provenance and Conditional Boundaries
 
 Proposed declaration-index/2 refinement grounded in the scope-directive builder function and `parse_static_if_statement`/`parse_statement_block`.
-The builder function publishes a standalone `DIRECTIVE_SCOPE` with a `scope_type`; it does not attach effective visibility to each declaration.
+The builder function publishes a standalone `.DIRECTIVE_SCOPE` with a `scope_type`; it does not attach effective visibility to each declaration.
 Static conditionals retain their branches, including parser-created single-statement blocks, rather than selecting one during parsing.
 Consequently, `scope_directive` is strictly a source-provenance summary, not an effective lexical/module visibility state.
 
@@ -48,11 +48,11 @@ An out-of-snapshot ID or a directive that is not a preceding direct element is i
 | Authored situation. | Required provenance result. |
 | --- | --- |
 | Qualified preceding direct directive. | Record that list and directive, map its exact `scope_type`, and preserve its source observation.  A later direct directive supersedes it only for this same-list summary. |
-| Qualified list with no preceding direct directive. | Record the list with no directive and `UNSPECIFIED`.  This means no direct same-list observation, not private/module/export default visibility. |
+| Qualified list with no preceding direct directive. | Record the list with no directive and `.UNSPECIFIED`.  This means no direct same-list observation, not private/module/export default visibility. |
 | Nested block, aggregate body or conditional branch. | Compute a separate list-local summary.  Do not copy an outer list's directive into the inner list's basis or leak the inner list's last directive into its parent or a sibling branch.  The owning syntax graph preserves outer/branch context independently. |
 | Declaration nested in an expression/header without an intervening statement list. | Use the nearest owning registered statement list and its containing statement as the ordering anchor.  Do not treat a directive inside some other child of that statement as preceding in this list. |
-| No statement-list ancestor in a supported standalone syntax form. | Both IDs are absent, and the tag is `UNSPECIFIED`; this does not establish a language default or prove that such syntax is semantically valid. |
-| Missing ownership/list correlation or unknown relevant directive form. | Preserve independently verified observations, use `RECOVERED_UNKNOWN`, and report `UNKNOWN_VISIBILITY` or `UNCLASSIFIED_ROUTE` with `VISIBILITY` impact as appropriate.  Do not confuse unavailable evidence with a qualified no-directive result. |
+| No statement-list ancestor in a supported standalone syntax form. | Both IDs are absent, and the tag is `.UNSPECIFIED`; this does not establish a language default or prove that such syntax is semantically valid. |
+| Missing ownership/list correlation or unknown relevant directive form. | Preserve independently verified observations, use `.RECOVERED_UNKNOWN`, and report `.UNKNOWN_VISIBILITY` or `.UNCLASSIFIED_ROUTE` with `.VISIBILITY` impact as appropriate.  Do not confuse unavailable evidence with a qualified no-directive result. |
 
 Traverse both static branches without executing the condition; a declaration's basis refers to its actual branch list, not a synthetic combined list of both branches.
 After a conditional statement, a parent's same-list summary still refers only to preceding direct elements of that parent list.
@@ -62,10 +62,10 @@ These are semantic/module-composition questions outside this payload.
 Recovering a condition does not by itself invalidate an otherwise qualified list/directive association; unresolved ownership or relevant directive observations do.
 Never use condition truth, symbol lookup or file following to repair the syntax summary.
 
-Declaration markers remain separately observed under their qualified producer routes; scope provenance cannot fill the reserved declaration `EXPORT` marker.
+Declaration markers remain separately observed under their qualified producer routes; scope provenance cannot fill the reserved declaration `.EXPORT` marker.
 Program/linker export metadata remains separate from both.
 
-`COMPLETE_SYNTAX_TRAVERSAL` may include `UNSPECIFIED` same-list summaries where absence of a direct directive is established; it may not conceal an unavailable list/marker mapping as that absence.
+`.COMPLETE_SYNTAX_TRAVERSAL` may include `.UNSPECIFIED` same-list summaries where absence of a direct directive is established; it may not conceal an unavailable list/marker mapping as that absence.
 This refinement deliberately provides no effective-visibility query, inheritance algorithm, branch-join operation or extra service operation.
 
 The discriminating future case places different scope directives in the two static branches followed by a parent-list declaration: retain both branch-local bases without selecting a condition or manufacturing a merged parent directive.
@@ -82,17 +82,17 @@ Proposed 2026-10-21 for the declaration-index/2 draft; no producer adapter or so
 That path does not recognise `export`.
 
 This establishes a limit of the reviewed producer path, not that `#export` is supported elsewhere or that every remaining source token was inspected as declaration metadata.
-Keep declaration-marker `EXPORT` reserved and the earlier unknown-observation rule intact.
+Keep declaration-marker `.EXPORT` reserved and the earlier unknown-observation rule intact.
 
-Neither `PROGRAM_EXPORT` nor `program_export_name` supplies a declaration-marker or scope-directive value.
+Neither `.PROGRAM_EXPORT` nor `program_export_name` supplies a declaration-marker or scope-directive value.
 
 `program_export_syntax` is `{coverage, occurrences: []ProgramExportOccurrence, producer_observation}`.
 
-Its `coverage` is `COMPLETE_METADATA_OBSERVATION. | PARTIAL_METADATA_OBSERVATION {reasons: []CoverageReason}` for this declaration's metadata, not semantic export validity or whole-index traversal.
+Its `coverage` is `.COMPLETE_METADATA_OBSERVATION | .PARTIAL_METADATA_OBSERVATION {reasons: []CoverageReason}` for this declaration's metadata, not semantic export validity or whole-index traversal.
 
-Metadata and `UNMAPPED` name reasons use the same structured record and propagate to the index's partial reasons.
+Metadata and `.UNMAPPED` name reasons use the same structured record and propagate to the index's partial reasons.
 
-`ProgramExportOccurrence` is `{marker_origin:SOURCE, name_argument: *ProgramExportName}`; `ProgramExportName` is `{origin:SOURCE, value_bytes}`.
+`ProgramExportOccurrence` is `{marker_origin:.SOURCE, name_argument: *ProgramExportName}`; `ProgramExportName` is `{origin:.SOURCE, value_bytes}`.
 
 The marker origin covers the authored `#` and `program_export` tokens; a name origin covers the consumed string token.
 
@@ -106,7 +106,7 @@ Do not substitute the declaration's name when the argument is absent.
 
 `value_bytes` is the exact lexer string value under the captured `EVALUATE_STRING_ESCAPES` profile, not a host-decoded or normalised linker name; raw spelling and malformed-input observations remain protected separately.
 
-`producer_observation` is `*ProgramExportObservation`, where `ProgramExportObservation` is `{requested:bool, stored_name_bytes}`, from `PROGRAM_EXPORT` and `program_export_name`, even when source correlation is incomplete.
+`producer_observation` is `*ProgramExportObservation`, where `ProgramExportObservation` is `{requested:bool, stored_name_bytes}`, from `.PROGRAM_EXPORT` and `program_export_name`, even when source correlation is incomplete.
 
 Use a non-null pointer for declaration-properties records and null for index occurrences such as bare enum members that have no such producer record; do not manufacture a false flag/empty string pair.
 
@@ -159,7 +159,7 @@ Assigned targets are not members.
 An empty list is valid for a pure assignment and does not fabricate a declaration.
 Every listed entry must reference this `compound_node_id` and have `container == parent_container`; a binding cannot belong to two regions.
 Create the region and emit all its binding entries before descending into shared properties, alignment or notes.
-Direct nested declarations there use `SHARED_REGION`; descendants of a nested ordinary declaration use that declaration as usual.
+Direct nested declarations there use `.SHARED_REGION`; descendants of a nested ordinary declaration use that declaration as usual.
 A nested compound's region retains the outer container through `parent_container`.
 The binding list expresses syntactic association, not value distribution, inferred tuple arity, evaluation order or semantic ownership of a type/procedure.
 Even a one-binding mixed compound keeps its region; do not collapse it into a special single-owner case.
@@ -167,8 +167,8 @@ Validate container ancestry across both tables, region membership and all node r
 Containment must be acyclic; binding-list references are associations, not additional containment edges.
 Do not infer ancestry from overlapping source spans or compare local IDs from different payloads.
 
-For `jai-cache-authored-edges/1`, each reviewed producer field has exactly one traversal role: `CHILD`, `CHILD_LIST`, `HELPER`, `BACKREFERENCE`, or `NON_CHILD`.
-`HELPER` is structural storage traversed through its registered fields, not an extra authored declaration; it may have no independent source origin.
+For `jai-cache-authored-edges/1`, each reviewed producer field has exactly one traversal role: `.CHILD`, `.CHILD_LIST`, `.HELPER`, `.BACKREFERENCE`, or `.NON_CHILD`.
+`.HELPER` is structural storage traversed through its registered fields, not an extra authored declaration; it may have no independent source origin.
 Embedded base records, scalar flags/names/spans and inactive union arms are not child occurrences.
 Follow only the active discriminant-selected arm; a null optional child is absent, not an unknown node.
 Register field paths and variant guards against the exact producer/schema binding.
@@ -200,9 +200,9 @@ Names without a prefix refer to `Parser_*` records; grouped rows do not waive pe
 | `Directive_Module_Parameters`, `Directive_Overlay`, `Directive_Poke_Name`, `Directive_Procedure_Name`. | `module_parameters`, `program_parameters`, `common_code`; `target_expression`, `declaration_or_using`; parser `module_expression` only (poke `name` is scalar); optional `argument`, respectively. |
 | `Ident`, `Context`, `Note`, `Placeholder`, `Directive_Context_Type`, `Directive_Scope`, `Directive_Through`, `Directive_Wildcard`. | No authored node children in the candidate mapping; retain source scalar observations separately. |
 | Base `Parser_Node` with `.DIRECTIVE_THIS`. | No authored child in the reviewed `#this` builder function; this reachable kind is not represented by a concrete entry in `TYPES`.  Preserve its source/kind observations without interpreting a nonexistent derived payload. |
-| `Asm`. | Parser-owned `features[]`, `statements[]` helpers, not opaque compiler `b1`/`b2`/`b3` storage.  Use the explicit assembly-helper guards and order below; `UNPARSED` base operands can still own parsed modifiers. |
+| `Asm`. | Parser-owned `features[]`, `statements[]` helpers, not opaque compiler `b1`/`b2`/`b3` storage.  Use the explicit assembly-helper guards and order below; `.UNPARSED` base operands can still own parsed modifiers. |
 
-Explicit `BACKREFERENCE` paths include `Block.parent`, `Block.belongs_to_struct`, `Block.owning_statement`, `Procedure_Body.header`, `Case.owning_if` and parser `Asm.enclosing_scope`.
+Explicit `.BACKREFERENCE` paths include `Block.parent`, `Block.belongs_to_struct`, `Block.owning_statement`, `Procedure_Body.header`, `Case.owning_if` and parser `Asm.enclosing_scope`.
 Lexical scopes/children/bindings, identifier `resolved_declaration`, common inferred `type`, enclosing-load references, compiler constants/polymorph/expansion records and sorted/resolved call data are excluded from authored descent.
 These exclusions do not delete source observations from the protected syntax snapshot or define semantic invalidation edges.
 
@@ -212,7 +212,7 @@ Registered non-owning associations, including import callees pointing to an acti
 A completed-node revisit is permitted only by a registered alias rule with a specified single traversal owner; otherwise coverage is partial with an unexpected-sharing reason, not silently deduplicated by a global visited set.
 Use valid source positions to interleave independent authored children in lexical order; equal/unlocated positions use a reviewed per-kind field-path order and then list index.
 This candidate table is not itself that complete ordering/guard registry.
-Helper nodes without a finished token span, including compound `declaration_properties`, do not gain a fabricated `SOURCE` origin from zero-initialised token fields; shared-region source identity comes from the owning compound.
+Helper nodes without a finished token span, including compound `declaration_properties`, do not gain a fabricated `.SOURCE` origin from zero-initialised token fields; shared-region source identity comes from the owning compound.
 
 There is a second compound-construction path in `parse_statement`: expression-led multi-target assignments allocate the same helper shape but do not set `operator_type` there.
 Consequently, the earlier binding predicate is qualified only for the reviewed `parse_declaration_node` route; it is not a universal shape-only classifier for arbitrary compound nodes.
@@ -241,9 +241,9 @@ Capturing a time interval or scanning for overlapping diagnostics alone is not t
 
 | Entry status. | Required evidence. |
 | --- | --- |
-| `RECOVERED` | At least one qualified recovery event belongs to this occurrence's published authored subtree, including a mapped inserted name token, expected-expression hole or skipped-token recovery.  Do not require `INSERT_MISSING_TOKEN`: expected-expression records can have no synthetic token and a default diagnostic recovery action. |
-| `PARSED` | Attribution is complete for this occurrence's published subtree and establishes no recovery events there.  This does not assert compiler validity, semantic success or absence of lexer/language diagnostics. |
-| `UNCLASSIFIED` | Neither a positive recovery attribution nor complete no-recovery evidence is available.  Retain the safe entry with a structured `UNCLASSIFIED_ROUTE` reason including `RECOVERY` impact, propagated to top-level partial coverage; do not guess either other tag. |
+| `.RECOVERED` | At least one qualified recovery event belongs to this occurrence's published authored subtree, including a mapped inserted name token, expected-expression hole or skipped-token recovery.  Do not require `.INSERT_MISSING_TOKEN`: expected-expression records can have no synthetic token and a default diagnostic recovery action. |
+| `.PARSED` | Attribution is complete for this occurrence's published subtree and establishes no recovery events there.  This does not assert compiler validity, semantic success or absence of lexer/language diagnostics. |
+| `.UNCLASSIFIED` | Neither a positive recovery attribution nor complete no-recovery evidence is available.  Retain the safe entry with a structured `.UNCLASSIFIED_ROUTE` reason including `.RECOVERY` impact, propagated to top-level partial coverage; do not guess either other tag. |
 
 Propagate a qualified event through registered downward ownership to enclosing declaration entries.
 An outer procedure declaration is recovered when a published nested body declaration is recovered; an unrelated following sibling is not.
@@ -259,9 +259,9 @@ If a lexer failure also causes qualified parser recovery, attribute that parser 
 Missing/ambiguous location mapping does not erase an otherwise qualified recovery association: a recovered entry can have unlocated observations and separate source-mapping coverage gaps.
 Conversely, an exact inserted-token anchor does not establish which declaration owns it.
 A fully mapped recovered subtree can still have complete syntax traversal, while missing attribution makes coverage partial even when source spelling and node traversal are otherwise available.
-Invalid recovery/diagnostic/synthetic-token references or conflicting attribution evidence remain validation failures, not an `UNCLASSIFIED` success containing unsafe associations.
+Invalid recovery/diagnostic/synthetic-token references or conflicting attribution evidence remain validation failures, not an `.UNCLASSIFIED` success containing unsafe associations.
 
-The discriminating future case recovers a nested procedure-body declaration: both that entry and the enclosing procedure entry are `RECOVERED`, while an unaffected sibling remains `PARSED` only with complete attribution evidence.
+The discriminating future case recovers a nested procedure-body declaration: both that entry and the enclosing procedure entry are `.RECOVERED`, while an unaffected sibling remains `.PARSED` only with complete attribution evidence.
 Additional independent cases cover expected-expression recovery without a synthetic token, skipped tokens, shared-compound versus binding-name events, cursor restoration after an abandoned attempt, unattached failures, lexer-only diagnostics, unlocated but attributed events and absent/corrupt attribution.
 Assert exact per-entry statuses, published ownership associations, partial reasons and retained diagnostic order against independent expectations.
 This draft neither instruments the parser nor qualifies a correlation adapter.
@@ -280,7 +280,7 @@ For a qualified compound, create its region on encounter and emit the entire new
 Each binding uses the outer container and the compound node ID as already specified, not the preceding binding as its parent.
 Then visit the compound's registered child sequence once.
 Descendants of target expressions use the outer container; they are not initialiser content owned by a binding or by the shared-properties region.
-When entering shared properties, alignment or notes, use this compound's `SHARED_REGION` container and restore the outer container on exit.
+When entering shared properties, alignment or notes, use this compound's `.SHARED_REGION` container and restore the outer container on exit.
 An ordinary declaration encountered there introduces its own declaration container for its descendants.
 This grouping can place a later binding's entry before a nested declaration whose source begins in an earlier target; it is the specified binding-group precedence, not evidence of evaluation order or a reason to reorder the graph.
 Expression-led assignments have no newly declared binding group under the qualified route rules, but still retain a region and the same target-versus-shared-payload distinction.
@@ -293,10 +293,10 @@ This representation does not choose numeric admission/resource defaults.
 Validate declaration-container references to earlier enclosing entries, region parent ancestry and the exact ordered binding associations; numeric ID order alone is not proof of ownership.
 Buffering for validation is permitted, but do not expose an incomplete table or forward/dangling reference as a completed result.
 
-If an ancestor that must be represented as an index declaration cannot be emitted safely, do not silently reparent its descendants to `ROOT`, another binding or the next available outer entry.
-Omit descendants whose required container cannot be represented and report the affected `DECLARATION_SET` and `CONTAINMENT` impacts on a safe snapshot subject.
+If an ancestor that must be represented as an index declaration cannot be emitted safely, do not silently reparent its descendants to `.ROOT`, another binding or the next available outer entry.
+Omit descendants whose required container cannot be represented and report the affected `.DECLARATION_SET` and `.CONTAINMENT` impacts on a safe snapshot subject.
 Independently safe source/diagnostic observations and unrelated index records remain usable.
-This is distinct from a reviewed non-declaration structural owner, which correctly emits no entry, or a mapped `UNMAPPED` name, which can still have an entry and a valid container under its explicit partial reason.
+This is distinct from a reviewed non-declaration structural owner, which correctly emits no entry, or a mapped `.UNMAPPED` name, which can still have an entry and a valid container under its explicit partial reason.
 Do not let skipped/recovered/partial subtrees leak the active declaration/region container into the following sibling.
 
 IDs are occurrence references inside this result only.
@@ -314,17 +314,17 @@ Proposed declaration-index/2 refinement; reason records describe incomplete obse
 
 `CoverageReason` is `{code, subject, field_path: []PathStep, impacts: []CoverageImpact, origin: *Origin, detail_utf8}`.
 
-`subject` is `DOCUMENT` or `NODE {local_node_id}` in the protected syntax snapshot of this exact envelope; it is not an entry ID, pointer or cross-result reference.
+`subject` is `.DOCUMENT` or `.NODE {local_node_id}` in the protected syntax snapshot of this exact envelope; it is not an entry ID, pointer or cross-result reference.
 
-`PathStep` is `FIELD {name_ascii}` or `ELEMENT {index:u64}`; field names and list steps resolve through the bound registry, with checked list indices.
+`PathStep` is `.FIELD {name_ascii}` or `.ELEMENT {index:u64}`; field names and list steps resolve through the bound registry, with checked list indices.
 
-An empty path refers to the whole subject; `DOCUMENT` requires an empty path.
+An empty path refers to the whole subject; `.DOCUMENT` requires an empty path.
 
 For an unrecognised field/kind without a safe registered path, identify the containing safe node or document rather than manufacturing a dereferenceable path.
 Retain unsupported raw observations in the protected snapshot only where its schema safely represents them.
 An unavailable origin is null, not an invented zero-width source range; an available `Origin` must pass the common revision/span checks and indicates the known affected observation, not necessarily the full extent of missing syntax.
 
-`CoverageImpact` is `DECLARATION_SET. | CONTAINMENT. | NAMES. | SOURCE_MAPPING. | VISIBILITY. | ORDER. | METADATA. | RECOVERY`.
+`CoverageImpact` is `.DECLARATION_SET | .CONTAINMENT | .NAMES | .SOURCE_MAPPING | .VISIBILITY | .ORDER | .METADATA | .RECOVERY`.
 
 The list is nonempty, has no duplicates and follows that registry order.
 
@@ -334,17 +334,17 @@ State all known impacts: uncertainty about which bindings exist is not merely a 
 
 | Exact reason code. | Intended missing observation. |
 | --- | --- |
-| `UNAVAILABLE_OBSERVATION`. | A required registered adapter feature cannot provide evidence for this reached region. |
-| `UNMAPPED_NODE_KIND`. | A reached syntax kind lacks a reviewed safe traversal/index mapping. |
-| `UNMAPPED_FIELD`. | A required field or active variant has no qualified mapping. |
-| `UNCLASSIFIED_ROUTE`. | Construction/source-form evidence is insufficient, including ambiguous compound binding classification. |
-| `UNMAPPED_ORIGIN`. | Required source/name/recovery location cannot be correlated without guessing. |
-| `UNMAPPED_NAME`. | Name form, source spelling or producer-value correlation is unavailable. |
-| `UNCORRELATED_METADATA`. | Metadata boundaries, occurrence presence/order or source/value association are not established. |
-| `UNKNOWN_VISIBILITY`. | Authored scope/marker observations required by the index cannot be established. |
-| `UNPROVEN_CHILD_ORDER`. | Children are safely known but their required authored order is not established. |
-| `OPAQUE_SYNTAX`. | A preserved source region, such as an unparsed assembly operand, has not been traversed for the promised observations. |
-| `UNREGISTERED_SHARING`. | A safe repeated node lacks a qualified alias/single-owner rule; stop the unqualified descent rather than duplicate it. |
+| `.UNAVAILABLE_OBSERVATION`. | A required registered adapter feature cannot provide evidence for this reached region. |
+| `.UNMAPPED_NODE_KIND`. | A reached syntax kind lacks a reviewed safe traversal/index mapping. |
+| `.UNMAPPED_FIELD`. | A required field or active variant has no qualified mapping. |
+| `.UNCLASSIFIED_ROUTE`. | Construction/source-form evidence is insufficient, including ambiguous compound binding classification. |
+| `.UNMAPPED_ORIGIN`. | Required source/name/recovery location cannot be correlated without guessing. |
+| `.UNMAPPED_NAME`. | Name form, source spelling or producer-value correlation is unavailable. |
+| `.UNCORRELATED_METADATA`. | Metadata boundaries, occurrence presence/order or source/value association are not established. |
+| `.UNKNOWN_VISIBILITY`. | Authored scope/marker observations required by the index cannot be established. |
+| `.UNPROVEN_CHILD_ORDER`. | Children are safely known but their required authored order is not established. |
+| `.OPAQUE_SYNTAX`. | A preserved source region, such as an unparsed assembly operand, has not been traversed for the promised observations. |
+| `.UNREGISTERED_SHARING`. | A safe repeated node lacks a qualified alias/single-owner rule; stop the unqualified descent rather than duplicate it. |
 
 Codes and impacts are closed ASCII tags; unknown tags reject this schema rather than silently becoming generic success.
 
@@ -354,11 +354,11 @@ Retain reasons in deterministic traversal-discovery order, with owning-node obse
 
 Independent occurrences are not deduplicated by equal code/message, and a copied metadata/name reason retains its original subject/path/impacts when propagated to top-level coverage.
 
-Top-level `PARTIAL_SYNTAX_TRAVERSAL` requires at least one reason.
+Top-level `.PARTIAL_SYNTAX_TRAVERSAL` requires at least one reason.
 
-`COMPLETE_SYNTAX_TRAVERSAL` requires no unresolved required observation anywhere in the traversed captured parse; an empty reason list must not be used to hide an unsupported producer route.
+`.COMPLETE_SYNTAX_TRAVERSAL` requires no unresolved required observation anywhere in the traversed captured parse; an empty reason list must not be used to hide an unsupported producer route.
 
-Local `UNMAPPED` names and partial metadata must have corresponding top-level reasons.
+Local `.UNMAPPED` names and partial metadata must have corresponding top-level reasons.
 
 Propagating a reason does not promote a local partial record to complete or fabricate an entry for an unclassified declaration.
 
@@ -372,14 +372,14 @@ In particular, no matching entry in a partial index is not proof that a declarat
 
 Malformed references, conflicting snapshot-bound evidence, invalid source spans and downward ownership cycles remain validation/conversion failures under the earlier contracts, not successful partial results with unsafe graphs.
 
-Cancellation, unsupported payload kinds and resource/internal failures retain their existing request outcomes; do not disguise them as `OPAQUE_SYNTAX` or source diagnostics.
+Cancellation, unsupported payload kinds and resource/internal failures retain their existing request outcomes; do not disguise them as `.OPAQUE_SYNTAX` or source diagnostics.
 Conversely, ordinary fully mapped parser recovery needs no coverage reason merely because diagnostics exist.
 
 Cache/result reuse preserves the exact reasons, impacts, bindings and coverage state.
 
 A later adapter or newer parse cannot relabel a retained partial result complete without a newly validated result under the appropriate context/world.
 
-The discriminating future vector is an unclassified compound: return safely known syntax with a `UNCLASSIFIED_ROUTE` reason affecting `DECLARATION_SET`, not an empty complete binding list.
+The discriminating future vector is an unclassified compound: return safely known syntax with a `.UNCLASSIFIED_ROUTE` reason affecting `.DECLARATION_SET`, not an empty complete binding list.
 Additional independent cases cover unmapped names, metadata propagation, opaque assembly, unlocated/overlapping gaps, safe sharing without an owner rule, invalid paths/tags, recovered-but-complete parses, empty partial-reason lists and corrupt/cancelled/unsupported outcomes.
 
 Assert exact reason records/order, impacts, coverage aggregation and forbidden negative inferences against independent expectations.
@@ -392,11 +392,11 @@ Proposed refinement of declaration-index/2 names and the adapter's `name_origins
 The producer's name string is an observation, not necessarily an exact contiguous source spelling.
 Keep it separate from source bytes; neither equality by name nor interner-address identity establishes a declaration occurrence or nominal identity.
 
-For `SPELLED`, `origin` covers the actual name occurrence's source tokens, and `spelling_bytes` equals that exact half-open source slice without removing comments, whitespace or backticks.
+For `.SPELLED`, `origin` covers the actual name occurrence's source tokens, and `spelling_bytes` equals that exact half-open source slice without removing comments, whitespace or backticks.
 
 `producer_name_bytes` is the owned exact name value stored by the producer for this occurrence; it need not equal `spelling_bytes` and is not an editor-normalised display name.
 
-`form == IDENTIFIER` applies to ordinary/compound binding identifiers and context-qualified bare enum members; `OPERATOR` requires the qualified operator-declaration route, not punctuation anywhere in an expression.
+`form == .IDENTIFIER` applies to ordinary/compound binding identifiers and context-qualified bare enum members; `.OPERATOR` requires the qualified operator-declaration route, not punctuation anywhere in an expression.
 
 Preserve modifier/keyword source observations outside the name separately; do not include the declaration's type, initialiser or `operator` keyword in the symbol-name slice merely because they share its node interval.
 
@@ -408,7 +408,7 @@ Preserve modifier/keyword source observations outside the name separately; do no
 | Multi-token operator name. | `*[]`, `[]` and `[]=` are constructed producer strings.  The source name interval runs from the first symbol through the last actually consumed name symbol, including intervening trivia; e.g. `operator [ ] =` preserves `[ ] =` separately from producer `[]=`. |
 | Recovered operator punctuation. | `parser_expect` can record a missing `]` while the operator parser still returns `*[]`/`[]`/`[]=`.  Keep only the actual source bytes in the name slice and correlate missing punctuation separately; never insert expected bytes into `spelling_bytes`. |
 
-`recovery_origins` preserves the ordered recovery observations specifically correlated to this name parse, using the existing `INSERTED`/`UNLOCATED` origin rules.
+`recovery_origins` preserves the ordered recovery observations specifically correlated to this name parse, using the existing `.INSERTED`/`.UNLOCATED` origin rules.
 
 An inserted punctuation origin is not an authored name fragment or a spelling edit.
 
@@ -416,13 +416,13 @@ An empty list is valid for a mapped unrecovered name.
 
 Do not attach unrelated declaration/initialiser diagnostics merely because they overlap the enclosing node span.
 
-A mapped recovered name remains `SPELLED` with `recovery_status == RECOVERED` on its entry; producer-name bytes may include expected punctuation absent from the source.
+A mapped recovered name remains `.SPELLED` with `recovery_status == .RECOVERED` on its entry; producer-name bytes may include expected punctuation absent from the source.
 
-If no trustworthy name interval or name-route/recovery correlation is available, use `UNMAPPED` with the retained producer value and a partial-index reason, not a guessed/clamped span or a false `MISSING` tag.
+If no trustworthy name interval or name-route/recovery correlation is available, use `.UNMAPPED` with the retained producer value and a partial-index reason, not a guessed/clamped span or a false `.MISSING` tag.
 
-`ANONYMOUS` denotes a qualified grammar slot with intentionally no name, such as a supported unnamed parameter/return slot.
+`.ANONYMOUS` denotes a qualified grammar slot with intentionally no name, such as a supported unnamed parameter/return slot.
 
-`MISSING` requires evidence that this grammar expected a name, but recovery did not produce one, with its insertion/unlocated origin.
+`.MISSING` requires evidence that this grammar expected a name, but recovery did not produce one, with its insertion/unlocated origin.
 
 A zero-length producer string alone proves neither state.
 
@@ -453,7 +453,7 @@ The proposed capability schema is `jai-cache-syntax-adapter/1`, encoded as `K("s
 
 Feature records appear in the following table order and use `K(feature_name, [method_tag, observation_schema])`.
 
-`method_tag` is exactly `UNAVAILABLE`, `CAPTURED` or `RECONSTRUCTED`; `observation_schema` is empty bytes only for `UNAVAILABLE`, otherwise the exact registered producer-observation or correlation schema identifier.
+`method_tag` is exactly `.UNAVAILABLE`, `.CAPTURED` or `.RECONSTRUCTED`; `observation_schema` is empty bytes only for `.UNAVAILABLE`, otherwise the exact registered producer-observation or correlation schema identifier.
 
 Reject unknown/missing/reordered/duplicate features and unsupported schemas; these are not free-form claims or a generic extension map.
 
@@ -461,14 +461,14 @@ The adapter build identity is a separate service-verified value in the `producer
 
 | Feature name. | Required evidence and current review status. |
 | --- | --- |
-| `authored_edges`. | Exact reachable-kind/field/variant/order registry, including base `DIRECTIVE_THIS`, guarded aliases and recovered holes.  The milestone-1 closure fixes the current-producer draft and its exclusions; implementing and qualifying a bound adapter remain open. |
+| `authored_edges`. | Exact reachable-kind/field/variant/order registry, including base `.DIRECTIVE_THIS`, guarded aliases and recovered holes.  The milestone-1 closure fixes the current-producer draft and its exclusions; implementing and qualifying a bound adapter remain open. |
 | `builder_function_routes`. | Qualified source-form/context evidence for types, literals, enum-member mode, parameter usings, import callees and arrow-run headers, plus committed published-syntax recovery attribution under the rules above.  Do not infer a universal route from equal/default field values or recovery ownership from diagnostic overlap.  Capture versus reconstruction remains review work. |
 | `compound_routes`. | Snapshot-bound `CompoundRoute` and separator observations under the following contract.  Current AST fields alone are insufficient; no qualified capture/reconstruction adapter is supplied yet. |
 | `name_origins`. | Exact spelled/anonymous/missing observations, separate source spelling and producer-name values, name-specific recovery and explicit unmapped outcomes, including operator names, unnamed slots and context-qualified enum members.  A copied/normalised producer name is not automatically a single source slice.  The draft's unavailable-evidence disposition is fixed; implementing and qualifying actual source correlation remain open. |
 | `metadata_origins`. | Correlated metadata boundaries/order and argument presence, including repeated/bare/empty program exports and alignment/replacement clauses whose final fields lose occurrences.  Current final fields alone are insufficient. |
 | `declaration_markers`. | Authored declaration-marker observations distinct from scope and program exports.  The reviewed parser paths have not established declaration `#export` support; this gap must stay explicit rather than be declared captured. |
 
-`CAPTURED` proposes retaining evidence at the owning parse/construction point; `RECONSTRUCTED` proposes a separately registered, producer-version-bound correlation.
+`.CAPTURED` proposes retaining evidence at the owning parse/construction point; `.RECONSTRUCTED` proposes a separately registered, producer-version-bound correlation.
 
 Neither tag is qualification by itself: the service must bind the actual supported implementation/schema and its review evidence, not trust an arbitrary descriptor supplied by a caller or manifest.
 An unavailable feature does not make exact source/tokens or independently supported diagnostics unavailable.
@@ -506,10 +506,10 @@ Default `operator_type` and default target modifiers therefore cannot distinguis
 
 The proposed logical observation is `CompoundRoute`:
 
-- `IDENTIFIER_HEAD {reassignment:bool}` records the actual `parse_declaration_node` branch decision for this compound, not a conclusion from the helper's eventual expression or scope bindings.
-- `EXPRESSION_HEAD {operator_token:TokenTag}` records the assignment-precedence token consumed by the expression-led `parse_statement` builder function.
+- `.IDENTIFIER_HEAD {reassignment:bool}` records the actual `parse_declaration_node` branch decision for this compound, not a conclusion from the helper's eventual expression or scope bindings.
+- `.EXPRESSION_HEAD {operator_token:TokenTag}` records the assignment-precedence token consumed by the expression-led `parse_statement` builder function.
 Preserve the exact token tag, including compound assignment operators; do not substitute the default stored `operator_type`.
-- `UNCLASSIFIED {reason}` retains syntax with an explicit unavailable/ambiguous-route reason; it is not a declaration route with `reassignment=false`.
+- `.UNCLASSIFIED {reason}` retains syntax with an explicit unavailable/ambiguous-route reason; it is not a declaration route with `reassignment=false`.
 
 Bind each observation to this envelope's snapshot-local compound node ID, exact source revision and producer/context schema.
 Retain the consumed/expected shared-separator origin as a separate `Origin` observation, with source-token correlation where a real token was consumed.
@@ -520,12 +520,12 @@ Reject conflicting observations or cross-snapshot IDs rather than picking the fi
 
 | Qualified route. | Binding and shared-region rule. |
 | --- | --- |
-| `IDENTIFIER_HEAD`, `reassignment=false`. | For each target in stored order, declare when its modifier is not `ASSIGN` (including explicit `DECLARE`); retain the declaration-properties/recovery observations. |
-| `IDENTIFIER_HEAD`, `reassignment=true`. | Declare only targets with explicit `DECLARE`; unmodified/`ASSIGN` targets are uses. |
-| `EXPRESSION_HEAD`. | No newly declared bindings.  Traverse the actual target expressions and shared RHS once; preserve the operator observation and create a shared region with an empty binding list when required to contain nested syntax. |
-| `UNCLASSIFIED` or missing evidence. | Preserve the compound/target/helper syntax and report partial index coverage for ambiguous binding classification.  Do not fabricate bindings or certify their absence from default fields. |
+| `.IDENTIFIER_HEAD`, `reassignment=false`. | For each target in stored order, declare when its modifier is not `.ASSIGN` (including explicit `.DECLARE`); retain the declaration-properties/recovery observations. |
+| `.IDENTIFIER_HEAD`, `reassignment=true`. | Declare only targets with explicit `.DECLARE`; unmodified/`.ASSIGN` targets are uses. |
+| `.EXPRESSION_HEAD`. | No newly declared bindings.  Traverse the actual target expressions and shared RHS once; preserve the operator observation and create a shared region with an empty binding list when required to contain nested syntax. |
+| `.UNCLASSIFIED` or missing evidence. | Preserve the compound/target/helper syntax and report partial index coverage for ambiguous binding classification.  Do not fabricate bindings or certify their absence from default fields. |
 
-This is the existing predicate `(!reassignment && modifier != ASSIGN) || modifier == DECLARE` restricted to its owning construction route, not a new parser declaration rule.
+This is the existing predicate `(!reassignment && modifier != .ASSIGN) || modifier == .DECLARE` restricted to its owning construction route, not a new parser declaration rule.
 Validate known modifier tags, target kinds/name observations and list alignment before emitting names.
 An unexpected non-identifier target on the identifier-head route is a mapping mismatch, not a reason to cast an expression to `Parser_Ident` or extract a name from arbitrary spelling.
 Expression-head targets can be members, subscripts or other expression shapes; labels/uses do not become declarations because their names match existing scope bindings.
@@ -596,7 +596,7 @@ These are producer entrypoints, not additional service operations or a claim tha
 | `parse_expression`. | `parse_value_expression`. | Retain its actual returned expression, including wrappers; diagnose missing/trailing input without inventing another root. |
 | `parse_declaration`. | `parse_declaration_node`, followed by terminator/notes handling. | Retain the returned kind; this entrypoint can return non-declaration directives and does not itself justify an index entry. |
 | `parse_block`. | `parse_block_node`, imperative mode. | Only the returned block and attached statement list are roots/children; missing opening braces can yield no root. |
-| `parse_declaration_block`. | `parse_block_node`, `DATA_DECLARATIONS` mode. | Use declaration-context statement rules.  Enum-member mode is enabled only by the separate registered enum-body route, not by this entrypoint's name. |
+| `parse_declaration_block`. | `parse_block_node`, `.DATA_DECLARATIONS` mode. | Use declaration-context statement rules.  Enum-member mode is enabled only by the separate registered enum-body route, not by this entrypoint's name. |
 | `parse_file`. | `parse_file_node`. | The returned block owns successfully retained statements; even an empty file can have a block root. |
 | `parse_file_edit`. | Validate edit range and unchanged prefix/suffix, then `parse_file_node` through `parseInit`. | Rejected input returns no successful replacement snapshot.  Admitted replacement syntax follows the same field registry; copied node identities are local to the new result, not the old snapshot's IDs. |
 
@@ -666,7 +666,7 @@ In particular, one layout can have multiple source forms, and a declaration allo
 | `Code_Using`. | `parse_procedure_type_header`, `parse_using_statement_after_keyword`. | `NONE`. |
 | `Code_While`. | `parse_while_statement`. | `NONE`. |
 
-The extra base allocation is `Parser_Node` in `parse_expression_directive`, kind `DIRECTIVE_THIS`; its root/statement/call paths and reuse exclusion are reviewed separately below.
+The extra base allocation is `Parser_Node` in `parse_expression_directive`, kind `.DIRECTIVE_THIS`; its root/statement/call paths and reuse exclusion are reviewed separately below.
 It has no derived payload.
 No other literal base allocation or named indirect wrapper use is admitted by this source inventory; a new one requires registry review, not a guessed leaf rule.
 
@@ -688,19 +688,19 @@ Reaching one through an unregistered syntax edge is not permission to traverse i
 | --- | --- | --- |
 | Embedded base/entry and generated overlays. | The same node/storage view, with common fields classified once; never allocate an extra ID for an overlay. | Incompatible layout/context is a conversion failure, not a second interpretation of the bytes. |
 | Compound properties and shared metadata. | The compound owns one comma node and one properties node; targets use the outer container, properties and compound-owned alignment/notes use the shared region.  Bindings reference this region; they do not own duplicate initialisers. | Unexpected properties-owned metadata or unclassified compound routes use the explicit partial dispositions below. |
-| Header parameter using. | The matching `arguments[]` element owns the declaration.  The header owns the `Using` wrapper/filter; `Using.expression` is an association only when pointer-identical to exactly one argument in this header in the required order. | Missing/duplicate/unmatched safe associations produce `UNREGISTERED_SHARING` or `UNCLASSIFIED_ROUTE`, not generic using-target suppression. |
-| Import-owned parameter call. | The import owns each parameter call; its `procedure_expression` is a non-owning association only when it is this owning import.  Ordinary calls still own their callee. | Missing/mismatched safe owner correlation is `UNCLASSIFIED_ROUTE`, not a name/span heuristic, arbitrary ancestor alias or generic cycle exemption.  Invalid references remain conversion failures. |
+| Header parameter using. | The matching `arguments[]` element owns the declaration.  The header owns the `Using` wrapper/filter; `Using.expression` is an association only when pointer-identical to exactly one argument in this header in the required order. | Missing/duplicate/unmatched safe associations produce `.UNREGISTERED_SHARING` or `.UNCLASSIFIED_ROUTE`, not generic using-target suppression. |
+| Import-owned parameter call. | The import owns each parameter call; its `procedure_expression` is a non-owning association only when it is this owning import.  Ordinary calls still own their callee. | Missing/mismatched safe owner correlation is `.UNCLASSIFIED_ROUTE`, not a name/span heuristic, arbitrary ancestor alias or generic cycle exemption.  Invalid references remain conversion failures. |
 | Arrow-run source header/block. | The registered source header owns its body and block; `Directive_Run.expression` is a block association only when it matches that header's actual body block under the arrow route.  Insert's implicit run wrapper follows this same rule. | Without qualified route/identity evidence, do not choose between two ownership paths; report the affected partial region. |
 | Other declared backlinks and semantic registries. | `Procedure_Body.header`, block/case/assembly parent/owner fields, resolved declarations/types, lexical scopes and sorted/generated storage never supply authored descent. | Do not turn populated semantic state into additional declarations or an alias capability. |
 
 An active downward cycle, invalid reference or conflicting snapshot-bound evidence remains a conversion failure.
-A safe completed-node revisit without a registered owner rule is `UNREGISTERED_SHARING` and stops that unqualified descent.
+A safe completed-node revisit without a registered owner rule is `.UNREGISTERED_SHARING` and stops that unqualified descent.
 Equal spans/spellings never merge distinct node occurrences, and a global visited set cannot substitute for these contextual guards.
 
 ### Advertised Limits and Mapping Dispositions
 
 This registry promises defined handling of the current syntax graph, not universally complete declaration indices.
-A future adapter must advertise its actual methods for the existing six capability features; no `CAPTURED` or `RECONSTRUCTED` implementation is asserted here.
+A future adapter must advertise its actual methods for the existing six capability features; no `.CAPTURED` or `.RECONSTRUCTED` implementation is asserted here.
 Missing evidence cannot be hidden by advertising the registry name.
 The following are explicit supported-profile limits, not unassigned mapping TODOs.
 Impacts below are minimum affected domains; add every other known impact under the common coverage contract.
@@ -708,18 +708,18 @@ Impacts below are minimum affected domains; add every other known impact under t
 | Reached condition/excluded inference. | Required disposition. | Coverage/admission consequence. |
 | --- | --- | --- |
 | Non-trivia full-featured profile. | Reject profile admission; preserve the separate current compatibility mode without promising byte mapping for it. | Unsupported profile, not a successful empty index. |
-| Compound construction evidence unavailable or ambiguous. | Preserve safely represented targets/properties, use the specified unclassified route, and emit no guessed bindings or guessed binding absence.  A qualified future observation must obey the existing identifier-head/expression-head rules. | `UNCLASSIFIED_ROUTE`, affecting `DECLARATION_SET` and `CONTAINMENT` where binding/container association is unknown. |
-| Bare enum-member, unnamed slot, type/cast or other context-sensitive source form lacks its required route evidence. | Keep the safely known syntax; do not infer membership, anonymity or an active arm from spelling/default fields alone. | `UNCLASSIFIED_ROUTE`/`UNAVAILABLE_OBSERVATION`, with the actual declaration/order/source impacts. |
-| Declaration `#export` marker. | No current producer path is admitted for `declaration_marker == EXPORT`.  Scope export and program export do not supply that evidence.  A missing marker feature cannot certify marker absence. | `RECOVERED_UNKNOWN` plus `UNKNOWN_VISIBILITY` or `UNAVAILABLE_OBSERVATION` with `VISIBILITY` impact wherever marker observations are required. |
-| Repeated/overwritten metadata, source-name or committed-recovery correlation unavailable. | Retain exact source/tokens, safe final fields and independently known entries.  Use unmapped names, unknown recovery or unavailable occurrence metadata rather than reconstructing discarded syntax or claiming complete absence. | `UNCORRELATED_METADATA`, `UNMAPPED_NAME`, `UNMAPPED_ORIGIN` or `UNCLASSIFIED_ROUTE`, with `METADATA`, `NAMES`, `SOURCE_MAPPING`, `ORDER` and/or `RECOVERY` as affected. |
-| Unexpected compound-property metadata, procedure/aggregate notes or aggregate-literal alignment without a registered route. | Do not silently drop a required observation or treat a nonnull field as permission for new descent. | `UNMAPPED_FIELD`/`UNCLASSIFIED_ROUTE`; include `DECLARATION_SET`, `CONTAINMENT` or `ORDER` when unknown child ownership can affect them. |
-| Safely represented unknown kind, active helper variant or unproved child order. | Preserve only safe observations, stop the unqualified edge/variant, and retain an explicit region reason. | `UNMAPPED_NODE_KIND`, `UNMAPPED_FIELD` or `UNPROVEN_CHILD_ORDER`; no complete traversal claim. |
-| Unparsed assembly or rejected/unpublished syntax. | Published unparsed regions remain opaque with their actual modifiers; unattached temporary allocations are not syntax children. | `OPAQUE_SYNTAX` for promised but uninspected regions; do not invent nodes for discarded storage. |
-| Lowered/compiler-generated/evaluated pointers, imports/loads, resolved visibility or evaluator effects. | Exclude from authored traversal.  Source request nodes and their registered payloads remain syntax; arbitrary pointer/type-definition literal arms are not reinterpreted as source-null or aggregate payloads. | Known non-authored fields stay excluded without manufacturing a source gap; an unqualified required literal/route uses `UNMAPPED_FIELD`/`UNCLASSIFIED_ROUTE`.  Semantic/evaluator queries remain unsupported initially. |
+| Compound construction evidence unavailable or ambiguous. | Preserve safely represented targets/properties, use the specified unclassified route, and emit no guessed bindings or guessed binding absence.  A qualified future observation must obey the existing identifier-head/expression-head rules. | `.UNCLASSIFIED_ROUTE`, affecting `.DECLARATION_SET` and `.CONTAINMENT` where binding/container association is unknown. |
+| Bare enum-member, unnamed slot, type/cast or other context-sensitive source form lacks its required route evidence. | Keep the safely known syntax; do not infer membership, anonymity or an active arm from spelling/default fields alone. | `.UNCLASSIFIED_ROUTE`/`.UNAVAILABLE_OBSERVATION`, with the actual declaration/order/source impacts. |
+| Declaration `#export` marker. | No current producer path is admitted for `declaration_marker == .EXPORT`.  Scope export and program export do not supply that evidence.  A missing marker feature cannot certify marker absence. | `.RECOVERED_UNKNOWN` plus `.UNKNOWN_VISIBILITY` or `.UNAVAILABLE_OBSERVATION` with `.VISIBILITY` impact wherever marker observations are required. |
+| Repeated/overwritten metadata, source-name or committed-recovery correlation unavailable. | Retain exact source/tokens, safe final fields and independently known entries.  Use unmapped names, unknown recovery or unavailable occurrence metadata rather than reconstructing discarded syntax or claiming complete absence. | `.UNCORRELATED_METADATA`, `.UNMAPPED_NAME`, `.UNMAPPED_ORIGIN` or `.UNCLASSIFIED_ROUTE`, with `.METADATA`, `.NAMES`, `.SOURCE_MAPPING`, `.ORDER` and/or `.RECOVERY` as affected. |
+| Unexpected compound-property metadata, procedure/aggregate notes or aggregate-literal alignment without a registered route. | Do not silently drop a required observation or treat a nonnull field as permission for new descent. | `.UNMAPPED_FIELD`/`.UNCLASSIFIED_ROUTE`; include `.DECLARATION_SET`, `.CONTAINMENT` or `.ORDER` when unknown child ownership can affect them. |
+| Safely represented unknown kind, active helper variant or unproved child order. | Preserve only safe observations, stop the unqualified edge/variant, and retain an explicit region reason. | `.UNMAPPED_NODE_KIND`, `.UNMAPPED_FIELD` or `.UNPROVEN_CHILD_ORDER`; no complete traversal claim. |
+| Unparsed assembly or rejected/unpublished syntax. | Published unparsed regions remain opaque with their actual modifiers; unattached temporary allocations are not syntax children. | `.OPAQUE_SYNTAX` for promised but uninspected regions; do not invent nodes for discarded storage. |
+| Lowered/compiler-generated/evaluated pointers, imports/loads, resolved visibility or evaluator effects. | Exclude from authored traversal.  Source request nodes and their registered payloads remain syntax; arbitrary pointer/type-definition literal arms are not reinterpreted as source-null or aggregate payloads. | Known non-authored fields stay excluded without manufacturing a source gap; an unqualified required literal/route uses `.UNMAPPED_FIELD`/`.UNCLASSIFIED_ROUTE`.  Semantic/evaluator queries remain unsupported initially. |
 | Invalid references, out-of-range observations, conflicting evidence, incompatible layouts or downward cycles. | Reject conversion under the existing failure contract. | Not a successful partial index and not a parser diagnostic. |
 
-Any required unavailable observation propagates to top-level `PARTIAL_SYNTAX_TRAVERSAL` with its subject/path and impacts; safe independent records remain usable.
-No empty reason list, default `UNSPECIFIED`, reserved marker value or unchanged field list may certify complete coverage.
+Any required unavailable observation propagates to top-level `.PARTIAL_SYNTAX_TRAVERSAL` with its subject/path and impacts; safe independent records remain usable.
+No empty reason list, default `.UNSPECIFIED`, reserved marker value or unchanged field list may certify complete coverage.
 A request for an entirely unimplemented query/schema remains unsupported rather than becoming a partial implementation by declaration.
 Retained results keep their original binding and coverage when a later adapter gains capabilities.
 
@@ -743,10 +743,10 @@ These rows apply to every generated layout without duplicating its node ID or cr
 
 | Record/storage domain. | Exact field roles. |
 | --- | --- |
-| `Code_Node`/shared compiler base. | `kind`: `NON_CHILD`, producer kind observation under the registered mapping, not a native ordinal wire tag.  `location`: `HELPER`, qualified source-location observation storage, not an authored node edge.  `node_flags`: `NON_CHILD`, registered source bits only, excluding typechecked/desugaring state.  `type`: `NON_CHILD`, inferred/compiler type excluded from syntax observations and descent.  `serial`: `NON_CHILD`, compiler bookkeeping excluded; never the snapshot node ID. |
-| `Parser_Node`/parser-owned base. | `first_token`: `NON_CHILD`, trivia-enabled token-interval start.  `one_past_last_token`: `NON_CHILD`, trivia-enabled exclusive end.  `code_node`: `HELPER`, embedded alternate compiler-base view of this same node, not another occurrence or an owned syntax child. |
-| `Code_Node.Location`/nested compiler location. | `enclosing_load`: `BACKREFERENCE`, compiler file/load provenance excluded from authored descent and owned syntax payloads.  `l0`: `NON_CHILD`, raw starting-line observation.  `c0`: `NON_CHILD`, raw starting byte-column observation.  `l1`: `NON_CHILD`, raw ending-line observation.  `c1`: `NON_CHILD`, raw exclusive ending byte-column observation.  These four producer coordinates are declared `s32`; their native representation is not a wire schema or an absolute source-byte interval. |
-| Base route/`DIRECTIVE_THIS` | No additional layout-specific fields or authored children on the reviewed `#this` route.  Its builder function allocates `Parser_Node` directly, assigns the kind and finishes its source interval; it does not allocate a derived payload or attach a resolved receiver/declaration. |
+| `Code_Node`/shared compiler base. | `kind`: `.NON_CHILD`, producer kind observation under the registered mapping, not a native ordinal wire tag.  `location`: `.HELPER`, qualified source-location observation storage, not an authored node edge.  `node_flags`: `.NON_CHILD`, registered source bits only, excluding typechecked/desugaring state.  `type`: `.NON_CHILD`, inferred/compiler type excluded from syntax observations and descent.  `serial`: `.NON_CHILD`, compiler bookkeeping excluded; never the snapshot node ID. |
+| `Parser_Node`/parser-owned base. | `first_token`: `.NON_CHILD`, trivia-enabled token-interval start.  `one_past_last_token`: `.NON_CHILD`, trivia-enabled exclusive end.  `code_node`: `.HELPER`, embedded alternate compiler-base view of this same node, not another occurrence or an owned syntax child. |
+| `Code_Node.Location`/nested compiler location. | `enclosing_load`: `.BACKREFERENCE`, compiler file/load provenance excluded from authored descent and owned syntax payloads.  `l0`: `.NON_CHILD`, raw starting-line observation.  `c0`: `.NON_CHILD`, raw starting byte-column observation.  `l1`: `.NON_CHILD`, raw ending-line observation.  `c1`: `.NON_CHILD`, raw exclusive ending byte-column observation.  These four producer coordinates are declared `s32`; their native representation is not a wire schema or an absolute source-byte interval. |
+| Base route/`.DIRECTIVE_THIS` | No additional layout-specific fields or authored children on the reviewed `#this` route.  Its builder function allocates `Parser_Node` directly, assigns the kind and finishes its source interval; it does not allocate a derived payload or attach a resolved receiver/declaration. |
 
 The two token fields exist only under `ENABLE_TRIVIA`; the full-featured cache profile requires that configuration.
 Their presence does not authorise reading nonexistent fields from a non-trivia producer, silently synthesising offsets from coordinates or treating an interval as a child edge.
@@ -784,7 +784,7 @@ The 128 call sites use 55 distinct type names, classified below against the live
 | Generic allocator argument class. | Call sites/distinct types. | Classification boundary. |
 | --- | --- | --- |
 | Generated parser layouts from `TYPES` | 120/50 | Every current generated layout name appears among the literal arguments.  This establishes allocation-site coverage, not every kind/variant, successful publication, source origin or independent traversal qualification. |
-| `Parser_Node`. | 1/1 | The reviewed `DIRECTIVE_THIS` builder; retain its separate base-kind route rather than inventing a generated layout. |
+| `Parser_Node`. | 1/1 | The reviewed `.DIRECTIVE_THIS` builder; retain its separate base-kind route rather than inventing a generated layout. |
 | `Parser_Array_Literal_Info`. | 3/1 | Non-node helper storage for aggregate, using-filter and copy routes; expression/type children follow their registered field roles. |
 | `Parser_Struct_Literal_Info`. | 2/1 | Non-node helper storage on aggregate/copy routes, not an additional generated node layout. |
 | `Parser_Context_Modification`. | 1/1 | The reviewed fresh context helper; its direct-copy allocation is counted separately below. |
@@ -815,7 +815,7 @@ This is a source-site inventory, not proof that generic allocation/copy paths or
 | --- | --- | --- |
 | `parse_primary`/directive dispatch. | After the hash token, require an identifier directive name; static-if-expression, type and here-string handling have their own routes.  Other identifier names forward to `parse_expression_directive(parser, first, directive_name.ident_value.name)`. | The `this` spelling can reach the direct base builder from primary-expression parsing.  Dispatch itself does not allocate a derived directive payload or resolve a receiver. |
 | `parse_declaration_directive`/fallback dispatch. | Require hash plus identifier, capture the current token index/name, then use the default directive branch to forward to `parse_expression_directive(parser, first, name)`. | The `this` spelling has no specialised declaration-directive branch in the reviewed source, so it can reach the same base builder.  This forwarding path does not make the result a declaration or prove grammar/semantic validity in every caller. |
-| `parse_expression_directive`/`this` builder. | Consume the two directive tokens, allocate `Parser_Node`, assign `DIRECTIVE_THIS`, call `finish_node`, then return that node. | No derived layout, attached child or resolved receiver is created by this branch.  Ordinary base-field and origin/range rules apply; only a node reached from the published syntax graph receives a snapshot-local ID. |
+| `parse_expression_directive`/`this` builder. | Consume the two directive tokens, allocate `Parser_Node`, assign `.DIRECTIVE_THIS`, call `finish_node`, then return that node. | No derived layout, attached child or resolved receiver is created by this branch.  Ordinary base-field and origin/range rules apply; only a node reached from the published syntax graph receives a snapshot-local ID. |
 
 A returned allocation is not proof that an enclosing builder attaches it to a published root; callers may reject or discard syntax.
 Do not discover declarations or node IDs by scanning the allocation pool, and do not promote an unattached directive to an index entry.
@@ -848,8 +848,8 @@ Fresh simple-call review for `#this(...)` in an imperative statement, without ad
 | --- | --- | --- |
 | `parse_statement`/call-form fallback. | The explicit hash/this/open-parenthesis exception skips direct declaration-directive return; the ordinary expression branch obtains `left` from `parse_binary` and returns it when no comma-led compound route is taken. | The returned expression, not a separately promoted bare directive, enters the already-reviewed imperative block statement list. |
 | `parse_binary` and `parse_prefix`/simple expression forwarding. | Binary parsing starts with `parse_prefix` and returns its left expression when no binary operator is selected; the ordinary non-prefix-operator case forwards to `parse_postfix`. | This restricted route introduces no extra unary/binary wrapper.  Prefix operators, explicit types, compound statements and additional operators require their own guarded routes. |
-| `parse_postfix`/call suffix. | Obtain the base directive from primary parsing, then pass it and the original starting-token index to postfix-suffix parsing.  An opening parenthesis replaces the current result with `parse_procedure_call(parser, result, first)`. | The call wraps the existing base node; it is not a derived payload for `DIRECTIVE_THIS` or a second parse of the directive tokens. |
-| `parse_procedure_call`/callee ownership. | After argument/context parsing and the closing-delimiter check, allocate `PROCEDURE_CALL`, assign the incoming node to `procedure_expression`, attach published unsorted arguments/context modification, finish and return the call. | The callee edge owns the base directive under the ordinary call mapping.  This is not the import-owned-call backlink exception, and no receiver/callee resolution is performed. |
+| `parse_postfix`/call suffix. | Obtain the base directive from primary parsing, then pass it and the original starting-token index to postfix-suffix parsing.  An opening parenthesis replaces the current result with `parse_procedure_call(parser, result, first)`. | The call wraps the existing base node; it is not a derived payload for `.DIRECTIVE_THIS` or a second parse of the directive tokens. |
+| `parse_procedure_call`/callee ownership. | After argument/context parsing and the closing-delimiter check, allocate `.PROCEDURE_CALL`, assign the incoming node to `procedure_expression`, attach published unsorted arguments/context modification, finish and return the call. | The callee edge owns the base directive under the ordinary call mapping.  This is not the import-owned-call backlink exception, and no receiver/callee resolution is performed. |
 
 The call and base directive have distinct snapshot-local node IDs and raw token intervals.
 Follow the call's callee before its argument/context children under the registered traversal order; neither overlapping intervals nor the shared starting token justify merging nodes or emitting a declaration-index entry.
@@ -865,9 +865,9 @@ The adjacent expression-reuse review establishes an exclusion, not another direc
 
 | Review site. | Admission/copy rule. | Result/review boundary. |
 | --- | --- | --- |
-| `reusable_expression`/base-kind exclusion. | Under `ENABLE_TRIVIA`, reject null and accept only the guarded identifier, literal, unary, expression-query, type-query, call, cast and binary shapes; unmatched kinds reach the final `false`.  There is no `DIRECTIVE_THIS` acceptance branch. | The bare directive is not admitted by this predicate.  Without trivia the predicate also returns `false`; fresh builder support does not imply reusable-expression support. |
+| `reusable_expression`/base-kind exclusion. | Under `ENABLE_TRIVIA`, reject null and accept only the guarded identifier, literal, unary, expression-query, type-query, call, cast and binary shapes; unmatched kinds reach the final `false`.  There is no `.DIRECTIVE_THIS` acceptance branch. | The bare directive is not admitted by this predicate.  Without trivia the predicate also returns `false`; fresh builder support does not imply reusable-expression support. |
 | `reusable_expression`/call admission. | Before checking arguments/context replacements, recursively test `call.procedure_expression` and reject the call if that test fails. | A simple ordinary call whose callee is the base directive is excluded by this gate as well.  Do not bypass the callee check because the outer call kind has a copier case. |
-| `copy_reusable_expression`/guarded copy boundary. | The call case recursively copies its callee before rebuilding argument/context storage.  There is no base-directive case; the unsupported-kind default asserts and returns null.  Supported cases then remap token endpoints and coordinates from the new token array. | This is not an opaque-node or raw-base-copy fallback.  Remapping supported nodes does not qualify copying `DIRECTIVE_THIS`, retaining old pointers, or copying pointer-bearing common fields into owned cache results. |
+| `copy_reusable_expression`/guarded copy boundary. | The call case recursively copies its callee before rebuilding argument/context storage.  There is no base-directive case; the unsupported-kind default asserts and returns null.  Supported cases then remap token endpoints and coordinates from the new token array. | This is not an opaque-node or raw-base-copy fallback.  Remapping supported nodes does not qualify copying `.DIRECTIVE_THIS`, retaining old pointers, or copying pointer-bearing common fields into owned cache results. |
 
 The current predicate/copier pair therefore supplies no approved reusable-expression clone of this base directive or its simple callee-owning call.
 This is a conservative exclusion to preserve, not authorisation to add a copy case to complete the registry.
@@ -879,8 +879,8 @@ Declaration reuse and fallback review for the excluded base directive and its or
 
 | Review site. | Guard/fallback path. | Result/review boundary. |
 | --- | --- | --- |
-| `reuse_simple_declaration`/candidate kind. | Require an eligible completed old block and a source-position-matched candidate of kind `DECLARATION` or `COMPOUND_DECLARATION`, as well as the later boundary/token checks. | A bare directive or call in the old statement list is not itself an eligible declaration candidate.  Rejection is not confirmed absence from the fresh syntax graph. |
-| `reuse_simple_declaration`/initialiser guards. | For scalar and compound declarations with initialisers, require `reusable_expression` on the respective expression before advancing the current token cursor or copying it.  The typed-without-initialiser exception applies only when that expression is null. | A retained `DIRECTIVE_THIS` initialiser, or ordinary call with it as callee, rejects this declaration reuse candidate.  A nonnull initialiser cannot bypass its predicate by being typed. |
+| `reuse_simple_declaration`/candidate kind. | Require an eligible completed old block and a source-position-matched candidate of kind `.DECLARATION` or `.COMPOUND_DECLARATION`, as well as the later boundary/token checks. | A bare directive or call in the old statement list is not itself an eligible declaration candidate.  Rejection is not confirmed absence from the fresh syntax graph. |
+| `reuse_simple_declaration`/initialiser guards. | For scalar and compound declarations with initialisers, require `reusable_expression` on the respective expression before advancing the current token cursor or copying it.  The typed-without-initialiser exception applies only when that expression is null. | A retained `.DIRECTIVE_THIS` initialiser, or ordinary call with it as callee, rejects this declaration reuse candidate.  A nonnull initialiser cannot bypass its predicate by being typed. |
 | `reuse_simple_declaration`/compound target copies. | Before copying compound targets with reference registration disabled, require every target to be an unmodified, single-token identifier in its expected comma-separated slot. | These direct copier calls are not an alternate route for a base directive or call target.  This guard does not qualify arbitrary compound assignments or semantic binding identity. |
 | `reusable_type_instantiation`/type-wrapper dependencies. | The declaration guards require reusable type wrappers when present.  Pointer/array wrappers recursively guard their dependencies; explicit dimensions require `reusable_expression`, and the terminal type-valued expression must be an identifier. | The corresponding type-wrapper copier's dimension and terminal-expression calls are constrained on these reviewed declaration routes.  This does not establish that every other type-wrapper caller has the same admission proof. |
 | `parse_file_node` and `parse_block_node`/rejected-candidate fallback. | A null declaration-reuse return leads to `parse_declaration_node` in the file loop or the declaration-block branch.  Append a nonnull fresh result before `finish_statement`, then attach the statement list to the returned block. | A successfully reparsed declaration retains its actual fresh initialiser graph under the existing field-role mapping.  Failed fresh parsing follows the existing diagnostic/synchronisation path, not a fabricated empty declaration or a salvaged old initialiser. |
@@ -899,7 +899,7 @@ These counts describe source sites, not executions, symbolic-link targets, gener
 
 | Recursive copy family. | Admission dependency/copy correspondence. | Base-directive boundary. |
 | --- | --- | --- |
-| Aggregate literal helpers. | Array members and struct arguments must each pass `reusable_expression` before their corresponding copier loops.  Optional array element/struct type expressions must be identifiers; those direct expression-copy calls rebuild type wrappers from copied identifiers. | The helper records do not bypass expression admission for their members, and their identifier-only type edges do not admit `DIRECTIVE_THIS`.  These checks do not qualify all helper fields or old-pool pointer exclusion after whole-record assignment. |
+| Aggregate literal helpers. | Array members and struct arguments must each pass `reusable_expression` before their corresponding copier loops.  Optional array element/struct type expressions must be identifiers; those direct expression-copy calls rebuild type wrappers from copied identifiers. | The helper records do not bypass expression admission for their members, and their identifier-only type edges do not admit `.DIRECTIVE_THIS`.  These checks do not qualify all helper fields or old-pool pointer exclusion after whole-record assignment. |
 | Unary and expression queries. | Accepted unary operators require their subexpression to pass `reusable_expression`; accepted expression-query kinds require their queried expression to pass it as well as the recorded interval checks.  Each copier rebuilds that same child. | An excluded directive nested on either edge prevents admission of the enclosing expression through this gate. |
 | Type queries and casts. | Type-query admission requires `reusable_type_instantiation` for the queried type; cast admission requires it for the target type and `reusable_expression` for the value.  The copier follows those same wrapper/value dependencies. | Wrapper recursion, explicit dimensions and terminal identifier restrictions remain those reviewed above; an enclosing type-query/cast kind is not an escape from them. |
 | Call children and labels. | Require reusable callee, argument expressions and context expressions.  An optional argument label must be an identifier; copy it with reference registration disabled, independently of the value's recursive copy. | Directive exclusion applies to values/context as well as callees.  Identifier label copying is not an unguarded expression-value route. |
@@ -919,14 +919,14 @@ Common base fields and generated overlay storage follow the shared rules after t
 
 | Parser layout/published kind. | Exact layout-specific field roles and guards. |
 | --- | --- |
-| `Parser_Context`/`CONTEXT`. | No layout-specific field beyond the structural `base`.  The `KEYWORD_CONTEXT` primary builder function publishes this leaf; do not resolve or expand the current language context as a syntax child. |
-| `Parser_Ident`/`IDENT`. | `name`: `NON_CHILD`, exact owned producer bytes, correlated separately to token spelling/backtick state.  `flags`: `NON_CHILD`, only registered source-derived bits in syntax observations.  `resolved_declaration`: `BACKREFERENCE`, never traversed even when the parser has already populated it.  Identifier presence is not by itself an index declaration; enum-member, binding and other construction contexts remain distinct. |
-| `Parser_Note`/`NOTE`. | `text`: `NON_CHILD`, owned exact stored bytes.  `note_flags`: `NON_CHILD`, source-derived observations only, not processed/compiler bits.  `parse_declaration_notes` takes token identifier bytes and removes one terminal NUL when present; preserve the original token spelling separately rather than asserting that stored text equals a source slice.  Only notes attached to the published declaration/compound graph are visited. |
-| `Parser_Placeholder`/`PLACEHOLDER`. | Parser-added `name`: `NON_CHILD`; this field is not present in the compiler `Code_Placeholder` layout and must not be lost by copying only its embedded compiler overlay.  The declaration route consumes `#placeholder` and expects an identifier.  Qualify name bytes against that actual name token/route, not the node's first token or a zero/default identifier value after recovery.  This leaf is not an ordinary declaration-index entry. |
+| `Parser_Context`/`.CONTEXT`. | No layout-specific field beyond the structural `base`.  The `.KEYWORD_CONTEXT` primary builder function publishes this leaf; do not resolve or expand the current language context as a syntax child. |
+| `Parser_Ident`/`.IDENT`. | `name`: `.NON_CHILD`, exact owned producer bytes, correlated separately to token spelling/backtick state.  `flags`: `.NON_CHILD`, only registered source-derived bits in syntax observations.  `resolved_declaration`: `.BACKREFERENCE`, never traversed even when the parser has already populated it.  Identifier presence is not by itself an index declaration; enum-member, binding and other construction contexts remain distinct. |
+| `Parser_Note`/`.NOTE`. | `text`: `.NON_CHILD`, owned exact stored bytes.  `note_flags`: `.NON_CHILD`, source-derived observations only, not processed/compiler bits.  `parse_declaration_notes` takes token identifier bytes and removes one terminal NUL when present; preserve the original token spelling separately rather than asserting that stored text equals a source slice.  Only notes attached to the published declaration/compound graph are visited. |
+| `Parser_Placeholder`/`.PLACEHOLDER`. | Parser-added `name`: `.NON_CHILD`; this field is not present in the compiler `Code_Placeholder` layout and must not be lost by copying only its embedded compiler overlay.  The declaration route consumes `#placeholder` and expects an identifier.  Qualify name bytes against that actual name token/route, not the node's first token or a zero/default identifier value after recovery.  This leaf is not an ordinary declaration-index entry. |
 
-For each row, embedded `base` is structural `HELPER` storage of the same node, not a child occurrence or another node ID.
+For each row, embedded `base` is structural `.HELPER` storage of the same node, not a child occurrence or another node ID.
 The parser's `code_node` and generated compiler-layout overlays are alternate storage views, not authored ownership edges; padding is not observable syntax.
-Common `kind`, source locations and trivia-enabled token interval fields are `NON_CHILD` observations with the existing origin/range rules.
+Common `kind`, source locations and trivia-enabled token interval fields are `.NON_CHILD` observations with the existing origin/range rules.
 Common inferred `type`, `enclosing_load` and compiler identity/bookkeeping storage are excluded from authored descent; source versus processed `node_flags` still requires the exact registered mask.
 No nonnull common/overlay pointer may create a child missing from these rows.
 Traversal order is therefore empty for these four leaves; their own node ID still follows first registered downward encounter.
@@ -953,11 +953,11 @@ Only the layout-specific fields below add downward edges; scalar tags/flags neve
 
 | Parser layout/published kind. | Exact layout-specific field roles and visit order. |
 | --- | --- |
-| `Parser_Unary_Operator`/`UNARY_OPERATOR`. | `operator_type`: `NON_CHILD`, under the registered operator mapping rather than a native enum ordinal.  `subexpression`: `CHILD`, required on the reviewed published routes and visited once.  Prefix operators, leading-dot shorthand and postfix dereference use this same edge; preserve their distinct operator/source observations. |
-| `Parser_Binary_Operator`/`BINARY_OPERATOR`. | `operator_type`: `NON_CHILD`.  `flags`: `NON_CHILD`, registered source-derived bits only.  `left`: `CHILD`, then `right`: `CHILD`.  Ordinary binary, member-access and array-subscript routes retain their operator distinction; do not follow member-resolution/scope bookkeeping as another edge. |
-| `Parser_Cast`/`CAST`. | `cast_flags`: `NON_CHILD`, registered source-derived bits only.  `target_type`: `CHILD`, required for explicit casts and inactive/absent for the qualified auto-cast route.  `expression`: `CHILD`, required.  Prefix explicit order is target then expression; postfix explicit order is expression then target; auto-cast visits only expression. |
-| `Parser_Expression_Query`/`EXPRESSION_QUERY`. | `query_kind`: `NON_CHILD`, exactly `TYPE_OF`, `IS_CONSTANT` or `CODE_OF` on the reviewed routes.  `expression_to_query`: `CHILD`, required and visited once.  A query node records source syntax, not a computed type/constant/code result. |
-| `Parser_Type_Query`/`TYPE_QUERY`. | `query_kind`: `NON_CHILD`, exactly `SIZE_OF`, `TYPE_INFO` or `INITIALIZER_OF` on the reviewed routes.  `type_to_query`: `CHILD`, required and visited once; its parser-created type-instantiation wrapper retains its own node ID and then follows that layout's active-form rules. |
+| `Parser_Unary_Operator`/`.UNARY_OPERATOR`. | `operator_type`: `.NON_CHILD`, under the registered operator mapping rather than a native enum ordinal.  `subexpression`: `.CHILD`, required on the reviewed published routes and visited once.  Prefix operators, leading-dot shorthand and postfix dereference use this same edge; preserve their distinct operator/source observations. |
+| `Parser_Binary_Operator`/`.BINARY_OPERATOR`. | `operator_type`: `.NON_CHILD`.  `flags`: `.NON_CHILD`, registered source-derived bits only.  `left`: `.CHILD`, then `right`: `.CHILD`.  Ordinary binary, member-access and array-subscript routes retain their operator distinction; do not follow member-resolution/scope bookkeeping as another edge. |
+| `Parser_Cast`/`.CAST`. | `cast_flags`: `.NON_CHILD`, registered source-derived bits only.  `target_type`: `.CHILD`, required for explicit casts and inactive/absent for the qualified auto-cast route.  `expression`: `.CHILD`, required.  Prefix explicit order is target then expression; postfix explicit order is expression then target; auto-cast visits only expression. |
+| `Parser_Expression_Query`/`.EXPRESSION_QUERY`. | `query_kind`: `.NON_CHILD`, exactly `.TYPE_OF`, `.IS_CONSTANT` or `.CODE_OF` on the reviewed routes.  `expression_to_query`: `.CHILD`, required and visited once.  A query node records source syntax, not a computed type/constant/code result. |
+| `Parser_Type_Query`/`.TYPE_QUERY`. | `query_kind`: `.NON_CHILD`, exactly `.SIZE_OF`, `.TYPE_INFO` or `.INITIALIZER_OF` on the reviewed routes.  `type_to_query`: `.CHILD`, required and visited once; its parser-created type-instantiation wrapper retains its own node ID and then follows that layout's active-form rules. |
 
 `parse_binary` publishes a binary node even when the right expression is missing, and array subscripts can likewise retain a null index.
 Preserve a qualified required-child recovery hole and its observations; do not replace it with ordinary optional absence or dereference null.
@@ -967,9 +967,9 @@ Retain only published graph occurrences, not a wrapper inferred from punctuation
 
 Prefix `-` on a numeric literal can update and return that literal directly, so source minus does not prove a unary-node occurrence.
 Grouping and equal-span wrappers likewise preserve the actual graph/IDs rather than manufacturing operator nodes.
-Cast source-form order requires qualified `IS_AUTO`/`HAS_POSTFIX_SYNTAX` and construction evidence.
+Cast source-form order requires qualified `.IS_AUTO`/`.HAS_POSTFIX_SYNTAX` and construction evidence.
 Conflicting/unregistered flag combinations or missing route evidence are not permission to traverse a nonnull inactive target; report the established mapping gap under the existing coverage contract.
-The reviewed prefix modifiers set `NO_BOUNDS_CHECK`, `TRUNCATE`, `FORCE` and `VERY_FORCE`; preserving final source flags does not reconstruct repeated modifier occurrences.
+The reviewed prefix modifiers set `.NO_BOUNDS_CHECK`, `.TRUNCATE`, `.FORCE` and `.VERY_FORCE`; preserving final source flags does not reconstruct repeated modifier occurrences.
 Exact cast/binary flag masks and the complete operator-tag registry remain in the payload-schema task.
 Unknown query tags are unmapped variants, not new evaluated capabilities.
 Never execute these expressions, compute sizes/initialisers, follow inferred common types or use a query's eventual compiler result as an authored child.
@@ -987,18 +987,18 @@ The parser overlays compiler `context_modification` with `*Parser_Context_Modifi
 
 | Parser layout/published kind. | Exact layout-specific field roles. |
 | --- | --- |
-| `Parser_Procedure_Call`/`PROCEDURE_CALL`. | `procedure_expression`: `CHILD` on the ordinary call route; the registered import-parameter route instead treats its owning-import association as a non-owning backreference.  `arguments_unsorted`: `HELPER`, ordered `Parser_Argument` records.  `context_modification`: `HELPER`, optional parser-owned context storage.  `flags`: `NON_CHILD`, registered source-derived bits only.  `resolved_procedure_expression`: `BACKREFERENCE`.  `overloads`: `NON_CHILD`, semantic candidate storage.  `arguments_sorted`: `BACKREFERENCE`, post-resolution argument arrangement, not another authored list.  `num_return_values_received`: `NON_CHILD`, semantic count.  `macro_expansion_block`: `NON_CHILD`, generated syntax excluded from this authored traversal. |
+| `Parser_Procedure_Call`/`.PROCEDURE_CALL`. | `procedure_expression`: `.CHILD` on the ordinary call route; the registered import-parameter route instead treats its owning-import association as a non-owning backreference.  `arguments_unsorted`: `.HELPER`, ordered `Parser_Argument` records.  `context_modification`: `.HELPER`, optional parser-owned context storage.  `flags`: `.NON_CHILD`, registered source-derived bits only.  `resolved_procedure_expression`: `.BACKREFERENCE`.  `overloads`: `.NON_CHILD`, semantic candidate storage.  `arguments_sorted`: `.BACKREFERENCE`, post-resolution argument arrangement, not another authored list.  `num_return_values_received`: `.NON_CHILD`, semantic count.  `macro_expansion_block`: `.NON_CHILD`, generated syntax excluded from this authored traversal. |
 
 | Parser helper/storage domain. | Exact fields and downward order. |
 | --- | --- |
-| `Parser_Argument`/non-node helper. | `name`: `CHILD`, optional named-argument identifier, then `expression`: `CHILD`, required for each published argument.  Neither the record itself nor an absent name gets a node ID. |
-| `Parser_Context_Modification`/non-node helper. | `modification_expressions`: `CHILD_LIST`, in stored source order.  The helper is not a `Parser_Node` even though the builder function uses `new_parser_node` to allocate it; its expressions have ordinary node IDs. |
+| `Parser_Argument`/non-node helper. | `name`: `.CHILD`, optional named-argument identifier, then `expression`: `.CHILD`, required for each published argument.  Neither the record itself nor an absent name gets a node ID. |
+| `Parser_Context_Modification`/non-node helper. | `modification_expressions`: `.CHILD_LIST`, in stored source order.  The helper is not a `Parser_Node` even though the builder function uses `new_parser_node` to allocate it; its expressions have ordinary node IDs. |
 
 Context-helper allocation and copy reachability review:
 
 | Review site. | Allocation/retention path. | Identity/qualification boundary. |
 | --- | --- | --- |
-| `parse_procedure_call`/fresh context helper. | After consuming `DOUBLE_COMMA`, allocate the helper through `new_parser_node`, collect successful expressions in order, diagnose an empty list, assign the list and later attach the helper to the returned call. | An empty or partially parsed context list can remain published.  Failed expression parsing does not discard the helper or invent an expression to fill it. |
+| `parse_procedure_call`/fresh context helper. | After consuming `.DOUBLE_COMMA`, allocate the helper through `new_parser_node`, collect successful expressions in order, diagnose an empty list, assign the list and later attach the helper to the returned call. | An empty or partially parsed context list can remain published.  Failed expression parsing does not discard the helper or invent an expression to fill it. |
 | `copy_reusable_expression`/rebuilt context helper. | If the old call has a helper, allocate a new one with direct `New(Parser_Context_Modification,, parser_node_allocator(parser.parsed))`, recursively copy each expression into a new list, assign that list and attach the new helper to the copied call. | The direct allocation is not a second node-builder route.  The helper pointer and list storage are rebuilt rather than left as the old call's attached helper after the initial whole-call assignment.  This does not qualify every other call field against old-pool pointers. |
 | `reusable_expression`/empty-list admission. | For a present call context helper, require each stored expression to be reusable; there is no separate nonempty-list check.  An empty list performs no child checks, while the callee and ordinary argument guards still apply. | This predicate alone does not reject a present empty helper.  The copy branch still runs for its nonnull helper pointer and preserves presence even with zero expressions; do not silently normalise it to absence. |
 | `Parser_Context_Modification`/helper identity. | The parser-owned declaration contains only `modification_expressions`, with no node base, kind or token/location fields.  Both allocation paths use the current parsed-source pool. | Only retained expression nodes enter ordinary node traversal and the snapshot-local ID domain.  The helper has no independent node span or diagnostic/recovery field to copy, and must not be decoded through compiler context storage. |
@@ -1029,14 +1029,14 @@ Shared base/overlay rules apply.
 
 | Record/storage domain. | Exact field roles. |
 | --- | --- |
-| `Code_Block`/parser layout input. | `parent`: `BACKREFERENCE`.  `block_type`: `NON_CHILD`, registered grammar-category observation.  `block_flags`: `NON_CHILD`, source-derived bits only.  `belongs_to_struct`: `BACKREFERENCE`.  `statements`: `CHILD_LIST`, published statement order.  `owning_statement`: `BACKREFERENCE`.  `members`: `NON_CHILD`, compiler member/resolution storage, not another source statement list. |
+| `Code_Block`/parser layout input. | `parent`: `.BACKREFERENCE`.  `block_type`: `.NON_CHILD`, registered grammar-category observation.  `block_flags`: `.NON_CHILD`, source-derived bits only.  `belongs_to_struct`: `.BACKREFERENCE`.  `statements`: `.CHILD_LIST`, published statement order.  `owning_statement`: `.BACKREFERENCE`.  `members`: `.NON_CHILD`, compiler member/resolution storage, not another source statement list. |
 
 Visit `statements` once; lexical scope bindings and member tables do not supply missing statements or declaration identities.
 An empty published list is valid, whereas an unattached failed statement remains described by source/diagnostics rather than an invented node.
 The parser's progress/recovery loop can skip input between attached statements.
 Preserve that recovery evidence and any established coverage gap without inserting skipped text as an AST statement or claiming there was no syntax there.
 Parser-created single-statement, quick-body and conditional blocks retain their own node IDs and qualified origin rules; the absence of authored braces does not make them backlinks or permit deleting the block.
-Do not infer authored delimiters from `IS_PARENTHESIZED` or default block flags alone.
+Do not infer authored delimiters from `.IS_PARENTHESIZED` or default block flags alone.
 The static check covers all seven layout-specific fields.
 Exact block-category/flag schemas and executable builder/reuse and statement/alias qualification remain open; the current-source allocation/root crosswalk is closed by milestone 1.
 
@@ -1050,11 +1050,11 @@ Shared base/overlay rules apply; embedded scope-entry storage is part of the sam
 
 | Record/storage domain. | Exact field roles. |
 | --- | --- |
-| `Code_Declaration`/parser layout input. | `entry`: `HELPER`, embedded scope-entry storage.  `type_inst`: `CHILD`, grammar-qualified optional or recovered required type.  `expression`: `CHILD`, grammar-qualified published initialiser.  `flags`: `NON_CHILD`, registered source bits only.  `alignment_expression`: `CHILD`, only when a qualified metadata route publishes it.  `notes`: `CHILD_LIST`, attached note nodes in stored order.  `program_export_name`: `NON_CHILD`, owned final producer bytes, distinct from correlated occurrence metadata. |
-| `Code_Compound_Declaration`/parser layout input. | `entry`: `HELPER`, embedded storage, not one authoritative name for the binding group.  `comma_separated_assignment`: `CHILD`, real structural comma-arguments node.  `declaration_properties`: `HELPER`, parser-node storage with its own snapshot ID but no standalone declaration-index entry.  `alignment_expression`: `CHILD`, compound-owned metadata.  `notes`: `CHILD_LIST`, compound-owned attached notes.  `operator_type`: `NON_CHILD`, qualified producer observation, not a universal binding-route classifier. |
-| `Code_Comma_Separated_Arguments`/parser layout input. | `arguments`: `HELPER`, ordered parser-owned compound-argument records.  The containing comma node has its own node ID; individual argument records do not. |
-| `Code_Scope_Entry`/embedded structural helper. | `name`: `NON_CHILD`, owned producer bytes when the qualified declaration route supplies them; do not replace a compound's per-binding names with this embedded field.  `import_target`: `BACKREFERENCE`, compiler/import association excluded from authored descent.  Its embedded base follows the shared same-node structural rule. |
-| `Code_Comma_Separated_Argument`/parser-owned helper counterpart. | `node`: `CHILD`, authored target occurrence, then `modifier`: `NON_CHILD`, registered per-target declaration/assignment observation, not an instruction to perform binding. |
+| `Code_Declaration`/parser layout input. | `entry`: `.HELPER`, embedded scope-entry storage.  `type_inst`: `.CHILD`, grammar-qualified optional or recovered required type.  `expression`: `.CHILD`, grammar-qualified published initialiser.  `flags`: `.NON_CHILD`, registered source bits only.  `alignment_expression`: `.CHILD`, only when a qualified metadata route publishes it.  `notes`: `.CHILD_LIST`, attached note nodes in stored order.  `program_export_name`: `.NON_CHILD`, owned final producer bytes, distinct from correlated occurrence metadata. |
+| `Code_Compound_Declaration`/parser layout input. | `entry`: `.HELPER`, embedded storage, not one authoritative name for the binding group.  `comma_separated_assignment`: `.CHILD`, real structural comma-arguments node.  `declaration_properties`: `.HELPER`, parser-node storage with its own snapshot ID but no standalone declaration-index entry.  `alignment_expression`: `.CHILD`, compound-owned metadata.  `notes`: `.CHILD_LIST`, compound-owned attached notes.  `operator_type`: `.NON_CHILD`, qualified producer observation, not a universal binding-route classifier. |
+| `Code_Comma_Separated_Arguments`/parser layout input. | `arguments`: `.HELPER`, ordered parser-owned compound-argument records.  The containing comma node has its own node ID; individual argument records do not. |
+| `Code_Scope_Entry`/embedded structural helper. | `name`: `.NON_CHILD`, owned producer bytes when the qualified declaration route supplies them; do not replace a compound's per-binding names with this embedded field.  `import_target`: `.BACKREFERENCE`, compiler/import association excluded from authored descent.  Its embedded base follows the shared same-node structural rule. |
+| `Code_Comma_Separated_Argument`/parser-owned helper counterpart. | `node`: `.CHILD`, authored target occurrence, then `modifier`: `.NON_CHILD`, registered per-target declaration/assignment observation, not an instruction to perform binding. |
 
 The field rows do not override the earlier binding-group event order or route evidence.
 A compound emits only the bindings justified by its qualified identifier/expression construction route, while target expressions retain their actual syntax and outer container.
@@ -1065,7 +1065,7 @@ This completes draft field-role enumeration for three more generated layouts and
 
 For an ordinary declaration, traverse optional `type_inst`, published `expression`, published `alignment_expression`, then attached `notes[]` in source order.
 Type and initialiser presence follow the qualified declaration grammar/recovery route: an inferred declaration legitimately omits `type_inst`, and a typed declaration without an initialiser legitimately omits `expression`.
-The `---` route can clear the expression and retain `IS_UNINITIALIZED`; do not invent a literal node to fill that absence.
+The `---` route can clear the expression and retain `.IS_UNINITIALIZED`; do not invent a literal node to fill that absence.
 Names, flags and `program_export_name` are scalar observations, not extra children.
 
 For a compound, first retain/visit the `comma_separated_assignment` structural node and its ordered target nodes; it is a real parser node even though it emits no independent index declaration.
@@ -1075,7 +1075,7 @@ The reviewed builder function passes `*result.alignment_expression` to `parse_de
 Do not copy those fields into every binding or assume they already alias fields on the helper.
 Unexpected populated helper alignment/notes require a reviewed route/alias rule or a partial mapping reason, not guessed ownership.
 The properties helper remains a real parser-node observation with a snapshot-local ID, despite having no independent authored declaration entry or reliable finished source span.
-Role `HELPER` does not erase the identity of storage that is itself a `Parser_Node`; non-node auxiliary helpers still have no ordinary node ID.
+Role `.HELPER` does not erase the identity of storage that is itself a `Parser_Node`; non-node auxiliary helpers still have no ordinary node ID.
 
 Repeated `#align` metadata can replace an earlier published alignment expression; note parsing also materialises note text separately from token spelling.
 Preserve the final attached expression, scalar/byte observations and exact source/diagnostics.
@@ -1113,28 +1113,28 @@ For exhaustive field-role coverage, the directive layouts below use the shared b
 
 | Record/storage domain. | Exact field roles. |
 | --- | --- |
-| `Code_Directive_Add_Context`/parser layout input. | `expression`: `CHILD`, declaration-grammar payload, with qualified recovery handling when the published directive lacks its required payload. |
-| `Code_Directive_Overlay`/parser layout input. | `target_expression`: `CHILD`, required parenthesised target, then `declaration_or_using`: `CHILD`, required payload traversed by its actual published kind.  Preserve required-child recovery; do not apply the overlay or resolve its target. |
-| `Code_Directive_Modify`/parser layout input. | `block`: `CHILD`, required authored block; retain the missing-opening-brace diagnostic and qualified missing-body observation instead of manufacturing a block. |
-| `Code_Directive_Run`/compiler layout input. | `flags`: `NON_CHILD`, registered source/parser bits only.  `assertion_string`: `NON_CHILD`, no populated source-message route on the reviewed builder functions; compiler-generated/evaluated messages are not source observations.  `procedure`: `CHILD` only on the qualified source arrow-header route below; unrelated lowered/compiler procedures remain excluded. |
-| `Parser_Directive_Run`/parser-added storage. | `expression`: `CHILD` on ordinary expression/block routes, but a non-owning body-block association on the qualified arrow-header route.  Validate that alias against this header's body identity; never descend twice or infer ownership from nonnull storage alone. |
-| `Code_Directive_Insert`/parser layout input. | `expression`: `CHILD`, required published payload, including a qualified implicit-run wrapper for arrow syntax.  `scope_redirection`: `CHILD`, optional source prefix.  `break_replacement`: `CHILD`, optional published replacement statement.  `continue_replacement`: `CHILD`, optional published replacement statement.  `remove_replacement`: `CHILD`, optional published replacement statement.  `expansion`: `NON_CHILD`, generated expansion excluded.  `is_internal`: `NON_CHILD`, internal generated bookkeeping excluded from source observations.  Enumeration order is not visit order: use the prefix/clause/payload ordering and recovery rules below. |
-| `Code_Directive_Location`/parser layout input. | `expression`: `CHILD`, optional non-caller argument, with consumed-but-missing argument recovery distinguished from empty parentheses.  `is_caller_location`: `NON_CHILD`, source route discriminator; caller syntax has no expression child. |
-| `Code_Directive_Procedure_Name`/parser layout input. | `argument`: `CHILD`, optional parenthesised expression; empty parentheses are legitimate absence, unlike a recovered failed expression. |
-| `Code_Directive_Poke_Name`/compiler layout input. | `name`: `NON_CHILD`, owned identifier-value bytes, not an identifier node.  `module_struct`: `NON_CHILD`, compiler interpretation excluded; the parser-owned overlay below is the only source view of this slot. |
-| `Parser_Directive_Poke_Name`/parser overlay view. | `module_expression`: `CHILD`, required postfix-expression payload with qualified recovery handling.  This overlays the compiler slot, not an additional allocation or second owning edge; never read the same storage as a resolved struct. |
-| `Code_Directive_Module_Parameters`/parser layout input. | `module_parameters`: `CHILD`, optional first source procedure-type header.  `program_parameters`: `CHILD`, optional second header on the consumed first-header route.  `common_code`: `CHILD`, optional trailing or block-only source block.  Visit in that order; empty/block-only forms are legitimate, while consumed-but-recovered headers retain their distinct evidence. |
+| `Code_Directive_Add_Context`/parser layout input. | `expression`: `.CHILD`, declaration-grammar payload, with qualified recovery handling when the published directive lacks its required payload. |
+| `Code_Directive_Overlay`/parser layout input. | `target_expression`: `.CHILD`, required parenthesised target, then `declaration_or_using`: `.CHILD`, required payload traversed by its actual published kind.  Preserve required-child recovery; do not apply the overlay or resolve its target. |
+| `Code_Directive_Modify`/parser layout input. | `block`: `.CHILD`, required authored block; retain the missing-opening-brace diagnostic and qualified missing-body observation instead of manufacturing a block. |
+| `Code_Directive_Run`/compiler layout input. | `flags`: `.NON_CHILD`, registered source/parser bits only.  `assertion_string`: `.NON_CHILD`, no populated source-message route on the reviewed builder functions; compiler-generated/evaluated messages are not source observations.  `procedure`: `.CHILD` only on the qualified source arrow-header route below; unrelated lowered/compiler procedures remain excluded. |
+| `Parser_Directive_Run`/parser-added storage. | `expression`: `.CHILD` on ordinary expression/block routes, but a non-owning body-block association on the qualified arrow-header route.  Validate that alias against this header's body identity; never descend twice or infer ownership from nonnull storage alone. |
+| `Code_Directive_Insert`/parser layout input. | `expression`: `.CHILD`, required published payload, including a qualified implicit-run wrapper for arrow syntax.  `scope_redirection`: `.CHILD`, optional source prefix.  `break_replacement`: `.CHILD`, optional published replacement statement.  `continue_replacement`: `.CHILD`, optional published replacement statement.  `remove_replacement`: `.CHILD`, optional published replacement statement.  `expansion`: `.NON_CHILD`, generated expansion excluded.  `is_internal`: `.NON_CHILD`, internal generated bookkeeping excluded from source observations.  Enumeration order is not visit order: use the prefix/clause/payload ordering and recovery rules below. |
+| `Code_Directive_Location`/parser layout input. | `expression`: `.CHILD`, optional non-caller argument, with consumed-but-missing argument recovery distinguished from empty parentheses.  `is_caller_location`: `.NON_CHILD`, source route discriminator; caller syntax has no expression child. |
+| `Code_Directive_Procedure_Name`/parser layout input. | `argument`: `.CHILD`, optional parenthesised expression; empty parentheses are legitimate absence, unlike a recovered failed expression. |
+| `Code_Directive_Poke_Name`/compiler layout input. | `name`: `.NON_CHILD`, owned identifier-value bytes, not an identifier node.  `module_struct`: `.NON_CHILD`, compiler interpretation excluded; the parser-owned overlay below is the only source view of this slot. |
+| `Parser_Directive_Poke_Name`/parser overlay view. | `module_expression`: `.CHILD`, required postfix-expression payload with qualified recovery handling.  This overlays the compiler slot, not an additional allocation or second owning edge; never read the same storage as a resolved struct. |
+| `Code_Directive_Module_Parameters`/parser layout input. | `module_parameters`: `.CHILD`, optional first source procedure-type header.  `program_parameters`: `.CHILD`, optional second header on the consumed first-header route.  `common_code`: `.CHILD`, optional trailing or block-only source block.  Visit in that order; empty/block-only forms are legitimate, while consumed-but-recovered headers retain their distinct evidence. |
 | `Code_Directive_Context_Type`/parser layout input. | No layout-specific fields; shared `base` only.  This is the authored `#Context` occurrence, not the completed context type or a member list. |
-| `Code_Directive_Scope`/parser layout input. | `scope_type`: `NON_CHILD`, source distinction among module/internal, export and file directives.  Apply the existing same-statement-list syntax rules, not inferred effective visibility or semantic scope links. |
+| `Code_Directive_Scope`/parser layout input. | `scope_type`: `.NON_CHILD`, source distinction among module/internal, export and file directives.  Apply the existing same-statement-list syntax rules, not inferred effective visibility or semantic scope links. |
 | `Code_Directive_Through`/parser layout input. | No layout-specific fields; shared `base` only.  Preserve a published standalone directive occurrence; case-parser consumption into a fallthrough marker does not manufacture another node. |
-| `Code_Directive_Wildcard`/parser layout input. | `index`: `NON_CHILD`, unassigned/default on the reviewed source builder function, not an inferred source ordinal or resolved binding index.  The published wildcard has no authored child. |
-| `Code_Directive_Import`/parser layout input. | `name`: `NON_CHILD`, owned decoded source bytes, including a qualified transient `#string` value.  `flags`: `NON_CHILD`, registered source bits only.  `module_parameters_call`: `CHILD`, optional first parameter call.  `program_parameters_call`: `CHILD`, optional second parameter call.  `import_type`: `NON_CHILD`, qualified source modifier observation where assigned by this parser, not permission to import or infer a resolved kind. |
-| `Code_Directive_Load`/parser layout input. | `short_name`: `NON_CHILD`, owned source string-token value.  `load_flags`: `NON_CHILD`, registered source observations only; the reviewed builder function leaves them at their defaults.  `fully_pathed_filename`: `NON_CHILD`, resolved external path excluded.  `loaded_string`: `NON_CHILD`, externally loaded content excluded. |
-| `Code_Directive_Library`/parser layout input. | `name`: `NON_CHILD`, owned source string-token value.  `library_flags`: `NON_CHILD`, registered source bits only, never resolved/linker state. |
-| `Code_Directive_Bytes`/parser layout input. | `expression`: `CHILD`, published binary-expression-grammar payload, with required-child recovery handling. |
-| `Code_Directive_Exists`/parser layout input. | `query_expression`: `CHILD`, required query expression.  `sync_expression`: `CHILD`, optional comma-introduced expression, required or recovered once that separator is consumed. |
-| `Code_Directive_Bake`/parser layout input. | `procedure_call`: `CHILD`, only the published call accepted by the bake builder function.  `bake_type`: `NON_CHILD`, source distinction between dynamic specialisation, constants bake and parameter-value bake requests. |
-| `Code_Directive_Code`/parser layout input. | `expression`: `CHILD`, ordinary/typed payload only; inactive on qualified null/caller routes.  `code_flags`: `NON_CHILD`, registered source observations, excluding processed/compiler state. |
+| `Code_Directive_Wildcard`/parser layout input. | `index`: `.NON_CHILD`, unassigned/default on the reviewed source builder function, not an inferred source ordinal or resolved binding index.  The published wildcard has no authored child. |
+| `Code_Directive_Import`/parser layout input. | `name`: `.NON_CHILD`, owned decoded source bytes, including a qualified transient `#string` value.  `flags`: `.NON_CHILD`, registered source bits only.  `module_parameters_call`: `.CHILD`, optional first parameter call.  `program_parameters_call`: `.CHILD`, optional second parameter call.  `import_type`: `.NON_CHILD`, qualified source modifier observation where assigned by this parser, not permission to import or infer a resolved kind. |
+| `Code_Directive_Load`/parser layout input. | `short_name`: `.NON_CHILD`, owned source string-token value.  `load_flags`: `.NON_CHILD`, registered source observations only; the reviewed builder function leaves them at their defaults.  `fully_pathed_filename`: `.NON_CHILD`, resolved external path excluded.  `loaded_string`: `.NON_CHILD`, externally loaded content excluded. |
+| `Code_Directive_Library`/parser layout input. | `name`: `.NON_CHILD`, owned source string-token value.  `library_flags`: `.NON_CHILD`, registered source bits only, never resolved/linker state. |
+| `Code_Directive_Bytes`/parser layout input. | `expression`: `.CHILD`, published binary-expression-grammar payload, with required-child recovery handling. |
+| `Code_Directive_Exists`/parser layout input. | `query_expression`: `.CHILD`, required query expression.  `sync_expression`: `.CHILD`, optional comma-introduced expression, required or recovered once that separator is consumed. |
+| `Code_Directive_Bake`/parser layout input. | `procedure_call`: `.CHILD`, only the published call accepted by the bake builder function.  `bake_type`: `.NON_CHILD`, source distinction between dynamic specialisation, constants bake and parameter-value bake requests. |
+| `Code_Directive_Code`/parser layout input. | `expression`: `.CHILD`, ordinary/typed payload only; inactive on qualified null/caller routes.  `code_flags`: `.NON_CHILD`, registered source observations, excluding processed/compiler state. |
 
 The context slice enumerates one layout-specific field across two layouts.
 Traverse the published add-context payload under the current authored container; do not merge contributions, resolve context membership or follow a computed type.
@@ -1162,7 +1162,7 @@ Import calls are visited module then program, with each call's import-callee ass
 Import `file`/`dir`/`string` modifiers can set `import_type` directly on this source parser route, despite that field's general compiler-phase inventory category.
 Preserve this qualified observation without reading unrelated resolved state.
 Names require owned-byte and source-token correlation: an empty decoded name is not proof of a missing string token.
-Consumed modifier order/repetition is not reconstructed from final flags; in particular, the reviewed library builder function accepts `link_always` but leaves `LINK_ALWAYS` clear.
+Consumed modifier order/repetition is not reconstructed from final flags; in particular, the reviewed library builder function accepts `link_always` but leaves `.LINK_ALWAYS` clear.
 Do not load content, canonicalise a requested path into a resolved result or link a library during syntax traversal.
 Exact scalar/flag schemas and executable builder/reuse and alias/lifetime qualification remain open.
 
@@ -1194,7 +1194,7 @@ Retain the import's existing node ID as association target, skip callee descent,
 This is not an active-path cycle failure and not permission to skip arbitrary recursive call expressions.
 A mismatched callee/owner requires a mapping reason; do not repair it by names, source spans or selecting another import.
 
-For arrow `#run`, including the `SYNTACTICALLY_IMPLICIT` run allocated for an arrow `#insert` payload, qualify the source-header route through its actual construction and body/expression identity.
+For arrow `#run`, including the `.SYNTACTICALLY_IMPLICIT` run allocated for an arrow `#insert` payload, qualify the source-header route through its actual construction and body/expression identity.
 `procedure` here is source syntax, despite the compiler inventory's general classification of lowered run procedures.
 The block alias is non-owning only when it matches this header's body block; an unexpected second expression is not silently discarded or globally deduplicated.
 If the source header has no body, retain its returns/flags and missing-payload observations even though `expression` is null.
@@ -1225,12 +1225,12 @@ Traverse the published parse shape, not a reconstructed precedence tree, inferre
 | Form/guard. | Active child order and observations. |
 | --- | --- |
 | `Procedure_Call`. | `procedure_expression`, then `arguments_unsorted[]` in stored order, then the optional `context_modification` helper's `modification_expressions[]` in stored order.  Context expressions follow the consumed `,,` boundary, not a merged or sorted argument list. |
-| `Parser_Argument` in a call. | Optional `name`, then `expression`.  The name is a source `Parser_Ident` for the consumed `IDENT =` label; it is not a declaration, assignment target or resolved formal-parameter reference. |
+| `Parser_Argument` in a call. | Optional `name`, then `expression`.  The name is a source `Parser_Ident` for the consumed `.IDENT =` label; it is not a declaration, assignment target or resolved formal-parameter reference. |
 | `Unary_Operator`. | `subexpression`, preserving the source operator observation.  Prefix and postfix dereference remain their actual producer operator tags; do not derive a synthetic binary child from their punctuation. |
 | `Binary_Operator`. | `left`, then `right`, including member access, subscripting and assignment expressions.  The right child may be a mapped recovered hole; do not turn the left subtree into a different expression merely because recovery failed on the right. |
 | Prefix explicit cast. | `target_type`, then `expression`, as constructed by the `cast(...)` route; retain its source cast flags. |
-| Postfix explicit cast. | `expression`, then `target_type` when `HAS_POSTFIX_SYNTAX` identifies the reviewed `value.(T)` route.  This reverses the prefix cast's order and therefore affects first-encounter node IDs. |
-| Auto cast. | `expression` only on the `IS_AUTO` route; absent `target_type` is intentional, not a missing explicit type. |
+| Postfix explicit cast. | `expression`, then `target_type` when `.HAS_POSTFIX_SYNTAX` identifies the reviewed `value.(T)` route.  This reverses the prefix cast's order and therefore affects first-encounter node IDs. |
+| Auto cast. | `expression` only on the `.IS_AUTO` route; absent `target_type` is intentional, not a missing explicit type. |
 
 Validate cast route and reviewed source flags together.
 Conflicting/unqualified auto/postfix forms or unexpected children require a partial mapping reason rather than a priority guess; inferred type data never supplies an absent target child.
@@ -1251,7 +1251,7 @@ Declarations reached inside expressions follow their own reviewed grammar mappin
 A fully mapped recovered hole does not automatically make traversal partial, whereas missing route/origin evidence does.
 Some failed postfix member/cast suffixes instead return the already parsed expression without publishing an access/cast wrapper.
 Do not reconstruct those missing wrappers from consumed punctuation or extend the returned node's raw span to hide the difference.
-Parenthesised expressions can reuse the same expression node with an expanded interval/`IS_PARENTHESIZED`; no separate group node is implied.
+Parenthesised expressions can reuse the same expression node with an expanded interval/`.IS_PARENTHESIZED`; no separate group node is implied.
 Keep actual producer identities and source observations.
 
 Exclude `arguments_sorted`, `resolved_procedure_expression`, overload collections, received-return counts, macro-expansion blocks and common inferred type pointers from authored descent.
@@ -1271,11 +1271,11 @@ Shared base/overlay rules apply; route-dependent order and optional-versus-recov
 
 | Record/storage domain. | Exact field roles. |
 | --- | --- |
-| `Code_If`/parser layout input. | `condition`: `CHILD`, required condition with recovery evidence.  `then_block`: `CHILD`, branch or switch-case block.  `else_block`: `CHILD`, route-qualified optional/required branch.  `if_flags`: `NON_CHILD`, registered source/parser bits.  `static_if_flags`: `NON_CHILD`, registered source observations only, not evaluation state.  `static_if_accepted_case`: `NON_CHILD`, evaluated selection excluded from authored traversal. |
-| `Code_Case`/parser layout input. | `condition`: `CHILD`, absent for a qualified default case or a recovered condition under distinct evidence.  `then_block`: `CHILD`, published case-body block.  `owning_if`: `BACKREFERENCE`.  `marked_as_fallthrough`: `NON_CHILD`, consumed source marker observation. |
-| `Code_While`/parser layout input. | `condition`: `CHILD`, then `block`: `CHILD`, with required-child recovery handling. |
-| `Code_For`/parser layout input. | `iteration_expression`: `CHILD`, required collection/range start.  `iteration_expression_right`: `CHILD`, consumed range-end route only.  `block`: `CHILD`, body.  `ident_it`: `CHILD`, optional explicit iterator occurrence.  `ident_it_index`: `CHILD`, optional explicit index occurrence.  `want_replacement_for_expansion`: `CHILD`, optional authored expansion request.  `want_pointer_expression`: `CHILD`, qualified dynamic prefix.  `want_reverse_expression`: `CHILD`, qualified dynamic prefix.  `for_flags`: `NON_CHILD`, registered source bits.  `ident_decl`: `NON_CHILD`, generated iterator declaration.  `index_decl`: `NON_CHILD`, generated index declaration.  `macro_expansion_procedure_call`: `NON_CHILD`, generated expansion storage. |
-| `Code_Loop_Control`/parser layout input. | `control_type`: `NON_CHILD`, source `BREAK`, `CONTINUE` or `REMOVE` distinction.  `target_ident`: `CHILD`, optional authored target reference, never a resolved loop/declaration edge. |
+| `Code_If`/parser layout input. | `condition`: `.CHILD`, required condition with recovery evidence.  `then_block`: `.CHILD`, branch or switch-case block.  `else_block`: `.CHILD`, route-qualified optional/required branch.  `if_flags`: `.NON_CHILD`, registered source/parser bits.  `static_if_flags`: `.NON_CHILD`, registered source observations only, not evaluation state.  `static_if_accepted_case`: `.NON_CHILD`, evaluated selection excluded from authored traversal. |
+| `Code_Case`/parser layout input. | `condition`: `.CHILD`, absent for a qualified default case or a recovered condition under distinct evidence.  `then_block`: `.CHILD`, published case-body block.  `owning_if`: `.BACKREFERENCE`.  `marked_as_fallthrough`: `.NON_CHILD`, consumed source marker observation. |
+| `Code_While`/parser layout input. | `condition`: `.CHILD`, then `block`: `.CHILD`, with required-child recovery handling. |
+| `Code_For`/parser layout input. | `iteration_expression`: `.CHILD`, required collection/range start.  `iteration_expression_right`: `.CHILD`, consumed range-end route only.  `block`: `.CHILD`, body.  `ident_it`: `.CHILD`, optional explicit iterator occurrence.  `ident_it_index`: `.CHILD`, optional explicit index occurrence.  `want_replacement_for_expansion`: `.CHILD`, optional authored expansion request.  `want_pointer_expression`: `.CHILD`, qualified dynamic prefix.  `want_reverse_expression`: `.CHILD`, qualified dynamic prefix.  `for_flags`: `.NON_CHILD`, registered source bits.  `ident_decl`: `.NON_CHILD`, generated iterator declaration.  `index_decl`: `.NON_CHILD`, generated index declaration.  `macro_expansion_procedure_call`: `.NON_CHILD`, generated expansion storage. |
+| `Code_Loop_Control`/parser layout input. | `control_type`: `.NON_CHILD`, source `.BREAK`, `.CONTINUE` or `.REMOVE` distinction.  `target_ident`: `.CHILD`, optional authored target reference, never a resolved loop/declaration edge. |
 
 The static check covers all 26 layout-specific fields across these five layouts.
 Table order does not replace the source-form traversal sequence, and source marker/flag observations do not authorise branch evaluation or loop expansion.
@@ -1285,17 +1285,17 @@ The remaining statement-layout slice makes return/defer/push-context/using field
 
 | Record/storage domain. | Exact field roles. |
 | --- | --- |
-| `Code_Return`/parser layout input. | `arguments_unsorted`: `HELPER`, ordered `Parser_Argument` records using the earlier helper mapping.  `return_flags`: `NON_CHILD`, registered source/parser bits including qualified quick-body normalisation.  `arguments_sorted`: `BACKREFERENCE`, post-resolution arrangement excluded from authored descent. |
-| `Code_Defer`/parser layout input. | `block`: `CHILD`, published deferred statement block with required-child recovery handling.  `is_backticked`: `NON_CHILD`, source keyword observation. |
-| `Code_Push_Context`/parser layout input. | `to_push`: `CHILD`, qualified optional source expression.  `block`: `CHILD`, non-`DEFER_POP` body route only.  `push_context_flags`: `NON_CHILD`, registered source bits; do not apply the requested context change. |
-| `Code_Using`/parser layout input. | `expression`: `CHILD` on the ordinary using route, but a non-owning argument association on the qualified parameter-using route.  `filter_type`: `NON_CHILD`, registered source filter observation.  `filter_expression`: `CHILD`, qualified optional or recovered filter, visited before the ordinary target.  `no_parameters`: `NON_CHILD`, producer scalar observation under its qualified route, not evidence of resolved membership. |
+| `Code_Return`/parser layout input. | `arguments_unsorted`: `.HELPER`, ordered `Parser_Argument` records using the earlier helper mapping.  `return_flags`: `.NON_CHILD`, registered source/parser bits including qualified quick-body normalisation.  `arguments_sorted`: `.BACKREFERENCE`, post-resolution arrangement excluded from authored descent. |
+| `Code_Defer`/parser layout input. | `block`: `.CHILD`, published deferred statement block with required-child recovery handling.  `is_backticked`: `.NON_CHILD`, source keyword observation. |
+| `Code_Push_Context`/parser layout input. | `to_push`: `.CHILD`, qualified optional source expression.  `block`: `.CHILD`, non-`.DEFER_POP` body route only.  `push_context_flags`: `.NON_CHILD`, registered source bits; do not apply the requested context change. |
+| `Code_Using`/parser layout input. | `expression`: `.CHILD` on the ordinary using route, but a non-owning argument association on the qualified parameter-using route.  `filter_type`: `.NON_CHILD`, registered source filter observation.  `filter_expression`: `.CHILD`, qualified optional or recovered filter, visited before the ordinary target.  `no_parameters`: `.NON_CHILD`, producer scalar observation under its qualified route, not evidence of resolved membership. |
 
 The reviewed return builder function appends only completed expression records, with no argument-name nodes; a populated name requires a qualified additional route rather than inference from shared helper storage.
 Empty returns and the existing quick-body recovered return-argument list remain distinct source/normalisation observations.
 For using parameters, the header's owning argument list supplies the target's sole descent; ordinary `Using.expression` remains owning.
 The lexical scope's using registry is not a second traversal path.
 The static check covers all 12 layout-specific fields in these four rows.
-Optionality, `DEFER_POP`, consumed-but-missing filters/targets and helper lifetime checks follow the existing route contracts, not tests of whether any pointer happens to be nonnull.
+Optionality, `.DEFER_POP`, consumed-but-missing filters/targets and helper lifetime checks follow the existing route contracts, not tests of whether any pointer happens to be nonnull.
 Exact scalar/flag schemas and independent behavioural qualification remain open for this statement slice too.
 
 The ordering below is authored traversal order, not execution order or evidence of an active compile-time branch.
@@ -1303,15 +1303,15 @@ Conditions can themselves be declarations through `parse_condition`; do not rest
 
 | Form/guarded route. | Active child order and observations. |
 | --- | --- |
-| Ordinary `If` and static `#if`. | `condition`, `then_block`, optional `else_block`.  Traverse both published branches; preserve `IS_STATIC` without evaluating conditions or following `static_if_accepted_case`. |
-| `ifx` and static `#ifx`. | `condition`, `then_block`, `else_block` when published.  Preserve `IS_IFX`/`IS_STATIC`; expression branches may be wrapped in blocks by `parse_ifx_branch`.  A missing branch must retain grammar/recovery observations rather than become an empty fabricated expression. |
-| Switch-form `If`. | `condition`, then `then_block.statements[]` case nodes in stored order, reached through the block's normal ownership.  `IS_SWITCH_STATEMENT` selects this route; do not infer a switch from an equality expression alone. |
+| Ordinary `If` and static `#if`. | `condition`, `then_block`, optional `else_block`.  Traverse both published branches; preserve `.IS_STATIC` without evaluating conditions or following `static_if_accepted_case`. |
+| `ifx` and static `#ifx`. | `condition`, `then_block`, `else_block` when published.  Preserve `.IS_IFX`/`.IS_STATIC`; expression branches may be wrapped in blocks by `parse_ifx_branch`.  A missing branch must retain grammar/recovery observations rather than become an empty fabricated expression. |
+| Switch-form `If`. | `condition`, then `then_block.statements[]` case nodes in stored order, reached through the block's normal ownership.  `.IS_SWITCH_STATEMENT` selects this route; do not infer a switch from an equality expression alone. |
 | `Case`. | Optional `condition`, then `then_block`; `owning_if` is a backreference.  A consumed `case ;` is the default-case route with no condition, not necessarily recovery.  Distinguish a failed nonempty condition parse using boundary/diagnostic correlation. |
 | `While`. | `condition`, then `block`.  Declaration-shaped conditions use their ordinary declaration mapping; no new loop container is invented. |
-| `For` prefix expressions. | Visit published `want_reverse_expression` and `want_pointer_expression` in their actual token order, not a fixed field order; fallback for equal/unlocated positions is reverse then pointer, with partial ordering coverage if the authored order cannot be established.  Scalar `REVERSE`/`POINTER` flags alone have no child. |
+| `For` prefix expressions. | Visit published `want_reverse_expression` and `want_pointer_expression` in their actual token order, not a fixed field order; fallback for equal/unlocated positions is reverse then pointer, with partial ordering coverage if the authored order cannot be established.  Scalar `.REVERSE`/`.POINTER` flags alone have no child. |
 | Remaining `For` fields. | After prefix expressions: optional `want_replacement_for_expansion`, optional explicit `ident_it`, optional explicit `ident_it_index`, required `iteration_expression`, optional range `iteration_expression_right`, then `block`.  A consumed range separator with a recovered missing right expression is distinct from no range. |
 | `Defer`. | `block`; retain scalar backtick observation.  Body traversal is syntactic, not delayed execution or effect analysis. |
-| `Push_Context`. | Optional `to_push`, then `block` on the non-`DEFER_POP` route.  The builder function omits the block for `DEFER_POP`; that absence is not automatically a missing-body error.  A leading block can also legitimately omit `to_push`. |
+| `Push_Context`. | Optional `to_push`, then `block` on the non-`.DEFER_POP` route.  The builder function omits the block for `.DEFER_POP`; that absence is not automatically a missing-body error.  A leading block can also legitimately omit `to_push`. |
 | `Loop_Control`. | Optional `target_ident` is an authored reference, not a declaration or a resolved loop edge.  Preserve `control_type` without computing control-flow targets. |
 
 Statement blocks can wrap a single authored statement without source braces, and `ifx` branch blocks can wrap a single expression.
@@ -1331,7 +1331,7 @@ The traversal must not claim it inspected unpublished duplicate-expression subtr
 
 Compiler `macro_expansion_procedure_call`, `ident_decl` and `index_decl` remain excluded generated data.
 Explicit `ident_it`/`ident_it_index` are visited source identifiers, not those generated declaration fields.
-The current three-kind declaration index does not add loop-binding entries or implicit `it`/index bindings; exposing a separate loop-binding kind requires its own schema review rather than mislabelling these identifiers `DECLARATION`.
+The current three-kind declaration index does not add loop-binding entries or implicit `it`/index bindings; exposing a separate loop-binding kind requires its own schema review rather than mislabelling these identifiers `.DECLARATION`.
 
 Case `#through` is consumed into `marked_as_fallthrough` by the case parser, not attached there as a separate `Directive_Through` child.
 Preserve its scalar/source observations; repeated directive origins require source correlation, not an extra invented node.
@@ -1340,7 +1340,7 @@ Fully mapped recovery does not automatically make traversal partial; missing rou
 Unexpected fields incompatible with a selected form require a mapping reason, not silent descent through another form or a guess from nonnull pointers.
 
 The discriminating future vectors are dynamic for-flags authored in opposite orders and a default `case ;` versus a recovered missing nonempty condition.
-Further independent cases cover declaration conditions; both static branches and enum-mode branch statements; ordinary/ifx single-statement wrappers; empty case bodies; range versus recovered missing range end; explicit versus implicit loop names; named expansion requests; duplicate discarded flag expressions; `DEFER_POP`; and deliberately populated backlinks/generated fields.
+Further independent cases cover declaration conditions; both static branches and enum-mode branch statements; ordinary/ifx single-statement wrappers; empty case bodies; range versus recovered missing range end; explicit versus implicit loop names; named expansion requests; duplicate discarded flag expressions; `.DEFER_POP`; and deliberately populated backlinks/generated fields.
 Assert exact active visit paths/order, node IDs, raw/recovery observations, index exclusions and partial reasons against independent expectations.
 This draft does not implement a visitor, execute branches/expansions or qualify control-flow semantics.
 
@@ -1351,8 +1351,8 @@ The exhaustive layout-specific field rows below use shared base/overlay rules an
 
 | Record/storage domain. | Exact field roles. |
 | --- | --- |
-| `Code_Struct`/parser layout input. | `modify_directives`: `CHILD_LIST`, authored modifier directives.  `block`: `CHILD`, required body with qualified recovery handling.  `arguments_block`: `CHILD`, optional parameter block.  `notes`: `CHILD_LIST`, only under a qualified attachment route; reviewed builder functions leave it empty.  `textual_flags`: `NON_CHILD`, registered source bits.  `alignment`: `NON_CHILD`, source numeric observation on the reviewed route, not an expression child or computed layout result.  `defined_type`: `NON_CHILD`, resolved type storage.  `constants_block`: `NON_CHILD`, compiler-prepared storage. |
-| `Code_Enum`/parser layout input. | `internal_type_inst`: `CHILD`, optional source type wrapper.  `block`: `CHILD`, required member body with qualified recovery handling.  `notes`: `CHILD_LIST`, only under a qualified attachment route.  `marked_as_complete`: `NON_CHILD`, source marker observation.  `marked_as_specified`: `NON_CHILD`, source marker observation.  `is_flags`: `NON_CHILD`, source keyword distinction.  `internal_type`: `NON_CHILD`, resolved type.  `external_type`: `NON_CHILD`, resolved type. |
+| `Code_Struct`/parser layout input. | `modify_directives`: `.CHILD_LIST`, authored modifier directives.  `block`: `.CHILD`, required body with qualified recovery handling.  `arguments_block`: `.CHILD`, optional parameter block.  `notes`: `.CHILD_LIST`, only under a qualified attachment route; reviewed builder functions leave it empty.  `textual_flags`: `.NON_CHILD`, registered source bits.  `alignment`: `.NON_CHILD`, source numeric observation on the reviewed route, not an expression child or computed layout result.  `defined_type`: `.NON_CHILD`, resolved type storage.  `constants_block`: `.NON_CHILD`, compiler-prepared storage. |
+| `Code_Enum`/parser layout input. | `internal_type_inst`: `.CHILD`, optional source type wrapper.  `block`: `.CHILD`, required member body with qualified recovery handling.  `notes`: `.CHILD_LIST`, only under a qualified attachment route.  `marked_as_complete`: `.NON_CHILD`, source marker observation.  `marked_as_specified`: `.NON_CHILD`, source marker observation.  `is_flags`: `.NON_CHILD`, source keyword distinction.  `internal_type`: `.NON_CHILD`, resolved type.  `external_type`: `.NON_CHILD`, resolved type. |
 
 Field-table order is not traversal order: struct parameters precede modifier directives and body; enum source type precedes body.
 Unexpected attached notes need their own ordering/ownership route, not default placement inferred from a populated pointer.
@@ -1364,8 +1364,8 @@ Members inherit the enclosing declaration/shared-region index container already 
 
 | Producer route. | Downward order and retained observations. |
 | --- | --- |
-| Struct or union. | Optional `arguments_block`, `modify_directives[]` in order, then `block`.  `textual_flags.UNION` distinguishes the union spelling on the same `STRUCT` node shape; it does not select a different child arm. |
-| Aggregate parameter block. | `statements[]` in stored order.  This is a parser block with `STRUCT_ARGUMENTS` and a parenthesised source interval, not evidence of authored braces.  Parameters are parsed through declaration grammar; do not assume every reached node is an ordinary declaration. |
+| Struct or union. | Optional `arguments_block`, `modify_directives[]` in order, then `block`.  `textual_flags.UNION` distinguishes the union spelling on the same `.STRUCT` node shape; it does not select a different child arm. |
+| Aggregate parameter block. | `statements[]` in stored order.  This is a parser block with `.STRUCT_ARGUMENTS` and a parenthesised source interval, not evidence of authored braces.  Parameters are parsed through declaration grammar; do not assume every reached node is an ordinary declaration. |
 | Struct/union body block. | `statements[]` in stored order, including declarations, using/directive forms, conditional declarations and field-default expressions.  `block.belongs_to_struct` is a backreference, never a descent to the aggregate. |
 | Enum or enum-flags. | Optional `internal_type_inst`, then `block`.  `is_flags`, `marked_as_complete` and `marked_as_specified` are scalar source observations, not child nodes or completed semantic membership. |
 | Enum body/enum-mode branch block. | `statements[]` in stored order.  Recognise bare member occurrences only under the enum-member grammar route; conditional branch blocks preserve that route without evaluating the condition. |
@@ -1381,12 +1381,12 @@ The reviewed builder functions do not attach `Struct.notes` or `Enum.notes`; enc
 Unexpected populated aggregate-note lists require a reviewed producer route or an explicit partial mapping reason, not silent omission or assumed shared ownership.
 Compiler `defined_type`, enum `internal_type`/`external_type`, constants blocks and inferred layout values are outside authored descent, even if populated later.
 
-A direct bare enum member is produced by `parse_enum_member` as a `Parser_Ident` from `IDENT ;` under enum-member mode.
-Emit one `ENUM_MEMBER` entry for that grammar occurrence, with `declaration_node_id` naming the identifier node, its spelled-name origin and its source occurrence as declaration origin; preserve repeated names without merging.
+A direct bare enum member is produced by `parse_enum_member` as a `Parser_Ident` from `.IDENT ;` under enum-member mode.
+Emit one `.ENUM_MEMBER` entry for that grammar occurrence, with `declaration_node_id` naming the identifier node, its spelled-name origin and its source occurrence as declaration origin; preserve repeated names without merging.
 It has no declaration-properties/program-export producer observation.
 The token/statement boundary establishes its grammar extent; an identifier node's own span need not include the semicolon.
-Named enum declarations parsed through ordinary declaration grammar retain `DECLARATION`/`COMPOUND_BINDING` as appropriate, rather than being relabelled solely because their container is an enum.
-Both forms are enum members: a bare `ENUM_MEMBER` occurrence (`A;`) has no value expression, so the compiler generates its value, while a named declaration (`A :: 5;`) has one.
+Named enum declarations parsed through ordinary declaration grammar retain `.DECLARATION`/`.COMPOUND_BINDING` as appropriate, rather than being relabelled solely because their container is an enum.
+Both forms are enum members: a bare `.ENUM_MEMBER` occurrence (`A;`) has no value expression, so the compiler generates its value, while a named declaration (`A :: 5;`) has one.
 [E14](CACHE_EXPERIMENTS.md#e14-results-enum-member-values) confirms that the forms mix in any order and that specified values may be sparse, descending, repeated or equal to generated ones, in both `enum` and `enum_flags`.
 Store each occurrence with its authored value expression or its absence, in source order; never compute generated values, sort or deduplicate by value, or treat member position as its value.
 Do not classify identifiers in initialisers, conditions, type annotations or nested expressions as bare members.
@@ -1412,8 +1412,8 @@ For exhaustive field-role coverage, the two generated procedure layouts have the
 
 | Record/storage domain. | Exact field roles. |
 | --- | --- |
-| `Code_Procedure_Header`/parser layout input. | `arguments`: `CHILD_LIST`, owning parameter declarations.  `returns`: `CHILD_LIST`, owning return slots.  `parameter_usings`: `CHILD_LIST`, owning using wrappers whose target association follows the guarded alias rule below.  `foreign_function_name`: `NON_CHILD`, owned decoded bytes.  `library_identifier`: `CHILD`, optional source identifier.  `deprecation_string`: `NON_CHILD`, owned decoded bytes.  `modify_directives`: `CHILD_LIST`, source order.  `body_or_null`: `CHILD`, optional published body.  `procedure_flags`: `NON_CHILD`, registered source/parser observations only.  `notes`: `CHILD_LIST`, only with a qualified attachment route; current reviewed builder functions leave it empty.  `name`: `NON_CHILD`, owner-derived compiler/parser value, not a separate authored procedure name.  `constants_block`: `NON_CHILD`, compiler-prepared storage.  `polymorph_source_header`: `BACKREFERENCE`, compiler instantiation provenance excluded from source descent. |
-| `Code_Procedure_Body`/parser layout input. | `block`: `CHILD`, published body block.  `header`: `BACKREFERENCE`, owning header association.  `body_flags`: `NON_CHILD`, registered source/parser observations only. |
+| `Code_Procedure_Header`/parser layout input. | `arguments`: `.CHILD_LIST`, owning parameter declarations.  `returns`: `.CHILD_LIST`, owning return slots.  `parameter_usings`: `.CHILD_LIST`, owning using wrappers whose target association follows the guarded alias rule below.  `foreign_function_name`: `.NON_CHILD`, owned decoded bytes.  `library_identifier`: `.CHILD`, optional source identifier.  `deprecation_string`: `.NON_CHILD`, owned decoded bytes.  `modify_directives`: `.CHILD_LIST`, source order.  `body_or_null`: `.CHILD`, optional published body.  `procedure_flags`: `.NON_CHILD`, registered source/parser observations only.  `notes`: `.CHILD_LIST`, only with a qualified attachment route; current reviewed builder functions leave it empty.  `name`: `.NON_CHILD`, owner-derived compiler/parser value, not a separate authored procedure name.  `constants_block`: `.NON_CHILD`, compiler-prepared storage.  `polymorph_source_header`: `.BACKREFERENCE`, compiler instantiation provenance excluded from source descent. |
+| `Code_Procedure_Body`/parser layout input. | `block`: `.CHILD`, published body block.  `header`: `.BACKREFERENCE`, owning header association.  `body_flags`: `.NON_CHILD`, registered source/parser observations only. |
 
 These rows enumerate fields, not their unconditional concatenation: parameter-using interleaving and suffix/body order remain the qualified sequence below.
 Unexpected notes or alias associations require the established mapping outcome, not an extra descent or silent omission.
@@ -1431,9 +1431,9 @@ Do not manufacture a named procedure entry from `Procedure_Header.name`, which m
 | Header return list. | After parameters, traverse `returns[]` in stored order.  Named returns and unnamed type-only slots keep their actual parser records; no inferred return declarations are added. |
 | Header suffix/body. | Traverse the optional `library_identifier`, then `modify_directives[]` in order, then optional `body_or_null`.  String-valued foreign/deprecation metadata is not a child.  Source positions still order any independently authored suffix observations; repeated flag occurrences require separate correlation, not inference from the final fields. |
 | `Procedure_Body` | Owns `block`.  `header` is a backreference; `block.owning_statement` points back to this body and is not a descent edge. |
-| Type-only/header-only forms. | A null `body_or_null` is valid; do not follow an unattached allocated body or create an empty block.  `TYPE_ONLY` and other source/derived parser flags remain observations, not proof of semantic validity. |
-| Expression-bodied quick form. | Header -> body -> parser-created block -> parser-created return -> `arguments_unsorted[].expression`.  Follow only these published downward edges; preserve `AUTO_INSERTED_FOR_QUICK_LAMBDA` and the header's `QUICK` observation. |
-| Braced quick form. | Header -> body -> authored block statements; preserve `QUICK_IN_BLOCK_FORM`.  Do not add another implicit return around the block. |
+| Type-only/header-only forms. | A null `body_or_null` is valid; do not follow an unattached allocated body or create an empty block.  `.TYPE_ONLY` and other source/derived parser flags remain observations, not proof of semantic validity. |
+| Expression-bodied quick form. | Header -> body -> parser-created block -> parser-created return -> `arguments_unsorted[].expression`.  Follow only these published downward edges; preserve `.AUTO_INSERTED_FOR_QUICK_LAMBDA` and the header's `.QUICK` observation. |
+| Braced quick form. | Header -> body -> authored block statements; preserve `.QUICK_IN_BLOCK_FORM`.  Do not add another implicit return around the block. |
 
 The parameter alias rule is narrowly guarded by a `parameter_usings[]` node attached to this header whose `expression` is pointer-identical to exactly one entry in this header's `arguments[]` while the producer is owned.
 Match the argument position using that association, not names or overlapping spans; preserve wrapper order and require associations to progress in argument order.
@@ -1441,7 +1441,7 @@ Missing, duplicate or unmatched associations are mapping gaps, not a reason to g
 Ordinary non-parameter using statements still own their expression under the normal registry rule.
 This registers the known cross-list sharing without permitting arbitrary revisits of completed nodes or following lexical-scope binding tables.
 
-Unnamed type-only arguments/returns are parser declaration slots with no authored name: if emitted by the index's declaration-slot mapping, their name is `ANONYMOUS`, not `MISSING` and not a fabricated empty identifier spelling.
+Unnamed type-only arguments/returns are parser declaration slots with no authored name: if emitted by the index's declaration-slot mapping, their name is `.ANONYMOUS`, not `.MISSING` and not a fabricated empty identifier spelling.
 Bare named quick-lambda parameters are authored declarations despite having no explicit type.
 Do not classify them as recovered merely because `type_inst` is null.
 The header builder function's parameter/return wrapper allocation does not establish a nominal binding identity; source-slot indexing and semantic name binding remain distinct.
@@ -1475,11 +1475,11 @@ Common base/overlay rules apply; helper/union storage does not introduce additio
 
 | Record/storage domain. | Exact field roles. |
 | --- | --- |
-| `Code_Literal`/parser layout input. | `value_type`: `NON_CHILD`, active-arm tag under the registered mapping.  `values`: `HELPER`, selected anonymous-union storage, not an unconditional list of values.  `value_flags`: `NON_CHILD`, reviewed source literal bits, never the lexer flag domain. |
-| `Code_Literal.values`/active union. | `_string`: `NON_CHILD`, owned active string bytes.  `_float64`: `NON_CHILD`, active floating-point bits.  `_s64`: `NON_CHILD`, signed storage view, not a second numeric value to read alongside the selected producer arm.  `_u64`: `NON_CHILD`, active integer/boolean observations under the route rules below.  `struct_literal_info`: `HELPER`, active struct payload only.  `array_literal_info`: `HELPER`, active array payload only.  `pointer_literal_info`: `HELPER`, qualified source-null payload only.  `type_info_literal_defn`: `NON_CHILD`, unsupported evaluated/type-definition payload, not authored descent. |
-| `Code_Struct_Literal_Info`/parser-owned helper counterpart. | `type_expression`: `CHILD`, optional typed-prefix wrapper, then `arguments`: `CHILD_LIST`, authored member-expression order. |
-| `Code_Array_Literal_Info`/parser-owned helper counterpart. | `element_type`: `CHILD`, optional qualified typed-prefix wrapper.  `alignment`: `CHILD`, only with a separately registered source route; inactive on the reviewed aggregate/name-list builder functions.  `array_members`: `CHILD_LIST`, authored member/name-list order.  `array_literal_flags`: `NON_CHILD`, registered source bits. |
-| `Code_Pointer_Literal_Info`/qualified source-null helper. | `global_symbol`: `NON_CHILD`.  `string_or_array_literal`: `NON_CHILD`.  `data_pointer`: `NON_CHILD`.  `pointer_literal_type`: `NON_CHILD`, qualified discriminator observation.  `offset_from_symbol`: `NON_CHILD`.  None supplies an authored node edge or permission to encode a process address. |
+| `Code_Literal`/parser layout input. | `value_type`: `.NON_CHILD`, active-arm tag under the registered mapping.  `values`: `.HELPER`, selected anonymous-union storage, not an unconditional list of values.  `value_flags`: `.NON_CHILD`, reviewed source literal bits, never the lexer flag domain. |
+| `Code_Literal.values`/active union. | `_string`: `.NON_CHILD`, owned active string bytes.  `_float64`: `.NON_CHILD`, active floating-point bits.  `_s64`: `.NON_CHILD`, signed storage view, not a second numeric value to read alongside the selected producer arm.  `_u64`: `.NON_CHILD`, active integer/boolean observations under the route rules below.  `struct_literal_info`: `.HELPER`, active struct payload only.  `array_literal_info`: `.HELPER`, active array payload only.  `pointer_literal_info`: `.HELPER`, qualified source-null payload only.  `type_info_literal_defn`: `.NON_CHILD`, unsupported evaluated/type-definition payload, not authored descent. |
+| `Code_Struct_Literal_Info`/parser-owned helper counterpart. | `type_expression`: `.CHILD`, optional typed-prefix wrapper, then `arguments`: `.CHILD_LIST`, authored member-expression order. |
+| `Code_Array_Literal_Info`/parser-owned helper counterpart. | `element_type`: `.CHILD`, optional qualified typed-prefix wrapper.  `alignment`: `.CHILD`, only with a separately registered source route; inactive on the reviewed aggregate/name-list builder functions.  `array_members`: `.CHILD_LIST`, authored member/name-list order.  `array_literal_flags`: `.NON_CHILD`, registered source bits. |
+| `Code_Pointer_Literal_Info`/qualified source-null helper. | `global_symbol`: `.NON_CHILD`.  `string_or_array_literal`: `.NON_CHILD`.  `data_pointer`: `.NON_CHILD`.  `pointer_literal_type`: `.NON_CHILD`, qualified discriminator observation.  `offset_from_symbol`: `.NON_CHILD`.  None supplies an authored node edge or permission to encode a process address. |
 
 Compiler names identify the layout inputs; the aggregate helper fields are accessed through their parser-owned counterparts, not by assuming the compiler's mutable representation is an owned payload.
 The pointer helper has overlapping symbol/string storage: its field-role enumeration is not permission to read inactive arms.
@@ -1493,37 +1493,37 @@ The literal-value flag domain is not the lexer's `Value_Flags` domain; the token
 
 | Literal arm/reviewed route. | Downward paths and retained observations. |
 | --- | --- |
-| `NUMBER`. | No child; retain the active `_float64` bits when the literal `FLOAT` flag is set, otherwise `_u64` bits, plus reviewed source flags.  This includes parser-produced `#char` values, not only numeric tokens. |
-| `BOOLEAN`. | No child; retain the parser's `_u64` observation for the authored `true`/`false` token, without treating the union as a pointer. |
-| `STRING`. | No child; retain `_string` bytes and source flags.  Routes include quoted/here strings, `#filepath`, and parser-created using-filter names; do not require every string value to equal its full source slice. |
-| `UNINITIALIZED`. | No child; retain the `---` occurrence.  Declaration parsing can instead set `IS_UNINITIALIZED` and clear the expression; do not reconstruct a missing literal node in that declaration. |
-| `STRUCT` from `parse_aggregate_literal`. | `struct_literal_info` is helper storage: optional `type_expression`, then `arguments[]` in authored order.  A typed prefix is wrapped with `make_type_instantiation`; an untyped literal legitimately has no type wrapper. |
-| `ARRAY` from `parse_aggregate_literal`. | `array_literal_info` is helper storage: optional `element_type`, then `array_members[]` in authored order.  The untyped route sets `WAS_UNTYPED`; typed prefixes are wrapped rather than resolved. |
-| `ARRAY` from a parenthesised `using,only` or `using,except` name list. | Helper `array_members[]` contains parser-created `STRING` literals in name-list order.  There is no element-type wrapper and this builder function does not set `WAS_UNTYPED`; the source is a name list, not `.[...]`. |
-| `POINTER` from the authored `null` route. | No authored child.  Preserve the qualified null observation: this builder function allocates `Code_Pointer_Literal_Info` with `pointer_literal_type == CONSTANT_VALUE`.  Do not follow its symbol/data/string-or-array pointer fields as syntax edges. |
+| `.NUMBER`. | No child; retain the active `_float64` bits when the literal `.FLOAT` flag is set, otherwise `_u64` bits, plus reviewed source flags.  This includes parser-produced `#char` values, not only numeric tokens. |
+| `.BOOLEAN`. | No child; retain the parser's `_u64` observation for the authored `true`/`false` token, without treating the union as a pointer. |
+| `.STRING`. | No child; retain `_string` bytes and source flags.  Routes include quoted/here strings, `#filepath`, and parser-created using-filter names; do not require every string value to equal its full source slice. |
+| `.UNINITIALIZED`. | No child; retain the `---` occurrence.  Declaration parsing can instead set `.IS_UNINITIALIZED` and clear the expression; do not reconstruct a missing literal node in that declaration. |
+| `.STRUCT` from `parse_aggregate_literal`. | `struct_literal_info` is helper storage: optional `type_expression`, then `arguments[]` in authored order.  A typed prefix is wrapped with `make_type_instantiation`; an untyped literal legitimately has no type wrapper. |
+| `.ARRAY` from `parse_aggregate_literal`. | `array_literal_info` is helper storage: optional `element_type`, then `array_members[]` in authored order.  The untyped route sets `.WAS_UNTYPED`; typed prefixes are wrapped rather than resolved. |
+| `.ARRAY` from a parenthesised `using,only` or `using,except` name list. | Helper `array_members[]` contains parser-created `.STRING` literals in name-list order.  There is no element-type wrapper and this builder function does not set `.WAS_UNTYPED`; the source is a name list, not `.[...]`. |
+| `.POINTER` from the authored `null` route. | No authored child.  Preserve the qualified null observation: this builder function allocates `Code_Pointer_Literal_Info` with `pointer_literal_type == .CONSTANT_VALUE`.  Do not follow its symbol/data/string-or-array pointer fields as syntax edges. |
 
 The source-null allocation review distinguishes generic pool allocation from node construction:
 
 | Review site. | Allocation/attachment rule. | Identity/review boundary. |
 | --- | --- | --- |
 | `new_parser_node`/generic allocation. | Allocate the requested `T` with `New(T,, parser_node_allocator(parser.parsed))`; the two type-specific adjustments concern wildcard indices and struct alignment.  The function body does not require or initialise common node fields for every `T`. | The function name does not make every result a `Parser_Node`, establish a kind, or grant a snapshot-local node ID.  Classify the actual record and its owning route. |
-| `parse_primary`/source-null helper attachment. | The `KEYWORD_NULL` branch consumes the token, allocates `Code_Pointer_Literal_Info`, sets its discriminator to `CONSTANT_VALUE`, then allocates a separate `Parser_Literal`, sets `LITERAL`/`POINTER`, attaches the helper and finishes/returns the literal. | The returned literal is the syntax node; the pointer helper remains non-node storage under its active literal arm.  This is one reviewed explicit helper allocation site in `parser.jai`, not proof of an exhaustive generic type/route universe. |
+| `parse_primary`/source-null helper attachment. | The `.KEYWORD_NULL` branch consumes the token, allocates `Code_Pointer_Literal_Info`, sets its discriminator to `.CONSTANT_VALUE`, then allocates a separate `Parser_Literal`, sets `.LITERAL`/`.POINTER`, attaches the helper and finishes/returns the literal. | The returned literal is the syntax node; the pointer helper remains non-node storage under its active literal arm.  This is one reviewed explicit helper allocation site in `parser.jai`, not proof of an exhaustive generic type/route universe. |
 | `Code_Pointer_Literal_Info`/non-node layout. | The installed declaration has the five already-inventoried fields, including overlapping symbol/literal pointer storage, and no embedded `Code_Node` or `Parser_Node` base. | Do not cast it to a node, read node token/location fields from it, or traverse its pointer-valued fields as authored children.  Reuse the existing field-role inventory rather than introducing a new generated layout or helper node ID. |
-| `reusable_expression`/pointer-literal exclusion. | After the separately guarded array/struct literal cases, admit only the reviewed number, boolean and qualified string literals.  A `POINTER` literal does not satisfy that final literal whitelist. | The source-null helper route is not admitted for copying through this predicate.  The copier's general literal case is not an independent admission rule or proof that a helper pointer can be retained safely. |
+| `reusable_expression`/pointer-literal exclusion. | After the separately guarded array/struct literal cases, admit only the reviewed number, boolean and qualified string literals.  A `.POINTER` literal does not satisfy that final literal whitelist. | The source-null helper route is not admitted for copying through this predicate.  The copier's general literal case is not an independent admission rule or proof that a helper pointer can be retained safely. |
 
 The focused static check verifies generic allocation shape, the source-null allocation/attachment sequence, the helper's existing declared-field inventory and literal reuse exclusion.
 It does not execute allocator defaults or inspect inactive union storage, prove all possible generic instantiations, or qualify helper lifetime after source teardown.
-A qualified source-null observation remains distinct from accepting arbitrary `CONSTANT_VALUE` addresses or other pointer discriminator variants.
+A qualified source-null observation remains distinct from accepting arbitrary `.CONSTANT_VALUE` addresses or other pointer discriminator variants.
 
 Other pointer/type-definition/evaluated literal routes are not admitted as authored children by this registry.
 An unsupported value tag or unqualified pointer route requires an explicit unmapped/partial reason, not a cast into an aggregate helper or an assumed null value.
-Source `null` must not be rejected merely because it uses the pointer arm; conversely, `value_type == POINTER` alone is not proof that an arbitrary producer value was authored `null`.
+Source `null` must not be rejected merely because it uses the pointer arm; conversely, `value_type == .POINTER` alone is not proof that an arbitrary producer value was authored `null`.
 The current parser's aggregate and using-filter builder functions do not populate `array_literal_info.alignment`.
 A nonnull alignment needs a separately reviewed producer route and ordering rule; preserve the observation and report partial mapping rather than silently traverse it or drop it.
 
 Typed and untyped empty aggregates still own an active helper; zero members is valid, while a null helper for a selected aggregate arm is a mapping gap unless explicit producer recovery evidence accounts for it.
 Missing type wrappers are ordinary absence on untyped aggregates and parser-created name lists.
-Do not infer a typed form from the absence of `WAS_UNTYPED`, since the using-filter builder function provides a counterexample.
+Do not infer a typed form from the absence of `.WAS_UNTYPED`, since the using-filter builder function provides a counterexample.
 Member lists contain expression nodes, not necessarily declarations or named-argument records.
 Preserve assignment expressions and repeated member spellings without promoting them to declaration-index entries or resolving field names.
 Walk nested declarations only through the active expression's own reviewed child mapping and the current authored container; helper storage does not fabricate an enclosing declaration.
@@ -1535,7 +1535,7 @@ Copy/lease active string bytes and helper lists independently of producer/intern
 Exact source spelling remains in the protected source/token data; decoded scalar values do not replace it.
 Keep wrapper and child IDs distinct even when their spans coincide, and do not discover unattached/recovery-discarded literals by scanning pool allocations.
 
-The discriminating future vectors are source `null` versus an unsupported pointer payload, and an untyped aggregate array versus a using-filter name-list array with no `WAS_UNTYPED` flag.
+The discriminating future vectors are source `null` versus an unsupported pointer payload, and an untyped aggregate array versus a using-filter name-list array with no `.WAS_UNTYPED` flag.
 Further independent cases cover typed/untyped empty and nested aggregates; repeated named member expressions; scalar/float bit preservation; `#char`, here strings and `#filepath`; standalone versus declaration `---`; missing helpers; inactive union-pointer controls; unexpected alignment; and owned bytes after producer teardown.
 Assert exact active paths/order, source/value observations, local node IDs and partial reasons against independent expectations.
 The milestone-2 closure supplies AST flag/value payload schemas; executable producer mapping and traversal qualification remain open.
@@ -1547,7 +1547,7 @@ For exhaustive field-registry closure, this layout has the following eight layou
 
 | Parser layout/published kind. | Exact layout-specific field roles. |
 | --- | --- |
-| `Parser_Type_Instantiation`/`TYPE_INSTANTIATION`. | `type_valued_expression`: `CHILD`, active for expression/polymorphic/procedure wrappers.  `must_implement`: `CHILD`, active only for a qualified consumed polymorphic constraint suffix.  `pointer_to`: `CHILD`, pointer form only.  `type_directive_target`: `CHILD`, type-directive form only.  `array_element_type`: `CHILD`, array/view/resizable/varargs forms only.  `array_dimension`: `CHILD`, fixed-dimension array form only.  `inst_flags`: `NON_CHILD`, registered source-derived observations.  `result`: `NON_CHILD`, inferred/compiler type storage excluded from syntax descent. |
+| `Parser_Type_Instantiation`/`.TYPE_INSTANTIATION`. | `type_valued_expression`: `.CHILD`, active for expression/polymorphic/procedure wrappers.  `must_implement`: `.CHILD`, active only for a qualified consumed polymorphic constraint suffix.  `pointer_to`: `.CHILD`, pointer form only.  `type_directive_target`: `.CHILD`, type-directive form only.  `array_element_type`: `.CHILD`, array/view/resizable/varargs forms only.  `array_dimension`: `.CHILD`, fixed-dimension array form only.  `inst_flags`: `.NON_CHILD`, registered source-derived observations.  `result`: `.NON_CHILD`, inferred/compiler type storage excluded from syntax descent. |
 
 The row enumerates possible fields, not one unconditional visit sequence.
 Select the active subset and order from the source-form table below; do not visit all six child slots merely because they share this layout.
@@ -1563,21 +1563,21 @@ Preserve raw producer `inst_flags` separately; only reviewed source bits partici
 
 | Source form/required observation. | Active child order and source flags. |
 | --- | --- |
-| Varargs `..T`. | `array_element_type`; `VARARGS` and `ARRAY_VIEW` are both set.  This is not a dimensionless array-view spelling. |
-| Polymorphic `$T` with optional `/ [interface] constraint`. | `type_valued_expression`, then `must_implement` only for a consumed constraint suffix.  The expression is the parser-created identifier marked `DEFINES_POLYMORPH_VARIABLE`; `INTERFACE` records the consumed `interface` keyword, not completion of constraint resolution. |
-| `#type` with optional `,distinct` or `,isa`. | `type_directive_target`; `TYPE_DIRECTIVE`, optionally `TYPE_DIRECTIVE_DISTINCT` or `TYPE_DIRECTIVE_ISA`.  Modifier tokens and recovery remain source observations; an unknown modifier is not silently normalised to an accepted one. |
+| Varargs `..T`. | `array_element_type`; `.VARARGS` and `.ARRAY_VIEW` are both set.  This is not a dimensionless array-view spelling. |
+| Polymorphic `$T` with optional `/ [interface] constraint`. | `type_valued_expression`, then `must_implement` only for a consumed constraint suffix.  The expression is the parser-created identifier marked `.DEFINES_POLYMORPH_VARIABLE`; `.INTERFACE` records the consumed `interface` keyword, not completion of constraint resolution. |
+| `#type` with optional `,distinct` or `,isa`. | `type_directive_target`; `.TYPE_DIRECTIVE`, optionally `.TYPE_DIRECTIVE_DISTINCT` or `.TYPE_DIRECTIVE_ISA`.  Modifier tokens and recovery remain source observations; an unknown modifier is not silently normalised to an accepted one. |
 | Pointer `*T`. | `pointer_to`; no array, directive or procedure source-form flag is implied. |
-| Array view `[]T`. | `array_element_type`; `ARRAY_VIEW`, without `VARARGS`.  `array_dimension` is inactive. |
-| Resizable array `[..]T`. | `array_element_type`; `RESIZABLE`.  `array_dimension` is inactive. |
-| Fixed-dimension array `[expression]T`. | `array_dimension`, then `array_element_type`, including expressions that contain directives or are not semantically valid dimensions.  Neither `ARRAY_VIEW` nor `RESIZABLE` is implied. |
-| Procedure type beginning `(` on this parse route. | `type_valued_expression`, the parsed `Procedure_Header`; `TYPE_OF_PROCEDURE` on the wrapper and `TYPE_ONLY` on the header.  Traverse authored parameters/returns under the header rules, not its lexical scope bindings. |
+| Array view `[]T`. | `array_element_type`; `.ARRAY_VIEW`, without `.VARARGS`.  `array_dimension` is inactive. |
+| Resizable array `[..]T`. | `array_element_type`; `.RESIZABLE`.  `array_dimension` is inactive. |
+| Fixed-dimension array `[expression]T`. | `array_dimension`, then `array_element_type`, including expressions that contain directives or are not semantically valid dimensions.  Neither `.ARRAY_VIEW` nor `.RESIZABLE` is implied. |
+| Procedure type beginning `(` on this parse route. | `type_valued_expression`, the parsed `Procedure_Header`; `.TYPE_OF_PROCEDURE` on the wrapper and `.TYPE_ONLY` on the header.  Traverse authored parameters/returns under the header rules, not its lexical scope bindings. |
 | General type-valued expression wrapper. | `type_valued_expression` from `make_type_instantiation`; no wrapper-specific source-form flag is added there.  This includes postfix member/call expressions and contextual aggregate-type wrappers, not only identifiers. |
 
 For each selected rule, the other type-instantiation child fields are inactive; unexpected populated fields or conflicting source-form flags are producer-mapping mismatches, not additional children or permission to switch rules.
 `must_implement` is not a globally active extra edge on all type nodes.
 In particular, `$T` and a recovered `$T /` can both have a null constraint pointer; token/parse correlation must preserve the consumed suffix and diagnostic rather than assert that both are unconstrained.
-An `INTERFACE` flag is not required for an ordinary `/ constraint`, and its absence does not prove the suffix was absent.
-Do not treat all `ARRAY_VIEW` records as varargs or all null `array_dimension` fields as array views: a recovered fixed-dimension form can have a missing dimension, and a general wrapper has no dimension at all.
+An `.INTERFACE` flag is not required for an ordinary `/ constraint`, and its absence does not prove the suffix was absent.
+Do not treat all `.ARRAY_VIEW` records as varargs or all null `array_dimension` fields as array views: a recovered fixed-dimension form can have a missing dimension, and a general wrapper has no dimension at all.
 
 Required-child recovery is explicit: retain a recognised missing target/dimension/constraint and its diagnostic/origin correlation rather than invent a node or dereference null.
 A fully mapped recovered hole need not make traversal partial; absent form/boundary/recovery evidence does, with the missing field path and reason.
@@ -1603,15 +1603,15 @@ This draft neither implements form correlation nor certifies the remaining proce
 ## Assembly Helper Guards and Traversal Order
 
 Proposed refinement of `jai-cache-authored-edges/1`, grounded in the parser's `parse_asm_instruction_span`, `add_asm_operand` and `parse_asm_*_span` builder functions.
-These auxiliary records are `HELPER` storage, not additional `Parser_Node` occurrences; only their identifier/expression fields enter the ordinary node traversal and node-ID domain.
+These auxiliary records are `.HELPER` storage, not additional `Parser_Node` occurrences; only their identifier/expression fields enter the ordinary node traversal and node-ID domain.
 Preserve helper kinds, spans, list order and scalar observations in the protected syntax snapshot; do not reinterpret their memory as compiler `Code_Asm` payloads.
 
 For exhaustive generated-layout field coverage, shared base/overlay rules apply to the compiler storage, while the parser generator adds separate owned syntax fields.
 
 | Record/storage domain. | Exact field roles. |
 | --- | --- |
-| `Code_Asm`/compiler layout input. | `b1`: `NON_CHILD`, opaque compiler payload excluded.  `b2`: `NON_CHILD`, opaque compiler payload excluded.  `b3`: `NON_CHILD`, opaque compiler payload excluded.  Do not inspect these slots to discover syntax, cast them to assembly helpers or serialise their raw bytes. |
-| `Parser_Asm`/parser-added storage. | `features`: `HELPER`, ordered feature records, then `statements`: `HELPER`, ordered statement records under the guards below.  `body_span`: `NON_CHILD`, qualified source-token interval observation.  `enclosing_scope`: `BACKREFERENCE`, never a downward syntax edge. |
+| `Code_Asm`/compiler layout input. | `b1`: `.NON_CHILD`, opaque compiler payload excluded.  `b2`: `.NON_CHILD`, opaque compiler payload excluded.  `b3`: `.NON_CHILD`, opaque compiler payload excluded.  Do not inspect these slots to discover syntax, cast them to assembly helpers or serialise their raw bytes. |
+| `Parser_Asm`/parser-added storage. | `features`: `.HELPER`, ordered feature records, then `statements`: `.HELPER`, ordered statement records under the guards below.  `body_span`: `.NON_CHILD`, qualified source-token interval observation.  `enclosing_scope`: `.BACKREFERENCE`, never a downward syntax edge. |
 
 `Parser_Asm` itself remains an ordinary node with its own ID; the `Asm` row below describes that node's traversal, not an extra helper allocation.
 Its list elements and their auxiliary records do not acquire node IDs, while their actual identifier/expression children do.
@@ -1626,21 +1626,21 @@ These are non-node records; their fields do not introduce helper IDs or permit u
 
 | Record/storage domain. | Exact fields/declared variants. |
 | --- | --- |
-| `Token_Span`/shared token-coordinate value. | `first`: `NON_CHILD`, inclusive token index.  `one_past_last`: `NON_CHILD`, exclusive token index.  Both use the producer's distinct `Token_Index` type, not absolute source-byte offsets. |
-| `Parser_Asm_Feature`/parser-owned helper. | `span`: `NON_CHILD`, qualified token-span observation.  `name`: `CHILD`, required published identifier occurrence; visit through the ordinary identifier mapping, not an assembly declaration entry. |
-| `Parser_Asm_Memory_Operand`/parser-owned helper. | `span`: `NON_CHILD`, published memory-address token interval.  `base`: `HELPER`, required base value, then `index`: `HELPER`, optional index value, `scale`: `HELPER`, optional scale value, and `displacement`: `HELPER`, optional signed displacement value.  Traverse published expressions in that order under the qualified memory route; default value records do not establish authored components. |
-| `Parser_Asm_Operand_Modifier`/parser-owned helper. | `kind`: `NON_CHILD`, registered suffix-variant observation.  `span`: `NON_CHILD`, published suffix token interval.  `argument`: `HELPER`, required identifier-valued argument only for the ampersand variants; inactive for every bang variant. |
-| `Parser_Asm_Operand_Modifier_Kind`/declared variants. | `BANG`, `BANG_N`, `BANG_D`, `BANG_U`, `BANG_Z`, `AMPERSAND`, `AMPERSAND_STAR`.  Native ordinals and the producer's enum width are not approved wire tags. |
-| `Parser_Asm_Register_Declaration`/parser-owned helper. | `span`: `NON_CHILD`, declaration-prefix token interval, not necessarily the full attached pinning interval.  `name`: `CHILD`, required source identifier.  `register_class`: `CHILD` only when the class spelling is explicit.  `is_inferred`: `NON_CHILD`, grammar observation selecting omitted versus explicit class, not semantic type inference.  `pinning`: `HELPER`, optional published pinning record after name and explicit class; distinguish a qualified omission from a rejected introduced suffix. |
-| `Parser_Asm_Register_Pinning`/parser-owned helper. | `span`: `NON_CHILD`, qualified full pinning token interval.  `source`: `HELPER`, required source value, then `target`: `HELPER`, required target value.  Each follows the value helper's expression/presence rules; helper records do not acquire node IDs. |
-| `Parser_Asm_Operand`/parser-owned helper. | `kind`: `NON_CHILD`, registered operand-variant observation.  `span`: `NON_CHILD`, full published operand token interval, including attached suffix syntax.  `value`: `HELPER`, selected value payload only.  `register_declaration`: `HELPER`, selected register-declaration payload only.  `register_pinning`: `HELPER`, selected register-pinning payload only.  `memory`: `HELPER`, selected memory payload only.  `modifiers`: `HELPER`, ordered published suffix records after the selected base, for every kind including unparsed.  Inactive base slots do not become edges. |
-| `Parser_Asm_Operand_Kind`/declared variants. | `UNPARSED`, `VALUE`, `REGISTER_DECLARATION`, `REGISTER_PINNING`, `MEMORY`.  Native ordinals and the producer's enum width are not approved wire tags. |
-| `Parser_Asm_Value`/parser-owned helper. | `span`: `NON_CHILD`, qualified value token interval.  `expression`: `CHILD`, published source expression when present; required for a selected value operand or required value component, but legitimately absent in an optional unused component under its owning helper's route. |
-| `Parser_Asm_Instruction`/parser-owned helper. | `span`: `NON_CHILD`, published statement-span observation.  `mnemonic`: `CHILD`, required source identifier.  `size`: `HELPER`, optional qualified mnemonic-size record.  `operands`: `HELPER`, ordered published operand records.  Visit mnemonic, selected size child, then operand children in stored order; helper records do not acquire node IDs. |
-| `Parser_Asm_Mnemonic_Size`/parser-owned helper. | `kind`: `NON_CHILD`, registered size-variant observation.  `span`: `NON_CHILD`, consumed size-token interval.  `polymorphic_name`: `CHILD` only on the polymorphic route; inactive for a fixed size. |
-| `Parser_Asm_Mnemonic_Size_Kind`/declared variants. | `FIXED`, `POLYMORPHIC`.  Native ordinals and the producer's enum width are not approved wire tags. |
-| `Parser_Asm_Statement`/parser-owned helper. | `kind`: `NON_CHILD`, registered statement-variant observation.  `span`: `NON_CHILD`, retained statement token interval.  `instruction`: `HELPER`, selected instruction payload only.  `register_declaration`: `HELPER`, selected register-declaration payload only.  `register_pinning`: `HELPER`, selected register-pinning payload only.  Use the kind guards below; no selected helper on the unparsed route. |
-| `Parser_Asm_Statement_Kind`/declared variants. | `UNPARSED`, `INSTRUCTION`, `REGISTER_DECLARATION`, `REGISTER_PINNING`.  Native ordinals and the producer's enum width are not approved wire tags. |
+| `Token_Span`/shared token-coordinate value. | `first`: `.NON_CHILD`, inclusive token index.  `one_past_last`: `.NON_CHILD`, exclusive token index.  Both use the producer's distinct `Token_Index` type, not absolute source-byte offsets. |
+| `Parser_Asm_Feature`/parser-owned helper. | `span`: `.NON_CHILD`, qualified token-span observation.  `name`: `.CHILD`, required published identifier occurrence; visit through the ordinary identifier mapping, not an assembly declaration entry. |
+| `Parser_Asm_Memory_Operand`/parser-owned helper. | `span`: `.NON_CHILD`, published memory-address token interval.  `base`: `.HELPER`, required base value, then `index`: `.HELPER`, optional index value, `scale`: `.HELPER`, optional scale value, and `displacement`: `.HELPER`, optional signed displacement value.  Traverse published expressions in that order under the qualified memory route; default value records do not establish authored components. |
+| `Parser_Asm_Operand_Modifier`/parser-owned helper. | `kind`: `.NON_CHILD`, registered suffix-variant observation.  `span`: `.NON_CHILD`, published suffix token interval.  `argument`: `.HELPER`, required identifier-valued argument only for the ampersand variants; inactive for every bang variant. |
+| `Parser_Asm_Operand_Modifier_Kind`/declared variants. | `.BANG`, `.BANG_N`, `.BANG_D`, `.BANG_U`, `.BANG_Z`, `.AMPERSAND`, `.AMPERSAND_STAR`.  Native ordinals and the producer's enum width are not approved wire tags. |
+| `Parser_Asm_Register_Declaration`/parser-owned helper. | `span`: `.NON_CHILD`, declaration-prefix token interval, not necessarily the full attached pinning interval.  `name`: `.CHILD`, required source identifier.  `register_class`: `.CHILD` only when the class spelling is explicit.  `is_inferred`: `.NON_CHILD`, grammar observation selecting omitted versus explicit class, not semantic type inference.  `pinning`: `.HELPER`, optional published pinning record after name and explicit class; distinguish a qualified omission from a rejected introduced suffix. |
+| `Parser_Asm_Register_Pinning`/parser-owned helper. | `span`: `.NON_CHILD`, qualified full pinning token interval.  `source`: `.HELPER`, required source value, then `target`: `.HELPER`, required target value.  Each follows the value helper's expression/presence rules; helper records do not acquire node IDs. |
+| `Parser_Asm_Operand`/parser-owned helper. | `kind`: `.NON_CHILD`, registered operand-variant observation.  `span`: `.NON_CHILD`, full published operand token interval, including attached suffix syntax.  `value`: `.HELPER`, selected value payload only.  `register_declaration`: `.HELPER`, selected register-declaration payload only.  `register_pinning`: `.HELPER`, selected register-pinning payload only.  `memory`: `.HELPER`, selected memory payload only.  `modifiers`: `.HELPER`, ordered published suffix records after the selected base, for every kind including unparsed.  Inactive base slots do not become edges. |
+| `Parser_Asm_Operand_Kind`/declared variants. | `.UNPARSED`, `.VALUE`, `.REGISTER_DECLARATION`, `.REGISTER_PINNING`, `.MEMORY`.  Native ordinals and the producer's enum width are not approved wire tags. |
+| `Parser_Asm_Value`/parser-owned helper. | `span`: `.NON_CHILD`, qualified value token interval.  `expression`: `.CHILD`, published source expression when present; required for a selected value operand or required value component, but legitimately absent in an optional unused component under its owning helper's route. |
+| `Parser_Asm_Instruction`/parser-owned helper. | `span`: `.NON_CHILD`, published statement-span observation.  `mnemonic`: `.CHILD`, required source identifier.  `size`: `.HELPER`, optional qualified mnemonic-size record.  `operands`: `.HELPER`, ordered published operand records.  Visit mnemonic, selected size child, then operand children in stored order; helper records do not acquire node IDs. |
+| `Parser_Asm_Mnemonic_Size`/parser-owned helper. | `kind`: `.NON_CHILD`, registered size-variant observation.  `span`: `.NON_CHILD`, consumed size-token interval.  `polymorphic_name`: `.CHILD` only on the polymorphic route; inactive for a fixed size. |
+| `Parser_Asm_Mnemonic_Size_Kind`/declared variants. | `.FIXED`, `.POLYMORPHIC`.  Native ordinals and the producer's enum width are not approved wire tags. |
+| `Parser_Asm_Statement`/parser-owned helper. | `kind`: `.NON_CHILD`, registered statement-variant observation.  `span`: `.NON_CHILD`, retained statement token interval.  `instruction`: `.HELPER`, selected instruction payload only.  `register_declaration`: `.HELPER`, selected register-declaration payload only.  `register_pinning`: `.HELPER`, selected register-pinning payload only.  Use the kind guards below; no selected helper on the unparsed route. |
+| `Parser_Asm_Statement_Kind`/declared variants. | `.UNPARSED`, `.INSTRUCTION`, `.REGISTER_DECLARATION`, `.REGISTER_PINNING`.  Native ordinals and the producer's enum width are not approved wire tags. |
 
 The span/feature/statement slice enumerates nine declared fields across three records and all four current statement kinds.
 The shared span's field names describe token coordinates; validate them against the protected revision and applicable source/recovery rules, not by blindly treating a zero/default pair as an authored occurrence.
@@ -1676,7 +1676,7 @@ None requires a separate value-helper pool allocation or acquires a node ID mere
 | `Parser_Asm_Register_Pinning`/`source`, `target`. | After pinning-shape validation, assign two records returned by `parse_asm_value_span`, first the identifier source interval, then the identifier/numeric target interval. | Both embedded records belong to the pinning helper; only their retained expression nodes enter the ordinary node-ID domain.  Existing pinning publication and required-expression rules still apply. |
 | `Parser_Asm_Memory_Operand`/`base`, `index`, `scale`, `displacement`. | After validating the addressing form, assign base span/identifier directly; do the same for an introduced index.  Assign scale and displacement from `parse_asm_value_span` only when their respective source boundaries were found. | These are four distinct embedded slots, not four automatically authored occurrences.  Unused slots stay subject to the existing optional-component/default-span rules; visit represented children in base/index/scale/displacement order. |
 | `Parser_Asm_Operand_Modifier`/`argument`. | The ampersand variants require an identifier, then assign its span and `new_asm_ident` result directly; bang variants do not populate this slot. | Inspect the slot only under its registered modifier kind and only after the modifier list is attached.  Temporary malformed-suffix records remain outside that published list. |
-| `Parser_Asm_Operand`/`value`. | For a recognised standalone identifier, number, signed number or qualified parenthesised base, assign the returned `parse_asm_value_span` record and select `VALUE`. | This slot is active only for the value operand kind.  An unparsed base does not become a value because default or inactive storage exists. |
+| `Parser_Asm_Operand`/`value`. | For a recognised standalone identifier, number, signed number or qualified parenthesised base, assign the returned `parse_asm_value_span` record and select `.VALUE`. | This slot is active only for the value operand kind.  An unparsed base does not become a value because default or inactive storage exists. |
 
 There are five explicit `parse_asm_value_span` call sites in `parser.jai`: two pinning components, two memory components and the ordinary value operand.
 The memory base/index and modifier argument instead supply three direct span/identifier population sites.
@@ -1709,29 +1709,29 @@ The focused static check compares that complete local set with the live declarat
 | --- | --- |
 | `Asm`. | `features[]`, then `statements[]`, each in stored source order.  `body_span` is observation data; `enclosing_scope` is a backreference. |
 | `Asm_Feature`. | `name`. |
-| `Asm_Statement`. | `INSTRUCTION`: `instruction`; `REGISTER_DECLARATION`: `register_declaration`; `REGISTER_PINNING`: `register_pinning`; `UNPARSED`: no base child.  Other arm fields are inactive regardless of pointer contents. |
+| `Asm_Statement`. | `.INSTRUCTION`: `instruction`; `.REGISTER_DECLARATION`: `register_declaration`; `.REGISTER_PINNING`: `register_pinning`; `.UNPARSED`: no base child.  Other arm fields are inactive regardless of pointer contents. |
 | `Asm_Instruction`. | `mnemonic`, optional `size` helper, then `operands[]` in stored order. |
-| `Asm_Mnemonic_Size`. | `FIXED`: no child; retain the size token span, not a fabricated numeric-expression node.  `POLYMORPHIC`: `polymorphic_name`. |
-| `Asm_Operand`. | First the selected base arm: `VALUE` -> `value`; `REGISTER_DECLARATION` -> `register_declaration`; `REGISTER_PINNING` -> `register_pinning`; `MEMORY` -> `memory`; `UNPARSED` -> no base child.  Then `modifiers[]` for every base kind, including `UNPARSED`. |
+| `Asm_Mnemonic_Size`. | `.FIXED`: no child; retain the size token span, not a fabricated numeric-expression node.  `.POLYMORPHIC`: `polymorphic_name`. |
+| `Asm_Operand`. | First the selected base arm: `.VALUE` -> `value`; `.REGISTER_DECLARATION` -> `register_declaration`; `.REGISTER_PINNING` -> `register_pinning`; `.MEMORY` -> `memory`; `.UNPARSED` -> no base child.  Then `modifiers[]` for every base kind, including `.UNPARSED`. |
 | `Asm_Value`. | `expression` when present.  For optional absent memory components the zero/default span is not an authored source occurrence. |
 | `Asm_Register_Declaration`. | `name`, then `register_class` only when `!is_inferred`, then optional `pinning`.  Inferred class means no class child, not an empty identifier. |
 | `Asm_Register_Pinning`. | `source`, then `target`, both `Asm_Value` helpers. |
 | `Asm_Memory_Operand`. | `base`, then optional `index`, `scale`, `displacement` values in that order.  Presence comes from a nonnull expression in this producer; do not infer a component from default span indices. |
-| `Asm_Operand_Modifier`. | `BANG`, `BANG_N`, `BANG_D`, `BANG_U`, `BANG_Z`: no child.  `AMPERSAND`, `AMPERSAND_STAR`: `argument` value.  Preserve modifier order and individual spans. |
+| `Asm_Operand_Modifier`. | `.BANG`, `.BANG_N`, `.BANG_D`, `.BANG_U`, `.BANG_Z`: no child.  `.AMPERSAND`, `.AMPERSAND_STAR`: `argument` value.  Preserve modifier order and individual spans. |
 
 This is the per-helper fallback order for equal/unlocated positions; it also matches the reviewed builder function's source progression for recognised forms.
 The optional-versus-required distinction is field-specific: a null optional size/pinning/memory component is ordinary absence only on a qualified omission route, whereas a null selected statement arm, instruction mnemonic, feature name, explicit register name/class, polymorphic size name or required modifier argument is an incomplete mapping.
-For a `VALUE` operand or recognised pinning/memory form, missing required expressions likewise prevent a complete mapping; retain available source/diagnostic observations rather than dereference null or invent a child.
+For a `.VALUE` operand or recognised pinning/memory form, missing required expressions likewise prevent a complete mapping; retain available source/diagnostic observations rather than dereference null or invent a child.
 An unknown helper discriminant is an unmapped variant and makes index coverage partial.
 Do not guess its arm from nonnull fields.
 Inactive fields are never traversed; fresh-observation comparisons must still detect unexpected producer data without following semantic or inactive pointers.
 
-`UNPARSED` statements and operand bases retain their exact token spans as opaque syntax and require a partial-traversal reason for the uninspected region, not a claim that the region contains no declarations.
+`.UNPARSED` statements and operand bases retain their exact token spans as opaque syntax and require a partial-traversal reason for the uninspected region, not a claim that the region contains no declarations.
 Recognised modifiers on an unparsed base remain independently traversable: `add_asm_operand` can assign `operand.modifiers` before discovering a missing/unsupported base.
 On an earlier malformed-modifier return, the producer may not attach the temporary modifier list at all; preserve only the published helper records plus raw source/diagnostics, never infer unattached records from pool allocations.
 A diagnostic alone does not force partial coverage of all other assembly children; identify the actual uninspected or unmappable region.
 
-Register-declaration/pinning helpers express assembly grammar, not ordinary `DECLARATION` or `COMPOUND_BINDING` entries.
+Register-declaration/pinning helpers express assembly grammar, not ordinary `.DECLARATION` or `.COMPOUND_BINDING` entries.
 Their names remain authored identifier occurrences; a future assembly-symbol index needs a separately reviewed kind rather than silently widening this declaration index.
 Ordinary declarations reached inside a parsed value expression still follow the surrounding authored container rules; an assembly instruction/helper does not fabricate an enclosing declaration entry.
 Register-declaration `name` and pinning `source.expression` may be separately allocated identifiers for the same source token.
@@ -1739,7 +1739,7 @@ Retain distinct producer node IDs and registered paths; equal spans/names are no
 Do not demand that every descendant span fit inside its immediate helper span: the current register-declaration helper's span can stop before its attached pinning.
 Validate all spans against the owned token/source revision and the registered construction, without silently widening producer observations.
 
-The discriminating future vector is an `UNPARSED` operand with an attached `AMPERSAND` modifier: the base contributes an opaque/partial reason while the modifier's identifier is visited exactly once.
+The discriminating future vector is an `.UNPARSED` operand with an attached `.AMPERSAND` modifier: the base contributes an opaque/partial reason while the modifier's identifier is visited exactly once.
 Additional independent vectors cover all four statement kinds, five operand kinds, both size kinds and seven modifier kinds; absent/inferred versus explicit register classes; optional memory components; separately allocated same-token identifiers; malformed suffixes; injected inactive pointers and unknown tags.
 Existing assembly fixtures in `parser_tokens_test.jai` provide source forms and recovery observations, not qualification of this proposed visitor.
 Assert exact visit paths/order, selected-arm exclusions, node IDs and local coverage reasons.
@@ -1753,25 +1753,25 @@ This records a scope simplification, not authorisation to remove the existing pa
 Keep trivia/source ownership and exact byte spans in the eventual API regardless of whether the implementation later removes the compile-time switch entirely.
 Performance comparisons for this profile must use an equivalent trivia-enabled fresh baseline; historical measurements with different options are not interchangeable acceptance samples.
 
-`jai-cache-token-tags/1` has the following closed `NAMED` registry, grouped for readability only; group/row order is not token precedence or an encoded enum ordinal.
+`jai-cache-token-tags/1` has the following closed `.NAMED` registry, grouped for readability only; group/row order is not token precedence or an encoded enum ordinal.
 
 | Group. | Canonical names. |
 | --- | --- |
-| Values. | `IDENT`, `NUMBER`, `STRING`. |
-| Operators. | `PLUSEQUALS`, `MINUSEQUALS`, `TIMESEQUALS`, `DIVEQUALS`, `MODEQUALS`, `ISEQUAL`, `ISNOTEQUAL`, `LOGICAL_AND`, `LOGICAL_OR`, `LESSEQUALS`, `GREATEREQUALS`, `RIGHT_ARROW`, `DOUBLE_DOT`, `DOUBLE_DOLLAR`, `SHIFT_LEFT`, `SHIFT_RIGHT`, `ROTATE_LEFT`, `ROTATE_RIGHT`, `TRIPLE_EQUALS`, `SHIFT_LEFT_EQUALS`, `SHIFT_RIGHT_EQUALS`, `ROTATE_LEFT_EQUALS`, `ROTATE_RIGHT_EQUALS`, `BITWISE_AND_EQUALS`, `BITWISE_OR_EQUALS`, `BITWISE_XOR_EQUALS`, `LOGICAL_AND_EQUALS`, `LOGICAL_OR_EQUALS`, `POSTFIX_DEREFERENCE`, `PREFIX_DEREFERENCE`, `ISEQUAL_FOR_SWITCH_STATEMENT`, `DOUBLE_MINUS`, `TRIPLE_MINUS`, `DOUBLE_COMMA`, `BEGIN_STRUCT_LITERAL`, `BEGIN_ARRAY_LITERAL`. |
-| Keywords. | `KEYWORD_FOR`, `KEYWORD_IF`, `KEYWORD_IFX`, `KEYWORD_THEN`, `KEYWORD_ELSE`, `KEYWORD_CASE`, `KEYWORD_RETURN`, `KEYWORD_STRUCT`, `KEYWORD_WHILE`, `KEYWORD_BREAK`, `KEYWORD_CONTINUE`, `KEYWORD_REMOVE`, `KEYWORD_USING`, `KEYWORD_DEFER`, `KEYWORD_SIZE_OF`, `KEYWORD_TYPE_OF`, `KEYWORD_CODE_OF`, `KEYWORD_INITIALIZER_OF`, `KEYWORD_TYPE_INFO`, `KEYWORD_NULL`, `KEYWORD_ENUM`, `KEYWORD_TRUE`, `KEYWORD_FALSE`, `KEYWORD_INLINE`, `KEYWORD_NO_INLINE`, `KEYWORD_CAST`, `KEYWORD_AUTO_CAST`, `KEYWORD_CONTEXT`, `KEYWORD_PUSH_CONTEXT`, `KEYWORD_OPERATOR`, `KEYWORD_IS_CONSTANT`, `KEYWORD_ENUM_FLAGS`, `KEYWORD_UNION`, `KEYWORD_INTERFACE`. |
-| Other. | `QUICK_LAMBDA`, `NOTE`, `END_OF_INPUT`, `ERROR`. |
-| AST-only operators. | `OPERATOR_ARRAY_SUBSCRIPT`, `OPERATOR_ASSIGNMENT_TO_ARRAY_SUBSCRIPT`. |
+| Values. | `.IDENT`, `.NUMBER`, `.STRING`. |
+| Operators. | `.PLUSEQUALS`, `.MINUSEQUALS`, `.TIMESEQUALS`, `.DIVEQUALS`, `.MODEQUALS`, `.ISEQUAL`, `.ISNOTEQUAL`, `.LOGICAL_AND`, `.LOGICAL_OR`, `.LESSEQUALS`, `.GREATEREQUALS`, `.RIGHT_ARROW`, `.DOUBLE_DOT`, `.DOUBLE_DOLLAR`, `.SHIFT_LEFT`, `.SHIFT_RIGHT`, `.ROTATE_LEFT`, `.ROTATE_RIGHT`, `.TRIPLE_EQUALS`, `.SHIFT_LEFT_EQUALS`, `.SHIFT_RIGHT_EQUALS`, `.ROTATE_LEFT_EQUALS`, `.ROTATE_RIGHT_EQUALS`, `.BITWISE_AND_EQUALS`, `.BITWISE_OR_EQUALS`, `.BITWISE_XOR_EQUALS`, `.LOGICAL_AND_EQUALS`, `.LOGICAL_OR_EQUALS`, `.POSTFIX_DEREFERENCE`, `.PREFIX_DEREFERENCE`, `.ISEQUAL_FOR_SWITCH_STATEMENT`, `.DOUBLE_MINUS`, `.TRIPLE_MINUS`, `.DOUBLE_COMMA`, `.BEGIN_STRUCT_LITERAL`, `.BEGIN_ARRAY_LITERAL`. |
+| Keywords. | `.KEYWORD_FOR`, `.KEYWORD_IF`, `.KEYWORD_IFX`, `.KEYWORD_THEN`, `.KEYWORD_ELSE`, `.KEYWORD_CASE`, `.KEYWORD_RETURN`, `.KEYWORD_STRUCT`, `.KEYWORD_WHILE`, `.KEYWORD_BREAK`, `.KEYWORD_CONTINUE`, `.KEYWORD_REMOVE`, `.KEYWORD_USING`, `.KEYWORD_DEFER`, `.KEYWORD_SIZE_OF`, `.KEYWORD_TYPE_OF`, `.KEYWORD_CODE_OF`, `.KEYWORD_INITIALIZER_OF`, `.KEYWORD_TYPE_INFO`, `.KEYWORD_NULL`, `.KEYWORD_ENUM`, `.KEYWORD_TRUE`, `.KEYWORD_FALSE`, `.KEYWORD_INLINE`, `.KEYWORD_NO_INLINE`, `.KEYWORD_CAST`, `.KEYWORD_AUTO_CAST`, `.KEYWORD_CONTEXT`, `.KEYWORD_PUSH_CONTEXT`, `.KEYWORD_OPERATOR`, `.KEYWORD_IS_CONSTANT`, `.KEYWORD_ENUM_FLAGS`, `.KEYWORD_UNION`, `.KEYWORD_INTERFACE`. |
+| Other. | `.QUICK_LAMBDA`, `.NOTE`, `.END_OF_INPUT`, `.ERROR`. |
+| AST-only operators. | `.OPERATOR_ARRAY_SUBSCRIPT`, `.OPERATOR_ASSIGNMENT_TO_ARRAY_SUBSCRIPT`. |
 
-`BYTE_CHAR` represents an unsigned byte value from `0` through `255`; representability does not claim that every byte is a valid source token.
+`.BYTE_CHAR` represents an unsigned byte value from `0` through `255`; representability does not claim that every byte is a valid source token.
 
 Preserve inactive/default diagnostic token observations without fabricating source spelling.
 
-Producer aliases `BITWISE_XOR`, `BITWISE_NOT`, `BITWISE_AND`, `BITWISE_OR` encode as `BYTE_CHAR` values `94`, `126`, `38`, `124` respectively.
+Producer aliases `.BITWISE_XOR`, `.BITWISE_NOT`, `.BITWISE_AND`, `.BITWISE_OR` encode as `.BYTE_CHAR` values `94`, `126`, `38`, `124` respectively.
 
-`__FIRST_KEYWORD` normalises to `NAMED {KEYWORD_FOR}` and `__LAST_KEYWORD` to `NAMED {KEYWORD_INTERFACE}`.
+`__FIRST_KEYWORD` normalises to `.NAMED {.KEYWORD_FOR}` and `__LAST_KEYWORD` to `.NAMED {.KEYWORD_INTERFACE}`.
 
-Those six alias spellings are not accepted as canonical `NAMED` payloads; payload decoding accepts only the table's exact names or a valid byte-character value.
+Those six alias spellings are not accepted as canonical `.NAMED` payloads; payload decoding accepts only the table's exact names or a valid byte-character value.
 
 The two AST-only operator names may appear in registered operator fields, not as claimed lexer-emitted source tokens.
 
@@ -1787,7 +1787,7 @@ This closes the current tag-name/alias inventory; the token-value/trivia draft b
 
 Proposed 2026-10-21 under `jai-cache-source-tokens/1`, for materialised source tokens in the required trivia-enabled profile; synthetic tokens remain separate recovery records, not fabricated source tokens.
 
-`TokenRecord` is `{tag, origin:SOURCE, coordinates, value_flags:u32, ident_is_backticked:bool, original, preceding, value}`.
+`TokenRecord` is `{tag, origin:.SOURCE, coordinates, value_flags:u32, ident_is_backticked:bool, original, preceding, value}`.
 
 `coordinates` preserves `{l0:s32, c0:s32, l1:s32, c1:s32}` verbatim as producer observations, independently of validated byte origins; unset/error coordinates are not clamped into valid editor positions.
 
@@ -1801,21 +1801,21 @@ If a producer route makes these differ, retain both observations and qualify tha
 
 | Active `value` tag. | Producer discriminator and exact payload. |
 | --- | --- |
-| `NAME {bytes}`. | `IDENT`, `NOTE` and materialised `KEYWORD_*` tokens carry the active `ident_value.name` bytes.  Preserve decoded/handler-produced bytes independently of source spelling; keywords use the copied name, and backticked spellings remain distinguishable through source and `ident_is_backticked`. |
-| `UNSIGNED_INTEGER {bits:u64}`. | `NUMBER` without `FLOAT` preserves the exact unsigned accumulator, including overflow-result bits with the producer's flags/diagnostics.  Do not reinterpret a high-bit value as a signed integer or infer representation from decimal spelling. |
-| `FLOAT64_BITS {bits:u64}`. | `NUMBER` with `FLOAT` preserves the exact IEEE-754 binary64 object bits of `float64_value`, even when the producer first rounded to `float32`.  No decimal formatting round trip, NaN canonicalisation or signed-zero folding. |
-| `STRING_BYTES {bytes}`. | `STRING` preserves the active `string_value` bytes under the captured `EVALUATE_STRING_ESCAPES` setting, including its intentional empty result when evaluation is disabled.  Keep exact raw source separately; a decoded value is not necessarily a source slice or UTF-8 text. |
-| `NO_VALUE`. | A reviewed producer route with no active union member, including punctuation and EOF.  Never read union backing bytes to fill this value; an unreviewed route needs a mapping failure, not a guessed zero/name. |
+| `.NAME {bytes}`. | `.IDENT`, `.NOTE` and materialised `KEYWORD_*` tokens carry the active `ident_value.name` bytes.  Preserve decoded/handler-produced bytes independently of source spelling; keywords use the copied name, and backticked spellings remain distinguishable through source and `ident_is_backticked`. |
+| `.UNSIGNED_INTEGER {bits:u64}`. | `.NUMBER` without `.FLOAT` preserves the exact unsigned accumulator, including overflow-result bits with the producer's flags/diagnostics.  Do not reinterpret a high-bit value as a signed integer or infer representation from decimal spelling. |
+| `.FLOAT64_BITS {bits:u64}`. | `.NUMBER` with `.FLOAT` preserves the exact IEEE-754 binary64 object bits of `float64_value`, even when the producer first rounded to `float32`.  No decimal formatting round trip, NaN canonicalisation or signed-zero folding. |
+| `.STRING_BYTES {bytes}`. | `.STRING` preserves the active `string_value` bytes under the captured `EVALUATE_STRING_ESCAPES` setting, including its intentional empty result when evaluation is disabled.  Keep exact raw source separately; a decoded value is not necessarily a source slice or UTF-8 text. |
+| `.NO_VALUE`. | A reviewed producer route with no active union member, including punctuation and EOF.  Never read union backing bytes to fill this value; an unreviewed route needs a mapping failure, not a guessed zero/name. |
 
-Quoted notes are still `NOTE`/`NAME`: the lexer parses a string then changes the tag and copies its resulting name.
+Quoted notes are still `.NOTE`/`.NAME`: the lexer parses a string then changes the tag and copies its resulting name.
 Do not reinterpret the overlapping union as both a note name and a string value.
 Identifier storage addresses, interning identity, allocator state and uninitialised union/hash bytes are not payload identity.
 If a future consumer requires a derived name hash, define/recompute it from the name with a versioned algorithm rather than persisting incidental `ident_value.hash` storage.
 The record retains `ident_is_backticked` and `value_flags` observations even where inactive; their semantic interpretation is controlled by token kind/producer route, not by nonzero union bytes.
 
-The closed `Value_Flags` mask is `0x1070001F`, with names/bits: `HERE_STRING=0x1`, `NUMBER=0x2`, `HEX=0x4`, `BINARY=0x8`, `FLOAT=0x10`, `REQUIRES_FLOAT64=0x100000`, `DEFAULTS_TO_FLOAT64=0x200000`, `REQUIRES_FLOAT64_DUE_TO_SIGNIFICANT_DIGITS=0x400000`, `OVERFLOWED=0x10000000`.
+The closed `Value_Flags` mask is `0x1070001F`, with names/bits: `.HERE_STRING=0x1`, `.NUMBER=0x2`, `.HEX=0x4`, `.BINARY=0x8`, `.FLOAT=0x10`, `.REQUIRES_FLOAT64=0x100000`, `.DEFAULTS_TO_FLOAT64=0x200000`, `.REQUIRES_FLOAT64_DUE_TO_SIGNIFICANT_DIGITS=0x400000`, `.OVERFLOWED=0x10000000`.
 Unknown bits reject conversion under this schema; preserve observed combinations without inventing extra lexical validity rules from flag names.
-In particular `HEX` may be set for an integer representation reason rather than a hexadecimal source prefix.
+In particular `.HEX` may be set for an integer representation reason rather than a hexadecimal source prefix.
 `Note_Flags.IS_SYSTEM_LEVEL` is a separate flag domain, not another interpretation of the overlapping `Value_Flags.HERE_STRING` bit.
 The reviewed note producers do not establish a note-flag payload mapping; do not fabricate one from that numeric overlap.
 
@@ -1826,8 +1826,8 @@ EOF has empty original spelling and a byte origin at the end of the exact source
 For reconstruction, concatenate each materialised token's preceding slice then original slice, including EOF; there is no separate trailing-trivia field or EOF reconstruction branch.
 Validate against the exact source; do not drop a leading BOM, comments, malformed bytes or the final gap merely because they have no semantic token value.
 Trivia classification is optional derived indexing over these slices, not a replacement for them.
-The closed kind registry is `WHITESPACE. | LINE_COMMENT. | BLOCK_COMMENT. | SHEBANG. | IGNORED`; each item carries a checked source slice and iterator-relative offset mapped back to the parent slice's start.
-Preserve `IGNORED` bytes and nested/unterminated block-comment text; classification must not assert on arbitrary source text or discard unrecognised bytes.
+The closed kind registry is `.WHITESPACE | .LINE_COMMENT | .BLOCK_COMMENT | .SHEBANG | .IGNORED`; each item carries a checked source slice and iterator-relative offset mapped back to the parent slice's start.
+Preserve `.IGNORED` bytes and nested/unterminated block-comment text; classification must not assert on arbitrary source text or discard unrecognised bytes.
 A classification gap does not authorise changing the authoritative trivia/source views.
 All slices/decoded values borrow through the owning syntax/result lease; no token, trivia iterator or interned name may outlive that lease without an independent copy/retain.
 

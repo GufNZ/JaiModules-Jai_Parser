@@ -450,14 +450,14 @@ Unprojected expression/procedure structure remains available only as exact sourc
 
 | Fixture. | Status. | Declarations. | Tokens. | Diagnostics. | Recovery Records. | Synthetic Tokens. |
 | --- | --- | --- | --- | --- | --- | --- |
-| Scalar, external reference, escaped string. | `COMPLETE` | 3 | 16 | 0 | 0 | 0 |
-| Here-string and external reference. | `COMPLETE` | 2 | 14 | 0 | 0 | 0 |
-| Missing semicolon between declarations. | `RECOVERED` | 2 | 10 | 1 | 1 | 1 |
-| Missing closing parenthesis. | `RECOVERED` | 2 | 12 | 1 | 1 | 1 |
-| Error inside a procedure, followed by another declaration. | `RECOVERED` | 2 | 21 | 1 | 1 | 0 |
-| Truncated procedure/declaration. | `INCOMPLETE` | 1 | 10 | 3 | 3 | 2 |
-| Empty source. | `COMPLETE` | 0 | 1 | 0 | 0 | 0 |
-| Empty string, full-width unsigned literal, external reference. | `COMPLETE` | 3 | 16 | 0 | 0 | 0 |
+| Scalar, external reference, escaped string. | `.COMPLETE` | 3 | 16 | 0 | 0 | 0 |
+| Here-string and external reference. | `.COMPLETE` | 2 | 14 | 0 | 0 | 0 |
+| Missing semicolon between declarations. | `.RECOVERED` | 2 | 10 | 1 | 1 | 1 |
+| Missing closing parenthesis. | `.RECOVERED` | 2 | 12 | 1 | 1 | 1 |
+| Error inside a procedure, followed by another declaration. | `.RECOVERED` | 2 | 21 | 1 | 1 | 0 |
+| Truncated procedure/declaration. | `.INCOMPLETE` | 1 | 10 | 3 | 3 | 2 |
+| Empty source. | `.COMPLETE` | 0 | 1 | 0 | 0 | 0 |
+| Empty string, full-width unsigned literal, external reference. | `.COMPLETE` | 3 | 16 | 0 | 0 | 0 |
 
 Each fixture runs with producer teardown before versus after attaching the two contexts, and with the left versus right context released first: 32 scenarios in total.
 All scenarios passed, comprising 16 complete, 12 recovered, and four incomplete primary snapshots.
@@ -510,7 +510,7 @@ Parent stamps alone, unvalidated target stamps, omitted negative dependencies, o
 Conservative module invalidation should agree with fresh evaluation when the module revision covers every modelled edit, at the cost of additional recomputation.
 
 The authored graph has 11 queries: constant, signature, body, candidate membership, scope membership, derived value, call, body analysis, lookup, layout, and layout consumer.
-Queries return an integer plus `COMPLETE`, `MISSING`, or `AMBIGUOUS` status.
+Queries return an integer plus `.COMPLETE`, `.MISSING`, or `.AMBIGUOUS` status.
 The uncached evaluator recursively traverses the graph without reading cached records; it shares the pure arithmetic/status evaluator with the cached path.
 Separately authored expected focus results and exact per-query recomputation sets check both correctness and reuse rather than relying only on that shared evaluator.
 
@@ -574,7 +574,7 @@ The bounded deterministic model represents signature, body, layout, and external
 Each task key is `(world, declaration, milestone)`; requests join that existing task and return either its immediate outcome or a pending handle.
 All configured tasks are scheduled; this is not a demand-discovery implementation.
 One scheduling step publishes ready work or propagates an explicit failed prerequisite, then notifies pending requests.
-At quiescence, transitive reachability over unresolved prerequisite edges identifies cyclic members; mutually reachable members receive the same canonical diagnostic group, while downstream dependents receive `FAILED` with a blocking-task ID.
+At quiescence, transitive reachability over unresolved prerequisite edges identifies cyclic members; mutually reachable members receive the same canonical diagnostic group, while downstream dependents receive `.FAILED` with a blocking-task ID.
 External tasks have no fabricated completion edge and remain pending until a simulated callback supplies a terminal result.
 
 The 17 scenarios run under both forward and reverse task traversal:
@@ -832,7 +832,7 @@ All writers and GC acquire the same exclusive `FileStream` lock (`FileShare.None
 A publisher writes a uniquely named same-directory temporary file, flushes file data with `Flush(true)`, closes it, and publishes it with overwrite-enabled `File.Move`; the blob is installed before its reference is committed in the manifest.
 An existing digest-named blob must validate before it is reused; an identical publication reuses that blob rather than mutating it.
 Readers load the manifest without the writer lock and validate whichever complete blob it selects; their read handles permit deletion, so replacement can proceed.
-The tested contention policy is fail-open rather than blocking/retrying indefinitely: the losing publisher keeps correct in-memory source, reports `LOCK_BUSY`, and retries explicitly after the first publisher releases the lock.
+The tested contention policy is fail-open rather than blocking/retrying indefinitely: the losing publisher keeps correct in-memory source, reports `.LOCK_BUSY`, and retries explicitly after the first publisher releases the lock.
 Publication rereads the manifest under that lock, so updating one slot does not overwrite a concurrent publisher's already committed other-slot update.
 
 | Check. | Observed Result. |
@@ -917,13 +917,13 @@ Bounds are 64 files, 512 KiB per source, 2 MiB per inventory, serial workers, an
 
 Hypothesis: retaining complete owned file snapshots avoids parsing on validated unchanged requests, whereas persisting source text alone adds I/O/decoding without eliminating real parse work.
 The discriminating checks compare three modes against the same disk source and resident control snapshots, require exact bytes as well as a 64-bit FNV-1a (Fowler-Noll-Vo) digest, computed with `fnv1a_hash` from the SDK `Hash` module, and deep-compare independently owned parses using the existing snapshot oracle.
-The tutorial corpus exposed a missing oracle registry entry for `DIRECTIVE_THIS`: the parser allocates it as a base `Parser_Node`, not a generated concrete node.
+The tutorial corpus exposed a missing oracle registry entry for `.DIRECTIVE_THIS`: the parser allocates it as a base `Parser_Node`, not a generated concrete node.
 The oracle now compares that actual base layout and still rejects unsupported kinds.
 Its existing mutation/alias negative controls and bounded three-file lifecycle verification also pass.
 
-`FRESH` reads, hashes, copies, parses, and releases every file.
-`RESIDENT` still reads and hashes every disk file and checks exact bytes before selecting its existing snapshot.
-`TEXT_SOURCE_REPARSE` additionally reads a versioned text envelope, decodes exact source bytes, validates length/FNV and equality with current disk bytes, then performs the same real parse and teardown as `FRESH`.
+`.FRESH` reads, hashes, copies, parses, and releases every file.
+`.RESIDENT` still reads and hashes every disk file and checks exact bytes before selecting its existing snapshot.
+`.TEXT_SOURCE_REPARSE` additionally reads a versioned text envelope, decodes exact source bytes, validates length/FNV and equality with current disk bytes, then performs the same real parse and teardown as `.FRESH`.
 This envelope contains uppercase hexadecimal source bytes, not serialised syntax nodes, bindings, or semantic queries.
 **It is a source-reparse control, not a persisted-AST decoder.**
 FNV is noncryptographic and is never sufficient for reuse by itself; the independent provenance records SHA-256 hashes for each input and the measured worker/source.
@@ -934,7 +934,7 @@ Every mode has two warmups and 21 individual measured project requests, with rot
 Overall latency includes disk reads, digest/exact-byte validation, decoding where applicable, source copies/parsing, and teardown.
 Separate read/hash/decode/parse/cleanup nanoseconds and actual requested byte counts are saved.
 Deep graph comparisons, artifact construction, memory instrumentation, and edit-source construction are outside request timings.
-Resident control snapshots remain live in every timed mode; `FRESH` is a warm in-process baseline, not an empty-process or OS-cold parse.
+Resident control snapshots remain live in every timed mode; `.FRESH` is a warm in-process baseline, not an empty-process or OS-cold parse.
 These are one local optimised LLVM timing round, not confidence intervals, hard latency bounds, or approved acceptance thresholds.
 
 | Inventory. | Files. | Source Bytes. | Fresh Median/p95 (ms) | Resident Median/p95 (ms) | Source-Reparse Median/p95 (ms) |
@@ -1033,7 +1033,7 @@ Their 21 deep lifetime comparisons destroy/poison the producer, poison/free arti
 Every one of the 89 real-source artifacts is also decoded after producer teardown and deep-compared with a separate fresh parse after input poisoning.
 These are 110 deep comparisons across authored and real-source checks, not full Jai feature or compiler-semantic coverage.
 
-`FRESH`, `RESIDENT`, and `AST_RELOAD` use the same actual disk-source read, FNV/exact-byte validation, filename context, and live resident control trees.
+`.FRESH`, `.RESIDENT`, and `.AST_RELOAD` use the same actual disk-source read, FNV/exact-byte validation, filename context, and live resident control trees.
 Reload additionally reads and validates the complete artifact and reconstructs its graph; it performs zero source parses.
 Fresh parsing and reload both release their temporary owned snapshots inside request latency.
 There are two warmups and 21 rotating requests per mode/inventory, for 315 measured requests; read/hash/decode/parse/cleanup clocks and source/artifact byte counts are saved.
