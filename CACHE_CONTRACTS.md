@@ -589,11 +589,11 @@ This chooses allocation semantics, not the coordinator's thread/locking implemen
 
 | Identity domain. | Allocator, scope and non-interchangeability. |
 | --- | --- |
-| `SessionID` | Fresh `SESSION` counter under one service incarnation; independent of `WorkspaceID` and persisted artifacts.  Closing/reopening the same workspace in the same process still creates another `SessionID`. |
-| `WorldID`, `ResultID`, `OperationID` | Separate session-local counters and the milestone-2 typed K recipes.  Equal numeric tokens across domains/sessions are distinct.  Retry at the same frontier gets a fresh `OperationID`, and exact result reuse never imports a foreign `ResultID` into the requesting session. |
-| `ClockIdentity` | `K("service-clock", [service_incarnation_namespace])`, bound to that service's actual monotonic clock and returned as `Capabilities.clock_identity`.  It is not comparable to another incarnation's clock or wall time. |
-| `ProviderRevision` | Nonempty provider-issued state token scoped by provider namespace, `SessionID` and `DocumentID` as already keyed.  The registered provider must attest nonreassignment and the exact disk/overlay state.  A new combined state uses a new token even with equal bytes; the overlay installation stamp remains the earlier installing `ProviderRevision` until replaced/cleared. |
-| `ProviderFrontier` | The registered provider/coordinator issues a fresh nonempty frontier token for the empty initial state and every accepted transaction.  Its accepted predecessor relation is coordinator state, not lexicographic token order.  Rejection and `RequestAnalysis` do not advance it. |
+| `SessionID`. | Fresh `SESSION` counter under one service incarnation; independent of `WorkspaceID` and persisted artifacts.  Closing/reopening the same workspace in the same process still creates another `SessionID`. |
+| `WorldID`, `ResultID`, `OperationID`. | Separate session-local counters and the milestone-2 typed K recipes.  Equal numeric tokens across domains/sessions are distinct.  Retry at the same frontier gets a fresh `OperationID`, and exact result reuse never imports a foreign `ResultID` into the requesting session. |
+| `ClockIdentity`. | `K("service-clock", [service_incarnation_namespace])`, bound to that service's actual monotonic clock and returned as `Capabilities.clock_identity`.  It is not comparable to another incarnation's clock or wall time. |
+| `ProviderRevision`. | Nonempty provider-issued state token scoped by provider namespace, `SessionID` and `DocumentID` as already keyed.  The registered provider must attest nonreassignment and the exact disk/overlay state.  A new combined state uses a new token even with equal bytes; the overlay installation stamp remains the earlier installing `ProviderRevision` until replaced/cleared. |
+| `ProviderFrontier`. | The registered provider/coordinator issues a fresh nonempty frontier token for the empty initial state and every accepted transaction.  Its accepted predecessor relation is coordinator state, not lexicographic token order.  Rejection and `RequestAnalysis` do not advance it. |
 | Live handle registration. | Scope is `SessionID` plus kind/slot/generation.  Slots are zero-based; a fresh slot starts at generation 1.  A new independent registration in a reused slot increments its generation; retired generations never return, and wrap retires the slot permanently.  Token allocation and slot reuse are separate counters; neither proves payload equality nor authorises adopting persisted handles. |
 | Payload-local IDs. | Dense zero-based IDs in their protected result/backing and distinct node/helper/token/recovery/entry/region domains.  They are not allocated `DeclarationID`/`TypeID` values, and matching an old node to a new node cannot make bare IDs portable. |
 
@@ -732,15 +732,15 @@ Binding/default evaluation is validated separately.
 
 | Arm. | Exact payload and restriction. |
 | --- | --- |
-| `BOOL` | `{value:bool}` with its registered `bool` type. |
-| `INTEGER` | `{signed:bool, bit_width:u32, little_endian:bytes}`.  `bit_width` is positive, byte count equals checked `(bit_width + 7)/8`, signed values use two's complement, and unused high bits are zero for unsigned or sign extension for signed.  The type profile fixes width/signedness; no decimal string or minimal-byte ambiguity. |
-| `FLOAT` | `{format:BINARY32\|BINARY64, little_endian_bits:bytes}` of exactly four/eight bytes; the text store writes it as an `X` hex-float bit pattern, not `B` bytes.  Preserve every bit, signed zero and NaN payload; semantic/compiler argument equivalence still needs its qualified policy, not host floating-point ==. |
-| `BYTES` | `{value:bytes}` with the registered string/byte-sequence type and exact bytes, including empty/non-UTF-8 values. |
-| `TYPE` | `{value:TypedTypeRef}`.  Types are identities/descriptors, not source-spelling strings. |
-| `ENUM` | `{type_identity:TypeID, representation:TypedValue(INTEGER)}`; aliases retain their actual typed value, and named spelling is not a new nominal identity. |
-| `AGGREGATE` | `{components:[]TypedArgument}` under the type profile's declared member/element order, preserving names and nested types.  Do not sort ordinary struct fields or inspect padding. |
-| `SUBJECT` | `{declaration:DeclarationID}` only where the registered parameter profile admits a declaration/procedure identity value; not an address to compiled code. |
-| `SESSION_LOCAL` | `{session:SessionID, token:bytes}` for a producer-owned uncanonicalisable identity/effect value.  Nonempty token is nonreassigned in that session; it is never persistable or equal across sessions. |
+| `BOOL`. | `{value:bool}` with its registered `bool` type. |
+| `INTEGER`. | `{signed:bool, bit_width:u32, little_endian:bytes}`.  `bit_width` is positive, byte count equals checked `(bit_width + 7)/8`, signed values use two's complement, and unused high bits are zero for unsigned or sign extension for signed.  The type profile fixes width/signedness; no decimal string or minimal-byte ambiguity. |
+| `FLOAT`. | `{format:BINARY32\|BINARY64, little_endian_bits:bytes}` of exactly four/eight bytes; the text store writes it as an `X` hex-float bit pattern, not `B` bytes.  Preserve every bit, signed zero and NaN payload; semantic/compiler argument equivalence still needs its qualified policy, not host floating-point ==. |
+| `BYTES`. | `{value:bytes}` with the registered string/byte-sequence type and exact bytes, including empty/non-UTF-8 values. |
+| `TYPE`. | `{value:TypedTypeRef}`.  Types are identities/descriptors, not source-spelling strings. |
+| `ENUM`. | `{type_identity:TypeID, representation:TypedValue(INTEGER)}`; aliases retain their actual typed value, and named spelling is not a new nominal identity. |
+| `AGGREGATE`. | `{components:[]TypedArgument}` under the type profile's declared member/element order, preserving names and nested types.  Do not sort ordinary struct fields or inspect padding. |
+| `SUBJECT`. | `{declaration:DeclarationID}` only where the registered parameter profile admits a declaration/procedure identity value; not an address to compiled code. |
+| `SESSION_LOCAL`. | `{session:SessionID, token:bytes}` for a producer-owned uncanonicalisable identity/effect value.  Nonempty token is nonreassigned in that session; it is never persistable or equal across sessions. |
 
 These encodings preserve observations; they do not define Jai comparison operators or prove that every arm is an admissible compile-time module argument.
 A profile must qualify canonical argument equivalence before using values to establish a language instance/type equality.
@@ -1114,7 +1114,7 @@ Drain/delivery is host-owned and serialised for a subscription; the core never i
 A callback adapter, if added, runs only while the host explicitly dispatches records, outside internal locks and with callback argument/result leases held through return.
 The host may submit/cancel/query again from that callback; re-entry is a new operation, not permission to recursively mutate the notification iteration or access released handles.
 `Release` during delivery suppresses future interest, but backing used by the active delivery stays leased until it returns.
-Callback exceptions/failures must not change an already committed task outcome or leak its delivery lease; the host-helper rules below define failure isolation and nonrecursive dispatch without introducing core callbacks.
+A callback's returned failure must not change an already committed task outcome or leak its delivery lease; the host-helper rules below define failure isolation and nonrecursive dispatch without introducing core callbacks.
 No UI thread affinity is inferred; the adapter/host must declare its dispatch thread and avoid a blocking wait that depends on progress on that same thread.
 
 ### Cancellation, Scheduling and Pressure
@@ -1153,7 +1153,7 @@ Never forcibly reclaim borrowed state or report stopped merely because a timeout
 An optional isolated compiler backend may require a bounded process-tree stop protocol, but no compiler process is launched by initial shutdown or by persisted artifacts.
 Delivery obligations for live registered handles remain observable through the shutdown handle/host drain; the host may explicitly release registrations instead, but shutdown cannot silently discard them.
 The owner/destruction rules below distinguish scheduler shutdown from the last external result lease without adding a public destroy operation.
-Blocking shutdown from inside a dispatch callback cannot wait for that same callback to return; request shutdown there and observe completion after unwinding.
+Blocking shutdown from inside a dispatch callback cannot wait for that same callback to return; request shutdown there and observe completion after the callback returns.
 
 ### Milestone 4: Task Attempts and Publication
 
@@ -1235,7 +1235,7 @@ No entry for an old generation is repointed to a newly reused slot, and an optio
 
 `Wait` uses an owner-lived condition variable paired with the state gate and the pinned registration's terminal/retired predicate.
 Atomically release the gate while arming/sleeping, tolerate spurious/coalesced wakes and always reacquire/reinspect; notify on terminal publication, cancellation, registration retirement and shutdown phase change.
-Registration retirement while sleeping wakes the call and returns `INVALID_HANDLE` if it wins that observation point; the call pin prevents use-after-free while it unwinds.
+Registration retirement while sleeping wakes the call and returns `INVALID_HANDLE` if it wins that observation point; the call pin prevents use-after-free until it returns.
 A valid terminal predicate observed at the deadline returns the terminal observation, otherwise `TIMED_OUT_PENDING`; wall time and a foreign clock cannot decide it.
 Notify-all/coalescing is permitted because the predicate is authoritative; neither a wake nor an empty drain implies successful completion or `STOPPED`.
 Progress comes from the service worker/completion producers, not the presence of a waiting/draining host thread.
@@ -1245,9 +1245,9 @@ A host may build a helper over caller-owned `CompletionBatch` values: it seriali
 Before invoking user code, the helper explicitly acquires/retains any `WORLD`/`RESULT` arguments it intends to expose, skips safely stale registrations and runs outside all service locks.
 The helper holds those independent handles through return even if the callback releases the original waiter/result/session registration.
 Use unconditional cleanup on every normal/error return; an explicit transfer to the callback must leave a named new owner rather than both parties releasing the same registration.
-The host catches/reports callback failures outside the service; the already delivered record is not requeued, its stable outcome remains pollable, and no task outcome is rewritten.
-Reentrant query/cancel/release/shutdown calls follow the ordinary operation table; blocking waits must be deferred until the dispatch stack unwinds whenever progress/cleanup depends on that stack.
-Thread affinity and user exception conventions belong to the host helper; they cannot add inline callbacks to this profile or weaken its ownership rules.
+The host helper checks each callback's returned error indication and reports failures outside the service; the already delivered record is not requeued, its stable outcome remains pollable, and no task outcome is rewritten.
+Reentrant query/cancel/release/shutdown calls follow the ordinary operation table; blocking waits must be deferred until the dispatch callback has returned whenever progress/cleanup depends on it.
+Thread affinity and callback error-reporting conventions belong to the host helper; they cannot add inline callbacks to this profile or weaken its ownership rules.
 
 #### Last-Consumer and Fairness Policy
 
@@ -1280,7 +1280,7 @@ The single compute worker never waits on a task queued behind itself: suspend `W
 The first reserved shutdown request publishes one shutdown operation and changes lifecycle at the same transition that rejects new submissions/analysis/queries/`ObserveTicket` registrations.
 Already available `WORLD`/`RESULT` access, `Poll`/`Wait`, `CancelWaiter`, bounded drain, `AcquireWorld` from surviving publication, `AcquireResult`, `Retain`, `Release`, `DescribeSession` and repeated shutdown observation remain supported under ordinary limits.
 After `QUIESCING`, `HEAD` can acquire an existing matching published head but cannot schedule or wait for a new one.
-An operation staged before quiescing either committed before it or rejects `SERVICE_CLOSED` on revalidation; any acquired provider references still unwind under their recorded owner.
+An operation staged before quiescing either committed before it or rejects `SERVICE_CLOSED` on revalidation; any acquired provider references are still released by their recorded owner.
 No provider callback may revive a retired registration or admit source work after that transition.
 
 Preserve every existing terminal observation; terminally cancel unfinished update/query interests with `SHUTDOWN`, remove their queued tasks and request cooperative stop of running producers.
@@ -1293,7 +1293,7 @@ After closing ingress and recording stop/terminal intents, enter `DRAINING`; int
 `STOPPED` requires all the following together under the gate: all pre-quiesce admission/acquisition calls have unwound; compute worker exit is acknowledged/joined outside the gate; all task mailboxes and external producer pins are consumed/detached safely; and scheduler-owned cleanup/store-finalisation operations have returned with a truthful bounded status.
 Stop/join outside the state gate, then publish the checked exit fact under it; never wait for a worker that needs the gate while retaining that gate.
 The pre-reserved reaper, not a polling host or the compute worker joining itself, drives that sequence.
-`STOPPED` denotes compute/ingress/store quiescence, not destruction of the surviving owner control infrastructure: the reaper's own final control pin ends after publishing the observation and unwinding its job.
+`STOPPED` denotes compute/ingress/store quiescence, not destruction of the surviving owner control infrastructure: the reaper's own final control pin ends after publishing the observation and returning from its job.
 Pure observers and a `Wait` on shutdown do not count as producers whose return is required for `STOPPED`, or shutdown could wait for its own observer.
 Undrained completion entries and client `WORLD`/`RESULT`/`TICKET`/`WAITER`/`SHUTDOWN` registrations do not prevent `STOPPED`; their observations/backing migrate to the surviving owner and remain charged until independently released.
 
@@ -1331,7 +1331,7 @@ Each trace must run both winning orders, the delayed-producer/host case and its 
 | X1: Register versus complete. | Force completion before, during and after waiter attachment/return.  Return an immediate protected result or one live pending registration with one retained terminal outcome; no lost wake or duplicate equivalent task. | Gate completion around registration, before pending return, and between observation/wait arming; compare returned registrations/outcomes to an external call ledger, check one live task per exact key, then independently acquire/validate bytes. | Split check/register or check/sleep loses the ready outcome/wake; joining a different world/schema fails exact binding. |
 | X2: Cancel versus complete. | Race current-world caller cancellation, source-frontier supersession and shared completion.  Caller stop affects one waiter; supersession affects every still-pending obsolete-world waiter.  Preserve the first terminal reason and release unpublished/unused payload ownership once. | Run two-consumer current-world UI stop separately from source-frontier supersession; barrier source commit, joins, completion, cancellation and late producer return in both orders.  An independent consumer/attempt/free ledger checks `CALLER` only on its winning waiter, `WORLD_SUPERSEDED` on every remaining pending old-world waiter, no duplicate dispatch/reissue and pins retained until safe stop.  Reissuing explicitly against current C may deduplicate a new C task, never revive B's attempt. | A UI stop kills the shared current-world task, one surviving consumer prevents obsolete-task cancellation, a terminal reason is rewritten, old work remains joinable/publishes late, a retry is silently rebound or scratch is freed before producer return. |
 | X3: `Release` and slot reuse. | Queue a notification/completion, release its registration and reuse the slot for another generation.  Old records cannot reach the new client; an already active delivery retains its backing through return. | Poison/reuse public and task slots, deliver old mailbox signals and use a drained stale handle; compare generation/attempt issuance to a separate ledger and keep a callback's independently acquired payload alive. | Accepting an old generation/attempt, freeing a mailbox before producer return, or borrowing callback backing from a released waiter is detected. |
-| X4: Reentrant host dispatch. | From host dispatch, submit another query, cancel a waiter, release a lease and request shutdown.  No callback runs under internal locks, no recursive delivery corrupts iteration, and shutdown completion does not depend on blocking its own callback. | Host-helper dispatch re-enters query/cancel/release/shutdown, requests nested dispatch and throws before/after explicit ownership transfer; a separate dispatch-depth/owner ledger proves deferral, stable terminal outcomes and balanced cleanup. | Inline callback under the gate, recursive list mutation, retry of an already delivered record or waiting for the current callback's return deadlocks or changes counts. |
+| X4: Reentrant host dispatch. | From host dispatch, submit another query, cancel a waiter, release a lease and request shutdown.  No callback runs under internal locks, no recursive delivery corrupts iteration, and shutdown completion does not depend on blocking its own callback. | Host-helper dispatch re-enters query/cancel/release/shutdown, requests nested dispatch and returns a callback failure before/after explicit ownership transfer; a separate dispatch-depth/owner ledger proves deferral, stable terminal outcomes and balanced cleanup. | Inline callback under the gate, recursive list mutation, retry of an already delivered record or waiting for the current callback's return deadlocks or changes counts. |
 | X5: Pressure and delayed delivery. | Delay host draining while admitted tasks finish and wake signals coalesce.  Outcomes remain pollable, and each live registration has at most one terminal record; queue/admission pressure never loses accepted work or revokes leases. | Fill each count/byte ceiling at exact boundary, then hold host drain while all reserved waiters finish; independently reconcile live/reserved/backing counts and retry failed drains without consumption.  At full ordinary handle/operation capacity the first shutdown still obtains its reserved handle/job. | Removing the shutdown reservation, charging only queued rather than reserved completions, consuming a failed copy or freeing running scratch on public cancellation violates the ledger. |
 | X6: Priority and external wait. | Mix visible-file work, background dependencies and blocked external input.  Required prerequisites make progress under the approved fairness policy, optional work cannot monopolise dispatch, and external waiting is not reported as a cycle. | Inject a long stream of later required work around a recorded ready background prerequisite, optional chunks and a blocked provider; a separate readiness FIFO/dispatch log proves no overtaking and independent compute progress after each bounded chunk returns. | Priority starvation, optional monopolisation, blocking the compute worker on its own queued dependency, or treating external wait as a cycle fails order/progress/classification checks. |
 | X7: Shutdown racing submission. | Order submissions around quiescing, run repeated shutdown, and attempt duplicate/late completions.  Every accepted request gets a truthful observable outcome; new work rejects and preserved result leases remain readable/releasable after stopped. | Barrier submissions and provider re-entry around quiescing; compare every acknowledged source frontier/ticket against a separate acceptance ledger.  Join an already published candidate, reorder older candidate completion, release `SESSION` after `STOPPED` and read/release retained child payloads. | A post-quiesce commit, old-head overwrite, published-join ticket left pending, restarted shutdown operation or destruction with live children is rejected. |
@@ -1951,6 +1951,9 @@ Shutdown observation is `PENDING {phase: QUIESCING. | DRAINING}` until terminal 
 The following is the closed logical interface `jai-cache-interface/1`, drafted for API review, not a machine ABI, generated Jai module or transport protocol.
 
 `Call(T)` is exactly `OK {value:T} | REJECTED {error:OperationError}`.
+Jai has no exceptions: each call returns this indication, and the caller must check it before using `value`.
+An idiomatic Jai binding returns multiple values, such as `success: bool, result: T` with the `OperationError` alongside, rather than signalling failure out of band.
+If a detailed error payload is needed, use `success: bool, result: TPayload, error: TError` where only one of result or error is non-null, based on the value of `success`.
 
 Operation rejection is distinct from a successfully observed terminal failure, unavailability or unsupported capability.
 All arguments and nested input arrays/bytes are borrowed only until the call returns; any accepted asynchronous work must already own its required copies/leases.
@@ -2165,6 +2168,7 @@ A host needing coherent capture must supply/validate it, not upgrade a mixed cap
 The registered provider exposes synchronous `RetainSource(ref) -> RETAINED {byte_count:u64} | FAILED {failure:Failure}`, `ReadSourceLease(ref) -> immutable byte view`, and `ReleaseSource(ref) -> Unit`.
 
 These are host-adapter hooks, not public service operations.
+Hooks report failure only through their returned arm, for example as `success: bool, byte_count: u64, failure_reason: Failure`; the service checks it before relying on any lease.
 
 Retain must independently protect the exact bytes/revision before acknowledgement; reading a retained lease cannot reopen the current path, silently change bytes, or require a dispatch callback to complete.
 

@@ -22,6 +22,8 @@ Status conventions apply to all four documents:
 - **Qualified** means passed executable acceptance against an implementation.  Nothing is qualified yet; all qualification and review vectors run only after separate implementation authorisation, against independent oracles (fresh parses, the official compiler, or authored expectations), with negative controls.
 - Approval, implementation and qualification are independent: an approved requirement can remain unimplemented and untested.
 - Experiments are bounded evidence, not qualification of a future service.
+- Jai has no exceptions.
+Wherever an operation, hook or callback is said to fail, reject or report an error, it returns an error indication that its caller must check before using any result.
 
 | Milestone. | Scope. | Status. |
 | --- | --- | --- |
