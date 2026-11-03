@@ -33,7 +33,7 @@ The initial fifteen-operation interface and all pending policy/implementation ga
 
 ## Same-List Scope Provenance and Conditional Boundaries
 
-Proposed declaration-index/2 refinement grounded in the scope-directive builder function and `parse_static_if_statement`/`parse_statement_block`.
+Proposed declaration-index/1 refinement grounded in the scope-directive builder function and `parse_static_if_statement`/`parse_statement_block`.
 The builder function publishes a standalone `.DIRECTIVE_SCOPE` with a `scope_type`; it does not attach effective visibility to each declaration.
 Static conditionals retain their branches, including parser-created single-statement blocks, rather than selecting one during parsing.
 Consequently, `scope_directive` is strictly a source-provenance summary, not an effective lexical/module visibility state.
@@ -75,7 +75,7 @@ Compiler visibility/default/inheritance behaviour remains separate pending quali
 
 ## Program Export Metadata Versus Visibility
 
-Proposed 2026-10-21 for the declaration-index/2 draft; no producer adapter or source-observation pass is implemented by this refinement.
+Proposed 2026-10-21 for the declaration-index/1 draft; no producer adapter or source-observation pass is implemented by this refinement.
 
 `parse_declaration_metadata` recognises `align`, `no_reset`, `uninitialized`, `elsewhere` and `program_export`; its default branch stops without consuming an unknown directive.
 
@@ -228,7 +228,7 @@ The registry has a source-reviewed draft boundary, not a behaviourally qualified
 
 ## Recovery Attribution and Published Syntax
 
-Proposed declaration-index/2 refinement grounded in `add_missing_token`, `add_expected_expression_at`, `add_unexpected_token` and the cursor-only checkpoint/restore implementation.
+Proposed declaration-index/1 refinement grounded in `add_missing_token`, `add_expected_expression_at`, `add_unexpected_token` and the cursor-only checkpoint/restore implementation.
 Recovery records retain diagnostic references and, for missing tokens, a synthetic-token reference; they do not identify an owning declaration node.
 
 `parser_restore` restores only the cursor, so observations from an abandoned attempt cannot automatically be attributed to the syntax later published at that position.
@@ -268,7 +268,7 @@ This draft neither instruments the parser nor qualifies a correlation adapter.
 
 ## Declaration Events, Local IDs and Partial Containers
 
-Proposed declaration-index/2 ordering refinement, grounded in the compound builder functions' ordered arguments and single shared properties helper.
+Proposed declaration-index/1 ordering refinement, grounded in the compound builder functions' ordered arguments and single shared properties helper.
 "Source order" means an ownership-preserving event sequence, not sorting completed records by byte start/end.
 Equal spans, unlocated recovery and a compound's multiple bindings make a span-only comparator insufficient.
 Visit reached nodes through the bound authored-edge/child-order registry.
@@ -310,7 +310,7 @@ This draft resolves ordering/representation rules, not a production visitor, cro
 
 ## Structured Coverage Reasons and Consumer Guarantees
 
-Proposed declaration-index/2 refinement; reason records describe incomplete observations, not source-language diagnostics, successful semantic facts or service failures.
+Proposed declaration-index/1 refinement; reason records describe incomplete observations, not source-language diagnostics, successful semantic facts or service failures.
 
 `CoverageReason` is `{code, subject, field_path: []PathStep, impacts: []CoverageImpact, origin: *Origin, detail_utf8}`.
 
@@ -388,7 +388,7 @@ This draft defines the observation contract, not an implemented coverage engine 
 
 ## Name Spelling, Producer Values and Recovery
 
-Proposed refinement of declaration-index/2 names and the adapter's `name_origins` capability, grounded in `parse_operator_declaration_name`, declaration-name capture and backticked identifier lexing.
+Proposed refinement of declaration-index/1 names and the adapter's `name_origins` capability, grounded in `parse_operator_declaration_name`, declaration-name capture and backticked identifier lexing.
 The producer's name string is an observation, not necessarily an exact contiguous source spelling.
 Keep it separate from source bytes; neither equality by name nor interner-address identity establishes a declaration occurrence or nominal identity.
 
@@ -1346,7 +1346,7 @@ This draft does not implement a visitor, execute branches/expansions or qualify 
 
 ## Struct and Enum Ownership and Member Context
 
-Proposed refinement of `jai-cache-authored-edges/1` and the declaration-index/2 draft, grounded in `parse_aggregate_definition`, `parse_aggregate_parameter_block`, `parse_aggregate_block`, `parse_struct_modifiers` and enum-mode statement parsing.
+Proposed refinement of `jai-cache-authored-edges/1` and the declaration-index/1 draft, grounded in `parse_aggregate_definition`, `parse_aggregate_parameter_block`, `parse_aggregate_block`, `parse_struct_modifiers` and enum-mode statement parsing.
 The exhaustive layout-specific field rows below use shared base/overlay rules and the source-order/recovery guards that follow.
 
 | Record/storage domain. | Exact field roles. |

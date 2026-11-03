@@ -156,7 +156,7 @@ Each line ends in one LF, including the last; reject CR, BOM, tabs, blank/commen
 Tokens are separated by exactly one ASCII space.
 The first line is exactly `[1]`; no ignored version-line suffix or implicit future version is accepted.
 The hash is SHA-256 of all exact preceding bytes through `END` and its LF, not decoded/reformatted text; it detects corruption, not malicious replacement with a recomputed hash.
-`StoreBlobKey` is the 32 SHA-256 bytes of the complete encoded file, including the hash line; its path spelling is exactly 64 uppercase hexadecimal digits.
+`StoreBlobKey` is the 32-byte (`[32] u8`) SHA-256 of the complete encoded file, including the hash line; its path spelling is exactly 64 uppercase hexadecimal digits.
 It is a wire-content key, distinct from `SourceRevision`, `ContextID`, `SyntaxArtifactKey` and `SemanticArtifactKey`.
 Schema/kind tokens are exact registered ASCII identifiers; unknown schemas/kinds/fields/arms and extra/trailing rows fail closed.
 
@@ -241,7 +241,7 @@ Documented implementation bounds, and any optional configured quotas, must be en
 
 ### Milestone 5: Record Schemas and Configured Policy
 
-`StoreRef` is `{kind:StoreRecordKind, schema:bytes, key:StoreBlobKey, wire_bytes:u64}`; each reference carries the full expected kind/schema and actual complete encoded length, not only a filename digest.
+`StoreRef` is `{kind:StoreRecordKind, schema:SchemaName, key:StoreBlobKey, wire_bytes:u64}`; each reference carries the full expected kind/schema and actual complete encoded length, not only a filename digest.
 
 `StoreRecordKind` has exactly seven tags in the following table.
 Its schemas use the exact written field order and the milestone-2 logical encodings/types, with the milestone-5 text grammar for their wire representation.
@@ -249,13 +249,13 @@ Canonical document/history arrays are duplicate-free and sorted by complete cano
 
 | Kind and exact schema. | Body record and validation. |
 | --- | --- |
-| `.DESCRIPTOR`, `jai-cache-store-descriptor/1`. | `StoredDescriptor {profile:bytes, store_namespace:bytes, workspace:WorkspaceID, provider_namespace:bytes, document_policy_version:u32, ownership:.WORKSPACE_EXCLUSIVE, wire_schema:bytes}`.  Profile/wire schema are `jai-cache-store/1` and `jai-cache-store-text/1`; compare namespace/workspace/provider/policy to the trusted binding, not to another claim read from this store. |
-| `.SOURCE`, `jai-cache-store-source/1`. | `StoredSource {source_revision:SourceRevision, source_bytes:bytes}`.  Recompute the canonical revision from exact bytes/length and require full identity equality; source bytes are never newline/Unicode normalised or interpreted as a path. |
-| `.CONTEXT`, `jai-cache-store-context/1`. | `StoredContext {context:ContextID, descriptor:bytes}`.  Decode/recompute the canonical context key and check the actual registered producer/adapter/profile tuple when reused.  Unsupported producer/schema becomes a miss, not inferred compatibility. |
+| `.DESCRIPTOR`, `jai-cache-store-descriptor/1`. | `StoredDescriptor {profile:SchemaName, store_namespace:StoreNamespace, workspace:WorkspaceID, provider_namespace:ProviderNamespace, document_policy_version:u32, ownership:.WORKSPACE_EXCLUSIVE, wire_schema:SchemaName}`.  Profile/wire schema are `jai-cache-store/1` and `jai-cache-store-text/1`; compare namespace/workspace/provider/policy to the trusted binding, not to another claim read from this store. |
+| `.SOURCE`, `jai-cache-store-source/1`. | `StoredSource {source_revision:SourceRevision, source_bytes:[] u8}`.  Recompute the canonical revision from exact bytes/length and require full identity equality; source bytes are never newline/Unicode normalised or interpreted as a path. |
+| `.CONTEXT`, `jai-cache-store-context/1`. | `StoredContext {context:ContextID, descriptor:ContextDescriptor}`.  Decode/recompute the canonical context key and check the actual registered producer/adapter/profile tuple when reused.  Unsupported producer/schema becomes a miss, not inferred compatibility. |
 | `.RECOVERY`, `jai-cache-store-recovery/1`. | `StoredRecovery {workspace:WorkspaceID, document:DocumentID, source:StoreRef, context:StoreRef, provenance:RecoveryProvenance, created_unix_seconds:s64}`.  `created_unix_seconds == -1` means not set; set times are nonnegative, and values below `-1` reject.  Source/context references have exactly those kinds; bind document/path/context through the validated document record and current host continuity before offering a candidate. |
 | `.DOCUMENT`, `jai-cache-store-document/1`. | `StoredDocument {document:DocumentID, binding:DocumentBinding, disk:StoredDiskSlot, recovery:StoredRecoverySlot}`.  Binding/namespace/policy must agree; independently stamped disk/recovery slots preserve save-versus-overlay/reset ordering. |
-| `.MANIFEST`, `jai-cache-store-manifest/1`. | `StoredManifest {store_namespace:bytes, descriptor:StoreRef, commit:StoreCommitID, previous_commit:*StoreCommitID, writer_epoch:u64, source_sequence:u64, accepted_frontier:*ProviderFrontier, documents:[]StoreRef, history:[]StoredHistory}`.  Descriptor/documents have the corresponding exact kinds, document identities are unique, and all required roots must exist and validate before commit. |
-| `.HEAD`, `jai-cache-store-head/1`. | `StoredHead {store_namespace:bytes, commit:StoreCommitID, generation:u64, manifest:StoreRef}`.  Manifest kind/schema/namespace/commit must agree; generation starts at 1, increments with checked arithmetic and never wraps.  The head is a complete envelope, not a partial pointer file or source authority. |
+| `.MANIFEST`, `jai-cache-store-manifest/1`. | `StoredManifest {store_namespace:StoreNamespace, descriptor:StoreRef, commit:StoreCommitID, previous_commit:*StoreCommitID, writer_epoch:u64, source_sequence:u64, accepted_frontier:*ProviderFrontier, documents:[]StoreRef, history:[]StoredHistory}`.  Descriptor/documents have the corresponding exact kinds, document identities are unique, and all required roots must exist and validate before commit. |
+| `.HEAD`, `jai-cache-store-head/1`. | `StoredHead {store_namespace:StoreNamespace, commit:StoreCommitID, generation:u64, manifest:StoreRef}`.  Manifest kind/schema/namespace/commit must agree; generation starts at 1, increments with checked arithmetic and never wraps.  The head is a complete envelope, not a partial pointer file or source authority. |
 
 `StoreCommitID = K("store-commit", [store_namespace, owner_epoch_u64_LE, commit_sequence_u64_LE])`.
 Reserve a fresh owner epoch through the trusted `ReserveEpoch` before opening a writer; its positive commit sequence starts at 1 and never repeats/wraps, including failed/uncertain publications.
@@ -268,7 +268,7 @@ The host must bind a reservation authority satisfying the declared durable nonre
 Test our authority/adapter logic and failure handling, not independent certification of the OS/storage that supplies those assumed primitives.
 
 - `StoreEventStamp` is `{writer_epoch:u64, source_sequence:u64, origin:StoreEventOrigin}`.
-- `StoreEventOrigin` is `.SOURCE {session:SessionID, operation:OperationID}` or `.BOOTSTRAP` or `.MAINTENANCE {action:.CLEAR_HISTORY|.CLEAR_RECOVERY|.CLEAR_ALL|.EXPIRE|.REINITIALISE, host_confirmation:bytes}`.
+- `StoreEventOrigin` is `.SOURCE {session:SessionID, operation:OperationID}` or `.BOOTSTRAP` or `.MAINTENANCE {action:.CLEAR_HISTORY|.CLEAR_RECOVERY|.CLEAR_ALL|.EXPIRE|.REINITIALISE, host_confirmation:ConfirmationToken}`.
 - `.SOURCE` requires a positive source sequence; bootstrap uses 0, and maintenance preserves the relevant committed source sequence under its fresh owner epoch and explicit head precondition.
 Neither bootstrap nor offline maintenance fabricates a live session/operation identity to stamp a tombstone.
 - `RecoveryProvenance` is `{origin:StoreEventStamp, installation_revision:ProviderRevision, accepted_frontier:ProviderFrontier}`; these archived IDs are descriptive provenance, never revived registrations or proof of current host intent.
@@ -286,7 +286,7 @@ On a valid source hit the initial reader reparses authoritative selected bytes u
 Future derived-record registration must specify the exact detached payload/backing/dependency schema, validate its artifact key and producer, and rebind fresh live world/result associations without restoring old handles.
 This closes the initial wire catalogue through explicit unsupported capability, not an unspecified AST serialiser or claim that source reload passed P3.
 
-The trusted host resolves `SessionOptions.store_policy` to `StorePolicy` with fields `{profile:bytes, store_namespace:bytes, workspace:WorkspaceID, provider_namespace:bytes, root:PathValue, enabled:bool, ownership:.WORKSPACE_EXCLUSIVE, required_guarantee:.PROCESS_ATOMIC|.POWER_LOSS_DURABLE, limits:StoreLimitRequest, recovery_retention:RecoveryRetention, automatic_repair:.DISABLED, platform_binding:bytes}` in that order.
+The trusted host resolves `SessionOptions.store_policy` to `StorePolicy` with fields `{profile:SchemaName, store_namespace:StoreNamespace, workspace:WorkspaceID, provider_namespace:ProviderNamespace, root:PathValue, enabled:bool, ownership:.WORKSPACE_EXCLUSIVE, required_guarantee:.PROCESS_ATOMIC|.POWER_LOSS_DURABLE, limits:StoreLimitRequest, recovery_retention:RecoveryRetention, automatic_repair:.DISABLED, platform_binding:SchemaName}` in that order.
 
 The selected defaults are enabled persistence at project-relative `.jaiParserCache`, no configured RAM/disk quota, `RecoveryRetention.UNTIL_HOST_DISCARD`, with exclusive store ownership.
 
@@ -435,7 +435,7 @@ The initial profile returns resident owned copies, so retained M4 `.WORLD`/`.RES
 Pins, reference maps and decoded copies all count against the configured byte/record/file limits; failure returns a miss/fault without exposing partial backing or revoking an earlier successful copy.
 There are no cross-process lease records to expire: another process must acquire the real exclusive owner handle before reading or collecting, and contention fails safely.
 
-`RecoveryOffer` is `{candidate:RecoveryCandidateRef, document:DocumentID, context:ContextID, context_descriptor:bytes, source_bytes:bytes, provenance:RecoveryProvenance}` returned as a complete bounded host-owned copy by the registered store adapter.
+`RecoveryOffer` is `{candidate:RecoveryCandidateRef, document:DocumentID, context:ContextID, context_descriptor:ContextDescriptor, source_bytes:[] u8, provenance:RecoveryProvenance}` returned as a complete bounded host-owned copy by the registered store adapter.
 
 `RecoveryCandidateRef.candidate_key` is exactly the candidate `.RECOVERY` record's 32-byte `StoreBlobKey`; its namespace/source revision must match the validated offer/source record.
 The offer owns exact bytes and context/provenance descriptions, not a borrowed file mapping, live overlay, ticket or provider lease.
@@ -462,7 +462,7 @@ The approved default has no fixed disk quota; this does not authorise automatic 
 
 Administrative requests belong to a trusted host/store-management binding, not persisted input or a sixteenth source/scheduling operation in `jai-cache-interface/1`.
 
-Their logical schema is `StoreMaintenanceRequest {version:bytes, store_namespace:bytes, expected_commit:*StoreCommitID, damage_fingerprint:*bytes, action:StoreMaintenanceAction, quarantine_epochs:[]u64, host_confirmation:bytes}` with version `jai-cache-store-admin/1`.
+Their logical schema is `StoreMaintenanceRequest {version:SchemaName, store_namespace:StoreNamespace, expected_commit:*StoreCommitID, damage_fingerprint:*DamageFingerprint, action:StoreMaintenanceAction, quarantine_epochs:[]u64, host_confirmation:ConfirmationToken}` with version `jai-cache-store-admin/1`.
 
 `StoreMaintenanceAction` is `.INSPECT | .CLEAR_HISTORY | .CLEAR_RECOVERY | .CLEAR_ALL | .REINITIALISE | .DELETE_QUARANTINE`.
 
@@ -477,7 +477,7 @@ A process-visible receipt is not a power-loss/durable-erase acknowledgement, and
 All destructive actions require scheduler `.STOPPED`, closed former store jobs, no file/read pins and no remaining session/child registration depending on the store owner; otherwise reject without changing it.
 Acquire fresh exclusive ownership/epoch before offline maintenance, and hold it through precondition validation, commit/reconciliation and cleanup.
 For a valid head, require a non-null `expected_commit` exactly matching it; for a damaged/missing head, require a matching `damage_fingerprint` computed over the bounded exact bad bytes or the canonical missing-head marker, plus explicit reinitialisation confirmation.
-The fingerprint is `K("store-damage", [store_namespace, V(.MISSING)])` for a missing head or `K("store-damage", [store_namespace, V(.PRESENT {head_bytes:bytes})])` for exact bounded head bytes; unreadable/oversized bytes cannot be fingerprinted by truncation and require rejection or separately authorised external administration.
+The fingerprint is `K("store-damage", [store_namespace, V(.MISSING)])` for a missing head or `K("store-damage", [store_namespace, V(.PRESENT {head_bytes:[] u8})])` for exact bounded head bytes; unreadable/oversized bytes cannot be fingerprinted by truncation and require rejection or separately authorised external administration.
 An unrelated newer head or changed damage observation rejects; do not reinterpret it as permission to clear the newly observed state.
 
 | Action. | Exact mutation/retention contract. |
@@ -563,7 +563,7 @@ Full descriptors and their authority bindings remain equality evidence; matching
 
 #### Live Identity Allocation
 
-The service bootstrap binds one `IdentityAuthority` record `{authority_namespace:bytes, issuer_schema:bytes}` to a trusted host issuer.
+The service bootstrap binds one `IdentityAuthority` record `{authority_namespace:AuthorityNamespace, issuer_schema:SchemaName}` to a trusted host issuer.
 The namespace is nonempty, nonreassigned host authority, not a workspace display path or cache-directory name.
 
 Its initial issuer schema is `jai-cache-epoch-issuer/1`.
@@ -614,7 +614,7 @@ A process cannot use an untrusted manifest as an `IdentityAuthority` or a reques
 
 #### Restart and Reuse Admission
 
-`ContinuityProof` is `{workspace:WorkspaceID, provider_namespace:bytes, document_policy_version:u32, provider_descriptor:bytes, document_bindings:[]DocumentBinding}` supplied by the trusted host/provider for the current opening.
+`ContinuityProof` is `{workspace:WorkspaceID, provider_namespace:ProviderNamespace, document_policy_version:u32, provider_descriptor:ProviderAdapterDescriptor, document_bindings:[]DocumentBinding}` supplied by the trusted host/provider for the current opening.
 The descriptor is the exact canonical milestone-2 provider descriptor, and bindings are duplicate-free in canonical `DocumentID` order.
 This is an admission attestation, not an authentication token self-certified by cache contents.
 An omitted, unverifiable or unequal field means fresh binding/no identity continuity for that scope; it does not authorise best-effort matching by path.
@@ -637,7 +637,7 @@ Required source/recovery persistence, disabled/degraded store behaviour and rese
 
 ### Milestone 3: Declaration Matching and Semantic Keys
 
-This is the deferred semantic identity schema `jai-cache-semantic-identity/1`, not a `DeclarationID` field added to declaration-index/2.
+This is the deferred semantic identity schema `jai-cache-semantic-identity/1`, not a `DeclarationID` field added to declaration-index/1.
 Its record schema identifiers are that ASCII prefix followed by `/` and the exact case-sensitive record name, unless a separately named schema or explicit K recipe is given; typed values use `jai-cache-typed-value/1`.
 Parameterised type identifiers retain milestone 2's framed parameterised-type recipe, with no ambiguous concatenation or open extension fields.
 The syntax-first API still publishes only result-local syntax/index references.
@@ -656,7 +656,7 @@ An ID never changes owner just because its token's bytes omit that owner.
 
 `.ENUM_MEMBER` bindings cover members with unset and specified values alike; the value is a separate `.CONSTANT_VALUE` facet recording whether it was specified or generated, so members sharing a value remain distinct declarations.
 
-`SyntaxOccurrence` is `{document:DocumentID, source_revision:SourceRevision, context:ContextID, backing_identity:bytes, node_id:u64, binding_ordinal:s64}`.
+`SyntaxOccurrence` is `{document:DocumentID, source_revision:SourceRevision, context:ContextID, backing_identity:BackingIdentity, node_id:u64, binding_ordinal:s64}`.
 
 `binding_ordinal == -1` means not set; a set ordinal is nonnegative and range-checked against the authored binding list, and values below `-1` reject.
 
@@ -665,7 +665,7 @@ Compound bindings require their authored ordinal; independent bindings and repea
 The source graph and all referenced identities remain protected by that semantic world's lifetime.
 Generated syntax additionally requires the provenance contract below and never pretends to be a source declaration-index entry.
 
-`SemanticSyntax` is `.SOURCE {occurrence:SyntaxOccurrence}` or `.GENERATED {provenance:bytes, output_ordinal:u64, backing_identity:bytes, node_id:u64}`.
+`SemanticSyntax` is `.SOURCE {occurrence:SyntaxOccurrence}` or `.GENERATED {provenance:GeneratedProvenanceKey, output_ordinal:u64, backing_identity:BackingIdentity, node_id:u64}`.
 The `.GENERATED` arm references the exact canonical `GeneratedProvenance` key and its checked output ordinal, never an authored `DocumentID` or fabricated `.SOURCE` span; its source revision/context come from the protected generated output's separately admitted source/origin schema.
 
 `DeclarationRevision = K("declaration-revision", [DeclarationID, SourceRevision, ContextID, V(SemanticSyntax, syntax), canonical_source_projection, semantic_producer_binding])`.
@@ -676,7 +676,7 @@ Equal IDs do not validate old type/body/diagnostic facts.
 Duplicate bindings assigning one ID different owners or independent occurrences in the same world reject publication.
 Out-of-range/cross-backing references fail validation rather than being repaired by matching source spans.
 
-`TypeID` has exactly three identity families: `.NOMINAL {declaration:DeclarationID}`, `.BUILTIN {type_profile:bytes, name_ascii:bytes}`, and `.INSTANTIATED {definition:DeclarationID, arguments:[]TypedArgument, specialisation_policy:bytes}`.
+`TypeID` has exactly three identity families: `.NOMINAL {declaration:DeclarationID}`, `.BUILTIN {type_profile:SchemaName, name_ascii:RegistryName}`, and `.INSTANTIATED {definition:DeclarationID, arguments:[]TypedArgument, specialisation_policy:SchemaName}`.
 Their canonical forms are K with tags `nominal-type`, `builtin-type`, `instantiated-type` and fields in the written order, using V for the typed argument sequence.
 Builtin names resolve under the exact registered type profile; no universal host ABI is assumed.
 Structural, pointer, procedure, context and other language types require an explicitly registered type-profile descriptor, represented only as `TypedTypeRef` below; unsupported type families return `.UNSUPPORTED` rather than being merged by size or display name.
@@ -722,12 +722,12 @@ Within a supported same-world language rule, nominal equality must come from the
 
 #### Typed Arguments and Configured Instances
 
-`TypedTypeRef` is `{profile:bytes, descriptor:bytes}`; descriptor is a canonical registered type-profile record, which may reference the `TypeID` families above.
+`TypedTypeRef` is `{profile:SchemaName, descriptor:TypeDescriptor}`; descriptor is a canonical registered type-profile record, which may reference the `TypeID` families above.
 It includes nominal identity and required type parameters/qualifiers, never only a display name or byte size.
 Unknown profiles/recursive descriptor encodings are unsupported; legal recursive nominal references use allocated `DeclarationID`/`TypeID` references, not infinitely nested structural keys.
 No arbitrary pointer-valued compiler `Type_Info` bytes are encoded.
 
-`TypedArgument` is `{name:*bytes, type:TypedTypeRef, value:TypedValue}`.
+`TypedArgument` is `{name:*string, type:TypedTypeRef, value:TypedValue}`.
 Explicit arguments retain authored argument order and membership, including named-argument order; a null `name` differs from an explicit name.
 Binding/default evaluation is validated separately.
 
@@ -736,14 +736,14 @@ Binding/default evaluation is validated separately.
 | Arm. | Exact payload and restriction. |
 | --- | --- |
 | `.BOOL`. | `{value:bool}` with its registered `bool` type. |
-| `.INTEGER`. | `{signed:bool, bit_width:u32, little_endian:bytes}`.  `bit_width` is positive, byte count equals checked `(bit_width + 7)/8`, signed values use two's complement, and unused high bits are zero for unsigned or sign extension for signed.  The type profile fixes width/signedness; no decimal string or minimal-byte ambiguity. |
-| `.FLOAT`. | `{format:.BINARY32\|.BINARY64, little_endian_bits:bytes}` of exactly four/eight bytes; the text store writes it as an `X` hex-float bit pattern, not `B` bytes.  Preserve every bit, signed zero and NaN payload; semantic/compiler argument equivalence still needs its qualified policy, not host floating-point ==. |
-| `.BYTES`. | `{value:bytes}` with the registered string/byte-sequence type and exact bytes, including empty/non-UTF-8 values. |
+| `.INTEGER`. | `{signed:bool, bit_width:u32, little_endian:[] u8}`.  `bit_width` is positive, byte count equals checked `(bit_width + 7)/8`, signed values use two's complement, and unused high bits are zero for unsigned or sign extension for signed.  The type profile fixes width/signedness; no decimal string or minimal-byte ambiguity. |
+| `.FLOAT`. | `{format:.BINARY32\|.BINARY64, bits:u64}`; `.BINARY32` occupies the low 32 bits with the high bits zero.  The text store on disk writes it as an `X` hex-float bit pattern.  Preserve every bit, signed zero and NaN payload; semantic/compiler argument equivalence still needs its qualified policy, not host floating-point ==. |
+| `.BYTES`. | `{value:[] u8}` with the registered string/byte-sequence type and exact bytes, including empty/non-UTF-8 values. |
 | `.TYPE`. | `{value:TypedTypeRef}`.  Types are identities/descriptors, not source-spelling strings. |
 | `.ENUM`. | `{type_identity:TypeID, representation:TypedValue(.INTEGER)}`; aliases retain their actual typed value, and named spelling is not a new nominal identity.  Enum values may be sparse and shared, so a value can correspond to several members or none; never reconstruct a member from it. |
 | `.AGGREGATE`. | `{components:[]TypedArgument}` under the type profile's declared member/element order, preserving names and nested types.  Do not sort ordinary struct fields or inspect padding. |
 | `.SUBJECT`. | `{declaration:DeclarationID}` only where the registered parameter profile admits a declaration/procedure identity value; not an address to compiled code. |
-| `.SESSION_LOCAL`. | `{session:SessionID, token:bytes}` for a producer-owned uncanonicalisable identity/effect value.  Nonempty token is nonreassigned in that session; it is never persistable or equal across sessions. |
+| `.SESSION_LOCAL`. | `{session:SessionID, token:SessionLocalToken}` for a producer-owned uncanonicalisable identity/effect value.  Nonempty token is nonreassigned in that session; it is never persistable or equal across sessions. |
 
 These encodings preserve observations; they do not define Jai comparison operators or prove that every arm is an admissible compile-time module argument.
 A profile must qualify canonical argument equivalence before using values to establish a language instance/type equality.
@@ -752,14 +752,14 @@ No hidden evaluation is performed merely to build a key.
 Integer widths, aggregate counts/depth and canonical key sizes obey the existing explicit limits, with overflow checked before `(bit_width + 7)` or allocation.
 No pointer, evaluator effect, resource handle or lossy printed value silently becomes a persistent key.
 
-`ImportRequestIdentity` is `{compatibility_policy:bytes, request_mode:.ROOT|.MODULE_NAME|.SOURCE_PATH, request_bytes:bytes, resolution_base:PathValue, resolver_binding:bytes, compiler_request_class:bytes}`.
+`ImportRequestIdentity` is `{compatibility_policy:SchemaName, request_mode:.ROOT|.MODULE_NAME|.SOURCE_PATH, request_bytes:[] u8, resolution_base:PathValue, resolver_binding:ResolverBinding, compiler_request_class:CompilerRequestClass}`.
 Preserve the exact request bytes observed by that compiler policy, not a rewritten canonical path or import alias variable name.
 
 `compiler_request_class` is the canonical class record produced by the registered, independently qualified compiler-compatibility adapter; it cannot be an arbitrary caller label.
 The adapter must establish both required distinctions and permitted sharing under E2/E4.
 Unknown grouping returns unsupported; different conservative cache keys alone cannot prove language-level nominal incompatibility.
 
-`ProgramSettings` is `{program_identity:bytes, targets:[]ProgramTargetSettings}`; `ProgramTargetSettings` is `{module_target:bytes, explicit_arguments:[]TypedArgument, effective_arguments:[]TypedArgument, configuration_site:SyntaxOccurrence}`.
+`ProgramSettings` is `{program_identity:ProgramIdentity, targets:[]ProgramTargetSettings}`; `ProgramTargetSettings` is `{module_target:ModuleTarget, explicit_arguments:[]TypedArgument, effective_arguments:[]TypedArgument, configuration_site:SyntaxOccurrence}`.
 
 `program_identity` and `module_target` are service-verified canonical records under the compatibility policy.
 Targets have set semantics, sorted by complete `module_target` bytes; duplicate target configuration rejects even with identical values.
@@ -767,7 +767,7 @@ Argument sequences preserve their declared order.
 Main-program authority and per-module applicability are validated before any instance cache hit; an imported module cannot set its child's program parameters.
 Default-expression/source/evaluation dependencies remain required even when effective argument values match.
 
-`EffectiveModuleProgramKey` is `{program_identity:bytes, module_target:bytes, explicit_arguments:[]TypedArgument, effective_arguments:[]TypedArgument}` from the validated `ProgramSettings`/`ProgramTargetSettings` pair.
+`EffectiveModuleProgramKey` is `{program_identity:ProgramIdentity, module_target:ModuleTarget, explicit_arguments:[]TypedArgument, effective_arguments:[]TypedArgument}` from the validated `ProgramSettings`/`ProgramTargetSettings` pair.
 The `configuration_site` is required validation/dependency provenance but is deliberately excluded from that identity key: moving a configuration site or changing its source revision alone must not manufacture another module instance.
 
 `program_identity` is a service-verified canonical host-program binding under the compatibility policy, stable for the selected program lineage rather than a freshly issued `WorldID` or an unchecked caller label.
@@ -803,7 +803,7 @@ The supported initial semantic query catalogue is empty.
 The records below specify the future extension boundary; registering a descriptor-shaped string is not authorisation to enable semantics, change the fifteen operations, or bypass a separate profile/API review.
 Semantic admission needs a new context schema that supplies every field above, a versioned query binding and qualified language rules; no fallback from missing semantics to declaration-index names is allowed.
 
-`SemanticQueryRecord` is `{schema:bytes, implementation:bytes, kind:SemanticFacet, subject:SemanticSubject, arguments:[]TypedArgument, context:SemanticContextID}`.
+`SemanticQueryRecord` is `{schema:SchemaName, implementation:SchemaName, kind:SemanticFacet, subject:SemanticSubject, arguments:[]TypedArgument, context:SemanticContextID}`.
 
 `SemanticFacet` is the closed reserved catalogue `.DECLARATION_SET | .NAME_LOOKUP | .OVERLOAD_CANDIDATES | .NOMINAL_IDENTITY | .SIGNATURE | .CONSTANT_VALUE | .INSTANTIATION | .LAYOUT | .BODY | .GENERATED_MEMBERSHIP | .DIAGNOSTICS`.
 
@@ -819,9 +819,9 @@ Exact language-specific request and payload schemas must be registered before a 
 Equivalent logical queries can share work only within the same immutable selected semantic world/qualified inputs.
 Cross-world hits require full dependency validation and a new result association for the requesting world; they do not join an old attempt by `QueryKey` alone.
 
-`DependencyRecord` is `{query:QueryKey, subject:SemanticSubject, facet:SemanticFacet, context:SemanticContextID, observed_revision:bytes, observation:SemanticObservation, validation_world:WorldID, parent_attempt:bytes}`.
+`DependencyRecord` is `{query:QueryKey, subject:SemanticSubject, facet:SemanticFacet, context:SemanticContextID, observed_revision:ObservedRevision, observation:SemanticObservation, validation_world:WorldID, parent_attempt:AttemptStamp}`.
 
-`SemanticObservation` is `{schema:bytes, completeness:.COMPLETE|.PROVISIONAL {blocking:[]QueryKey}, value_descriptor:bytes, source_mapping:*SemanticSyntax}`; `value_descriptor` is the exact registered immutable canonical facet value, not merely its hash.
+`SemanticObservation` is `{schema:SchemaName, completeness:.COMPLETE|.PROVISIONAL {blocking:[]QueryKey}, value_descriptor:CanonicalValue, source_mapping:*SemanticSyntax}`; `value_descriptor` is the exact registered immutable canonical facet value, not merely its hash.
 
 The registered revision domain validates `observed_revision`.
 Provisional blocking is nonempty and cannot certify a complete missing-name result.
@@ -832,18 +832,18 @@ Payload/dependency/completeness publication is atomic; no partial dependency set
 
 Revision/identity/source-map validation is mandatory even when this key's digest matches.
 
-`GeneratedProvenance` is `{producer_query:QueryKey, producer_revision:bytes, generator_binding:bytes, context:SemanticContextID, inputs:[]DependencyRecord, effects:[]EffectObservation, outputs:[]GeneratedOutput}`.
+`GeneratedProvenance` is `{producer_query:QueryKey, producer_revision:ProducerRevision, generator_binding:GeneratorBinding, context:SemanticContextID, inputs:[]DependencyRecord, effects:[]EffectObservation, outputs:[]GeneratedOutput}`.
 
-`EffectObservation` is `{schema:bytes, subject:bytes, observation:bytes}` under an explicitly supported effect tracker; unknown/untracked effects prevent persistent reuse, not an empty complete effect set.
+`EffectObservation` is `{schema:SchemaName, subject:CanonicalValue, observation:CanonicalValue}` under an explicitly supported effect tracker; unknown/untracked effects prevent persistent reuse, not an empty complete effect set.
 
-`GeneratedOutput` is `{ordinal:u64, source_revision:SourceRevision, source_bytes:bytes, origin:.GENERATED}`; ordinals are dense in producer emission order.
+`GeneratedOutput` is `{ordinal:u64, source_revision:SourceRevision, source_bytes:[] u8, origin:.GENERATED}`; ordinals are dense in producer emission order.
 
 Its provenance key is `K("generated-provenance", [V(GeneratedProvenance, provenance)])`; generated output source/context/origin schemas must be admitted separately before a `.GENERATED` binding is supported.
 Re-enter syntax/discovery with this protected provenance and a separate origin schema, never spans into an authored source file.
 Evaluator trust, permissions and execution limits remain required and unsupported initially.
 A failed/compiler-rejected generator cannot publish a successful output prefix.
 
-`CycleObservation` is `{schema:bytes, required_edges:[]CycleEdge, classification:.EXTERNAL_PENDING|.UNCLASSIFIED|.LEGAL_RECURSION|.ILLEGAL_CYCLE, rule:*bytes}`; `CycleEdge` is `{from:QueryKey, to:QueryKey, milestone:SemanticFacet}`.
+`CycleObservation` is `{schema:SchemaName, required_edges:[]CycleEdge, classification:.EXTERNAL_PENDING|.UNCLASSIFIED|.LEGAL_RECURSION|.ILLEGAL_CYCLE, rule:*SchemaName}`; `CycleEdge` is `{from:QueryKey, to:QueryKey, milestone:SemanticFacet}`.
 
 Actual required unresolved edges are reported in deterministic `QueryKey`-byte order with duplicate edges rejected.
 
@@ -851,7 +851,7 @@ Actual required unresolved edges are reported in deterministic `QueryKey`-byte o
 Layout by-value cycles, legal pointer recursion and evaluator re-entry cannot be classified from scheduler idleness or a generic recursion depth guard.
 This closes the unsupported/rule-admission boundary, not the catalogue of future language recursion rules.
 
-`SemanticArchive` is `{schema:bytes, workspace:WorkspaceID, provider_continuity:ContinuityProof, producer_binding:bytes, compatibility_policy:bytes, declarations:[]DeclarationBinding, matches:[]MatchRecord, artifacts:[]ArchivedArtifact}`; `ArchivedArtifact` is `{key:bytes, query:SemanticQueryRecord, observation:SemanticObservation, dependencies:[]DependencyRecord}`.
+`SemanticArchive` is `{schema:SchemaName, workspace:WorkspaceID, provider_continuity:ContinuityProof, producer_binding:ProducerBinding, compatibility_policy:SchemaName, declarations:[]DeclarationBinding, matches:[]MatchRecord, artifacts:[]ArchivedArtifact}`; `ArchivedArtifact` is `{key:SemanticArtifactKey, query:SemanticQueryRecord, observation:SemanticObservation, dependencies:[]DependencyRecord}`.
 
 Only profiles with canonical, tracked, persistable values may write such an archive.
 It is a candidate graph, not live handles or authority to evaluate arbitrary stored code.
@@ -1174,7 +1174,7 @@ No task key omits its candidate/selected world or silently joins a newer world; 
 The task index admits at most one current task for an equal full key; independent public operation identities and waiter/ticket reservations are not collapsed by sharing that task.
 Initial semantic/evaluator query kinds still return `.UNSUPPORTED` before either task kind is created.
 
-`AttemptStamp` is `{session:SessionID, world:WorldID, task_key:bytes, slot:u64, generation:u64, attempt:u64}`.
+`AttemptStamp` is `{session:SessionID, world:WorldID, task_key:TaskKey, slot:u64, generation:u64, attempt:u64}`.
 `task_key` is the complete canonical key; `slot`/`generation` identify the live task record, not a public handle, and `attempt` is a positive checked counter local to that allocation.
 Start `generation`/`attempt` at 1; advance `attempt` before a permitted replacement dispatch, never reuse it, and retire the task allocation on exhaustion rather than wrap.
 A fresh allocation uses a fresh nonreassigned slot/generation association; milestone-3 generation retirement rules apply.
@@ -1472,10 +1472,10 @@ Outer request/session records carry the interface schema version, inherited by n
 | `Handle(K: HandleKind)`. | `{session: SessionID, KIND :: K, slot: u64, generation: u64}`.  Validate session/kind/generation on every operation; retire a slot before generation wrap.  A handle identifies one owning registration, not a serialisable world/declaration identity. |
 | `SessionOptions`. | `{version, workspace, provider_namespace, provider_capabilities, context, requested_limits, store_policy}`.  The host explicitly supplies required configuration/policy or requests a documented negotiated value; unspecified defaults are not silently chosen by this draft. |
 | `SessionDescription`. | `{session_identity, workspace, provider_namespace, lifecycle, accepted_frontier, tracked_document_states, capabilities, consistency, effective_limits, store_status}`.  Return one coherent caller-owned value snapshot, not mutable borrowed coordinator storage.  It reports source selection/capabilities, not a published analysis world or atomic filesystem view. |
-| `SourceInput`. | Tagged `.INLINE_BYTES {bytes}` or `.PROVIDER_LEASE {provider_identity, provider_revision, immutable_lease}`.  Inline bytes are borrowed only during submission; acceptance copies them or acquires an independent immutable lease.  The provider lease must be retained successfully before acknowledgement. |
+| `SourceInput`. | Tagged `.INLINE_BYTES {bytes:[] u8}` or `.PROVIDER_LEASE {provider_identity, provider_revision, immutable_lease}`.  Inline bytes are borrowed only during submission; acceptance copies them or acquires an independent immutable lease.  The provider lease must be retained successfully before acknowledgement. |
 | `ExpectedProviderState`. | Tagged `.UNTRACKED` or `REVISION {provider_revision}`.  `.UNTRACKED` matches only a document with no accepted provider state in this session; it is not confirmed absence and never bypasses a tracked revision conflict. |
 | `DiskObservation`. | Tagged `.PRESENT {source: SourceInput, source_revision, context: ContextID, observation_provenance:ObservationProvenance}` or `.ABSENT {provider_revision, context, observation_provenance:ObservationProvenance}`.  Neither unknown membership nor permission denial is `.ABSENT`.  Check revision claims against captured inputs/provider authority; do not trust an arbitrary digest field. |
-| `RangeEdit`. | `{start_byte: u64, end_byte: u64, replacement: bytes}` with half-open endpoints into the current intermediate document bytes.  The enclosing event names the initial base revision; apply edits sequentially, checking ranges/overflow after each, then accept or reject the whole batch. |
+| `RangeEdit`. | `{start_byte: u64, end_byte: u64, replacement: [] u8}` with half-open endpoints into the current intermediate document bytes.  The enclosing event names the initial base revision; apply edits sequentially, checking ranges/overflow after each, then accept or reject the whole batch. |
 | `DocumentEvent`. | `{document: DocumentID, expected_provider_state: ExpectedProviderState, source_context: ContextID, binding:*DocumentBinding, event: EventPayload}`.  All required base/host-confirmation tokens are explicit, not inferred from timestamps or cache contents.  A first `.SET_OVERLAY`, `.OBSERVE_DISK` or host-confirmed `.RESTORE_OVERLAY` may use `.UNTRACKED`; editing, saving or resetting requires compatible tracked base state. |
 | `SourceBatch`. | `{version, workspace: WorkspaceID, session: SessionID, expected_frontier: ProviderFrontier, contexts:[]ContextRegistration, events: []DocumentEvent, milestone: .SYNTAX_INDEX}`.  Initially require one event per logical document; a range-edit event may contain its sequential edit list.  Reject an empty batch or unsupported milestone explicitly. |
 | `AnalysisRequest`. | `{version, expected_frontier, documents: []DocumentID, milestone: .SYNTAX_INDEX}`.  Request analysis of a nonempty, duplicate-free set of already tracked selected revisions under the membership rules below, without changing provider source state.  Unknown members or incompatible consistency reject explicitly; no hidden provider/disk read is implied. |
@@ -1486,6 +1486,23 @@ Outer request/session records carry the interface schema version, inherited by n
 
 Counts, bytes, decoded sizes and accepted registrations must have concrete checked limits before implementing this schema.
 The fixed-width handle fields do not bound total allocations or authorise wrapping IDs; no client may fabricate a valid registration by copying a logical identity into a slot.
+
+#### Byte-Valued Types
+
+There is no general `bytes` type.
+Each byte-valued field uses one of the following types, and identifiers that must not be confused with each other have distinct types even when they share a representation.
+
+| Type. | Definition and use. |
+| --- | --- |
+| `[] u8`. | Raw content compared and stored exactly, possibly not UTF-8: source bytes, edit replacements, `TypedValue.BYTES` values, raw producer messages, import request spellings, variable-width integers and quoted unrecognised input. |
+| `string`. | Strict UTF-8 presentation text such as `message_utf8`, and authored names such as `TypedArgument.name`. |
+| `SchemaName :: #type,distinct string`. | An exact case-sensitive registered ASCII identifier of a schema, profile, policy, platform binding or rule, such as `jai-cache-store/1`. |
+| `RegistryName :: #type,distinct string`. | An exact registered ASCII tag: a node kind, helper layout, enum domain or enum/flag member name. |
+| Host and provider tokens. | `StoreNamespace`, `ProviderNamespace`, `AuthorityNamespace`, `AuthorityIdentity`, `HostAuthority`, `ProviderIdentity`, `ConfirmationToken`, `ObservationToken`, `CaptureToken`, `LeaseToken`, `PolicyKey` and `SessionLocalToken`, each `#type,distinct [] u8`.  Issued by their owning authority, compared byte-for-byte and never parsed by the service. |
+| Canonical encodings. | `ContextDescriptor`, `SyntaxAdapterDescriptor`, `TypeDescriptor`, `CanonicalValue`, `ClockIdentity`, `TaskKey`, `SemanticArtifactKey`, `GeneratedProvenanceKey`, `BackingIdentity`, `ProducerBinding`, `GeneratorBinding`, `ResolverBinding`, `CompilerRequestClass`, `ProgramIdentity`, `ModuleTarget`, `ObservedRevision`, `ProducerRevision` and `DamageFingerprint`, each `#type,distinct [] u8` holding the complete canonical `K`/`V` encoding produced by the recipe or registered schema that defines it. |
+| `StoreBlobKey :: #type,distinct [32] u8`. | The SHA-256 digest of a complete store file. |
+
+These types all use the canonical `bytes` encoding and the store's `B` row; records such as `ProviderAdapterDescriptor` and `AttemptStamp` keep their record encoding.
 
 #### Analysis Membership, Duplicates and Ordering
 
@@ -1622,7 +1639,7 @@ Envelope access and all nested views borrow from the owning `.RESULT`; an indepe
 | Common span. | `{document, source_revision, start_byte:u64, end_byte:u64}` with `0 <= start_byte <= end_byte <= exact_source.count`.  Zero-width insertion/recovery spans are permitted.  A span from another revision is not remapped implicitly; generated/unlocated items require an explicit tagged origin, not an out-of-range sentinel. |
 | `.SYNTAX_SNAPSHOT`. | Exact owned source bytes, syntax-schema identifier, token sequence, root/node records and recovery information needed for C1 comparison.  Node references are snapshot-local IDs resolved only within this envelope, not pointers, declaration identities or global IDs.  The schema must enumerate node/token variants and every observable child/list/span field before API approval; exposing today's mutable `Parser_Node` memory is not this contract. |
 | `.SYNTAX_DIAGNOSTICS`. | Ordered records under `jai-cache-syntax-diagnostics/1` as specified below, including code, severity, origins/messages, token details and recovery action.  Preserve parser emission order; do not deduplicate by message or location.  A malformed source diagnostic is an available syntax result, not a service failure. |
-| `.SYNTAX_DECLARATION_INDEX`. | `{coverage, entries: []IndexEntry, shared_regions: []SharedRegion}` under the draft `jai-cache-syntax-declaration-index/2` contract below.  Entries follow declaration-event/binding-group order, not a global span sort; entry/region/node IDs occupy distinct result-local domains.  Names separate exact source spelling from producer values; visibility records same-list provenance, not resolved accessibility.  Recovery and coverage retain explicit uncertainty.  Repeated/anonymous/recovered declarations are not merged by name; this index promises neither nominal `DeclarationID` continuity nor semantic lookup/completeness. |
+| `.SYNTAX_DECLARATION_INDEX`. | `{coverage, entries: []IndexEntry, shared_regions: []SharedRegion}` under the draft `jai-cache-syntax-declaration-index/1` contract below.  Entries follow declaration-event/binding-group order, not a global span sort; entry/region/node IDs occupy distinct result-local domains.  Names separate exact source spelling from producer values; visibility records same-list provenance, not resolved accessibility.  Recovery and coverage retain explicit uncertainty.  Repeated/anonymous/recovered declarations are not merged by name; this index promises neither nominal `DeclarationID` continuity nor semantic lookup/completeness. |
 
 Messages are strict UTF-8 presentation text.
 Source bytes and spelled-name bytes preserve exact parser input slices; producer-name bytes instead preserve the exact producer value, which can differ from the source spelling.
@@ -1647,7 +1664,7 @@ An advertised alternative is not an implicit fallback for a retained world.
 
 Validate the supported cross-schema combination as a tuple, not only each identifier in isolation.
 For example, an index node reference must resolve under the bound node registry, and an inserted-token observation must use the bound token/recovery mapping.
-Independent schema families need not have matching version numbers: diagnostic/1 and declaration-index/2 can coexist only when their complete registered combination is supported, not because suffixes agree or disagree.
+Independent schema families need not have matching version numbers: a later declaration-index/2 could coexist with diagnostic/1 only when their complete registered combination is supported, not because suffixes agree or disagree.
 The returned envelope schema, actual payload fields and kind-specific completeness must agree with that binding and the result description's protected payload.
 Reject contradictory/unknown encodings rather than skipping fields until a familiar shape remains.
 
@@ -1659,7 +1676,7 @@ Previously retained results remain readable under their original registered acce
 These rules do not approve a legacy schema converter, mixed-version compatibility matrix or migration.
 Such support requires its own exact registered mapping and qualification; a version-shaped identifier alone proves nothing.
 
-The discriminating future case queries declaration-index/2 in a world whose diagnostic profile uses diagnostic/1: return each exact admitted schema, and reject an unsupported tuple without guessing a fallback.
+The discriminating future case queries declaration-index/1 in a world whose diagnostic profile uses diagnostic/1: return each exact admitted schema, and reject an unsupported tuple without guessing a fallback.
 Additional independent cases cover interface-versus-payload version confusion, changed advertised session capabilities with a retained old world, mismatched token/node/recovery registries, unknown envelope fields and a stored legacy index with unchanged source bytes.
 Assert exact context/envelope bindings, unsupported-versus-failed outcomes and retained old-result access.
 The milestone-2 closure supplies the snapshot schema and public accessor signatures.
@@ -1711,7 +1728,7 @@ Cursor position, current editor selection and UI visibility are not hidden query
 Existing priority may affect scheduling, but never which declarations/diagnostics are present in a successful payload.
 
 A host can derive a display selection from the owned whole-document result.
-Such a selection is a view of that result, not another `jai-cache-syntax-declaration-index/2` payload with a newly asserted completeness value.
+Such a selection is a view of that result, not another `jai-cache-syntax-declaration-index/1` payload with a newly asserted completeness value.
 Preserve original entry/region/node IDs and parent/binding associations, and retain access to omitted ancestors/regions through the original protected result.
 Do not densely renumber a filtered list while leaving references in the old namespace.
 If serialising or independently owning a transformed index is later required, define its schema, reference remapping/closure and coverage rules explicitly; the original full-result contract does not grant that conversion automatically.
@@ -1867,7 +1884,7 @@ If producer messages cannot be represented losslessly as the required UTF-8 pres
 
 `.FATAL` parse status is not automatically a service failure: publish available diagnostics/recovered syntax when safely owned; an allocation/internal parser failure remains a service failure, not a fabricated language diagnostic.
 
-`jai-cache-syntax-declaration-index/2` `data` is `{coverage, entries: []IndexEntry, shared_regions: []SharedRegion}`.
+`jai-cache-syntax-declaration-index/1` `data` is `{coverage, entries: []IndexEntry, shared_regions: []SharedRegion}`.
 
 `coverage` is `.COMPLETE_SYNTAX_TRAVERSAL` or `.PARTIAL_SYNTAX_TRAVERSAL {reasons: []CoverageReason}` under the structured reason contract below; completeness concerns traversal of this captured parse, never import closure or semantic membership.
 
@@ -1881,7 +1898,7 @@ Recovery does not automatically mean partial traversal, and a complete traversal
 Anonymous, missing and unmapped names are distinct, not empty identifiers.
 
 `container` is `.ROOT | .DECLARATION {local_entry_id} | .SHARED_REGION {local_region_id}` and `recovery_status` is `.PARSED | .RECOVERED | .UNCLASSIFIED {reason:CoverageReason}` under the attribution rules below.
-The version change makes shared ownership explicit; these are replacement drafts, not compatibility promises for an implemented v1/v2 payload.
+Shared ownership is explicit through `shared_regions` and the `.SHARED_REGION` container; this is a draft, not a compatibility promise for an implemented payload.
 
 `syntax_kind` is `.DECLARATION | .COMPOUND_BINDING | .ENUM_MEMBER`; it describes the declaration grammar, not whether an initialiser eventually denotes a procedure/type/value.
 A compound declaration emits one entry per newly declared binding in authored order, sharing the declaration node/origin; assigned targets are uses, not index declarations.
@@ -2053,7 +2070,7 @@ A field named `observation` never transfers a result/world lease.
 | `ShutdownRequested`. | `{shutdown:Handle(.SHUTDOWN)}`. |
 
 `OperationError` is `{code, detail:ErrorDetail}` with exactly the eight codes from the operation table.
-Its detail arm must match the code: `.INVALID_VERSION {supplied:bytes, supported:[]bytes}`, `.INVALID_ARGUMENT {path:FieldPath, rule:ArgumentRule}`, `.INVALID_HANDLE {kind:HandleKind}`, `.BASE_MISMATCH {scope:.FRONTIER|.DOCUMENT|.SOURCE|.OVERLAY, document:*DocumentID}`, `.UNSUPPORTED_EVENT {event_tag:bytes}`, `.ADMISSION_DENIED {reason:AdmissionReason}`, `.ACTIVE_SESSION`, or `.SERVICE_CLOSED`.
+Its detail arm must match the code: `.INVALID_VERSION {supplied:[] u8, supported:[]SchemaName}`, `.INVALID_ARGUMENT {path:FieldPath, rule:ArgumentRule}`, `.INVALID_HANDLE {kind:HandleKind}`, `.BASE_MISMATCH {scope:.FRONTIER|.DOCUMENT|.SOURCE|.OVERLAY, document:*DocumentID}`, `.UNSUPPORTED_EVENT {event_tag:[] u8}`, `.ADMISSION_DENIED {reason:AdmissionReason}`, `.ACTIVE_SESSION`, or `.SERVICE_CLOSED`.
 
 Expected/current source states are obtained through `DescribeSession`, not an unbounded error dump.
 
@@ -2062,16 +2079,16 @@ Expected/current source states are obtained through `DescribeSession`, not an un
 Field paths use the registry's `.FIELD {name_ascii}`/`.ELEMENT {index:u64}` segments, rooted at the operation input.
 An unrecognised incoming tag can be quoted as bounded raw bytes; it does not extend a closed response union.
 
-- `AdmissionReason` is `.LIMIT {name:LimitName}` or `.CONFIGURATION_REQUIRED {field:FieldPath}` or `.CAPABILITY {schema:bytes}` or `.SOURCE_ACQUISITION {failure:Failure}` or `.RESOURCE_EXHAUSTED`.
+- `AdmissionReason` is `.LIMIT {name:LimitName}` or `.CONFIGURATION_REQUIRED {field:FieldPath}` or `.CAPABILITY {schema:SchemaName}` or `.SOURCE_ACQUISITION {failure:Failure}` or `.RESOURCE_EXHAUSTED`.
 - `Failure` is `{stage:.ADMISSION|.PROVIDER|.PARSER|.CONVERSION|.PUBLICATION|.SERVICE, code:.IO|.PERMISSION|.REVISION_UNAVAILABLE|.INVALID_EVIDENCE|.INVALID_REFERENCE|.INVALID_TEXT|.RESOURCE_LIMIT|.INTERNAL, diagnostic:*ServiceDiagnostic}`.
-- `ServiceDiagnostic` is `{severity:.WARNING|.ERROR, message_utf8:bytes}` with strict UTF-8; it is not a language diagnostic and has no inferred source span.
+- `ServiceDiagnostic` is `{severity:.WARNING|.ERROR, message_utf8:string}` with strict UTF-8; it is not a language diagnostic and has no inferred source span.
 - `UnavailableReason` is `.NOT_CAPTURED | .SOURCE_ABSENT | .SOURCE_UNKNOWN | .REVISION_UNAVAILABLE | .PROVIDER_UNAVAILABLE`.
-- `UnsupportedReason` is `{capability:.SEMANTIC_QUERY|.COMPILER_EVALUATION|.QUERY_SCHEMA|.CONTEXT_PROFILE|.CONSISTENCY, schema:*bytes}`.
+- `UnsupportedReason` is `{capability:.SEMANTIC_QUERY|.COMPILER_EVALUATION|.QUERY_SCHEMA|.CONTEXT_PROFILE|.CONSISTENCY, schema:*SchemaName}`.
 - `CancellationReason` is `.CALLER | .WORLD_SUPERSEDED | .SHUTDOWN | .PRESSURE`; cancellation never relabels a failed conversion as successful partial output.
 - `.CALLER` identifies waiter-local UI/client stop; `.WORLD_SUPERSEDED` identifies cancellation of unfinished work against an obsolete source frontier and is delivered to every still-pending query waiter sharing it.
 Cancellation observations preserve the original selected-world identity; clients can inspect the accepted frontier and explicitly acquire/request current analysis before reissuing, but no successor world or retry is selected automatically.
 
-`Deadline` is `.AT {clock_identity:bytes, nanoseconds:u64}` in the monotonic clock advertised by the owning service in `Capabilities.clock_identity`.
+`Deadline` is `.AT {clock_identity:ClockIdentity, nanoseconds:u64}` in the monotonic clock advertised by the owning service in `Capabilities.clock_identity`.
 A foreign clock is `.INVALID_ARGUMENT`.
 It is neither wall time nor a persisted timestamp; wrap/overflow rejects, and no infinite-wait sentinel is reserved.
 
@@ -2085,7 +2102,7 @@ It performs no provider read, parsing, registration, waiting or implicit retain:
 ```text
 ReadWorld(world: Handle(.WORLD)) -> (success: bool, result: Borrowed(WorldDescription), error: *OperationError)
 ReadResult(result: Handle(.RESULT)) -> (success: bool, result: Borrowed(ResultDescription), error: *OperationError)
-ReadSource(result: Handle(.RESULT), start_byte: u64, end_byte: u64) -> (success: bool, result: Borrowed(bytes), error: *OperationError)
+ReadSource(result: Handle(.RESULT), start_byte: u64, end_byte: u64) -> (success: bool, result: Borrowed([] u8), error: *OperationError)
 ResolveNode(result: Handle(.RESULT), node_id: u64) -> (success: bool, result: Borrowed(NodeRecord), error: *OperationError)
 ResolveToken(result: Handle(.RESULT), token_id: u64) -> (success: bool, result: Borrowed(TokenRecord), error: *OperationError)
 ResolveRecovery(result: Handle(.RESULT), recovery_id: u64) -> (success: bool, result: Borrowed(RecoveryRecord), error: *OperationError)
@@ -2110,17 +2127,17 @@ No public deep-copy API or mutable field accessor is implied; a host copy must i
 The provider schema identifier is ASCII `jai-cache-source-provider/1`.
 
 `SessionOptions.provider_capabilities` is the following exact `ProviderAdapterDescriptor`, not a free-form capability map.
-Its fields are `{adapter_schema, authority_identity:bytes, document_policy_version:u32, path_platform, case_alias_link_policy, reappearance_policy, consistency_capabilities, lease_capabilities}` in that order.
+Its fields are `{adapter_schema, authority_identity:AuthorityIdentity, document_policy_version:u32, path_platform, case_alias_link_policy, reappearance_policy, consistency_capabilities, lease_capabilities}` in that order.
 
 `adapter_schema` must equal this identifier; authority bytes must be nonempty and bind to the actual host/provider registration, not a claim trusted from persistence.
 
 | Descriptor field. | Closed alternatives and admission rule. |
 | --- | --- |
 | `path_platform`. | `.WINDOWS_UTF16LE`. | `.POSIX_BYTES`, matching the admitted provider's native path validator and every canonical document binding.  Cross-platform capability is not inferred from decoding a path. |
-| `case_alias_link_policy`. | `.DISTINCT_KEYS` or `.HOST_VALIDATED_ALIASES {policy_identity:bytes}`.  `.DISTINCT_KEYS` performs no service-side case folding, link resolution or alias merging; keys are host-issued, not inferred from path strings.  The second arm requires a registered version-bound host validator and evidence before two requests share a key.  It is unsupported if that validator is absent. |
+| `case_alias_link_policy`. | `.DISTINCT_KEYS` or `.HOST_VALIDATED_ALIASES {policy_identity:SchemaName}`.  `.DISTINCT_KEYS` performs no service-side case folding, link resolution or alias merging; keys are host-issued, not inferred from path strings.  The second arm requires a registered version-bound host validator and evidence before two requests share a key.  It is unsupported if that validator is absent. |
 | `reappearance_policy`. | `.SAME_KEY`. | `.FRESH_KEY`, chosen explicitly by the provider.  `.SAME_KEY` retains the registered document identity across confirmed absence/reappearance; `.FRESH_KEY` requires a new document key and leaves historical identity untouched. |
 | `consistency_capabilities`. | Nonempty canonical set of `.IMMUTABLE_CAPTURE`. | `.COHERENT_CAPTURE`, in this order.  `.IMMUTABLE_CAPTURE` guarantees each retained observation, not a common filesystem instant.  `.COHERENT_CAPTURE` additionally requires one provider-attested capture token for the whole participating set.  There is no `.BEST_EFFORT` arm permitting mutable bytes under an accepted revision. |
-| `lease_capabilities`. | `.COPY_ONLY` or `.IMMUTABLE_RETAIN_RELEASE {lease_schema:bytes}`.  `.COPY_ONLY` admits `.INLINE_BYTES` only.  The second requires the registered provider's retain/read/release contract below; arbitrary pointers or an unregistered lease schema reject. |
+| `lease_capabilities`. | `.COPY_ONLY` or `.IMMUTABLE_RETAIN_RELEASE {lease_schema:SchemaName}`.  `.COPY_ONLY` admits `.INLINE_BYTES` only.  The second requires the registered provider's retain/read/release contract below; arbitrary pointers or an unregistered lease schema reject. |
 
 `DocumentBinding` is `{document:DocumentID, absolute_path:PathValue, provider_policy_version:u32}`.
 It must match the document's provider namespace/key and the session's policy.
@@ -2130,7 +2147,7 @@ Refine `DocumentEvent` to `{document, expected_provider_state, source_context, b
 A changed binding under the same key rejects the complete batch.
 This is a provider attestation plus registered policy validation, not independent physical-file discovery by the service.
 
-`ContextRegistration` is `{identity:ContextID, descriptor:bytes}` where descriptor bytes are exactly the previously specified canonical syntax-context `K` descriptor.
+`ContextRegistration` is `{identity:ContextID, descriptor:ContextDescriptor}` where descriptor bytes are exactly the previously specified canonical syntax-context `K` descriptor.
 The service parses, validates and recomputes that identity against the actual registered producer/profile tuple before accepting it.
 
 `SessionOptions.context` is `{supported_tuples:[]SchemaTuple, contexts:[]ContextRegistration}`.
@@ -2146,7 +2163,7 @@ Occurrence-specific paths may be registered by later batches without reopening t
 
 `SchemaTuple` is `{token_tags, source_tokens, nodes, recovery, declaration_index, diagnostics, snapshot, authored_edges, syntax_adapter, parse_profile, diagnostic_profile}`, each an exact registered ASCII identifier.
 
-Required initial schema values are respectively `jai-cache-token-tags/1`, `jai-cache-source-tokens/1`, `jai-cache-authored-nodes/1`, `jai-cache-recovery/1`, `jai-cache-syntax-declaration-index/2`, `jai-cache-syntax-diagnostics/1`, `jai-cache-syntax-snapshot/1`, `jai-cache-authored-edges/1`, and `jai-cache-syntax-adapter/1`; profile identifiers resolve to the explicitly registered producer policies already required by the context.
+Required initial schema values are respectively `jai-cache-token-tags/1`, `jai-cache-source-tokens/1`, `jai-cache-authored-nodes/1`, `jai-cache-recovery/1`, `jai-cache-syntax-declaration-index/1`, `jai-cache-syntax-diagnostics/1`, `jai-cache-syntax-snapshot/1`, `jai-cache-authored-edges/1`, and `jai-cache-syntax-adapter/1`; profile identifiers resolve to the explicitly registered producer policies already required by the context.
 
 The context's four syntax-schema fields refer to `source_tokens`, `nodes`, `recovery` and `declaration_index`; `source_tokens` binds `token_tags`, and its `snapshot` mapping binds the remaining tuple.
 
@@ -2157,9 +2174,9 @@ No version-number coincidence establishes compatibility.
 Admission accepts only a whole implemented tuple; the registry must expose which of the three `QueryKind` payload implementations it actually supplies.
 Advertising all three remains a requirement for the syntax-first qualification slice, not a claim that an adapter exists today.
 
-`Consistency` is `.IMMUTABLE_CAPTURE` or `.COHERENT_CAPTURE {provider_namespace:bytes, capture_token:bytes}`; `capture_token` is nonempty and provider-attested.
+`Consistency` is `.IMMUTABLE_CAPTURE` or `.COHERENT_CAPTURE {provider_namespace:ProviderNamespace, capture_token:CaptureToken}`; `capture_token` is nonempty and provider-attested.
 
-`ObservationProvenance` is `{provider_identity:bytes, observation_token:bytes, consistency:Consistency}`.
+`ObservationProvenance` is `{provider_identity:ProviderIdentity, observation_token:ObservationToken, consistency:Consistency}`.
 Refine `DiskObservation`'s `.PRESENT` arm to `{source, source_revision, context, observation_provenance:ObservationProvenance}` and its `.ABSENT` arm to `{provider_revision, context, observation_provenance:ObservationProvenance}`.
 
 The provenance is required in both arms; selected consistency comes from that value, not a timestamp.
@@ -2172,7 +2189,7 @@ The baseline requests no stronger guarantee than immutable capture.
 
 A host needing coherent capture must supply/validate it, not upgrade a mixed capture after analysis.
 
-`ProviderLeaseRef` is `{lease_schema:bytes, lease_token:bytes}`; source input's `immutable_lease` has exactly this type.
+`ProviderLeaseRef` is `{lease_schema:SchemaName, lease_token:LeaseToken}`; source input's `immutable_lease` has exactly this type.
 
 The registered provider exposes synchronous `RetainSource(ref) -> .RETAINED {byte_count:u64} | .FAILED {failure:Failure}`, `ReadSourceLease(ref) -> immutable byte view`, and `ReleaseSource(ref) -> Unit`.
 
@@ -2191,7 +2208,7 @@ A lease token copied from storage establishes no live provider ownership.
 
 Adapter acquisition failure rejects the batch atomically; later loss of an allegedly immutable retained source is a provider failure, never permission to substitute new bytes.
 
-`HostConfirmation` is `{host_authority:bytes, confirmation_token:bytes, document:DocumentID, expected_provider_state:ExpectedProviderState, action:.RESET|.RESTORE, source_revision:*SourceRevision, recovery_candidate:*RecoveryCandidateRef}`.
+`HostConfirmation` is `{host_authority:HostAuthority, confirmation_token:ConfirmationToken, document:DocumentID, expected_provider_state:ExpectedProviderState, action:.RESET|.RESTORE, source_revision:*SourceRevision, recovery_candidate:*RecoveryCandidateRef}`.
 
 It is accepted only from the registered authoritative host channel and must match the enclosing event/base.
 - `.RESET` has null for both pointer fields and selects its supplied disk observation.
@@ -2199,7 +2216,7 @@ It is accepted only from the registered authoritative host channel and must matc
 
 Tokens are nonempty, action-bound attestations, not user-interface prompts issued by the cache or proof inferred from a recovery file.
 
-`RecoveryCandidateRef` is `{store_namespace:bytes, candidate_key:bytes, source_revision:SourceRevision}` issued by the supported store reader; candidate-key bytes are opaque to this API and interpreted only by the milestone-5 store schema.
+`RecoveryCandidateRef` is `{store_namespace:StoreNamespace, candidate_key:StoreBlobKey, source_revision:SourceRevision}` issued by the supported store reader; candidate-key bytes are opaque to this API and interpreted only by the milestone-5 store schema.
 
 No path or live handle is reconstructed from them.
 - `.ACK_SAVE.expected_overlay_revision` is the `ProviderRevision` of the event that installed that overlay, not its content `SourceRevision` or the latest combined disk/overlay state.
@@ -2221,7 +2238,7 @@ Present `.DISK` and `.ABSENT` require validated provenance; host overlays may ha
 Its top-level configuration is `ConfigurationID = K("syntax-configuration", [V(Sequence(SchemaTuple), canonical_supported_tuple_set)])`, not a filename-bearing document `ContextID`; per-member context remains the sole occurrence authority and binds the actual verified producer/adapter build.
 Rename, implicit resolver discovery and semantic membership remain `.UNSUPPORTED` in this schema; no placeholder resolver callback is admitted.
 
-`Capabilities` is `{interface_version:InterfaceVersion, provider:ProviderAdapterDescriptor, tuples:[]SchemaTuple, syntax_adapters:[]bytes, queries:[]QueryKind, clock_identity:bytes}`.
+`Capabilities` is `{interface_version:InterfaceVersion, provider:ProviderAdapterDescriptor, tuples:[]SchemaTuple, syntax_adapters:[]SyntaxAdapterDescriptor, queries:[]QueryKind, clock_identity:ClockIdentity}`.
 Adapter bytes are exact canonical syntax-adapter descriptors, not host claims.
 Tuple/adapter lists are duplicate-free canonical sets sorted by their complete canonical bytes; queries appear in registry order and list implemented kinds only.
 
@@ -2240,7 +2257,7 @@ Its lifecycle is `.OPEN | .QUIESCING | .DRAINING | .STOPPED`.
 
 `StoreStatus` is `{mode:.ENABLED|.DISABLED|.DEGRADED, acknowledged_frontier:*ProviderFrontier, diagnostics:[]ServiceDiagnostic}`; an acknowledged frontier reports confirmed durable progress only, never source admission alone.
 
-`SessionOptions.store_policy` is `{policy_schema:bytes, policy_key:bytes}` identifying explicit host configuration resolved by the registered store-policy implementation.
+`SessionOptions.store_policy` is `{policy_schema:SchemaName, policy_key:PolicyKey}` identifying explicit host configuration resolved by the registered store-policy implementation.
 Missing required policy returns `.ADMISSION_DENIED`/`.CONFIGURATION_REQUIRED`; unknown policy schemas return `.ADMISSION_DENIED`/`.CAPABILITY`.
 This API cannot interpret an opaque key as a path or choose persistence defaults.
 Required source/recovery persistence (R2) and the exact store configuration/grammar (milestone 5) are unchanged.
@@ -2313,7 +2330,7 @@ A schema identifier resolves to its complete ordered field/variant/type registry
 
 | Value type. | Canonical bytes. |
 | --- | --- |
-| `bytes`. | `K("bytes", [exact_bytes])`; empty bytes are valid unless the owning field forbids them. |
+| `[] u8`, `string` and their distinct types. | `K("bytes", [exact_bytes])`; empty values are valid unless the owning field forbids them. |
 | ASCII tag/schema. | `K("ascii", [exact_ASCII_bytes])`; nonempty, bytes 0x21 through 0x7E only, case-sensitive.  The owning registry further restricts the spelling. |
 | `bool`. | `K("bool", [one_byte])`, exactly 0 or 1. |
 | `u8`, `u16`, `u32`, `u64`. | `K(type_name, [fixed_width_little_endian_bytes])`; no decimal text, variable-width integers or narrowing. |
@@ -2336,7 +2353,7 @@ In-memory implementations may avoid materialising V/K buffers but must compare/h
 
 #### Node and Helper Projection
 
-`jai-cache-syntax-snapshot/1` `data` is `{source:bytes, root:s64, nodes:[]NodeRecord, helpers:[]HelperRecord, tokens:[]TokenRecord, synthetic_tokens:[]SyntheticTokenRecord, recoveries:[]RecoveryRecord, diagnostics:[]RawDiagnostic, parse_status:ParseStatus}`.
+`jai-cache-syntax-snapshot/1` `data` is `{source:[] u8, root:s64, nodes:[]NodeRecord, helpers:[]HelperRecord, tokens:[]TokenRecord, synthetic_tokens:[]SyntheticTokenRecord, recoveries:[]RecoveryRecord, diagnostics:[]RawDiagnostic, parse_status:ParseStatus}`.
 Source is exactly the envelope's revision bytes.
 
 Its node schema is `jai-cache-authored-nodes/1`, source token schema is `jai-cache-source-tokens/1`, recovery schema is `jai-cache-recovery/1`, and all four bind to the admitted `SchemaTuple`.
@@ -2346,7 +2363,7 @@ Materialised token IDs follow lexer order including EOF; node IDs follow first r
 Each domain is dense zero-based `u64` and independent of every other domain.
 Inline/by-value helpers have distinct helper occurrences, not extra node identities.
 
-`NodeRecord` is `.MAPPED {local_node_id:u64, kind:bytes, coordinates:Coordinates, token_span:TokenSpan, origin:*Origin, fields:[]FieldObservation}` or `.OPAQUE {local_node_id:u64, producer_kind:u64, coordinates:Coordinates, token_span:TokenSpan, origin:*Origin}`.
+`NodeRecord` is `.MAPPED {local_node_id:u64, kind:RegistryName, coordinates:Coordinates, token_span:TokenSpan, origin:*Origin, fields:[]FieldObservation}` or `.OPAQUE {local_node_id:u64, producer_kind:u64, coordinates:Coordinates, token_span:TokenSpan, origin:*Origin}`.
 `Coordinates` is `{l0:s32,c0:s32,l1:s32,c1:s32}`; `TokenSpan` is `{first:s64,one_past_last:s64}` retaining signed producer observations.
 Neither record authorises dereferencing invalid token indices.
 
@@ -2355,7 +2372,7 @@ Only qualified origin mapping produces a non-null `origin`.
 `.OPAQUE` is permitted only in the safe backing of a partial derived result, with its required coverage reason and no unqualified child/scalar reads.
 An exact `.SYNTAX_SNAPSHOT` contains no `.OPAQUE` records; encountering an unrepresentable active kind/field fails that conversion, not a falsely exact snapshot.
 
-`HelperRecord` is `{local_helper_id:u64, layout:bytes, fields:[]FieldObservation}`.
+`HelperRecord` is `{local_helper_id:u64, layout:RegistryName, fields:[]FieldObservation}`.
 Its layout is one of the active non-node helper layouts in the milestone-1 auxiliary/shared-record inventory; assembly helpers retain their full `Parser_Asm_`* layout names.
 
 Structural base/entry/compiler-overlay embeddings flatten into the same node's qualified field paths and do not allocate helper IDs.
@@ -2371,7 +2388,7 @@ Base kind/location/token-span observations already in the node header are not du
 M1's per-layout/shared/helper field tables define the exact required paths, active guards, owning edges, aliases, scalar domains and excluded fields; the field projection is normative reuse of that registry, not a fresh walk over every public compiler field.
 Changing those tables changes this schema and must revise its binding.
 
-`FieldValue` is exactly `.INACTIVE`, `.BOOL {value:bool}`, `.SIGNED {value:s64}`, `.UNSIGNED {value:u64}`, `.FLOAT64_BITS {bits:u64}`, `.BYTES {value:bytes}`, `.TOKEN_TAG {value:TokenTag}`, `ENUM {domain:bytes, name_ascii:bytes}`, `.FLAGS {domain:bytes, names:[]bytes}`, `.NODE {local_node_id:s64, relationship:.OWNED|.ALIAS}`, `.HELPER {local_helper_id:s64}`, `.LIST {elements:[]FieldValue}`, `.TOKEN_SPAN {value:TokenSpan}`, or `.SOURCE_NULL`.
+`FieldValue` is exactly `.INACTIVE`, `.BOOL {value:bool}`, `.SIGNED {value:s64}`, `.UNSIGNED {value:u64}`, `.FLOAT64_BITS {bits:u64}`, `.BYTES {value:[] u8}`, `.TOKEN_TAG {value:TokenTag}`, `.ENUM {domain:RegistryName, name_ascii:RegistryName}`, `.FLAGS {domain:RegistryName, names:[]RegistryName}`, `.NODE {local_node_id:s64, relationship:.OWNED|.ALIAS}`, `.HELPER {local_helper_id:s64}`, `.LIST {elements:[]FieldValue}`, `.TOKEN_SPAN {value:TokenSpan}`, or `.SOURCE_NULL`.
 
 Guard-inactive fields use `.INACTIVE` without reading their backing memory; a missing active pointer is `.NODE` with `local_node_id == -1` or `.HELPER` with `local_helper_id == -1`, not `.INACTIVE`.
 
@@ -2382,7 +2399,7 @@ A recovered required-child hole retains its actual absence/recovery observations
 Safe source strings are `.BYTES`; narrow native integers extend without losing sign/bits and must fit their registered field range when validated.
 Numeric literal union selection follows the existing literal-route rules, using `.UNSIGNED` for the accumulator and `.FLOAT64_BITS` for the float arm; scalar byte strings, `.BOOLEAN` and `.SOURCE_NULL` remain distinct.
 Never read multiple overlapping arms.
-`ENUM` domain is the exact qualified producer enum type at that field; `name_ascii` is its declared canonical name, including a declared zero/default where observed, under the bound compiler SDK identity.
+`.ENUM` domain is the exact qualified producer enum type at that field; `name_ascii` is its declared canonical name, including a declared zero/default where observed, under the bound compiler SDK identity.
 The registry excludes native aliases unless explicitly normalised; operator fields instead use `TokenTag`.
 Producer enum values may be sparse or shared by several names, so each domain's registry maps every admitted value to exactly one recorded canonical name rather than deriving names from values or ordinals.
 Unknown integer enum values reject conversion, not a guessed name.
@@ -2439,7 +2456,7 @@ Its active value must be qualified from the actual producer route; unavailable/u
 
 `ResolveRecovery` indexes the recovery array by its checked array position, not by its signed diagnostic/synthetic observations.
 
-`RawDiagnostic` is `{code:DiagnosticCode, severity:.ERROR|.WARNING, token_span:TokenSpan, message_bytes:bytes, expected_token:TokenTag, actual_token:TokenTag, recovery_action:RecoveryAction, lexer_line:s32, lexer_column:s32, related:[]RawRelatedDiagnostic}`; `RawRelatedDiagnostic` is `{token_span:TokenSpan, message_bytes:bytes}`.
+`RawDiagnostic` is `{code:DiagnosticCode, severity:.ERROR|.WARNING, token_span:TokenSpan, message_bytes:[] u8, expected_token:TokenTag, actual_token:TokenTag, recovery_action:RecoveryAction, lexer_line:s32, lexer_column:s32, related:[]RawRelatedDiagnostic}`; `RawRelatedDiagnostic` is `{token_span:TokenSpan, message_bytes:[] u8}`.
 
 `DiagnosticCode` and `RecoveryAction` are the five codes and three actions already fixed by diagnostic/1.
 
@@ -2451,7 +2468,7 @@ Raw token spans/indices retain observations even when not valid source maps, whi
 
 Diagnostic counts, order and recovery relationships agree with the protected producer; a well-owned fatal parse can still have available observations.
 
-The three envelope schemas and backing resolvers are now fixed by these records plus the existing diagnostic/1, declaration-index/2, token, origin, coverage and M1 field registries.
+The three envelope schemas and backing resolvers are now fixed by these records plus the existing diagnostic/1, declaration-index/1, token, origin, coverage and M1 field registries.
 An implementation lacking one mapping must truthfully reject its tuple/query or fail the affected conversion; partial declaration coverage cannot launder an inexact snapshot.
 Full snapshot access is not required for an independently supported partial index with safe `.OPAQUE` backing.
 Executable producer round trips, adapter observation correlation and lifetime/concurrency qualification remain future implementation work.
