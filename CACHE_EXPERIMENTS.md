@@ -1,6 +1,6 @@
 # Cache Architecture Experiments
 
-Bounded experiments E1-E13 supporting the [cache architecture](CACHE_ARCHITECTURE.md); their conclusions are summarised there.
+Bounded experiments E1-E14 supporting the [cache architecture](CACHE_ARCHITECTURE.md); their conclusions are summarised there.
 Status conventions, the decision record, the milestone index and the label glossary are in [CACHE_ARCHITECTURE.md](CACHE_ARCHITECTURE.md#document-map-and-conventions).
 
 ## Experiment Index
@@ -9,7 +9,7 @@ Each experiment uses small isolated fixtures/prototypes, not a parallel implemen
 Language probes use the official compiler as the oracle, including separate expected-failure cases; prototype cache tests compare against fresh computation.
 All probes ran manually on authored trusted fixtures, not by automatic evaluation of arbitrary workspace code.
 
-E1-E13 are complete within their stated bounds.
+E1-E14 are complete within their stated bounds.
 Complete semantic editor-workflow measurements remain open, and E13 is not a production evaluator or general compilation-context extractor.
 
 | ID. | Experiment and discriminating check. | Decision it informs. |
@@ -27,6 +27,7 @@ Complete semantic editor-workflow measurements remain open, and E13 is not a pro
 | E11. | Completed: filesystem store/restart/overlay model with 911 parent-process checks, 32 worker processes, five killed publishers, competing publication/retry, twelve corruption cases, real cache-directory write denial, save/reset/deletion/reappearance, lease-aware GC, four broken-policy controls, and an independent saved-evidence audit. | Immutable digest-addressed blobs plus locked manifest replacement preserve complete selected states under the tested interruptions.  Recovery is host-confirmed, exact source hashing defeats stale timestamps, and cache failures must preserve source operations and surface diagnostics.  See results below. |
 | E12. | Completed (bounded baseline plus two reload follow-ups): measure fresh parse, unchanged-file reuse, and text reload with validation across many small files and large active files, transitive imports, malformed edits, body/interface changes, and repeated updates.  Include hashing/I/O, tail latency, retained worlds, and disk size; distinguish process restart from OS-cold filesystem cache. | Validated resident reuse is favoured; the verbose owned-graph text reload is slower than fresh parsing, so the graph codec is not adopted.  Informs workload selection and initial cache granularity; see results below. |
 | E13. | Completed: explicit generated-array `using,map` wrapper versus real mapping, six equivalent pairs, module parameter/private-helper context, exclusions, three compiler rejections, invalid-output policy, twelve damaged-frame controls, and post-process host ownership. | The explicit wrapper works for this supported slice; preserve context and positional exclusions, require successful compilation before publication, and do not mistake a conservative identifier policy for compiler behaviour.  See results below. |
+| E14. | Completed: 19 `enum`/`enum_flags` declarations mixing members with and without values, read back through `Type_Info_Enum`, plus seven expected-failure probes. | Enum members may omit or specify values in any order; specified values may be sparse, descending, repeated or equal to generated ones.  Records keep one entry per member and never key members by value.  See results below. |
 
 ### E1 Results: Import Scope and Visibility
 
@@ -1209,6 +1210,64 @@ Limits: only this two-member struct and static parameter/private-helper context 
 General exported-member enumeration, overloads/imports/conditional declarations, full identifier/reserved-name and receiving-scope collision rules, mutable compile-time state, source/caller context, dependency/effect tracking, concurrency, cancellation, hostile output, and sandboxing remain unvalidated or unsupported.
 No performance claim, evaluator opt-in default, production API, or migration implementation follows from this experiment.
 The bounded wrapper proposal is feasible; a future evaluator must preserve a declared supported context or return unsupported, retain positional exclusions, own its results, and publish only after validated successful completion.
+
+### E14 Results: Enum Member Values
+
+Completed 2026-11-03 on Windows with Jai beta 0.2.030 and the fast x64 backend.
+Probe: [experiment_enum_values.jai](examples/experiment_enum_values.jai); expected-failure probes are in [examples/enum_values_probes](examples/enum_values_probes).
+From the examples directory:
+
+```bash
+jai experiment_enum_values.jai && ./experiment_enum_values.exe
+for f in enum_values_probes/*.jai; do jai "$f"; done
+```
+
+Hypothesis: a member written without a value (`A;`) gets a compiler-generated value, a member written with one (`A :: 5;`) keeps it, and the two forms mix freely, so stored enum records cannot assume dense, unique or position-derived values.
+The probe prints each member's name and value from `Type_Info_Enum`, in declaration order.
+
+| Declaration. | Observed values. |
+| --- | --- |
+| `enum { A; B; C; }` | `0, 1, 2`. |
+| `enum { A; B :: 10; C; D :: 5; E; }` | `0, 10, 11, 5, 6`: sparse and descending; each generated value follows the previous member, not the maximum. |
+| `enum { A :: 3; B :: 3; C; }` | `3, 3, 4`: repeated specified values. |
+| `enum { A; B; C :: 1; D; }` | `0, 1, 1, 2`: a specified value equal to a generated one. |
+| `enum { A :: 2; B :: 0; C; D; }` | `2, 0, 1, 2`: a generated value equal to an earlier specified one. |
+| `enum s32 { A :: -5; B; C :: -1; D; }` | `-5, -4, -1, 0`. |
+| `enum { A :: 7; B :: A; C; }`, `enum { A :: 1 << 3; B; }` | `7, 7, 8` and `8, 9`: member references and constant expressions. |
+| `enum { A; #if INCLUDE_B { B; } C; }` | `0, 1, 2` when included; `0, 1` for `A, C` when excluded, so an excluded member does not advance the sequence. |
+| `enum u8 { A :: 254; B; }` | `254, 255`. |
+| `enum u8 #specified { A :: 9; B :: 1; C :: 1; }` | `9, 1, 1`: `#specified` requires a value on every member but still permits descending and repeated values. |
+| `enum_flags { A; B; C; }` | `1, 2, 4`. |
+| `enum_flags { A; B :: 0x10; C; D :: 0x2; E; }` | `1, 16, 32, 2, 4`: each generated value doubles the previous member's value. |
+| `enum_flags { A :: 0x4; B :: 0x4; C; }`, `enum_flags { A; B; C :: 0x2; D; }` | `4, 4, 8` and `1, 2, 2, 4`. |
+| `enum_flags { NONE :: 0; A :: 0x1; B; }`, `enum_flags { A; B; C; AB :: A \| B; }` | `0, 1, 2` and `1, 2, 4, 3`: zero and combined values may be specified. |
+| `enum_flags { A; #if false { B; } C; }` | `1, 2` for `A, C`. |
+
+The seven expected-failure probes each reject with exit code 1:
+
+| Probe. | Diagnostic. |
+| --- | --- |
+| Duplicate member name. | `Redeclaration of 'A'.` |
+| `#specified` member without a value. | `This declaration is inside an enum marked as #specified, but it does not provide an explicit value.` |
+| `enum u8 { A :: 255; B; }` and `enum_flags u8 { A :: 0x80; B; }`. | `Numeric constant is out of range for this enum. ... the value is 256.` |
+| `enum u8 { A :: 256; }` | The same out-of-range diagnostic, at the specified value. |
+| `enum_flags` member without a value after `0x3`. | `... the previous value is not a single flag (it is 0x3).` |
+| `enum_flags` member without a value after `0`. | `... the previous value is 0, which is not a valid flag.` |
+
+Conclusions:
+
+- The first member without a value is `0` in an `enum` and `1` in an `enum_flags`.
+- Each later member without a value is the immediately-previous declared member's value plus one (`enum`) or doubled (`enum_flags`).
+In an `enum_flags` the previous value must be a single flag (exactly one on-bit).
+- Specified values may be sparse, descending, negative, repeated or equal to a generated value; generated values can also collide with earlier specified ones.
+- Members excluded by `#if` take no part in the sequence.
+Names must be unique, and every value must fit the underlying type.
+
+Cached and persisted enum records must therefore keep one entry per member occurrence in declaration order, record whether each value was specified or generated, and never key, deduplicate or reconstruct members by value.
+A generated value depends on its predecessor, so a changed specified value or `#if` condition can change every following generated value.
+
+Limits: one compiler/backend/platform; no `#complete`, `using` of enums, `#insert`-generated members, module-parameter-driven conditions or values computed by `#run` were tested.
+Note that `#insert` is not valid inside an enum declaration due to the body of `#insert` needing to be a complete statement - code-generated enums must be output as the entire declaration.
 
 ## Scope of the Evidence
 

@@ -92,7 +92,7 @@ Its `coverage` is `COMPLETE_METADATA_OBSERVATION. | PARTIAL_METADATA_OBSERVATION
 
 Metadata and `UNMAPPED` name reasons use the same structured record and propagate to the index's partial reasons.
 
-`ProgramExportOccurrence` is `{marker_origin:SOURCE, name_argument: Optional(ProgramExportName)}`; `ProgramExportName` is `{origin:SOURCE, value_bytes}`.
+`ProgramExportOccurrence` is `{marker_origin:SOURCE, name_argument: *ProgramExportName}`; `ProgramExportName` is `{origin:SOURCE, value_bytes}`.
 
 The marker origin covers the authored `#` and `program_export` tokens; a name origin covers the consumed string token.
 
@@ -100,15 +100,15 @@ Trivia between tokens remains in the protected source, not in decoded `value_byt
 
 Preserve occurrences in token order, including repeats.
 
-`NONE` means no string token was consumed for that occurrence; `SOME` with empty bytes means an explicitly present empty string.
+A null `name_argument` means no string token was consumed for that occurrence; a non-null one with empty bytes means an explicitly present empty string.
 
 Do not substitute the declaration's name when the argument is absent.
 
 `value_bytes` is the exact lexer string value under the captured `EVALUATE_STRING_ESCAPES` profile, not a host-decoded or normalised linker name; raw spelling and malformed-input observations remain protected separately.
 
-`producer_observation` is `Optional({requested:bool, stored_name_bytes})` from `PROGRAM_EXPORT` and `program_export_name`, even when source correlation is incomplete.
+`producer_observation` is `*ProgramExportObservation`, where `ProgramExportObservation` is `{requested:bool, stored_name_bytes}`, from `PROGRAM_EXPORT` and `program_export_name`, even when source correlation is incomplete.
 
-Use `SOME` for declaration-properties records and `NONE` for index occurrences such as bare enum members that have no such producer record; do not manufacture a false flag/empty string pair.
+Use a non-null pointer for declaration-properties records and null for index occurrences such as bare enum members that have no such producer record; do not manufacture a false flag/empty string pair.
 
 Copy/lease these bytes independently of producer allocator lifetime; they are not pointer identity or an identifier-interner key.
 
@@ -312,7 +312,7 @@ This draft resolves ordering/representation rules, not a production visitor, cro
 
 Proposed declaration-index/2 refinement; reason records describe incomplete observations, not source-language diagnostics, successful semantic facts or service failures.
 
-`CoverageReason` is `{code, subject, field_path: []PathStep, impacts: []CoverageImpact, origin: Optional(Origin), detail_utf8}`.
+`CoverageReason` is `{code, subject, field_path: []PathStep, impacts: []CoverageImpact, origin: *Origin, detail_utf8}`.
 
 `subject` is `DOCUMENT` or `NODE {local_node_id}` in the protected syntax snapshot of this exact envelope; it is not an entry ID, pointer or cross-result reference.
 
@@ -322,7 +322,7 @@ An empty path refers to the whole subject; `DOCUMENT` requires an empty path.
 
 For an unrecognised field/kind without a safe registered path, identify the containing safe node or document rather than manufacturing a dereferenceable path.
 Retain unsupported raw observations in the protected snapshot only where its schema safely represents them.
-An unavailable origin is `NONE`, not an invented zero-width source range; an available `Origin` must pass the common revision/span checks and indicates the known affected observation, not necessarily the full extent of missing syntax.
+An unavailable origin is null, not an invented zero-width source range; an available `Origin` must pass the common revision/span checks and indicates the known affected observation, not necessarily the full extent of missing syntax.
 
 `CoverageImpact` is `DECLARATION_SET. | CONTAINMENT. | NAMES. | SOURCE_MAPPING. | VISIBILITY. | ORDER. | METADATA. | RECOVERY`.
 
@@ -1386,6 +1386,9 @@ Emit one `ENUM_MEMBER` entry for that grammar occurrence, with `declaration_node
 It has no declaration-properties/program-export producer observation.
 The token/statement boundary establishes its grammar extent; an identifier node's own span need not include the semicolon.
 Named enum declarations parsed through ordinary declaration grammar retain `DECLARATION`/`COMPOUND_BINDING` as appropriate, rather than being relabelled solely because their container is an enum.
+Both forms are enum members: a bare `ENUM_MEMBER` occurrence (`A;`) has no value expression, so the compiler generates its value, while a named declaration (`A :: 5;`) has one.
+[E14](CACHE_EXPERIMENTS.md#e14-results-enum-member-values) confirms that the forms mix in any order and that specified values may be sparse, descending, repeated or equal to generated ones, in both `enum` and `enum_flags`.
+Store each occurrence with its authored value expression or its absence, in source order; never compute generated values, sort or deduplicate by value, or treat member position as its value.
 Do not classify identifiers in initialisers, conditions, type annotations or nested expressions as bare members.
 Carry enum-member mode only along the registered enum body and static-branch statement routes; a missing route/boundary observation requires partial coverage, not a name-based guess.
 `parse_static_if_statement` forwards the enum mode through statement-block parsing: traverse both authored branches, including single-statement branches, with branch-local visibility observations and no guessed active branch or merged enum membership.

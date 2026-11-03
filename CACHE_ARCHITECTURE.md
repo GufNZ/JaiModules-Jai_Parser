@@ -13,7 +13,7 @@ The AST-copier keep/drop decision remains separate and unresolved.
 | This document. | Architecture (sections 1-13), the decision record, initial scope, correctness gates, performance comparisons, open decisions, experiment summary and TODO (sections 14-15). |
 | [CACHE_SYNTAX_REGISTRY.md](CACHE_SYNTAX_REGISTRY.md) | Projection of the current parser's nodes, helpers and tokens onto the syntax payloads (milestone 1). |
 | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md) | Detailed contract drafts: core source/world contracts, persistence, semantic identity, execution, source capture, interface schema, and acceptance (milestones 2-7). |
-| [CACHE_EXPERIMENTS.md](CACHE_EXPERIMENTS.md) | Procedures, measurements and limits of experiments E1-E13. |
+| [CACHE_EXPERIMENTS.md](CACHE_EXPERIMENTS.md) | Procedures, measurements and limits of experiments E1-E14. |
 
 Status conventions apply to all four documents:
 
@@ -42,7 +42,7 @@ The unnumbered initial-scope and core-contract drafts of 2026-10-20 preceded mil
 | R1-R8. | Review decisions. | [Decision record](#decision-record). |
 | C1-C5. | Correctness gates. | [Correctness gates](#correctness-gates). |
 | P1-P5. | Performance comparisons. | [Performance comparisons](#performance-comparisons). |
-| E1-E13. | Experiments. | [CACHE_EXPERIMENTS.md](CACHE_EXPERIMENTS.md); summary in [section 14](#experiment-summary). |
+| E1-E14. | Experiments. | [CACHE_EXPERIMENTS.md](CACHE_EXPERIMENTS.md); summary in [section 14](#experiment-summary). |
 | T1-T8. | Core contract acceptance traces. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#acceptance-trace-drafts). |
 | S1-S8. | Store acceptance traces. | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#store-acceptance-trace-drafts). |
 | D1-D8. | Semantic identity traces (deferred). | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#semantic-acceptance-trace-drafts). |
@@ -345,7 +345,12 @@ Split useful results where dependencies differ:
 - Enum member values, underlying representation, and exported names.
 
 A layout key includes target/ABI and all observed field-type/value/layout dependencies.
-An enum member can depend on earlier implicit values and external constants.
+An enum member is written either with a value (`A :: 5;`) or without one (`A;`).
+Without one, the compiler generates it from the previous declared member: plus one in an `enum` (first `0`), doubled in an `enum_flags` (first `1`) ([E14](CACHE_EXPERIMENTS.md#e14-results-enum-member-values)).
+Specified values may be sparse, descending or repeated, and may equal generated ones, so several members can share a value.
+A generated value therefore depends on its predecessor's value, external constants and any `#if` that excludes earlier members.
+Cached and persisted enum records keep one entry per member occurrence in declaration order, recording whether its value was specified or generated alongside the resulting value.
+Never key members by value, assume values are dense, unique or equal to position, or reconstruct a member name from a value.
 A `#if` or generated field can alter membership without changing the outer declaration text.
 `using,map` can change exposed names without changing stored field syntax.
 
@@ -863,6 +868,7 @@ Each conclusion holds only within its experiment's stated bounds.
 | E11. | Store publication and recovery. | Immutable digest-addressed blobs plus locked manifest replacement preserve complete selected states under the tested interruptions; recovery is host-confirmed. |
 | E12. | Real-source baseline and reload. | Validated resident reuse is favoured; the verbose owned-graph text reload is slower than fresh parsing, so the graph codec is not adopted. |
 | E13. | Explicit `using,map` wrapper. | The wrapper works for its supported slice if it preserves context and positional exclusions and publishes only after successful compilation. |
+| E14. | Enum member values. | Members with and without values mix freely; specified values may be sparse, descending, repeated or equal to generated ones, so enum records keep one entry per member and never key by value. |
 
 ### Exit Criteria and Migration Planning
 
@@ -898,7 +904,7 @@ Qualification items apply only after separate implementation authorisation, usin
 - [x] Complete the milestone-4 draft: ordering, reservations, task attempts, delivery, cancellation and shutdown, with X1-X8.
 - [x] Complete the milestone-5 draft: store grammar, record schemas, commit protocol, pins, recovery, collection and administration, with S1-S8.
 - [x] Draft milestone 6: A1-A15, W1-W6 and evidence verdict rules.
-- [x] Run and record E1-E13 and the two E12 reload follow-ups.
+- [x] Run and record E1-E14 and the two E12 reload follow-ups.
 - [x] Exclude OS-cold and external storage guarantees from the initial scope (R8).
 
 ### Approval and Sign-Off
