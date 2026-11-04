@@ -9,6 +9,8 @@ Parser :: #import "Jai_Parser"(ENABLE_TRIVIA = true);
 #if OS == .WINDOWS {
 	#import "Windows";
 	#import "Windows_Utf8";
+} else #if OS == .LINUX || OS == .MACOS {
+	#import "POSIX";
 }
 
 #load "canonical.jai";

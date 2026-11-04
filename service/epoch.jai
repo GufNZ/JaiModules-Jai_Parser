@@ -1,6 +1,8 @@
 // R10 epoch issuer: a per-project `.jaiParserEpoch` file beside the store root, holding the authority namespace and the last reserved epoch.
 // Reservation holds an exclusive sibling lock file, writes the successor to a staging file, flushes it and replaces the epoch file.
-// Only the Windows implementation exists so far (R11); other platforms report the issuer as unavailable.
+// Windows and POSIX (Linux, macOS) implementations exist (R11); only Windows has been run.  Other platforms report the issuer as unavailable.
+
+EPOCH_ISSUER_SUPPORTED :: OS == .WINDOWS || OS == .LINUX || OS == .MACOS;
 
 EPOCH_FILE_NAME :: ".jaiParserEpoch";
 EPOCH_FILE_SCHEMA :: "jai-cache-epoch/1";
@@ -69,7 +71,7 @@ decode_epoch_file :: (text: string, authority_namespace: [] u8) -> Epoch_Failure
 
 // Reserves a fresh epoch greater than both the last recorded one and `floor` (the highest writer epoch in any readable store head).
 reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0) -> bool, u64, Epoch_Failure {
-	#if OS != .WINDOWS {
+	#if !EPOCH_ISSUER_SUPPORTED {
 		return false, 0, .UNSUPPORTED_PLATFORM;
 	} else {
 		assert(authority_namespace.count > 0);
@@ -77,23 +79,13 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 		lock_path := tprint("%.lock", epoch_path);
 		staging_path := tprint("%.staging", epoch_path);
 
-		lock := INVALID_HANDLE_VALUE;
-		for 1..EPOCH_LOCK_ATTEMPTS {
-			lock = CreateFileW(utf8_to_wide(lock_path,, temp), FILE_GENERIC_READ | FILE_GENERIC_WRITE, 0, null, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
-			if lock != INVALID_HANDLE_VALUE || GetLastError() != ERROR_SHARING_VIOLATION {
-				break;
-			}
-
-
-			sleep_milliseconds(EPOCH_LOCK_RETRY_MILLISECONDS);
-		}
-
-		if lock == INVALID_HANDLE_VALUE {
-			return false, 0, .LOCK_UNAVAILABLE;
+		lock_failure, lock := acquire_epoch_lock(lock_path);
+		if lock_failure != .NONE {
+			return false, 0, lock_failure;
 		}
 
 
-		defer CloseHandle(lock);
+		defer release_epoch_lock(lock);
 
 		last: u64;
 		read_failure, existing := read_small_file(epoch_path);
@@ -125,7 +117,7 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 		}
 
 
-		if !MoveFileExW(utf8_to_wide(staging_path,, temp), utf8_to_wide(epoch_path,, temp), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) {
+		if !replace_epoch_file(staging_path, epoch_path, directory) {
 			return false, 0, .IO_ERROR;
 		}
 
@@ -141,6 +133,35 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 	MOVEFILE_REPLACE_EXISTING :: 0x1;
 	MOVEFILE_WRITE_THROUGH :: 0x8;
 	ERROR_SHARING_VIOLATION :: 0x20;
+
+	// Share mode 0 is the exclusive lock; closing the handle releases it.
+	acquire_epoch_lock :: (path: string) -> Epoch_Failure, HANDLE {
+		for 1..EPOCH_LOCK_ATTEMPTS {
+			lock := CreateFileW(utf8_to_wide(path,, temp), FILE_GENERIC_READ | FILE_GENERIC_WRITE, 0, null, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
+			if lock != INVALID_HANDLE_VALUE {
+				return .NONE, lock;
+			}
+
+
+			if GetLastError() != ERROR_SHARING_VIOLATION {
+				return .IO_ERROR, INVALID_HANDLE_VALUE;
+			}
+
+
+			sleep_milliseconds(EPOCH_LOCK_RETRY_MILLISECONDS);
+		}
+
+		return .LOCK_UNAVAILABLE, INVALID_HANDLE_VALUE;
+	}
+
+	release_epoch_lock :: (lock: HANDLE) {
+		CloseHandle(lock);
+	}
+
+	// `MOVEFILE_WRITE_THROUGH` makes the directory entry durable, so `directory` needs no separate flush.
+	replace_epoch_file :: (staging_path: string, epoch_path: string, directory: string) -> bool {
+		return !!MoveFileExW(utf8_to_wide(staging_path,, temp), utf8_to_wide(epoch_path,, temp), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+	}
 
 	// A missing file reads as empty; anything over the bound or unreadable is an error rather than a truncated read.
 	read_small_file :: (path: string) -> Epoch_Failure, string {
@@ -182,5 +203,139 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 		defer CloseHandle(handle);
 		written: DWORD;
 		return WriteFile(handle, text.data, xx text.count, *written, null) && written == xx text.count && FlushFileBuffers(handle);
+	}
+} else #if OS == .LINUX || OS == .MACOS {
+	// Linux bindings only declare the `flock` struct, so bind the function under another name.
+	epoch_flock :: (fd: s32, operation: s32) -> s32 #foreign epoch_libc "flock";
+	epoch_libc :: #library,system "libc";
+
+	EPOCH_FILE_MODE :: S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+
+	// `flock` excludes other open descriptions, including threads of this process; `O_CLOEXEC` keeps children from inheriting the lock.
+	acquire_epoch_lock :: (path: string) -> Epoch_Failure, s32 {
+		fd := open(temp_c_string(path), O_RDWR | O_CREAT | O_CLOEXEC, EPOCH_FILE_MODE);
+		if fd < 0 {
+			return .IO_ERROR, -1;
+		}
+
+
+		for 1..EPOCH_LOCK_ATTEMPTS {
+			if !epoch_flock(fd, LOCK_EX | LOCK_NB) {
+				return .NONE, fd;
+			}
+
+
+			error := errno();
+			if error != EWOULDBLOCK && error != EINTR {
+				close(fd);
+				return .IO_ERROR, -1;
+			}
+
+
+			sleep_milliseconds(EPOCH_LOCK_RETRY_MILLISECONDS);
+		}
+
+		close(fd);
+		return .LOCK_UNAVAILABLE, -1;
+	}
+
+	release_epoch_lock :: (fd: s32) {
+		close(fd);
+	}
+
+	// macOS `fsync` does not flush the drive cache; `F_FULLFSYNC` does, but some filesystems reject it.
+	flush_descriptor :: (fd: s32) -> bool {
+		#if OS == .MACOS {
+			if fcntl(fd, F_FULLFSYNC) != -1 {
+				return true;
+			}
+		}
+
+		return fsync(fd) == 0;
+	}
+
+	// `rename` replaces atomically; flushing the directory makes the new entry durable.
+	replace_epoch_file :: (staging_path: string, epoch_path: string, directory: string) -> bool {
+		if rename(temp_c_string(staging_path), temp_c_string(epoch_path)) {
+			return false;
+		}
+
+
+		directory_fd := open(temp_c_string(directory), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+		if directory_fd < 0 {
+			return false;
+		}
+
+
+		defer close(directory_fd);
+		return flush_descriptor(directory_fd);
+	}
+
+	// A missing file reads as empty; anything over the bound or unreadable is an error rather than a truncated read.
+	read_small_file :: (path: string) -> Epoch_Failure, string {
+		fd := open(temp_c_string(path), O_RDONLY | O_CLOEXEC);
+		if fd < 0 {
+			return ifx errno() == ENOENT then .NONE else .IO_ERROR, "";
+		}
+
+
+		defer close(fd);
+		// One byte past the bound detects oversized files without `fstat`.
+		buffer := talloc_string(EPOCH_FILE_MAXIMUM_BYTES + 1);
+		total: s64;
+		while total < buffer.count {
+			got := read(fd, buffer.data + total, xx (buffer.count - total));
+			if got < 0 {
+				if errno() == EINTR {
+					continue;
+				}
+
+
+				return .IO_ERROR, "";
+			}
+
+
+			if !got {
+				break;
+			}
+
+
+			total += got;
+		}
+
+		if !total || total > EPOCH_FILE_MAXIMUM_BYTES {
+			return .MALFORMED_FILE, "";
+		}
+
+
+		buffer.count = total;
+		return .NONE, buffer;
+	}
+
+	write_flushed_file :: (path: string, text: string) -> bool {
+		fd := open(temp_c_string(path), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, EPOCH_FILE_MODE);
+		if fd < 0 {
+			return false;
+		}
+
+
+		defer close(fd);
+		written: s64;
+		while written < text.count {
+			count := write(fd, text.data + written, xx (text.count - written));
+			if count < 0 {
+				if errno() == EINTR {
+					continue;
+				}
+
+
+				return false;
+			}
+
+
+			written += count;
+		}
+
+		return flush_descriptor(fd);
 	}
 }
