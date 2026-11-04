@@ -178,6 +178,7 @@ main :: () {
 	test_binary_expressions();
 	test_basic_declarations();
 	test_compound_declarations();
+	test_compound_token_evidence();
 	test_container_types();
 	test_procedure_types();
 	test_polymorphic_types();
@@ -13086,6 +13087,97 @@ test_basic_declarations :: () {
 	assert(uninitialized.root.(*Extended.Parser_Declaration).expression == null);
 }
 
+first_compound_in_block :: (parsed: *Extended.Parsed_Source) -> *Extended.Parser_Compound_Declaration {
+	for parsed.root.(*Extended.Parser_Block).statements {
+		if it.kind == .COMPOUND_DECLARATION {
+			return it.(*Extended.Parser_Compound_Declaration);
+		}
+	}
+
+
+	assert(false, "No compound declaration in '%'.", parsed.source);
+	return null;
+}
+
+token_type_at :: (parsed: *Extended.Parsed_Source, index: Extended.Token_Index) -> Extended.Token_Type {
+	assert(index >= 0 && index.(s64) < parsed.tokens.count);
+	return parsed.tokens[index.(s64)].type;
+}
+
+// Every compound records its shared operator and each target's modifier and separator, whichever builder route produced it.
+test_compound_token_evidence :: () {
+	declared := Extended.parse_block("{ a, b := v; }");
+	assert(declared.status == .COMPLETE);
+	declared_node := first_compound_in_block(*declared);
+	declared_arguments := declared_node.comma_separated_assignment.arguments;
+	assert(declared_node.operator_type == 0 && token_type_at(*declared, declared_node.operator_token) == #char ":");
+	assert(token_type_at(*declared, declared_arguments[0].separator_token) == #char "," && declared_arguments[1].separator_token == -1);
+	assert(declared_arguments[0].modifier_token == -1 && declared_arguments[1].modifier_token == -1);
+	assert(declared.root_scope.children[0].bindings.count == 2);
+
+	mixed_declare := Extended.parse_block("{ a:, b = v; }");
+	assert(mixed_declare.status == .COMPLETE);
+	mixed_declare_node := first_compound_in_block(*mixed_declare);
+	mixed_declare_arguments := mixed_declare_node.comma_separated_assignment.arguments;
+	assert(mixed_declare_node.operator_type == #char "=" && token_type_at(*mixed_declare, mixed_declare_node.operator_token) == #char "=");
+	assert(mixed_declare_arguments[0].modifier == .DECLARE && token_type_at(*mixed_declare, mixed_declare_arguments[0].modifier_token) == #char ":");
+	assert(mixed_declare_arguments[0].separator_token.(s64) == mixed_declare_arguments[0].modifier_token.(s64) + 1);
+	assert(mixed_declare.root_scope.children[0].bindings.count == 1 && mixed_declare.root_scope.children[0].bindings[0].name == "a");
+
+	mixed_assign := Extended.parse_block("{ a=, b := v; }");
+	assert(mixed_assign.status == .COMPLETE);
+	mixed_assign_node := first_compound_in_block(*mixed_assign);
+	mixed_assign_arguments := mixed_assign_node.comma_separated_assignment.arguments;
+	assert(mixed_assign_node.operator_type == 0 && token_type_at(*mixed_assign, mixed_assign_node.operator_token) == #char ":");
+	assert(mixed_assign_arguments[0].modifier == .ASSIGN && token_type_at(*mixed_assign, mixed_assign_arguments[0].modifier_token) == #char "=");
+	assert(mixed_assign.root_scope.children[0].bindings.count == 1 && mixed_assign.root_scope.children[0].bindings[0].name == "b");
+
+	// The expression-led route used to drop the operator token and leave operator_type unset.
+	plus := Extended.parse_block("{ a, b += v; }");
+	assert(plus.status == .COMPLETE);
+	plus_node := first_compound_in_block(*plus);
+	assert(plus_node.operator_type == .PLUS_ASSIGN && token_type_at(*plus, plus_node.operator_token) == .PLUSEQUALS);
+	assert(token_type_at(*plus, plus_node.comma_separated_assignment.arguments[0].separator_token) == #char ",");
+	assert(!plus.root_scope.children[0].bindings.count);
+
+	member := Extended.parse_block("{ v.x, w = 1, 2; }");
+	assert(member.status == .COMPLETE);
+	member_node := first_compound_in_block(*member);
+	assert(member_node.operator_type == #char "=" && token_type_at(*member, member_node.operator_token) == #char "=");
+	assert(member_node.comma_separated_assignment.arguments[0].node.kind == .BINARY_OPERATOR);
+	assert(member_node.comma_separated_assignment.first_token == member_node.first_token);
+
+	undeclarable := Extended.parse_block("{ v.x, w := 1, 2; after(); }");
+	assert(undeclarable.status == .RECOVERED);
+	assert(undeclarable.diagnostics.count == 1);
+	undeclarable_node := first_compound_in_block(*undeclarable);
+	target := undeclarable_node.comma_separated_assignment.arguments[0].node;
+	diagnostic := undeclarable.diagnostics[0];
+	assert(diagnostic.expected_token == .IDENT && contains(diagnostic.message, "simple identifier"));
+	assert(diagnostic.span.first == target.first_token && diagnostic.span.one_past_last == target.one_past_last_token);
+	assert(undeclarable.root_scope.children[0].bindings.count == 1 && undeclarable.root_scope.children[0].bindings[0].name == "w");
+	assert(undeclarable.root.(*Extended.Parser_Block).statements[1].kind == .PROCEDURE_CALL);
+
+	missing := Extended.parse_declaration("x, y;");
+	assert(missing.status != .COMPLETE && missing.diagnostics.count);
+	assert(missing.root.(*Extended.Parser_Compound_Declaration).operator_token == -1);
+
+	// The target list starts at its first target, not at a declaration prefix.
+	prefixed := Extended.parse_declaration("#no_reset a, b: s64;");
+	assert(prefixed.status == .COMPLETE);
+	prefixed_node := prefixed.root.(*Extended.Parser_Compound_Declaration);
+	assert(prefixed_node.first_token == 0);
+	assert(token_type_at(*prefixed, prefixed_node.comma_separated_assignment.first_token) == .IDENT);
+	assert(prefixed_node.comma_separated_assignment.arguments[0].node.first_token == prefixed_node.comma_separated_assignment.first_token);
+	assert(!!(prefixed_node.declaration_properties.flags & .NO_RESET));
+
+	for parsed: Extended.Parsed_Source.[declared, mixed_declare, mixed_assign, plus, member, undeclarable, missing, prefixed] {
+		assert(Extended.reconstruct_source(*parsed) == parsed.source);
+		Extended.release_parser_tree(*parsed);
+		Extended.release_parser_names(*parsed);
+	}
+}
+
 test_compound_declarations :: () {
 	REASSIGNED_SOURCE :: "{ out1, out2 = hello(1); out1 = 2; after(); }";
 	reassigned := Extended.parse_block(REASSIGNED_SOURCE);
@@ -13614,23 +13706,48 @@ check_flagged_declaration_fallback :: (source: string, expected_flag: type_of(Co
 test_declaration_metadata :: () {
 	check_declaration_metadata_edit("value: s64 #align 16; @Tag(1) keep := value;", "value: s64 #align 32; @Tag(1) keep := value;", 18, 20, 32, "Tag(1)");
 	check_declaration_metadata_edit("value: s64 #align 16; @Tag(1) keep := value;", "value: s64 #align 16; @Tag(2) keep := value;", 27, 28, 16, "Tag(2)");
-	EXPORT_PREFIX :: "value: s64 #align 16 #program_export \"";
+	EXPORT_PREFIX :: "#program_export \"";
 	check_declaration_metadata_edit(
-		tprint("%published\"; @Tag(1) keep := value;", EXPORT_PREFIX),
-		tprint( "%released\"; @Tag(1) keep := value;", EXPORT_PREFIX),
+		tprint("%published\" value: s64 #align 16; @Tag(1) keep := value;", EXPORT_PREFIX),
+		tprint( "%released\" value: s64 #align 16; @Tag(1) keep := value;", EXPORT_PREFIX),
 		EXPORT_PREFIX.count, EXPORT_PREFIX.count + "published".count,
 		16,
 		"Tag(1)",
 		"released"
 	);
 	check_flagged_declaration_fallback("#no_reset value: s64;", .NO_RESET);
-	check_flagged_declaration_fallback("value: s64 #program_export \"exported_value\";", .PROGRAM_EXPORT, "exported_value");
+	check_flagged_declaration_fallback("#program_export \"exported_value\" value: s64;", .PROGRAM_EXPORT, "exported_value");
+	check_flagged_declaration_fallback("#program_export value: s64;", .PROGRAM_EXPORT);
+	check_flagged_declaration_fallback("#program_export #no_reset value: s64;", .PROGRAM_EXPORT | .NO_RESET);
 	check_flagged_declaration_fallback("value: s64 #elsewhere;", .ELSEWHERE);
 	check_flagged_declaration_fallback("value: s64 #uninitialized;", .IS_UNINITIALIZED);
 	check_flagged_declaration_fallback("$value: Type;", .AUTO_VALUE_BAKE);
 	check_flagged_declaration_fallback("$$value: Type;", .AUTO_VALUE_BAKE);
 	aligned := Extended.parse_declaration("value: s64 #align 16;");
 	assert(aligned.status == .COMPLETE);
+
+	// The compiler only accepts `#program_export` before a declaration, never after it.
+	postfix_export := Extended.parse_file("value: s64 #program_export; after :: 1;");
+	assert(postfix_export.status == .RECOVERED && postfix_export.diagnostics.count);
+	assert(!(postfix_export.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).flags & .PROGRAM_EXPORT));
+	exported_procedure := Extended.parse_file("#program_export\nentry :: () #c_call {}");
+	assert(exported_procedure.status == .COMPLETE);
+	entry := exported_procedure.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration);
+	assert(entry.name == "entry" && !!(entry.flags & .PROGRAM_EXPORT) && !entry.program_export_name && entry.first_token == 0);
+	exported_compound := Extended.parse_declaration("#program_export \"pair\" left, right: s64;");
+	assert(exported_compound.status == .COMPLETE);
+	exported_properties := exported_compound.root.(*Extended.Parser_Compound_Declaration).declaration_properties;
+	assert(!!(exported_properties.flags & .PROGRAM_EXPORT) && exported_properties.program_export_name == "pair");
+	block_export := Extended.parse_block("{ #program_export inner :: () #c_call {} after(); }");
+	assert(block_export.status == .COMPLETE);
+	block_statements := block_export.root.(*Extended.Parser_Block).statements;
+	assert(block_statements.count == 2 && block_statements[1].kind == .PROCEDURE_CALL);
+	assert(!!(block_statements[0].(*Extended.Parser_Declaration).flags & .PROGRAM_EXPORT));
+	for parsed: Extended.Parsed_Source.[postfix_export, exported_procedure, exported_compound, block_export] {
+		assert(Extended.reconstruct_source(*parsed) == parsed.source);
+		Extended.release_parser_tree(*parsed);
+		Extended.release_parser_names(*parsed);
+	}
 	aligned_node := aligned.root.(*Extended.Parser_Declaration);
 	assert(aligned_node.alignment_expression.(*Extended.Parser_Literal)._u64 == 16);
 	aligned_old_source := copy_string("value: s64 #align 16; main :: () { use := value; }");

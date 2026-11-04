@@ -1918,17 +1918,17 @@ Entries follow the declaration-event order specified below: enclosing declaratio
 Declaration containers refer only to earlier enclosing entries.
 Shared-region containers follow the acyclic ownership rules below; validate both ID domains and reject cycles, never treat an arbitrary local ID as a pointer or nominal declaration identity.
 
-`visibility_syntax` is `{scope_directive, scope_basis, declaration_marker, observations}`.
+`visibility_syntax` is `{scope_directive, scope_basis, observations}`.
 
 `scope_directive` is `.UNSPECIFIED | .SCOPE_EXPORT | .SCOPE_MODULE | .SCOPE_FILE | .RECOVERED_UNKNOWN`; `scope_basis` records the same-list provenance specified below.
 
-`declaration_marker` is `.UNSPECIFIED | .EXPORT | .RECOVERED_UNKNOWN`; `observations` preserves the ordered directive/marker source spans used to derive those syntactic tags.
+`observations` preserves the ordered directive source spans used to derive that syntactic tag.
 
-These are authored `#scope_export`, `#scope_module`, `#scope_file` and `#export` observations, not a claim of resolved accessibility, valid marker placement, conditional activation or completed exports.
+These are authored `#scope_export`, `#scope_module` and `#scope_file` observations, not a claim of resolved accessibility, conditional activation or completed exports.
 Unsupported/malformed observations remain recovered/partial with reasons rather than being coerced to exported or private.
 Do not execute conditions, follow imports/loads, expand `#add_context`, evaluate `using,map`, or merge instantiated members while building this index.
 Walk only owned authored/recovered syntax; complete traversal of it is compatible with semantic queries remaining unsupported.
-Exact node/token variant registries and traversal-to-current-node mapping still need API review; this draft does not certify that the current parser exposes every marker without an adapter or lossless source observation.
+Exact node/token variant registries and traversal-to-current-node mapping still need API review; this draft does not certify that the current parser exposes every directive without an adapter or lossless source observation.
 
 Future acceptance vectors: end-of-file zero-width and inserted-token origins; unmappable lexer/token locations with preserved raw observations; duplicate diagnostics and ordered related messages; invalid message encoding; compound/repeated/anonymous/recovered names; nested containers; visibility changes; partial versus complete syntax traversal without evaluator execution.
 Validate these against fresh owned parser observations under C1/C5.

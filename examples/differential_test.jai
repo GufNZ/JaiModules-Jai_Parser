@@ -1337,6 +1337,7 @@ normalise_parser_node :: (node: *Parser.Parser_Node, path: string, layer: Compar
 
 		case .COMPOUND_DECLARATION;
 			declaration := node.(*Parser.Parser_Compound_Declaration);
+			add_normalised_field(result, path, "operator_type", tprint("%", declaration.operator_type.(s64)));
 			add_normalised_field(result, path, "argument_count", tprint("%", declaration.comma_separated_assignment.arguments.count));
 			for declaration.comma_separated_assignment.arguments {
 				add_normalised_field(result, tprint("%.argument[%]", path, it_index), "modifier", tprint("%", it.modifier));
@@ -1777,6 +1778,7 @@ normalise_node :: (node: *Code_Node, path: string, layer: Comparison_Layer, resu
 
 		case .COMPOUND_DECLARATION;
 			declaration := node.(*Code_Compound_Declaration);
+			add_normalised_field(result, path, "operator_type", tprint("%", declaration.operator_type.(s64)));
 			add_normalised_field(result, path, "argument_count", tprint("%", declaration.comma_separated_assignment.arguments.count));
 			for declaration.comma_separated_assignment.arguments {
 				add_normalised_field(result, tprint("%.argument[%]", path, it_index), "modifier", tprint("%", it.modifier));
@@ -1892,6 +1894,8 @@ normalise_parser_declaration :: (declaration: *Parser.Parser_Declaration, path: 
 	add_normalised_field(result, path, "auto_bake", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE) != 0));
 	add_normalised_field(result, path, "auto_bake_required", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE_IS_REQUIRED) != 0));
 	add_normalised_field(result, path, "scope_modifier", tprint("%", (declaration.flags & .HAS_SCOPE_MODIFIER) != 0));
+	add_normalised_field(result, path, "program_export", tprint("%", (declaration.flags & .PROGRAM_EXPORT) != 0));
+	add_normalised_field(result, path, "program_export_name", explicit_export_name(declaration.program_export_name, declaration.name));
 	normalise_parser_node(declaration.type_inst, tprint("%.type", path), layer, result);
 	normalise_parser_node(declaration.expression, tprint("%.expression", path), layer, result);
 	normalise_parser_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
@@ -1909,6 +1913,8 @@ normalise_declaration :: (declaration: *Code_Declaration, path: string, layer: C
 	add_normalised_field(result, path, "auto_bake", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE) != 0));
 	add_normalised_field(result, path, "auto_bake_required", tprint("%", (declaration.flags & .AUTO_VALUE_BAKE_IS_REQUIRED) != 0));
 	add_normalised_field(result, path, "scope_modifier", tprint("%", (declaration.flags & .HAS_SCOPE_MODIFIER) != 0));
+	add_normalised_field(result, path, "program_export", tprint("%", (declaration.flags & .PROGRAM_EXPORT) != 0));
+	add_normalised_field(result, path, "program_export_name", explicit_export_name(declaration.program_export_name, declaration.name));
 	normalise_node(declaration.type_inst, tprint("%.type", path), layer, result);
 	normalise_node(declaration.expression, tprint("%.expression", path), layer, result);
 	normalise_node(declaration.alignment_expression, tprint("%.alignment", path), layer, result);
@@ -1916,6 +1922,13 @@ normalise_declaration :: (declaration: *Code_Declaration, path: string, layer: C
 	for declaration.notes {
 		add_normalised_field(result, tprint("%.note[%]", path, it_index), "text", it.text);
 	}
+}
+
+// The compiler may fill an omitted export name with the declaration name; only a different name is authored syntax.
+explicit_export_name :: (export_name: string, name: string) -> string {
+	return ifx export_name == name
+		then ""
+		else export_name;
 }
 
 add_normalised_field :: (tree: *Normalised_Tree, path: string, name: string, value: string) {
@@ -4004,7 +4017,13 @@ JAI
 	assert_statement_fixture("out1, out2 = hello(1);");
 	assert_statement_fixture("a=, b := proc();");
 	assert_statement_fixture("a:, b = proc();");
+	assert_statement_fixture("a, b += proc();");
+	assert_statement_fixture("a, b, c <<= proc();");
+	assert_statement_fixture("a, b :: v;");
+	assert_statement_fixture("#program_export inner :: () {}");
 	assert_statement_matches_code("#no_reset fixture_no_reset: s64;", #code { #no_reset fixture_no_reset: s64; }, file_scope = true);
+	assert_statement_matches_code("#program_export fixture_export: s64;", #code { #program_export fixture_export: s64; }, file_scope = true);
+	assert_statement_matches_code("#program_export \"renamed\" fixture_renamed: s64;", #code { #program_export "renamed" fixture_renamed: s64; }, file_scope = true);
 	assert_statement_fixture("{ value := 1; }");
 	assert_statement_fixture("`return 1;");
 	assert_statement_fixture("while ready { break; }");

@@ -1005,7 +1005,15 @@ run_runner :: (arguments: [] string) -> s32 {
 
 
 					if exit_code != 0 {
-						print("\e[91mFAIL\e[0m job \e[93m%\e[0m [\e[96m%\e[0m \e[93m%\e[0m..\e[93m%\e[0m] exit=\e[91m%\e[0m. Logs: \e[96m%\e[0m\n", worker.job_index + 1, section.name, job.first, job.last, exit_code, job.directory);
+						print(
+							"\e[91mFAIL\e[0m job \e[93m%\e[0m [\e[96m%\e[0m \e[93m%\e[0m..\e[93m%\e[0m] exit=\e[91m%\e[0m. Logs: \e[96m%\e[0m\n",
+							worker.job_index + 1,
+							section.name,
+							job.first,
+							job.last,
+							exit_code,
+							job.directory
+						);
 						return 1;
 					}
 
@@ -1047,13 +1055,30 @@ run_runner :: (arguments: [] string) -> s32 {
 					} else {
 						finished += 1;
 						covered += job.expected;
-						print("\e[92mPASS\e[0m job \e[93m%\e[0m/\e[93m%\e[0m [\e[96m%\e[0m \e[93m%\e[0m..\e[93m%\e[0m] fixtures=\e[93m%\e[0m covered=\e[92m%\e[0m/\e[93m%\e[0m\n", job_index + 1, jobs.count, section.name, job.first, job.last, job.expected, covered, expected_total);
+						print(
+							"\e[92mPASS\e[0m job \e[93m%\e[0m/\e[93m%\e[0m [\e[96m%\e[0m \e[93m%\e[0m..\e[93m%\e[0m] fixtures=\e[93m%\e[0m covered=\e[92m%\e[0m/\e[93m%\e[0m\n",
+							job_index + 1,
+							jobs.count,
+							section.name,
+							job.first,
+							job.last,
+							job.expected,
+							covered,
+							expected_total
+						);
 						clean_runner_job(job.directory);
 					}
 
 				case WAIT_TIMEOUT;
 					if GetTickCount64() - worker.started >= xx (options.timeout_seconds * 1000) {
-						print("\e[93mTIMEOUT\e[0m job \e[93m%\e[0m [\e[96m%\e[0m \e[93m%\e[0m..\e[93m%\e[0m]; stopping worker trees. Logs: \e[96m%\e[0m\n", worker.job_index + 1, section.name, job.first, job.last, job.directory);
+						print(
+							"\e[93mTIMEOUT\e[0m job \e[93m%\e[0m [\e[96m%\e[0m \e[93m%\e[0m..\e[93m%\e[0m]; stopping worker trees. Logs: \e[96m%\e[0m\n",
+							worker.job_index + 1,
+							section.name,
+							job.first,
+							job.last,
+							job.directory
+						);
 						return 124;
 					}
 
@@ -1090,7 +1115,15 @@ run_runner :: (arguments: [] string) -> s32 {
 
 			worker.job_index = next_job;
 			worker.started = GetTickCount64();
-			print("\e[96mSTART\e[0m job \e[93m%\e[0m/\e[93m%\e[0m [\e[96m%\e[0m \e[93m%\e[0m..\e[93m%\e[0m] pid=\e[93m%\e[0m\n", next_job + 1, jobs.count, section.name, job.first, job.last, worker.info.dwProcessId);
+			print(
+				"\e[96mSTART\e[0m job \e[93m%\e[0m/\e[93m%\e[0m [\e[96m%\e[0m \e[93m%\e[0m..\e[93m%\e[0m] pid=\e[93m%\e[0m\n",
+				next_job + 1,
+				jobs.count,
+				section.name,
+				job.first,
+				job.last,
+				worker.info.dwProcessId
+			);
 			next_job += 1;
 			active += 1;
 			admission_started = GetTickCount64();

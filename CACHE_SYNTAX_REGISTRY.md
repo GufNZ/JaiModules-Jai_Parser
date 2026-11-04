@@ -14,10 +14,9 @@ Proposed mapping review 2026-10-21; this is a producer-adapter contract, not an 
 | `Parser_Token` without `ENABLE_TRIVIA`. | This aliases `Token`, which has line/column observations but no byte-offset fields.  It is outside the full-featured service profile: no non-trivia byte-mapping adapter is required.  Existing AST-compatibility mode may remain in the current parser independently; this specification does not require preserving that mode in the future owned-syntax API. |
 | `add_missing_token`. | Correlate the diagnostic's recovery record with `synthetic_tokens` and `insertion_index`; map the insertion position to a checked zero-width source anchor.  At end of input use the exact source length when the token/source mapping validates it.  No synthetic token bytes are inserted into the authoritative source.  Missing/ambiguous correlation remains `.UNLOCATED`, not a guessed inserted origin. |
 | `Parser_Declaration`/`.DECLARATION`. | Emit the authored declaration with its actual name and origin, retaining recovery state and containing syntax ownership.  A synthetic helper `declaration_properties` inside a compound node is not an additional standalone declaration entry. |
-| `Parser_Compound_Declaration`/`.COMPOUND_DECLARATION`. | Read `comma_separated_assignment.arguments` in authored order and shared `declaration_properties`.  For a qualified `parse_declaration_node` construction, the binding predicate is `(!reassignment && modifier != .ASSIGN) || modifier == .DECLARE`, where reassignment is the shared `operator_type` equal to the `=` character.  Emit only arguments satisfying this predicate; `.ASSIGN` targets and ordinary multi-target reassignment remain uses.  The separate expression-led construction needs route classification as described below; do not apply this predicate universally.  Do not collapse names or duplicate the shared properties node as an entry. |
+| `Parser_Compound_Declaration`/`.COMPOUND_DECLARATION`. | Read `comma_separated_assignment.arguments` in authored order and shared `declaration_properties`.  One builder function, `parse_compound_declaration`, produces every compound, recording the shared `operator_token` and each argument's `modifier_token` and `separator_token`.  A target is declared when it carries `.DECLARE`, or carries no modifier under a shared `:`; every other target is a use.  Declared targets must be identifiers; the builder diagnoses any other declared target.  Do not collapse names or duplicate the shared properties node as an entry. |
 | `Parser_Directive_Scope`/`.DIRECTIVE_SCOPE`. | Map `scope_type` `.EXPORT`, `.INTERNAL`, `.FILE` to `.SCOPE_EXPORT`, `.SCOPE_MODULE`, `.SCOPE_FILE` respectively, preserving the directive origin.  Track direct same-list provenance under the rules below; conditional branches retain branch-local observations without evaluation or a guessed merged visibility state. |
-| Declaration `#export` observation. | The reviewed scope-directive parser does not establish a declaration-marker mapping.  `.EXPORT` in `declaration_marker` is reserved until a real producer path or qualified lossless syntax adapter is identified.  Do not infer it from scope `.EXPORT`, resolved visibility, string matching inside comments/literals, or absent metadata.  Unrepresentable relevant observations require `.RECOVERED_UNKNOWN`/partial coverage, not a false `.UNSPECIFIED` assertion. |
-| Declaration `#program_export` metadata. | `parse_declaration_metadata` sets `.PROGRAM_EXPORT` and optionally stores a string token's value in `program_export_name`.  This requests a program/linker export, not module visibility or the reserved declaration `.EXPORT` marker.  Preserve it separately as specified below; the stored string is scalar data, not an AST child. |
+| Declaration `#program_export` prefix. | `parse_declaration_node` accepts `#program_export`, optionally followed by a string name, before the declaration it exports, sets `.PROGRAM_EXPORT` and stores the string's value in `program_export_name`.  This requests a program/linker export, not module visibility.  Preserve it as specified below; the stored string is scalar data, not an AST child. |
 
 The index traversal follows authored syntax ownership/child edges only; it must not follow resolved declarations, lexical binding/reference tables or inferred semantic backreferences.
 Snapshot-local node IDs identify syntax occurrences, not names; assign index-local entry IDs independently, preserving the declared enclosing-before-nested and per-binding order.
@@ -27,7 +26,7 @@ Until that representation and the reached child mappings are reviewed and qualif
 `.COMPLETE_SYNTAX_TRAVERSAL` requires a reviewed child-edge/variant registry covering every reached authored node kind and every required route, origin/name, visibility, metadata and recovery-attribution observation.
 An unknown node or unmapped required field makes coverage partial with a reason; successful parsing alone is not that proof.
 
-Mapping checks to implement after authorisation: raw punctuation versus named/aliased tokens; trivia-enabled origins and rejection of a non-trivia full-featured profile; EOF insertion/recovery correlations; `a, b := values` versus `a, b = values` and mixed declare/assign modifiers; shared compound initialiser ownership; sequential/conditional scope directives; unmapped declaration markers and unknown child variants.
+Mapping checks to implement after authorisation: raw punctuation versus named/aliased tokens; trivia-enabled origins and rejection of a non-trivia full-featured profile; EOF insertion/recovery correlations; `a, b := values` versus `a, b = values` and mixed declare/assign modifiers; shared compound initialiser ownership; sequential/conditional scope directives; unknown child variants.
 These supplement C1/C5 and the payload review vectors without claiming executable adapter qualification.
 The initial fifteen-operation interface and all pending policy/implementation gates are unchanged.
 
@@ -62,10 +61,9 @@ These are semantic/module-composition questions outside this payload.
 Recovering a condition does not by itself invalidate an otherwise qualified list/directive association; unresolved ownership or relevant directive observations do.
 Never use condition truth, symbol lookup or file following to repair the syntax summary.
 
-Declaration markers remain separately observed under their qualified producer routes; scope provenance cannot fill the reserved declaration `.EXPORT` marker.
-Program/linker export metadata remains separate from both.
+Program/linker export metadata remains separate from scope provenance.
 
-`.COMPLETE_SYNTAX_TRAVERSAL` may include `.UNSPECIFIED` same-list summaries where absence of a direct directive is established; it may not conceal an unavailable list/marker mapping as that absence.
+`.COMPLETE_SYNTAX_TRAVERSAL` may include `.UNSPECIFIED` same-list summaries where absence of a direct directive is established; it may not conceal an unavailable list mapping as that absence.
 This refinement deliberately provides no effective-visibility query, inheritance algorithm, branch-join operation or extra service operation.
 
 The discriminating future case places different scope directives in the two static branches followed by a parent-list declaration: retain both branch-local bases without selecting a condition or manufacturing a merged parent directive.
@@ -75,69 +73,37 @@ Compiler visibility/default/inheritance behaviour remains separate pending quali
 
 ## Program Export Metadata Versus Visibility
 
-Proposed 2026-10-21 for the declaration-index/1 draft; no producer adapter or source-observation pass is implemented by this refinement.
+Revised 2026-11-05 (phase 1 of the migration plan).
+The official compiler, its `Program_Print` module and every corpus use place `#program_export` before the declaration it exports, optionally followed by a string name, in declaration and imperative contexts alike.
+A trailing `#program_export` is rejected by the compiler, or applies to the next declaration.
+`parse_declaration_node` therefore consumes the prefix form only; `parse_statement` routes it to that builder, and `parse_declaration_metadata` no longer recognises it.
 
-`parse_declaration_metadata` recognises `align`, `no_reset`, `uninitialized`, `elsewhere` and `program_export`; its default branch stops without consuming an unknown directive.
+Neither `.PROGRAM_EXPORT` nor `program_export_name` supplies a scope-directive value.
 
-That path does not recognise `export`.
-
-This establishes a limit of the reviewed producer path, not that `#export` is supported elsewhere or that every remaining source token was inspected as declaration metadata.
-Keep declaration-marker `.EXPORT` reserved and the earlier unknown-observation rule intact.
-
-Neither `.PROGRAM_EXPORT` nor `program_export_name` supplies a declaration-marker or scope-directive value.
-
-`program_export_syntax` is `{coverage, occurrences: []ProgramExportOccurrence, producer_observation}`.
-
-Its `coverage` is `.COMPLETE_METADATA_OBSERVATION | .PARTIAL_METADATA_OBSERVATION {reasons: []CoverageReason}` for this declaration's metadata, not semantic export validity or whole-index traversal.
-
-Metadata and `.UNMAPPED` name reasons use the same structured record and propagate to the index's partial reasons.
+`program_export_syntax` is `*ProgramExportOccurrence`; null means the declaration has no `#program_export` prefix.
 
 `ProgramExportOccurrence` is `{marker_origin:.SOURCE, name_argument: *ProgramExportName}`; `ProgramExportName` is `{origin:.SOURCE, value_bytes}`.
 
-The marker origin covers the authored `#` and `program_export` tokens; a name origin covers the consumed string token.
+The marker origin covers the `#` and `program_export` tokens at the start of the declaration's token interval; a name origin covers the immediately following string token.
+The prefix position makes this correlation exact: no search through the declaration's span is needed or permitted.
 
 Trivia between tokens remains in the protected source, not in decoded `value_bytes`.
 
-Preserve occurrences in token order, including repeats.
-
-A null `name_argument` means no string token was consumed for that occurrence; a non-null one with empty bytes means an explicitly present empty string.
+A null `name_argument` means no string token followed the marker; a non-null one with empty bytes means an explicitly present empty string.
 
 Do not substitute the declaration's name when the argument is absent.
 
 `value_bytes` is the exact lexer string value under the captured `EVALUATE_STRING_ESCAPES` profile, not a host-decoded or normalised linker name; raw spelling and malformed-input observations remain protected separately.
 
-`producer_observation` is `*ProgramExportObservation`, where `ProgramExportObservation` is `{requested:bool, stored_name_bytes}`, from `.PROGRAM_EXPORT` and `program_export_name`, even when source correlation is incomplete.
-
-Use a non-null pointer for declaration-properties records and null for index occurrences such as bare enum members that have no such producer record; do not manufacture a false flag/empty string pair.
-
 Copy/lease these bytes independently of producer allocator lifetime; they are not pointer identity or an identifier-interner key.
 
-The producer loop sets the flag on every recognised occurrence and overwrites the stored name only when the following token is a string.
-Thus, a later bare `#program_export` does not clear an earlier stored name.
+For a compound declaration, the prefix belongs to the shared region and is stored on its `declaration_properties`.
+Each binding entry may expose the same immutable observation value, but it is one authored occurrence, not one per binding or a claim that every target is semantically exported.
 
-With complete correlation, `requested` must equal whether any occurrence was consumed and the stored name must match the last consumed name, or the producer's initial empty value if none was consumed.
+A second `#program_export` before the same declaration is diagnosed rather than merged.
+Recovered or missing marker/name tokens follow the common recovery-attribution rules; an unavailable correlation reports `.UNCORRELATED_METADATA` rather than a guessed occurrence.
 
-Do not infer occurrence count, argument presence or ordering from that final flag/string pair; it loses information, particularly for explicit empty names and repeated markers.
-An adapter must correlate exact metadata tokens with the owning declaration's parse route and recovery, not search all tokens within its full span: an initialiser, nested procedure, comment or string can contain unrelated text.
-
-A complete observation requires a qualified metadata interval and all consumed occurrences; otherwise retain verified occurrences and producer data, report partial metadata coverage and propagate a declaration-index partial reason.
-
-A zero flag alone does not prove complete absence.
-
-For a compound declaration, source metadata belongs to the shared region.
-Each binding entry may expose the same immutable observation value, but it is one authored observation sequence, not one occurrence per binding or a claim that every target is semantically exported.
-The compound with no declared bindings still retains this data in its protected syntax; a declaration index with no binding entries does not invent one to carry metadata.
-No helper token span may be fabricated to recover the metadata interval; compound properties require correlation through the owning compound and actual parse boundaries.
-
-The cheap discriminating source check is the assignment in `parse_declaration_metadata`: it copies `parser_eat(parser).string_value`, not a `Parser_Node` pointer, and only inside the `.STRING` branch.
-
-Existing `parser_tokens_test.jai` fixtures exercise named exports and incremental owned-byte comparisons, but they are not qualification of the new occurrence schema.
-
-Future independent acceptance vectors: absent/bare/named/explicit-empty requests; repeated named then bare and named then empty requests; evaluated versus unevaluated escapes; compound metadata; nested initialiser decoys; unknown directives and malformed/recovered string tokens; byte ownership after producer teardown.
-
-Check exact source origins, occurrence order, absent-versus-empty names, final producer observations and partial reasons.
-
-Leave declaration `#export` mapping open until supported producer evidence exists; do not invent a syntax adapter or change parser behaviour to close it on paper.
+Independent acceptance vectors: absent, bare, named and explicit-empty prefixes; prefixes combined with `#no_reset`; procedure, variable and compound declarations; imperative-block declarations; the rejected trailing form; evaluated versus unevaluated escapes; malformed string tokens; byte ownership after producer teardown.
 
 ## Authored Child Edges and Shared Compound Regions
 
@@ -214,15 +180,13 @@ Use valid source positions to interleave independent authored children in lexica
 This candidate table is not itself that complete ordering/guard registry.
 Helper nodes without a finished token span, including compound `declaration_properties`, do not gain a fabricated `.SOURCE` origin from zero-initialised token fields; shared-region source identity comes from the owning compound.
 
-There is a second compound-construction path in `parse_statement`: expression-led multi-target assignments allocate the same helper shape but do not set `operator_type` there.
-Consequently, the earlier binding predicate is qualified only for the reviewed `parse_declaration_node` route; it is not a universal shape-only classifier for arbitrary compound nodes.
-Until a qualified producer observation distinguishes these routes and non-identifier targets, preserve their syntax but report partial declaration-index coverage rather than emit bindings from a default operator value.
-The proposed route-evidence contract below defines that requirement without claiming the current parser already supplies it.
-Do not repurpose resolver bindings as authored ownership to hide this gap.
+Both former construction paths now share `parse_compound_declaration`, which records the shared operator in `operator_type` and `operator_token` for every compound, including expression-led targets and `+=`-style operators.
+The binding rule above therefore applies to every compound node, using recorded tokens rather than a route classification.
+Do not repurpose resolver bindings as authored ownership.
 
-The milestone-1 closure below fixes the draft's current-producer guards/order, alias ownership and explicit marker/compound/metadata limitations.
+The milestone-1 closure below fixes the draft's current-producer guards/order, alias ownership and explicit compound/metadata limitations.
 Remaining qualification must exercise those rules, producer-version drift and truthful partial coverage; closing the registry does not make unavailable observations available.
-Future C1/C5 vectors must cover shared initialisers with nested anonymous/ordinary/compound declarations, zero/one/multiple declared bindings, repeated names, both compound construction routes, recovered null/unlocated helpers, injected cycles/unregistered sharing, inactive literal arms and deliberately populated semantic backlinks.
+Future C1/C5 vectors must cover shared initialisers with nested anonymous/ordinary/compound declarations, zero/one/multiple declared bindings, repeated names, identifier and expression targets, recovered null/unlocated helpers, injected cycles/unregistered sharing, inactive literal arms and deliberately populated semantic backlinks.
 Assert exact entry/region counts, IDs, association order, parent containers and coverage reasons against independently authored expectations, not only a second traversal using the same registry.
 The registry has a source-reviewed draft boundary, not a behaviourally qualified implementation; exact API/schema review remains open.
 
@@ -283,7 +247,7 @@ Descendants of target expressions use the outer container; they are not initiali
 When entering shared properties, alignment or notes, use this compound's `.SHARED_REGION` container and restore the outer container on exit.
 An ordinary declaration encountered there introduces its own declaration container for its descendants.
 This grouping can place a later binding's entry before a nested declaration whose source begins in an earlier target; it is the specified binding-group precedence, not evidence of evaluation order or a reason to reorder the graph.
-Expression-led assignments have no newly declared binding group under the qualified route rules, but still retain a region and the same target-versus-shared-payload distinction.
+Assignments with no declared targets have no newly declared binding group, but still retain a region and the same target-versus-shared-payload distinction.
 
 `local_entry_id` is a zero-based `u64` equal to the entry's position in `entries`; `local_region_id` likewise equals the region's position in `shared_regions` in region-creation order.
 These remain separate domains even when their numeric values coincide.
@@ -341,7 +305,7 @@ State all known impacts: uncertainty about which bindings exist is not merely a 
 | `.UNMAPPED_ORIGIN`. | Required source/name/recovery location cannot be correlated without guessing. |
 | `.UNMAPPED_NAME`. | Name form, source spelling or producer-value correlation is unavailable. |
 | `.UNCORRELATED_METADATA`. | Metadata boundaries, occurrence presence/order or source/value association are not established. |
-| `.UNKNOWN_VISIBILITY`. | Authored scope/marker observations required by the index cannot be established. |
+| `.UNKNOWN_VISIBILITY`. | Authored scope-directive observations required by the index cannot be established. |
 | `.UNPROVEN_CHILD_ORDER`. | Children are safely known but their required authored order is not established. |
 | `.OPAQUE_SYNTAX`. | A preserved source region, such as an unparsed assembly operand, has not been traversed for the promised observations. |
 | `.UNREGISTERED_SHARING`. | A safe repeated node lacks a qualified alias/single-owner rule; stop the unqualified descent rather than duplicate it. |
@@ -463,10 +427,9 @@ The adapter build identity is a separate service-verified value in the `producer
 | --- | --- |
 | `authored_edges`. | Exact reachable-kind/field/variant/order registry, including base `.DIRECTIVE_THIS`, guarded aliases and recovered holes.  The milestone-1 closure fixes the current-producer draft and its exclusions; implementing and qualifying a bound adapter remain open. |
 | `builder_function_routes`. | Qualified source-form/context evidence for types, literals, enum-member mode, parameter usings, import callees and arrow-run headers, plus committed published-syntax recovery attribution under the rules above.  Do not infer a universal route from equal/default field values or recovery ownership from diagnostic overlap.  Capture versus reconstruction remains review work. |
-| `compound_routes`. | Snapshot-bound `CompoundRoute` and separator observations under the following contract.  Current AST fields alone are insufficient; no qualified capture/reconstruction adapter is supplied yet. |
+| `compound_routes`. | `.CAPTURED`: the producer records the shared `operator_token`/`operator_type` and each argument's `modifier_token` and `separator_token` under the following contract.  Implementing and qualifying the bound adapter remain open. |
 | `name_origins`. | Exact spelled/anonymous/missing observations, separate source spelling and producer-name values, name-specific recovery and explicit unmapped outcomes, including operator names, unnamed slots and context-qualified enum members.  A copied/normalised producer name is not automatically a single source slice.  The draft's unavailable-evidence disposition is fixed; implementing and qualifying actual source correlation remain open. |
-| `metadata_origins`. | Correlated metadata boundaries/order and argument presence, including repeated/bare/empty program exports and alignment/replacement clauses whose final fields lose occurrences.  Current final fields alone are insufficient. |
-| `declaration_markers`. | Authored declaration-marker observations distinct from scope and program exports.  The reviewed parser paths have not established declaration `#export` support; this gap must stay explicit rather than be declared captured. |
+| `metadata_origins`. | Correlated metadata boundaries/order and argument presence, including program-export prefixes and alignment/replacement clauses whose final fields lose occurrences.  Current final fields alone are insufficient for repeated trailing metadata. |
 
 `.CAPTURED` proposes retaining evidence at the owning parse/construction point; `.RECONSTRUCTED` proposes a separately registered, producer-version-bound correlation.
 
@@ -490,59 +453,42 @@ Do not silently replace an admitted profile's advertised guarantees with weaker 
 Unsupported profile/schema admission must be explicit, while supported partial coverage and its reasons remain truthful under that profile.
 
 The discriminating future check keeps source/parser identity fixed and changes only adapter build, registry binding or one observation feature: the context must change and derived index reuse must miss.
-Further independent cases cover unavailable compound/marker observations with usable syntax/diagnostics; an available global capability with a local recovered gap; unknown/forged capability schemas; unsupported payload kinds versus partial supported indices; corrupt evidence; and retained old results across adapter replacement.
+Further independent cases cover unavailable compound observations with usable syntax/diagnostics; an available global capability with a local recovered gap; unknown/forged capability schemas; unsupported payload kinds versus partial supported indices; corrupt evidence; and retained old results across adapter replacement.
 Assert exact binding equality/misses, admission/query outcomes and per-result coverage against independent expectations.
 This matrix records the integration choices still requiring review; it does not approve instrumentation, a reconstruction adapter, policy defaults or the final API.
 
-## Compound Route Evidence and Binding Classification
+## Compound Token Evidence and Binding Classification
 
-Proposed producer-adapter refinement; neither parser instrumentation nor a reconstruction adapter is implemented here.
+Revised 2026-11-05 (phase 1 of the migration plan, decision R12).
+The official compiler builds one compound shape for every multi-target statement: identifier or expression targets, optional per-identifier `:`/`=` modifiers, and a shared operator recorded in `operator_type` (0 for `:`, the `=` character, or an assignment operator such as `.PLUS_ASSIGN`).
+The parser now matches it with a single builder function, `parse_compound_declaration`, called from both `parse_declaration_node` and `parse_statement`.
 
-`parse_statement` can construct expression-led multi-target assignments for any operator reported at assignment precedence by `binary_operator_info`; it consumes that operator without storing it in the resulting compound's `operator_type`.
+Under `ENABLE_TRIVIA` the builder records, for each compound:
 
-The declaration route instead records shared `=` reassignment, or takes the declaration-properties branch after expecting `:`.
+- `operator_token`: the token index of the consumed shared operator, or `-1` when an expected `:` was missing and recovery inserted it.
+- Per argument, `modifier_token`: the index of its `:`/`=` modifier, or `-1`; modifiers apply only to identifier targets followed by a comma.
+- Per argument, `separator_token`: the index of the comma after it, or `-1` for the last target.
 
-Default `operator_type` and default target modifiers therefore cannot distinguish all produced compounds.
+The two callers differ only in how targets are built: the identifier-led caller builds identifier nodes directly, so declared names are not registered as references, and the expression-led caller parses targets as expressions and backs out when no shared operator follows its comma.
+The recorded tokens are the complete binding evidence; no separate route observation is needed.
 
-The proposed logical observation is `CompoundRoute`:
-
-- `.IDENTIFIER_HEAD {reassignment:bool}` records the actual `parse_declaration_node` branch decision for this compound, not a conclusion from the helper's eventual expression or scope bindings.
-- `.EXPRESSION_HEAD {operator_token:TokenTag}` records the assignment-precedence token consumed by the expression-led `parse_statement` builder function.
-Preserve the exact token tag, including compound assignment operators; do not substitute the default stored `operator_type`.
-- `.UNCLASSIFIED {reason}` retains syntax with an explicit unavailable/ambiguous-route reason; it is not a declaration route with `reassignment=false`.
-
-Bind each observation to this envelope's snapshot-local compound node ID, exact source revision and producer/context schema.
-Retain the consumed/expected shared-separator origin as a separate `Origin` observation, with source-token correlation where a real token was consumed.
-A missing expected `:` can be correlated to inserted-token recovery, not represented as an authored colon.
-A captured branch decision may still describe recovered syntax; no observation certifies semantic validity.
-Each compound has at most one coherent observation.
-Reject conflicting observations or cross-snapshot IDs rather than picking the first; no raw producer pointer is an external identity.
-
-| Qualified route. | Binding and shared-region rule. |
+| Recorded evidence. | Binding rule. |
 | --- | --- |
-| `.IDENTIFIER_HEAD`, `reassignment=false`. | For each target in stored order, declare when its modifier is not `.ASSIGN` (including explicit `.DECLARE`); retain the declaration-properties/recovery observations. |
-| `.IDENTIFIER_HEAD`, `reassignment=true`. | Declare only targets with explicit `.DECLARE`; unmodified/`.ASSIGN` targets are uses. |
-| `.EXPRESSION_HEAD`. | No newly declared bindings.  Traverse the actual target expressions and shared RHS once; preserve the operator observation and create a shared region with an empty binding list when required to contain nested syntax. |
-| `.UNCLASSIFIED` or missing evidence. | Preserve the compound/target/helper syntax and report partial index coverage for ambiguous binding classification.  Do not fabricate bindings or certify their absence from default fields. |
+| Target with modifier `.DECLARE`. | Declared. |
+| Target with modifier `.ASSIGN`. | A use. |
+| Unmodified target, shared `:`. | Declared. |
+| Unmodified target, shared `=` or assignment operator. | A use. |
+| Declared target that is not an identifier. | Diagnosed by the builder ("only a simple identifier can be declared"), matching the compiler's rejection; emit no binding for it. |
 
-This is the existing predicate `(!reassignment && modifier != .ASSIGN) || modifier == .DECLARE` restricted to its owning construction route, not a new parser declaration rule.
-Validate known modifier tags, target kinds/name observations and list alignment before emitting names.
-An unexpected non-identifier target on the identifier-head route is a mapping mismatch, not a reason to cast an expression to `Parser_Ident` or extract a name from arbitrary spelling.
-Expression-head targets can be members, subscripts or other expression shapes; labels/uses do not become declarations because their names match existing scope bindings.
+The `a:, b = v` and `a=, b := v` forms follow directly from these rows.
+Validate that each recorded index lies inside the snapshot's token array and names the expected token type; a mismatch is a conversion failure, not a guessed binding.
 Recovered names/holes preserve the common name/origin rules rather than manufacturing a well-formed spelled binding.
-The route observation does not waive source-span, metadata or child-registry validation.
+The evidence does not waive source-span, metadata or child-registry validation.
 
-For producer integration, prefer recording the route at the successful construction point before the distinguishing operator/branch evidence is lost.
-That would be a separately authorised capability change, not an edit authorised by this document.
-An alternative adapter may reconstruct evidence only under a separately reviewed, producer-version-bound token/parse correlation that covers lookahead routing, nested delimiters, modifiers and recovery.
-A raw scan for `:`/`=`, a nonnull/default-field test, or consulting lexical bindings is insufficient.
-The current builder functions' comma-node intervals differ around the shared separator: the declaration builder function records its interval after consuming/expecting the separator, while the expression builder function finishes its comma node before consuming the assignment operator.
-This is useful discriminating test evidence, not an approved route classifier: recovered spans, parser reuse and producer-version changes must not silently change binding meaning.
+The comma-separated-arguments node of every compound starts at its first target (not at a declaration prefix such as `#no_reset`) and ends after the shared operator.
+AST reuse rebases the recorded indices and the node's locations with the reused declaration.
 
-The discriminating future vector pairs `a, b := values` with an expression-headed member/subscript multi-target assignment whose compound operator field remains default; only the first can obtain implicit declared bindings.
-Independent vectors must also cover ordinary identifier-head `a, b = values`, mixed explicit declare/assign modifiers, compound-assignment operators, repeated names, nested target/RHS expressions, missing separators/RHS, malformed targets, absent/conflicting route evidence and stale snapshot-bound observations.
-Assert exact binding counts/order, source names/origins, empty versus populated shared-region associations, retained operator tags, recovery status and partial reasons against independent expectations and the actual fresh construction route.
-This narrows the unresolved gap to route capability/correlation review and executable qualification; it does not claim that the current producer now meets it, add a service operation or authorise a parser/API migration.
+Covered by `test_compound_token_evidence` in `parser_tokens_test.jai` and by the differential normaliser, which now compares `operator_type` with the compiler; future independent vectors must still cover repeated names, nested target/RHS expressions, missing separators/RHS, malformed targets and stale snapshot-bound observations.
 
 ## Generated Layout Inventory and Registry Closure
 
@@ -700,7 +646,7 @@ Equal spans/spellings never merge distinct node occurrences, and a global visite
 ### Advertised Limits and Mapping Dispositions
 
 This registry promises defined handling of the current syntax graph, not universally complete declaration indices.
-A future adapter must advertise its actual methods for the existing six capability features; no `.CAPTURED` or `.RECONSTRUCTED` implementation is asserted here.
+A future adapter must advertise its actual methods for the existing five capability features; no `.CAPTURED` or `.RECONSTRUCTED` implementation is asserted here.
 Missing evidence cannot be hidden by advertising the registry name.
 The following are explicit supported-profile limits, not unassigned mapping TODOs.
 Impacts below are minimum affected domains; add every other known impact under the common coverage contract.
@@ -708,9 +654,8 @@ Impacts below are minimum affected domains; add every other known impact under t
 | Reached condition/excluded inference. | Required disposition. | Coverage/admission consequence. |
 | --- | --- | --- |
 | Non-trivia full-featured profile. | Reject profile admission; preserve the separate current compatibility mode without promising byte mapping for it. | Unsupported profile, not a successful empty index. |
-| Compound construction evidence unavailable or ambiguous. | Preserve safely represented targets/properties, use the specified unclassified route, and emit no guessed bindings or guessed binding absence.  A qualified future observation must obey the existing identifier-head/expression-head rules. | `.UNCLASSIFIED_ROUTE`, affecting `.DECLARATION_SET` and `.CONTAINMENT` where binding/container association is unknown. |
+| Compound token evidence missing or inconsistent. | Preserve safely represented targets/properties and emit no guessed bindings or guessed binding absence; a recorded token that does not match the token stream is a conversion failure. | `.UNCLASSIFIED_ROUTE`, affecting `.DECLARATION_SET` and `.CONTAINMENT` where binding/container association is unknown. |
 | Bare enum-member, unnamed slot, type/cast or other context-sensitive source form lacks its required route evidence. | Keep the safely known syntax; do not infer membership, anonymity or an active arm from spelling/default fields alone. | `.UNCLASSIFIED_ROUTE`/`.UNAVAILABLE_OBSERVATION`, with the actual declaration/order/source impacts. |
-| Declaration `#export` marker. | No current producer path is admitted for `declaration_marker == .EXPORT`.  Scope export and program export do not supply that evidence.  A missing marker feature cannot certify marker absence. | `.RECOVERED_UNKNOWN` plus `.UNKNOWN_VISIBILITY` or `.UNAVAILABLE_OBSERVATION` with `.VISIBILITY` impact wherever marker observations are required. |
 | Repeated/overwritten metadata, source-name or committed-recovery correlation unavailable. | Retain exact source/tokens, safe final fields and independently known entries.  Use unmapped names, unknown recovery or unavailable occurrence metadata rather than reconstructing discarded syntax or claiming complete absence. | `.UNCORRELATED_METADATA`, `.UNMAPPED_NAME`, `.UNMAPPED_ORIGIN` or `.UNCLASSIFIED_ROUTE`, with `.METADATA`, `.NAMES`, `.SOURCE_MAPPING`, `.ORDER` and/or `.RECOVERY` as affected. |
 | Unexpected compound-property metadata, procedure/aggregate notes or aggregate-literal alignment without a registered route. | Do not silently drop a required observation or treat a nonnull field as permission for new descent. | `.UNMAPPED_FIELD`/`.UNCLASSIFIED_ROUTE`; include `.DECLARATION_SET`, `.CONTAINMENT` or `.ORDER` when unknown child ownership can affect them. |
 | Safely represented unknown kind, active helper variant or unproved child order. | Preserve only safe observations, stop the unqualified edge/variant, and retain an explicit region reason. | `.UNMAPPED_NODE_KIND`, `.UNMAPPED_FIELD` or `.UNPROVEN_CHILD_ORDER`; no complete traversal claim. |
@@ -719,7 +664,7 @@ Impacts below are minimum affected domains; add every other known impact under t
 | Invalid references, out-of-range observations, conflicting evidence, incompatible layouts or downward cycles. | Reject conversion under the existing failure contract. | Not a successful partial index and not a parser diagnostic. |
 
 Any required unavailable observation propagates to top-level `.PARTIAL_SYNTAX_TRAVERSAL` with its subject/path and impacts; safe independent records remain usable.
-No empty reason list, default `.UNSPECIFIED`, reserved marker value or unchanged field list may certify complete coverage.
+No empty reason list, default `.UNSPECIFIED` or unchanged field list may certify complete coverage.
 A request for an entirely unimplemented query/schema remains unsupported rather than becoming a partial implementation by declaration.
 Retained results keep their original binding and coverage when a later adapter gains capabilities.
 
@@ -1057,7 +1002,7 @@ Shared base/overlay rules apply; embedded scope-entry storage is part of the sam
 | `Code_Comma_Separated_Argument`/parser-owned helper counterpart. | `node`: `.CHILD`, authored target occurrence, then `modifier`: `.NON_CHILD`, registered per-target declaration/assignment observation, not an instruction to perform binding. |
 
 The field rows do not override the earlier binding-group event order or route evidence.
-A compound emits only the bindings justified by its qualified identifier/expression construction route, while target expressions retain their actual syntax and outer container.
+A compound emits only the bindings justified by its recorded operator and modifier tokens, while target expressions retain their actual syntax and outer container.
 The properties helper follows declaration field guards only in its compound-helper context: do not derive an independent name, scope entry or source origin from its zero/default fields.
 Unexpected helper-owned alignment/notes remain the explicit mapping gap described below.
 The static coverage check compares all five rows with their compiler inventory records, excluding shared `base`; role-labelled `entry` fields remain included.
@@ -1098,7 +1043,7 @@ Comparing only the 50 generated `TYPES` entries inventoried above is insufficien
 Unknown fields/variants and ambiguous routes remain explicit partial reasons.
 3. Review each alias with its exact owner/target guard and one downward traversal owner.
 In particular, parameter usings, import callees and arrow-run block aliases are different rules, not a generic visited-set exemption.
-4. Resolve or explicitly exclude compound construction-route ambiguity, unsupported declaration markers, source-slot/name origins and uncorrelated metadata/ordering routes.
+4. Resolve or explicitly exclude source-slot/name origins and uncorrelated metadata/ordering routes.
 A documented gap is not reviewed complete coverage; any exclusion must be reflected in the advertised profile and per-result coverage.
 5. After implementation authorisation, qualify exact node/entry/region counts, paths/order, origins, alias targets, recovery/partial reasons and owned lifetimes against independently authored expectations plus fresh owned parser output under C1/C5.
 

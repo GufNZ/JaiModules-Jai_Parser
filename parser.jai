@@ -456,6 +456,8 @@ TYPES :: Type.[
 				print(b, "\tfeatures: []*Parser_Asm_Feature;\n\tstatements: []*Parser_Asm_Statement;\n\tbody_span: Token_Span;\n\tenclosing_scope: *Parser_Block;\n");
 			case "Code_Placeholder";
 				print(b, "\tname: string;\n");
+			case "Code_Compound_Declaration";
+				print(b, "\t#if ENABLE_TRIVIA {\n\t\toperator_token: Token_Index = xx -1;\n\t}\n");
 		}
 
 		print(b, "}\n\n");
@@ -493,6 +495,10 @@ Parser_Context_Modification :: struct {
 Parser_Comma_Separated_Argument :: struct {
 	node: *Parser_Node;
 	modifier: type_of(Code_Comma_Separated_Argument.modifier);
+	#if ENABLE_TRIVIA {
+		modifier_token: Token_Index = xx -1;
+		separator_token: Token_Index = xx -1;
+	}
 }
 
 Parser :: struct {
@@ -555,7 +561,9 @@ resolve_lexical_references :: (scope: *Parser_Lexical_Scope) {
 			}
 
 
-			if found break;
+			if found {
+				break;
+			}
 
 
 			lookup = lookup.parent;
@@ -1013,11 +1021,21 @@ reuse_simple_declaration :: (parser: *Parser) -> *Parser_Node {
 				arguments.* = old_arguments.*;
 				arguments.first_token = xx start;
 				arguments.one_past_last_token = xx (start + 2 * old_arguments.arguments.count);
+				arguments_first_token := parser.parsed.tokens[start];
+				arguments_last_token := parser.parsed.tokens[arguments.one_past_last_token.(s64) - 1];
+				arguments.l0 = arguments_first_token.l0;
+				arguments.c0 = arguments_first_token.c0;
+				arguments.l1 = arguments_last_token.l1;
+				arguments.c1 = arguments_last_token.c1;
 				copied_arguments: [..]Parser_Comma_Separated_Argument;
 				copied_arguments.allocator = parser_node_allocator(parser.parsed);
 				for old_arguments.arguments {
 					argument := it;
 					argument.node = copy_reusable_expression(parser, it.node, start - first, false);
+					if argument.separator_token >= 0 {
+						argument.separator_token = xx (argument.separator_token.(s64) + start - first);
+					}
+
 					array_add(*copied_arguments, argument);
 				}
 
@@ -1037,6 +1055,10 @@ reuse_simple_declaration :: (parser: *Parser) -> *Parser_Node {
 				declaration.* = compound.*;
 				declaration.comma_separated_assignment = arguments;
 				declaration.declaration_properties = properties;
+				if declaration.operator_token >= 0 {
+					declaration.operator_token = xx (declaration.operator_token.(s64) + start - first);
+				}
+
 				finish_node(parser, declaration, start);
 				if !reassignment_compound {
 					for copied_arguments {
@@ -1804,6 +1826,11 @@ parse_statement :: (parser: *Parser, parent: *Parser_Block = null) -> *Parser_No
 	}
 
 
+	if parser_peek_if(parser, #char "#", .IDENT) && parser_peek(parser, 1).ident_value.name == "program_export" {
+		return parse_declaration_node(parser);
+	}
+
+
 	if token.type == #char "#" && !(parser_peek_if(parser, #char "#", .IDENT, #char "(") && parser_peek(parser, 1).ident_value.name == "this") {
 		directive := parse_declaration_directive(parser);
 		if directive {
@@ -1857,46 +1884,9 @@ parse_statement :: (parser: *Parser, parent: *Parser_Block = null) -> *Parser_No
 
 
 	// A comma can belong to an expression; commit to a compound assignment only after finding its operator.
-	comma := parser_checkpoint(parser);
-	arguments: [..]Parser_Comma_Separated_Argument;
-	arguments.allocator = parser_node_allocator(parser.parsed);
-	array_add(*arguments, .{ node = left });
-	while parser_eat_if(parser, #char ",") {
-		argument := parse_binary(parser, 2);
-		if !argument {
-			parser_restore(parser, comma);
-			return left;
-		}
-
-
-		array_add(*arguments, .{ node = argument });
-	}
-
-	is_binary, _, precedence, _ := binary_operator_info(parser_peek(parser).type);
-	if !is_binary || precedence != 1 {
-		parser_restore(parser, comma);
-		return left;
-	}
-
-
-	arguments_node := new_parser_node(parser, Parser_Comma_Separated_Arguments);
-	arguments_node.kind = .COMMA_SEPARATED_ARGUMENTS;
-	arguments_node.arguments = arguments;
-	finish_node(parser, arguments_node, first);
-	parser_eat(parser);
-	right := parse_declaration_expression(parser);
-	if !right {
-		add_expected_expression(parser);
-	}
-
-	result := new_parser_node(parser, Parser_Compound_Declaration);
-	result.kind = .COMPOUND_DECLARATION;
-	result.comma_separated_assignment = arguments_node;
-	result.declaration_properties = new_parser_node(parser, Parser_Declaration);
-	result.declaration_properties.kind = .DECLARATION;
-	result.declaration_properties.expression = right;
-	finish_node(parser, result, first);
-	return result;
+	flags: type_of(Code_Declaration.flags);
+	compound := parse_compound_declaration(parser, first, first, left, false, flags);
+	return ifx compound then compound else left;
 }
 
 new_asm_ident :: (parser: *Parser, token_index: s64) -> *Parser_Ident {
@@ -2711,6 +2701,7 @@ parse_case_block :: (parser: *Parser, parent: *Parser_Block, owning_if: *Parser_
 		return null;
 	}
 
+
 	parent_scope := parser.current_scope;
 	push_lexical_scope(parser);
 	defer parser.current_scope = parent_scope;
@@ -3320,6 +3311,16 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 	}
 
 
+	// `#program_export ["name"]` precedes the declaration it exports, before any `#no_reset`.
+	program_export_name: string;
+	marked_program_export := parser_peek_if(parser, #char "#", .IDENT) && parser_peek(parser, 1).ident_value.name == "program_export";
+	if marked_program_export {
+		parser_eat(parser, 2);
+		if parser_peek(parser).type == .STRING {
+			program_export_name = parser_eat(parser).string_value;
+		}
+	}
+
 	marked_no_reset := parser_peek_if(parser, #char "#", .IDENT) && parser_peek(parser, 1).ident_value.name == "no_reset";
 	if marked_no_reset {
 		parser_eat(parser, 2);
@@ -3327,7 +3328,7 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 
 
 	if parser_peek(parser).type == #char "#" {
-		if marked_no_reset {
+		if marked_no_reset || marked_program_export {
 			add_expected_expression(parser);
 			return null;
 		}
@@ -3338,6 +3339,10 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 
 
 	declaration_flags: type_of(Code_Declaration.flags);
+	if marked_program_export {
+		declaration_flags |= .PROGRAM_EXPORT;
+	}
+
 	if marked_no_reset {
 		declaration_flags |= .NO_RESET;
 	}
@@ -3366,109 +3371,19 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 	if (parser_peek(parser).type == #char "," || parser_peek(parser, 1).type == #char ","
 		&& (parser_peek(parser).type == #char ":" || parser_peek(parser).type == #char "=")
 	) {
-		// 1. Capture names and their individual declare/assign intent before the shared separator.
-		arguments: [..]Parser_Comma_Separated_Argument;
-		arguments.allocator = parser_node_allocator(parser.parsed);
-
-		first_ident := new_parser_node(parser, Parser_Ident);
-		first_ident.kind = .IDENT;
-		first_ident.name = name_token.ident_value.name;
-		if name_token.ident_is_backticked {
-			first_ident.flags |= .HAS_SCOPE_MODIFIER;
-		}
-
-		finish_node(parser, first_ident, first);
-
-		first_modifier: type_of(Code_Comma_Separated_Argument.modifier);
-
-		if parser_peek(parser, 1).type == #char "," {
-			if parser_eat_if(parser, #char ":") {
-				first_modifier = .DECLARE;
-			} else if parser_eat_if(parser, #char "=") {
-				first_modifier = .ASSIGN;
-			}
-		}
-
-		array_add(*arguments, .{node = first_ident, modifier = first_modifier});
-
-		while parser_eat_if(parser, #char ",") {
-			argument_first := parser.cursor;
-			argument_token := parser_peek(parser);
-			if !parser_eat_if(parser, .IDENT) {
-				add_expected_expression(parser);
-				break;
-			}
-
-
-			ident := new_parser_node(parser, Parser_Ident);
-			ident.kind = .IDENT;
-			ident.name = argument_token.ident_value.name;
-			if argument_token.ident_is_backticked {
-				ident.flags |= .HAS_SCOPE_MODIFIER;
-			}
-
-			finish_node(parser, ident, argument_first);
-
-			modifier: type_of(Code_Comma_Separated_Argument.modifier);
-			if parser_peek(parser, 1).type == #char "," {
-				if parser_eat_if(parser, #char ":") {
-					modifier = .DECLARE;
-				} else if parser_eat_if(parser, #char "=") {
-					modifier = .ASSIGN;
-				}
-			}
-
-			array_add(*arguments, .{node = ident, modifier = modifier});
-		}
-
-		// 2. A shared `=` reassigns existing targets; `:` introduces declaration properties.
-		reassignment := parser_eat_if(parser, #char "=");
-		if !reassignment {
-			parser_expect(parser, #char ":");
-		}
-
-		// 3. Preserve the compiler's compound shape even for multi-target reassignment.
-		result := new_parser_node(parser, Parser_Compound_Declaration);
-		result.kind = .COMPOUND_DECLARATION;
-
-		if reassignment {
-			result.operator_type = #char "=";
-		}
-
-		result.comma_separated_assignment = new_parser_node(parser, Parser_Comma_Separated_Arguments);
-		result.comma_separated_assignment.kind = .COMMA_SEPARATED_ARGUMENTS;
-		result.comma_separated_assignment.arguments = arguments;
-		#if ENABLE_TRIVIA {
-			result.comma_separated_assignment.first_token = xx first;
-			result.comma_separated_assignment.one_past_last_token = xx parser.cursor;
-		}
-		result.declaration_properties = new_parser_node(parser, Parser_Declaration);
-		result.declaration_properties.kind = .DECLARATION;
-		result.declaration_properties.flags = declaration_flags;
-
-		// 4. Reassignments take RHS values; declarations may also have types and metadata.
-		if reassignment {
-			result.declaration_properties.expression = parse_declaration_expression(parser);
-			if !result.declaration_properties.expression {
-				add_expected_expression(parser);
-			}
-		} else {
-			parse_declaration_properties(parser, result.declaration_properties, allow_multi_value_expression);
-		}
-
-		parse_declaration_metadata(parser, result.declaration_properties, *result.alignment_expression);
-
-		finish_node(parser, result, first);
-
-		// 5. Only newly declared names enter this scope; assigned targets remain uses.
-		for arguments {
-			if (!reassignment && it.modifier != .ASSIGN) || it.modifier == .DECLARE {
-				name := it.node.(*Parser_Ident).name;
-				array_add(*parser.current_scope.bindings, Parser_Binding.{name = name, declaration = result.declaration_properties});
-			}
-		}
-
-		return result;
+		name_first := parser.cursor - 1;
+		first_ident := new_compound_ident(parser, name_token, name_first);
+		compound := parse_compound_declaration(
+			parser,
+			first,
+			name_first,
+			first_ident,
+			true,
+			declaration_flags,
+			allow_multi_value_expression
+		);
+		compound.(*Parser_Compound_Declaration).declaration_properties.program_export_name = program_export_name;
+		return compound;
 	}
 
 
@@ -3481,6 +3396,7 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 	result.kind = .DECLARATION;
 	result.name = declaration_name;
 	result.flags = declaration_flags;
+	result.program_export_name = program_export_name;
 	if name_token.ident_is_backticked {
 		result.flags |= .HAS_SCOPE_MODIFIER;
 	}
@@ -3494,6 +3410,181 @@ parse_declaration_node :: (parser: *Parser, allow_multi_value_expression := true
 
 	finish_node(parser, result, first);
 	return result;
+}
+
+// Builds every compound declaration and multi-target assignment, recording the shared operator and each target's modifier and separator tokens.
+// Identifier-led callers build identifier targets directly, so declared names never become references.  The expression-led caller parses
+// targets as expressions and gets null back when no shared operator follows, since its comma may belong to an enclosing construct.
+parse_compound_declaration :: (
+	parser: *Parser,
+	first: s64,
+	targets_first: s64,
+	first_target: *Parser_Node,
+	identifier_led: bool,
+	declaration_flags: type_of(Code_Declaration.flags),
+	allow_multi_value_expression := true
+) -> *Parser_Node {
+	comma := parser_checkpoint(parser);
+	arguments: [..]Parser_Comma_Separated_Argument;
+	arguments.allocator = parser_node_allocator(parser.parsed);
+	array_add(*arguments, .{node = first_target});
+	parse_compound_modifier(parser, *arguments[0]);
+
+	while parser_peek(parser).type == #char "," {
+		#if ENABLE_TRIVIA {
+			arguments[arguments.count - 1].separator_token = xx parser.cursor;
+		}
+
+		parser_eat(parser);
+		target: *Parser_Node;
+		if identifier_led {
+			target_first := parser.cursor;
+			target_token := parser_peek(parser);
+			if !parser_eat_if(parser, .IDENT) {
+				add_expected_expression(parser);
+				break;
+			}
+
+
+			target = new_compound_ident(parser, target_token, target_first);
+		} else {
+			target = parse_binary(parser, 2);
+			if !target {
+				parser_restore(parser, comma);
+				return null;
+			}
+		}
+
+		array_add(*arguments, .{node = target});
+		parse_compound_modifier(parser, *arguments[arguments.count - 1]);
+	}
+
+	// `:` introduces declaration properties; any assignment-precedence operator, including `+=`, assigns to the targets.
+	operator_first := parser.cursor;
+	is_binary, operator_type, precedence := binary_operator_info(parser_peek(parser).type);
+	reassignment := is_binary && precedence == 1;
+	if reassignment || parser_peek(parser).type == #char ":" {
+		parser_eat(parser);
+	} else if !identifier_led {
+		parser_restore(parser, comma);
+		return null;
+	} else {
+		parser_expect(parser, #char ":");
+		operator_first = -1;
+	}
+
+
+	result := new_parser_node(parser, Parser_Compound_Declaration);
+	result.kind = .COMPOUND_DECLARATION;
+	if reassignment {
+		result.operator_type = operator_type;
+	}
+
+	#if ENABLE_TRIVIA {
+		result.operator_token = xx operator_first;
+	}
+
+	result.comma_separated_assignment = new_parser_node(parser, Parser_Comma_Separated_Arguments);
+	result.comma_separated_assignment.kind = .COMMA_SEPARATED_ARGUMENTS;
+	result.comma_separated_assignment.arguments = arguments;
+	finish_node(parser, result.comma_separated_assignment, targets_first);
+
+	properties := new_parser_node(parser, Parser_Declaration);
+	properties.kind = .DECLARATION;
+	properties.flags = declaration_flags;
+	result.declaration_properties = properties;
+	if reassignment {
+		properties.expression = parse_declaration_expression(parser);
+		if !properties.expression {
+			add_expected_expression(parser);
+		}
+	} else {
+		parse_declaration_properties(parser, properties, allow_multi_value_expression);
+	}
+
+	parse_declaration_metadata(parser, properties, *result.alignment_expression);
+	finish_node(parser, result, first);
+
+	// Only newly declared names enter this scope; assigned targets remain uses.
+	for arguments {
+		if (reassignment || it.modifier == .ASSIGN) && it.modifier != .DECLARE {
+			continue;
+		}
+
+
+		if it.node.kind != .IDENT {
+			add_undeclarable_target(parser, it.node, operator_first);
+			continue;
+		}
+
+
+		array_add(*parser.current_scope.bindings, Parser_Binding.{name = it.node.(*Parser_Ident).name, declaration = properties});
+	}
+
+	return result;
+}
+
+new_compound_ident :: (parser: *Parser, token: Parser_Token, first: s64) -> *Parser_Ident {
+	result := new_parser_node(parser, Parser_Ident);
+	result.kind = .IDENT;
+	result.name = token.ident_value.name;
+	if token.ident_is_backticked {
+		result.flags |= .HAS_SCOPE_MODIFIER;
+	}
+
+	return finish_node(parser, result, first);
+}
+
+// A per-target `:` or `=` is only a modifier when a comma follows it; otherwise it is the shared operator.
+parse_compound_modifier :: (parser: *Parser, argument: *Parser_Comma_Separated_Argument) {
+	if argument.node.kind != .IDENT || parser_peek(parser, 1).type != #char "," {
+		return;
+	}
+
+
+	modifier_first := parser.cursor;
+	if parser_eat_if(parser, #char ":") {
+		argument.modifier = .DECLARE;
+	} else if parser_eat_if(parser, #char "=") {
+		argument.modifier = .ASSIGN;
+	} else {
+		return;
+	}
+
+
+	#if ENABLE_TRIVIA {
+		argument.modifier_token = xx modifier_first;
+	}
+}
+
+add_undeclarable_target :: (parser: *Parser, target: *Parser_Node, operator_first: s64) {
+	#if ENABLE_TRIVIA {
+		span := make_token_span(target.first_token.(s64), target.one_past_last_token.(s64));
+		actual_token := parser.parsed.tokens[target.first_token.(s64)].type;
+	} else {
+		at := ifx operator_first >= 0 then operator_first else parser.cursor;
+		span := make_token_span(at, at);
+		actual_token := parser.parsed.tokens[at].type;
+	}
+
+	diagnostic := Parse_Diagnostic.{
+		kind = .EXPECTED_TOKEN,
+		span = span,
+		expected_token = .IDENT,
+		actual_token = actual_token,
+		message = "Only a simple identifier can be declared; this target is a more general expression."
+	};
+	array_add(*parser.parsed.diagnostics, diagnostic);
+	array_add(
+		*parser.parsed.recovery_records,
+		Recovery_Record.{
+			kind = .ERROR_SPAN,
+			span = diagnostic.span,
+			diagnostic_index = parser.parsed.diagnostics.count - 1
+		}
+	);
+
+	mark_parse_error(parser, false);
 }
 
 parse_operator_declaration_name :: (parser: *Parser) -> string {
@@ -3516,20 +3607,21 @@ parse_operator_declaration_name :: (parser: *Parser) -> string {
 
 	name: string;
 	if token.type == {
-		case #char "+";				name = "+";
-		case #char "-";				name = "-";
-		case #char "*";				name = "*";
-		case #char "/";				name = "/";
-		case #char "%";				name = "%";
-		case #char "<";				name = "<";
-		case #char ">";				name = ">";
-		case #char "=";				name = "=";
-		case #char ".";				name = ".";
-		case #char "!";				name = "!";
-		case #char "~";				name = "~";
-		case #char "&";				name = "&";
-		case #char "|";				name = "|";
-		case #char "^";				name = "^";
+		case #char "+";				#through;
+		case #char "-";				#through;
+		case #char "*";				#through;
+		case #char "/";				#through;
+		case #char "%";				#through;
+		case #char "<";				#through;
+		case #char ">";				#through;
+		case #char "=";				#through;
+		case #char ".";				#through;
+		case #char "!";				#through;
+		case #char "~";				#through;
+		case #char "&";				#through;
+		case #char "|";				#through;
+		case #char "^";				name = .{ 1, xx *token.type };//QUESTION: is this safe to do given relative lifespans of token and name?
+
 		case .ISEQUAL;				name = "==";
 		case .ISNOTEQUAL;			name = "!=";
 		case .LESSEQUALS;			name = "<=";
@@ -3631,13 +3723,6 @@ parse_declaration_metadata :: (parser: *Parser, properties: *Parser_Declaration,
 			case "elsewhere";
 				parser_eat(parser, 2);
 				properties.flags |= .ELSEWHERE;
-
-			case "program_export";
-				parser_eat(parser, 2);
-				properties.flags |= .PROGRAM_EXPORT;
-				if parser_peek(parser).type == .STRING {
-					properties.program_export_name = parser_eat(parser).string_value;
-				}
 
 			case;
 				break;
@@ -5104,6 +5189,7 @@ binary_operator_info :: (token_type: Token_Type) -> (bool, Operator_Type, s32, b
 		case .SHIFT_RIGHT;			operator_type = .SHIFT_RIGHT;			precedence = 8;
 		case .ROTATE_LEFT;			operator_type = .ROTATE_LEFT;			precedence = 8;
 		case .ROTATE_RIGHT;			operator_type = .ROTATE_RIGHT;			precedence = 8;
+
 		case #char "&"; #through;
 		case #char "|"; #through;
 		case #char "^";		operator_type = token_type.(Operator_Type);		precedence = 8;
@@ -5120,6 +5206,7 @@ binary_operator_info :: (token_type: Token_Type) -> (bool, Operator_Type, s32, b
 		case .ISNOTEQUAL;			operator_type = .IS_NOT_EQUAL;			precedence = 4;
 		case .LESSEQUALS;			operator_type = .LESS_OR_EQUAL;			precedence = 4;
 		case .GREATEREQUALS;		operator_type = .GREATER_OR_EQUAL;		precedence = 4;
+
 		case #char "<"; #through;
 		case #char ">";		operator_type = token_type.(Operator_Type);		precedence = 4;
 
@@ -5128,6 +5215,7 @@ binary_operator_info :: (token_type: Token_Type) -> (bool, Operator_Type, s32, b
 		case .LOGICAL_OR;			operator_type = .LOGICAL_OR;			precedence = 2;
 
 		case #char "=";		operator_type = token_type.(Operator_Type);		precedence = 1;
+
 		case .PLUSEQUALS;			operator_type = .PLUS_ASSIGN;			precedence = 1;
 		case .MINUSEQUALS;			operator_type = .MINUS_ASSIGN;			precedence = 1;
 		case .TIMESEQUALS;			operator_type = .TIMES_ASSIGN;			precedence = 1;
@@ -5404,6 +5492,7 @@ parse_postfix_suffixes :: (parser: *Parser, result: *Parser_Node, first: s64) ->
 		}
 	}
 
+
 	return result;
 }
 
@@ -5494,6 +5583,7 @@ parse_procedure_call :: (parser: *Parser, procedure: *Parser_Node, first: s64) -
 
 make_type_instantiation :: (parser: *Parser, expression: *Parser_Node) -> *Parser_Type_Instantiation {
 	result := new_parser_node(parser, Parser_Type_Instantiation);
+
 	result.kind = .TYPE_INSTANTIATION;
 	result.type_valued_expression = expression;
 	result.l0 = expression.l0;
@@ -5504,6 +5594,7 @@ make_type_instantiation :: (parser: *Parser, expression: *Parser_Node) -> *Parse
 		result.first_token = expression.first_token;
 		result.one_past_last_token = expression.one_past_last_token;
 	}
+
 	return result;
 }
 
@@ -6632,6 +6723,7 @@ materialise_tokens :: (source: string, old: *Parsed_Source = null, edit_start: s
 				}
 			}
 		}
+
 
 		if token.type == {
 			case .END_OF_INPUT;

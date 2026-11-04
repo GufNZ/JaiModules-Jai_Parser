@@ -17,7 +17,7 @@ Re-audit of the current code on 2026-11-04.
 | [module.jai](module.jai) | Parameters `ENABLE_TRIVIA` (default off), `EVALUATE_STRING_ESCAPES`, `INTERN_IDENTIFIERS`, `USE_SIMD`, `TRACK_AST_REUSE`; loads the lexer, parser and resolver. | The service imports the parser with `ENABLE_TRIVIA = true`; the full-featured profile rejects non-trivia builds.  Existing default-parameter users are unaffected. |
 | [parser.jai](parser.jai) (about 6,800 lines) | Entry points `parse_file`, `parse_file_edit`, `parse_expression`, `parse_declaration`, `parse_block`, `parse_declaration_block`; `release_parser_tree`.  All nodes live in one `Pool` in `Parsed_Source`; source and filename are borrowed. | The service owns source bytes and the `Parsed_Source` together and releases both on the last lease.  Only `parse_file` is needed initially (whole-file reparse, R1). |
 | Compound declarations | Two builders: identifier-led in `parse_declaration_node`, expression-led in `parse_statement`.  The expression-led path discards its operator token; neither records modifier nor separator token indices. | Phase 1 merges them and records every token (R12). |
-| Declaration `#export` | No producer path; `parse_declaration_metadata` stops at unknown directives. | Phase 1 adds it (R12). |
+| `#program_export` | Parsed as trailing declaration metadata, the opposite of the compiler, which only accepts it as a prefix. | Phase 1 parses the prefix form (R12, amended). |
 | [resolution.jai](resolution.jai) | `resolve_lexical_references` writes `resolved_declaration` into identifier nodes; scopes and bindings are built during parsing. | The service parses with `resolve_identifiers = false` (E6): published snapshots are never mutated.  Resolution stays available to existing callers and is not part of the initial slice. |
 | AST reuse (`parse_file_edit`, `reuse_simple_declaration`, copier) | About 900 production lines and 6,900 test lines. | Not used by the service.  The keep/drop decision stays independent (see [simplify.md](simplify.md) 1a); this plan neither removes nor depends on it. |
 | Lexer | `Token`, trivia iteration, SIMD classifiers; `Parser_Token` adds byte offsets under trivia. | Reused as-is through the parser. |
@@ -29,7 +29,7 @@ Re-audit of the current code on 2026-11-04.
 
 | Kept unchanged. | Changed. | New. | Not touched by this plan. |
 | --- | --- | --- | --- |
-| Lexer; all existing public parse entry points and their tests; resolver; default module parameters. | Compound-declaration builders and their node shape; declaration metadata (`#export`); the registry text describing them. | Service code: canonical values, identities/handles, owned snapshots and projections, declaration-index adapter, provider, coordinator/worker, store, harness host, acceptance runner. | AST-copier keep/drop; semantic queries; evaluator; language server; POSIX store implementation. |
+| Lexer; all existing public parse entry points and their tests; resolver; default module parameters. | Compound-declaration builders and their node shape; `#program_export` placement; the registry text describing them. | Service code: canonical values, identities/handles, owned snapshots and projections, declaration-index adapter, provider, coordinator/worker, store, harness host, acceptance runner. | AST-copier keep/drop; semantic queries; evaluator; language server; POSIX store implementation. |
 
 No existing public API breaks.
 The only deliberate shape change is the compound-declaration node in phase 1, which is checked against the official compiler through the differential tests.
@@ -97,10 +97,10 @@ The named-slot tests now use `logger_data = ...` so named, and unnamed slots are
 
 1. **Unified compound builder.**  One shared tail parses comma-separated targets (expressions, with an optional per-target `:` or `=` before a following comma), then the shared operator (`:`, `=` or an assignment-precedence operator).  Both entry points call it.  Record on the compound node the shared operator token index, each target's modifier token index (or none), and each separating comma's token index.  Binding classification becomes a function of recorded tokens: declared when the target carries `:`, or carries no modifier under a shared `:`; otherwise assigned.  Declared targets must be identifiers; anything else is diagnosed.
 2. Keep scope-binding registration, notes, metadata and the existing node fields working; update `reuse_simple_declaration`'s compound guard for the new shape.
-3. **Declaration `#export`.**  Recognise it in `parse_declaration_metadata` (or the declaration prefix, wherever the official compiler accepts it, confirmed by a differential fixture), recording the marker token on the declaration.
-4. Rewrite the registry's compound-route section (the route becomes derivable, not captured) and the reserved-`EXPORT` rule.
+3. **`#program_export` prefix.**  The compiler, its `Program_Print` module and every corpus use put `#program_export ["name"]` before the declaration, in declaration and imperative contexts; parse that form only and stop accepting it as trailing metadata.
+4. Rewrite the registry's compound-route and program-export sections.
 
-Tests: new parser tests covering `a, b := v`, `a, b = v`, `a:, b = v`, `a=, b := v`, `x.y, z[0] = v`, `a, b += v`, missing separator/RHS, non-identifier declared targets; differential fixtures for the same against the compiler; `#export` positive/negative fixtures; all existing suites.
+Tests: new parser tests covering `a, b := v`, `a, b = v`, `a:, b = v`, `a=, b := v`, `x.y, z[0] = v`, `a, b += v`, missing separator/RHS, non-identifier declared targets; differential fixtures for the same against the compiler; prefix `#program_export` positive fixtures and the rejected trailing form; all existing suites.
 If unification breaks compiler agreement in a way that cannot be fixed cleanly, fall back to recording a route field in both builders (R12 fallback) and record the reason.
 
 Exit: all suites pass; registry text matches the code.
@@ -122,7 +122,7 @@ Exit: foundations library passes its tests with negative controls.
 1. **Owned parse.**  Copy source and filename into a snapshot owner, parse with trivia and `resolve_identifiers = false`, and tie release of the pool, tokens, diagnostics and bytes to the owner.
 2. **Snapshot projection.**  `.SYNTAX_SNAPSHOT` envelope: tokens and trivia, node records with snapshot-local IDs per the milestone-1 registry field roles, recovery/synthetic tokens, completeness; `.OPAQUE`-free or conversion failure.
 3. **Diagnostics projection.**  `.SYNTAX_DIAGNOSTICS` with origins and the summary record.
-4. **Declaration index adapter.**  Authored-edge traversal registry, entries and shared regions, name origins, metadata (`#program_export`, `#export`), scope-basis provenance, coverage reasons; capability descriptor (`jai-cache-syntax-adapter/1`).
+4. **Declaration index adapter.**  Authored-edge traversal registry, entries and shared regions, name origins, metadata (`#program_export`), scope-basis provenance, coverage reasons; capability descriptor (`jai-cache-syntax-adapter/1`).
 5. **Context registry.**  Schema tuples, parse profile, adapter binding; admission of the implemented tuple only.
 
 Tests (C1 and the milestone-2 qualification checklist): every W1 authored vector and the W2 inventories compare projection against an independent fresh parse via `snapshot_oracle.jai`; producer teardown and poisoning before comparison; registry-route vectors from the syntax registry's discriminating cases; coverage-reason and partial-index vectors.
@@ -200,10 +200,14 @@ Exit: user decision recorded.
 	- [x] Record the baseline test results.
 	- [x] Settle the service code location.
 	- [x] Add the acceptance record format and empty runner ([cache_acceptance.jai](examples/cache_acceptance.jai), with `--self-test`).
-- [ ] Phase 1: parser evidence.
-	- [ ] Unify the compound-declaration builders and record operator, modifier and separator tokens.
-	- [ ] Add declaration `#export`.
-	- [ ] Update the registry text.
+- [x] Phase 1: parser evidence.
+	- [x] Unify the compound-declaration builders and record operator, modifier and separator tokens.
+		- [x] One builder for both routes; `operator_type` now recorded for `+=`-style compounds, checked against the compiler by the differential normaliser.
+		- [x] Undeclarable (non-identifier) declared targets diagnosed, matching the compiler's rejection.
+		- [x] Parser tests with a negative control; syntax differential section passes with a negative control.
+	- [x] Parse `#program_export ["name"]` as a declaration prefix (declaration and imperative contexts); trailing form now diagnosed; parser tests and differential fixtures with a negative control.
+	- [x] Update the registry text (compound token evidence and program-export prefix).
+	- [x] Run the full baseline suite set (2026-11-05): all suites pass; differential 4,181/4,181 fixtures in 252 jobs; lexer corpus 2,257,532 tokens across 738 files.
 - [ ] Phase 2: foundations.
 	- [ ] Canonical values.
 	- [ ] Content digest.
