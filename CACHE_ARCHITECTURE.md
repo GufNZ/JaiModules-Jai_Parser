@@ -14,6 +14,7 @@ The AST-copier keep/drop decision remains separate and unresolved.
 | [CACHE_SYNTAX_REGISTRY.md](CACHE_SYNTAX_REGISTRY.md) | Projection of the current parser's nodes, helpers and tokens onto the syntax payloads (milestone 1). |
 | [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md) | Detailed contract drafts: core source/world contracts, persistence, semantic identity, execution, source capture, interface schema, and acceptance (milestones 2-7). |
 | [CACHE_EXPERIMENTS.md](CACHE_EXPERIMENTS.md) | Procedures, measurements and limits of experiments E1-E14. |
+| [CACHE_MIGRATION_PLAN.md](CACHE_MIGRATION_PLAN.md) | Phased plan from the current parser to the signed-off service, with its progress checklist. |
 
 Status conventions apply to all four documents:
 
@@ -728,8 +729,8 @@ Earlier hypothetical large-file savings for a broader copier are not evidence fo
 ### Decision Record
 
 This table is the single authoritative record of review decisions; other sections and the companion documents refer to it rather than restating it.
-All eight are approved as design directions.
-Detailed contracts, API review and whole-specification sign-off remain pending.
+All are approved as design directions.
+The user signed off the whole specification on 2026-11-04 (R9); implementation still requires the migration plan and separate implementation authorisation.
 The fifteen-operation interface in [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#operation-and-outcome-table) was approved as the specification baseline on 2026-10-21, subject to exact schemas and API review.
 
 | Decision. | Direction. | Approved. | Remaining boundary. |
@@ -742,6 +743,12 @@ The fifteen-operation interface in [CACHE_CONTRACTS.md](CACHE_CONTRACTS.md#opera
 | R6: Resources and store ownership. | No configured RAM/disk quota by default, with optional finite limits; exclusive ownership by one process/writer session per project/provider store; no optional persistent history.  Contention degrades persistence, not source analysis. | 2026-10-23. | No shared-store concurrency, eager allocation, resource-availability guarantee or unchecked decoding follows. |
 | R7: Performance evaluation. | Measure comparable deltas first and evaluate the trade-offs afterwards; no preselected pass/fail percentages.  Latency, including tail latency, is the primary concern; memory and storage are secondary trade-offs (confirmed 2026-10-20). | 2026-10-23. | Correctness and leak checks remain mandatory.  The earlier 10%/5%/four-times proposals are withdrawn. |
 | R8: External assumptions. | Qualify behaviour implemented by our code (interruption-safe staging/rename, complete-or-rejected publication, ownership, cleanup and graceful failure) under stated filesystem/OS primitive assumptions. | 2026-10-23. | No power-loss, hardware/filesystem durability or OS-cold claims, and no external certification campaign. |
+| R9: Sign-off and first host. | Whole-specification sign-off, including the milestone-7 B1-B10 cross-contract review and the later-capability list below as the first slice's extension/unsupported boundary.  The first host is an in-process Jai test harness; a language server is the later goal. | 2026-11-04. | Sign-off approves the specification, not implementation; a migration plan and separate implementation authorisation follow. |
+| R10: Epoch issuer. | A per-project `.jaiParserEpoch` file beside `.jaiParserCache`, excluded from version control like the cache, holding the authority namespace and last reserved epoch.  Reserve by exclusive lock, increment, atomic replacement and flush; the next epoch is also at least one above the highest `writer_epoch` in any readable store head. | 2026-11-04. | The head floor is a safety net for a deleted epoch file, not a replacement authority.  Deleting the file while restoring an older cache remains outside the guarantee. |
+| R11: Native store binding. | One platform-neutral contract, `jai-cache-store-local/1`, defines the required semantics of each store primitive; per-OS implementations (Windows first, POSIX later) record their OS assumptions in the build/producer identity. | 2026-11-04. | Only the Windows implementation is qualified initially (R1).  Store files remain platform-neutral text. |
+| R12: Parser evidence changes. | Unify the two compound-declaration builders into one path recording the shared operator token and every per-target modifier and separator token index, so declared-versus-assigned targets follow from recorded source alone (fallback: a recorded route field).  Add parser support for declaration `#export`. | 2026-11-04. | Both are migration steps behind the existing parser tests; the registry's compound-route and reserved-`EXPORT` sections are revised with them. |
+| R13: Workloads. | W2 keeps the E12 inventories, including Invaders.  W3 is a list of larger projects: `examples/codex_view`, `examples/VR` (generated bindings reported separately) and `modules/Jai_Parser`, extended later. | 2026-11-04. | Freeze each manifest when measurement starts; extend the list before generalising performance claims. |
+| R14: Content digest. | Use the SDK's 128-bit Meow Hash (`meow_hash` module, version 0.5, fixed default seed) as the registered content digest `jai-cache-digest-meow128/1` wherever the drafts specified SHA-256: store envelope hashes, `StoreBlobKey`, `SourceRevision` and canonical-key indexing. | 2026-11-04. | Digests index and detect accidental corruption only; exact bytes and descriptors remain the equality authority, so a collision causes a miss or cache fault, never a merge.  Not collision-resistant against crafted input.  The module uses x64 AES instructions; another platform needs a separately registered digest, which changes the store and key schema versions. |
 
 #### R2/R6 Policy Details
 
@@ -760,7 +767,11 @@ Do not convert a transient free-space/RAM observation into a guaranteed reservat
 
 Under R8, our code makes its best interruption-safe publication effort using parallel staging files and replacement/rename with documented assumptions; it is not responsible for proving that external storage honours them.
 An excluded external guarantee is neither a passed test nor permission for our code to ignore failed calls, publish partial state or violate retained ownership.
-These decisions supersede any conflicting proposal in the contract drafts.
+These decisions, and R9-R14, supersede any conflicting proposal in the contract drafts and the syntax registry.
+
+#### R9 Later-Capability Boundary
+
+These remain unsupported in the first slice, each with its drafted extension contract: semantic queries (deferred milestone-3 records, empty catalogue); module-instance composition and parameters (identity keys only); dependency tracking (whole-module invalidation baseline); generated code and the compiler-backed evaluator; cycle classification beyond `EXTERNAL_PENDING`/`UNCLASSIFIED`; persisted AST reload (P3); shared/multi-process stores and power-loss durability (R6/R8); other platforms and compilers (R1); and editor features such as rename, completion and export fixes.
 
 ### Initial Capability Boundary
 
@@ -816,13 +827,18 @@ Semantic dependency and editor-workflow measurements in section 13 remain necess
 
 These are approvals or choices within the drafted contracts; the decision record above is not reopened.
 
-- Approve or revise the drafted host-confirmation, recovery/clear/repair and privacy contracts, including their concrete host binding.
-- Review the concrete host/store/native bindings and their enforcement of project-root resolution, discovery/version-control exclusion, permissions and contention diagnostics.
-- Review the initial provider adapter's declared case/alias/link/reappearance policy and source-visible path binding against the drafted canonical encodings.
-Additional-platform adapters remain deferred rather than requiring one universal path rule now.
-- Approve the drafted typed parameter/context encodings and conservative identity rules (milestone 3); decide which later compiler-compatible semantic/evaluation profiles can support them.
+Resolved at sign-off on 2026-11-04 (R9-R13):
+
+- The drafted host-confirmation, recovery/clear/repair and privacy contracts are approved; the first concrete host binding is the Jai test harness.
+- The host/store/native bindings are approved under the platform-neutral `jai-cache-store-local/1` contract (R11), including project-root resolution, discovery/version-control exclusion, permissions and contention diagnostics.
+- The provider adapter's exact-case, no-link-following, distinct-alias and reappearance-as-new-revision policy is approved as a platform-neutral policy; per-platform adapters implement it.
+- The typed parameter/context encodings and conservative identity rules (milestone 3) are approved; later semantic/evaluation profiles remain separate decisions.
+- The workload matrix is approved (R13); W3 manifests are frozen when measurement starts.
+
+Still open, none blocking the first slice:
+
 - For a later evaluator, choose the exact program/module opt-in parameter and host permission API, supported compilation-context reproduction and structured result/effect protocols for `#insert`, `using,map`, `#modify` and `#run`.
-- Approve the workload/profile matrix and larger-project (W3) manifest, then evaluate observed latency/memory/storage deltas.
+- Evaluate observed latency/memory/storage deltas once measured.
 - Decide whether optional syntax chunks or finer cache granularity are worthwhile only after comparable whole-file/query measurements; they do not block the initial whole-file design.
 - Decide whether to adopt, defer or reject [sentinel dependency slots](#implementation-option-sentinel-dependency-slots); they remain an encapsulated implementation option until then.
 
@@ -875,11 +891,11 @@ Each conclusion holds only within its experiment's stated bounds.
 The specification is ready for migration planning when:
 
 - [x] Every R1-R8 direction is recorded explicitly, without an implicit production default.
-- [ ] Every initial requirement has exact schemas/protocols: owner, identity/version rule, state transition, failure behaviour and executable acceptance criterion; remaining items are explicitly deferred rather than accidental gaps.
-- [ ] The contracts have been checked together for conflicts: provider versus analysis frontiers, current versus retained worlds, task versus waiter lifetime, source availability versus store durability, and logical identity versus artifact revision.
-- [ ] The workload/platform matrix and measurement procedure are agreed.
-- [ ] Later capabilities have extension/unsupported contracts.
-- [ ] The user has signed off the whole specification.
+- [x] Every initial requirement has exact schemas/protocols: owner, identity/version rule, state transition, failure behaviour and executable acceptance criterion; remaining items are explicitly deferred rather than accidental gaps.
+- [x] The contracts have been checked together for conflicts: provider versus analysis frontiers, current versus retained worlds, task versus waiter lifetime, source availability versus store durability, and logical identity versus artifact revision.
+- [x] The workload/platform matrix and measurement procedure are agreed.
+- [x] Later capabilities have extension/unsupported contracts.
+- [x] The user has signed off the whole specification (2026-11-04).
 
 Only then write the migration plan, mapping current code, tests, and public operations to the approved contracts.
 That plan must identify replacement/reuse/removal boundaries, dependency-ordered buildable steps, temporary adapters or deliberate API breaks, test/oracle preservation, persistence rollout/version rejection, cutover criteria, and cleanup.
@@ -909,15 +925,24 @@ Qualification items apply only after separate implementation authorisation, usin
 
 ### Approval and Sign-Off
 
-- [ ] Obtain explicit whole-specification sign-off (milestone 7) after the user finishes reading.
-	- [ ] Resolve each [open decision](#open-decisions).
-	- [ ] Obtain API review of the milestone-2 interface, including context registry and adapter descriptor/platform-policy alternatives.
-	- [ ] Obtain API/identity-authority review of milestone 3.
-	- [ ] Obtain detailed execution/profile/native-API approval for milestone 4, documenting effective safety minima/ceilings and optional quotas and binding provider/store finalisation to stated OS/API assumptions.
-	- [ ] Review milestone 5's store/native/API/issuer contracts.
-	- [ ] Approve the milestone-6 larger-project manifest and workload/profile configurations; do not infer unresolved defaults from test fixtures.
-	- [ ] Specify and review the extension route to broader syntax/semantic/platform coverage.
-	- [ ] Confirm that the approved drafts define owned immutable syntax snapshots, explicit ownership/reclamation, the safe versioned persistent store, cache-backed source/syntax capabilities, and update-ticket/pending-query APIs.
+- [x] Obtain explicit whole-specification sign-off (milestone 7) after the user finishes reading (2026-11-04, R9).
+	- [x] Resolve each blocking [open decision](#open-decisions); the remaining ones are explicitly deferred.
+	- [x] Obtain API review of the milestone-2 interface, including context registry and adapter descriptor/platform-policy alternatives.
+	- [x] Obtain API/identity-authority review of milestone 3 (issuer: R10).
+	- [x] Obtain detailed execution/profile/native-API approval for milestone 4, binding provider/store finalisation to stated OS/API assumptions (R11).
+	- [x] Review milestone 5's store/native/API/issuer contracts.
+	- [x] Approve the milestone-6 larger-project manifest and workload/profile configurations (R13).
+	- [x] Specify and review the extension route to broader syntax/semantic/platform coverage (R9 later-capability boundary).
+	- [x] Confirm that the approved drafts define owned immutable syntax snapshots, explicit ownership/reclamation, the safe versioned persistent store, cache-backed source/syntax capabilities, and update-ticket/pending-query APIs.
+
+### Migration Planning
+
+- [x] Re-audit the current parser, resolver, copier, tests and examples against the signed-off contracts.
+- [x] Write the [migration plan](CACHE_MIGRATION_PLAN.md): replacement/reuse/removal boundaries, dependency-ordered buildable steps, temporary adapters or deliberate API breaks, test/oracle preservation, store rollout/version rejection, cutover criteria and cleanup.
+	- [x] Include the R12 parser changes: unified compound-declaration builder with recorded operator/modifier/separator tokens, and declaration `#export` support.
+	- [x] Include the R10 epoch issuer and the R11 Windows store binding.
+- [ ] Document effective safety minima/ceilings and optional quota enforcement as each bounded component is implemented.
+- [ ] Obtain implementation authorisation for the plan.
 
 ### Qualification After Implementation Authorisation
 
@@ -971,4 +996,3 @@ Qualification items apply only after separate implementation authorisation, usin
 - [ ] Define inaccessible-candidate diagnostics and explicit export fix actions, separate from ordinary identifier resolution and validated against current source and export impact.
 - [ ] Benchmark supported editor workflows in section 13 before choosing chunk-level syntax reuse or finer cache granularity.
 - [ ] Revisit the existing AST-copier decision independently, using its measured benefit and preserved correctness contracts.
-- [ ] After sign-off, write a separate migration/implementation plan from the current parser.

@@ -149,14 +149,14 @@ SCHEMA <registered-schema>
 BODY
 <one typed value>
 END
-HASH <64 uppercase hexadecimal digits>
+HASH <32 uppercase hexadecimal digits>
 ```
 
 Each line ends in one LF, including the last; reject CR, BOM, tabs, blank/comment lines, leading/trailing spaces, missing final LF and any bytes after the hash line.
 Tokens are separated by exactly one ASCII space.
 The first line is exactly `[1]`; no ignored version-line suffix or implicit future version is accepted.
-The hash is SHA-256 of all exact preceding bytes through `END` and its LF, not decoded/reformatted text; it detects corruption, not malicious replacement with a recomputed hash.
-`StoreBlobKey` is the 32-byte (`[32] u8`) SHA-256 of the complete encoded file, including the hash line; its path spelling is exactly 64 uppercase hexadecimal digits.
+The hash is the registered 128-bit content digest (R14) of all exact preceding bytes through `END` and its LF, not decoded/reformatted text; it detects corruption, not malicious replacement with a recomputed hash.
+`StoreBlobKey` is the 16-byte (`[16] u8`) content digest of the complete encoded file, including the hash line; its path spelling is exactly 32 uppercase hexadecimal digits.
 It is a wire-content key, distinct from `SourceRevision`, `ContextID`, `SyntaxArtifactKey` and `SemanticArtifactKey`.
 Schema/kind tokens are exact registered ASCII identifiers; unknown schemas/kinds/fields/arms and extra/trailing rows fail closed.
 
@@ -205,7 +205,7 @@ Use checked iterative value/reference stacks under `depth`; malformed input retu
 | Recovery descriptor. | Workspace/document-session association, exact source/context reference and host recovery provenance needed to present a candidate.  No automatic activation flag inferred from recency.  Save/reset/discard advance or remove the corresponding recovery reference explicitly. |
 
 Use canonical versioned encodings for identity inputs; equal decoded values in different ad hoc spellings must not accidentally become a different key, or vice versa.
-Candidate immutable artifact keys are SHA-256 of the exact encoded artifact bytes, with source-byte and logical-context validation inside the record.
+Candidate immutable artifact keys are content digests of the exact encoded artifact bytes, with source-byte and logical-context validation inside the record.
 This separates wire integrity from source identity and dependency validity; a matching outer digest alone is not a valid syntax/semantic hit.
 Verify existing content before treating a same-key file as reusable; conflicting or invalid content is a cache fault, not permission to overwrite a blob potentially used by another reader.
 Checksums/digests detect corruption, not authenticity against an attacker able to replace content and hashes together.
@@ -264,6 +264,8 @@ Head generation is useful local predecessor information, not global uniqueness: 
 `previous_commit` is descriptive provenance, not a strong reference that recursively keeps every historical manifest/source alive.
 The trusted epoch issuer is outside the disposable cache and its clear/repair/rollback scope; no counter, PID, clock, lock-file contents or restored manifest replaces its durable nonreassignment contract.
 This profile supplies no unqualified local issuer fallback.
+The selected issuer (R10) is a per-project `.jaiParserEpoch` file beside the store root, excluded from version control, holding the authority namespace and last reserved epoch; reservation locks it exclusively, increments, atomically replaces and flushes it before returning.
+The reserved epoch is also at least one above the highest `writer_epoch` in any readable store head; this floor guards against a deleted epoch file but is not itself the authority.
 The host must bind a reservation authority satisfying the declared durable nonreassignment contract under documented external assumptions, or `OpenSession` retains the specified configuration failure; process-atomic cache commits do not weaken that identity prerequisite.
 Test our authority/adapter logic and failure handling, not independent certification of the OS/storage that supplies those assumed primitives.
 
@@ -304,7 +306,9 @@ Expiry removes only unprotected eligible roots in a committed manifest, never ac
 
 The initial profile implements only `.PROCESS_ATOMIC`; `.POWER_LOSS_DURABLE` is a reserved requirement that needs a separately registered/qualified binding, otherwise store access degrades explicitly without weakening the request.
 
-The initial native binding identifier is `jai-cache-store-windows-local/1`; our adapter must correctly use documented root/lock/replacement primitives and handle their failures, without an independent filesystem/volume certification requirement.
+The native binding contract is the platform-neutral `jai-cache-store-local/1` (R11): it fixes the required semantics of each primitive below, while each per-OS implementation records its OS assumptions in the build/producer identity.
+Only the Windows implementation is qualified initially.
+Our adapter must correctly use documented root/lock/replacement primitives and handle their failures, without an independent filesystem/volume certification requirement.
 An enabled but inaccessible/contended/unsupported store reports degradation; a disabled binding performs no store reads/writes, lock acquisition, enumeration or automatic cleanup.
 
 ### Milestone 5: Layout, Ownership and Commit Protocol
@@ -318,7 +322,8 @@ All immutable kinds except `.HEAD` are installed in the blob tree; `descriptor.t
 This fixes the earlier directory-layout proposal for the initial source-only profile: document/context grouping and readable original paths live in validated `.DOCUMENT`/`.CONTEXT` records, while identical source bytes can share one immutable blob.
 Per-declaration/semantic-instance files are not silently introduced into this catalogue; a later semantic store must retain their separate configured identities.
 
-The native binding must implement the following rules under explicitly documented local Windows API assumptions; test our use/error/interruption paths rather than independently qualifying the volume or extrapolating E11's ReFS result into a hardware guarantee.
+Each native implementation must satisfy the following rules under its explicitly documented OS API assumptions; Windows primitives are named, and a POSIX implementation uses equivalents such as `openat`/`O_NOFOLLOW`, `flock`, `O_EXCL`, `linkat` and `rename`.
+Test our use/error/interruption paths rather than independently qualifying the volume or extrapolating E11's ReFS result into a hardware guarantee.
 
 | Boundary. | Required primitive/ownership rule. |
 | --- | --- |
@@ -437,7 +442,7 @@ There are no cross-process lease records to expire: another process must acquire
 
 `RecoveryOffer` is `{candidate:RecoveryCandidateRef, document:DocumentID, context:ContextID, context_descriptor:ContextDescriptor, source_bytes:[] u8, provenance:RecoveryProvenance}` returned as a complete bounded host-owned copy by the registered store adapter.
 
-`RecoveryCandidateRef.candidate_key` is exactly the candidate `.RECOVERY` record's 32-byte `StoreBlobKey`; its namespace/source revision must match the validated offer/source record.
+`RecoveryCandidateRef.candidate_key` is exactly the candidate `.RECOVERY` record's 16-byte `StoreBlobKey`; its namespace/source revision must match the validated offer/source record.
 The offer owns exact bytes and context/provenance descriptions, not a borrowed file mapping, live overlay, ticket or provider lease.
 Host confirmation of `.RESTORE` must bind that same candidate/document/revision and supplied byte copy under the existing `HostConfirmation`/`.RESTORE_OVERLAY` rules; the event creates a fresh provider installation stamp.
 The offer's exact canonical context descriptor is copied provenance, not automatic context admission; the restore batch supplies/references its current supported context under the existing atomic registration rules.
@@ -570,7 +575,7 @@ Its initial issuer schema is `jai-cache-epoch-issuer/1`.
 
 The host hook `ReserveEpoch(authority_namespace) -> .RESERVED {epoch:u64} | .UNAVAILABLE` reserves a positive, strictly increasing epoch before returning it, exclusively across all service processes sharing that authority.
 A returned epoch is never reissued, including after crash, aborted startup, cache clearing or restore of an older cache backup.
-Persistent reservation may be supplied by the host's existing durable authority; this contract does not choose a cache file, writer policy or filesystem commit primitive.
+Persistent reservation is supplied by the R10 `.jaiParserEpoch` issuer for the initial host; other hosts may bind their own durable authority.
 An issuer unable to prove reservation returns `.UNAVAILABLE`, never an old epoch, timestamp, process ID or probabilistic substitute.
 
 Bootstrap/`OpenSession` then fails `.ADMISSION_DENIED`/`.CONFIGURATION_REQUIRED` without exposing a session.
@@ -1500,7 +1505,7 @@ Each byte-valued field uses one of the following types, and identifiers that mus
 | `RegistryName :: #type,distinct string`. | An exact registered ASCII tag: a node kind, helper layout, enum domain or enum/flag member name. |
 | Host and provider tokens. | `StoreNamespace`, `ProviderNamespace`, `AuthorityNamespace`, `AuthorityIdentity`, `HostAuthority`, `ProviderIdentity`, `ConfirmationToken`, `ObservationToken`, `CaptureToken`, `LeaseToken`, `PolicyKey` and `SessionLocalToken`, each `#type,distinct [] u8`.  Issued by their owning authority, compared byte-for-byte and never parsed by the service. |
 | Canonical encodings. | `ContextDescriptor`, `SyntaxAdapterDescriptor`, `TypeDescriptor`, `CanonicalValue`, `ClockIdentity`, `TaskKey`, `SemanticArtifactKey`, `GeneratedProvenanceKey`, `BackingIdentity`, `ProducerBinding`, `GeneratorBinding`, `ResolverBinding`, `CompilerRequestClass`, `ProgramIdentity`, `ModuleTarget`, `ObservedRevision`, `ProducerRevision` and `DamageFingerprint`, each `#type,distinct [] u8` holding the complete canonical `K`/`V` encoding produced by the recipe or registered schema that defines it. |
-| `StoreBlobKey :: #type,distinct [32] u8`. | The SHA-256 digest of a complete store file. |
+| `StoreBlobKey :: #type,distinct [16] u8`. | The content digest (R14) of a complete store file. |
 
 These types all use the canonical `bytes` encoding and the store's `B` row; records such as `ProviderAdapterDescriptor` and `AttemptStamp` keep their record encoding.
 
@@ -1545,7 +1550,7 @@ Define `B(x)` as an unsigned 64-bit little-endian byte count followed by exactly
 Define `K(tag, fields)` as `B(ASCII("jai-cache-key"))`, unsigned 32-bit little-endian key-schema version `1`, `B(ASCII(tag))`, unsigned 64-bit little-endian field count, then each field encoded with `B` in declared order.
 Nested keys are complete `K` byte sequences used as fields, not unframed concatenations; numeric fields have explicitly declared widths and little-endian encoding.
 Lengths must be representable and checked before allocation/addition; a 64-bit length is not permission to allocate that much memory.
-Hashing uses SHA-256 over the complete key bytes, but the key descriptor remains available for equality/validation; a digest alone is not a logical identity or proof of source authority.
+Hashing uses the registered content digest (R14) over the complete key bytes, but the key descriptor remains available for equality/validation; a digest alone is not a logical identity or proof of source authority.
 This is a canonical fingerprint input, not a replacement for the proposed versioned text persistence format.
 
 | Value. | Proposed canonical identity and authority. |
@@ -1556,7 +1561,7 @@ This is a canonical fingerprint input, not a replacement for the proposed versio
 | `SessionID`. | `K("session", [service_incarnation_namespace, session_token])`, issued by the service.  The incarnation namespace is never reassigned while old references/records can survive; session tokens are not reused within it.  Neither is derived from workspace/path/content; owner routing is validated before slot lookup.  Restart creates a new incarnation and rejects every old handle even if persisted workspace/document keys match.  Milestone 3 specifies the reserved-epoch/checked-counter allocator; issuer qualification and API review remain open. |
 | `ProviderRevision`. | `K("provider-revision", [provider_namespace, session_identity, document_identity, provider_state_token])`.  A token identifies one accepted combined disk/overlay state, not just selected bytes.  The provider cannot reuse it for a different state; rejected batches do not install a new token. |
 | `ProviderFrontier`. | `K("provider-frontier", [provider_namespace, session_identity, frontier_token])`.  The coordinator records the accepted-event order; token bytes/digests are not lexicographic clocks.  Retry analysis leaves the frontier unchanged, and a rejected transaction creates no accepted successor. |
-| `SourceRevision`. | `K("source", [source_key_version_u32, byte_count_u64, SHA256(exact_source_bytes)])`, with source-key version `1`.  Exact bytes remain the authority; collision ambiguity rejects affected reuse rather than merging different sources.  Equal empty/present sources can share this value across documents, but confirmed absence has no source revision.  No BOM stripping, newline conversion, decoding or trailing-NUL insertion is part of identity. |
+| `SourceRevision`. | `K("source", [source_key_version_u32, byte_count_u64, DIGEST128(exact_source_bytes)])`, with source-key version `1`.  Exact bytes remain the authority; collision ambiguity rejects affected reuse rather than merging different sources.  Equal empty/present sources can share this value across documents, but confirmed absence has no source revision.  No BOM stripping, newline conversion, decoding or trailing-NUL insertion is part of identity. |
 | `ContextID`. | `K("context", [context_schema_identifier, canonical_context_descriptor])`.  The versioned descriptor includes syntax configuration/parser schema and all source-visible path/resolution inputs used by that result; semantic extension fields must include the `SemanticContextID` inputs from [architecture section 3](CACHE_ARCHITECTURE.md#3-terms-and-identities) before semantic reuse is supported.  An opaque host label alone cannot establish equivalent context. |
 | World/result/operation identity. | Service-issued, session-scoped, typed nonreused tokens, distinct from registration handles and from content keys.  Repeated analysis may produce a distinct world/result identity at the same frontier.  Equality of those tokens never authorises restoring handles from persistence. |
 
@@ -2349,7 +2354,7 @@ A parameterised schema identifier is `K("parameterised-type", [base_schema_ASCII
 A bounded decoder rejects an incorrect field count, duplicate/reordered field, malformed tag, overflow, invalid UTF-8 presentation text or extra trailing bytes before exposing a value.
 Opaque source/name/path bytes do not acquire a UTF-8 requirement.
 Canonical set order compares complete canonical bytes, shorter prefix first.
-In-memory implementations may avoid materialising V/K buffers but must compare/hash exactly these logical bytes and retain the equality authority; a matching SHA-256 alone never proves equivalence.
+In-memory implementations may avoid materialising V/K buffers but must compare/hash exactly these logical bytes and retain the equality authority; a matching digest alone never proves equivalence.
 
 #### Node and Helper Projection
 
@@ -2635,7 +2640,7 @@ Do not use a borrowed view after releasing its last protecting owner and call th
 
 ### Milestone 6: Workloads and Measurement Boundaries
 
-Use a frozen read-only source manifest for every workload: canonical relative names, exact source bytes/lengths and SHA-256, selected contexts, toolchain/adapter/schema revisions and explicit inclusion/exclusion rules.
+Use a frozen read-only source manifest for every workload: canonical relative names, exact source bytes/lengths and content digests, selected contexts, toolchain/adapter/schema revisions and explicit inclusion/exclusion rules.
 Never infer semantic import closure, execute source, edit project inputs or follow filesystem links merely to build a workload.
 Fixture creation, failure injection and staged store writes belong only to an explicitly authorised isolated test root; a host-declared project/cache root is not blanket test-write permission.
 
