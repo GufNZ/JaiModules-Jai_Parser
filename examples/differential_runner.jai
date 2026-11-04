@@ -183,17 +183,17 @@ close_worker :: (worker: *Runner_Worker) {
 	worker.* = .{};
 }
 
-get_runner_environment :: (name: *u16) -> *u16, bool {
+get_runner_environment :: (name: *u16) -> bool, *u16 {
 	required := GetEnvironmentVariableW(name, null, 0);
 	if !required {
-		return null, true;
+		return true, null;
 	}
 
 
 	previous := temporary_alloc(required * size_of(u16)).(*u16);
 	previous[0] = 0;
 	count := GetEnvironmentVariableW(name, previous, required);
-	return previous, count < required && (count != 0 || required == 1);
+	return count < required && (count != 0 || required == 1), previous;
 }
 
 start_worker :: (worker: *Runner_Worker, arguments: [] string, memory_bytes: u64, working_directory := "", log_path := "") -> bool {
@@ -268,8 +268,8 @@ start_worker :: (worker: *Runner_Worker, arguments: [] string, memory_bytes: u64
 	if working_directory {
 		temp_valid: bool;
 		tmp_valid: bool;
-		previous_temp, temp_valid = get_runner_environment(temp_name);
-		previous_tmp, tmp_valid = get_runner_environment(tmp_name);
+		temp_valid, previous_temp = get_runner_environment(temp_name);
+		tmp_valid, previous_tmp = get_runner_environment(tmp_name);
 		temporary_directory := tprint("%/tmp", working_directory);
 		if !temp_valid || !tmp_valid || !make_directory_if_it_does_not_exist(temporary_directory) {
 			close_worker(worker);
@@ -361,12 +361,12 @@ runner_usage :: () {
 	print("  \e[96m--timeout\e[0m \e[93mN\e[0m          (default \e[93m30\e[0m seconds per phase/admission wait)\n");
 }
 
-runner_integer :: (text: string) -> s64, bool {
+runner_integer :: (text: string) -> bool, s64 {
 	value, valid, remainder := string_to_int(text, T = s64);
-	return value, valid && !remainder;
+	return valid && !remainder, value;
 }
 
-parse_runner_options :: (arguments: [] string) -> Runner_Options, bool {
+parse_runner_options :: (arguments: [] string) -> bool, Runner_Options {
 	options: Runner_Options;
 	option_names :: string.["--all", "--list", "--self-test", "--workers", "--batch-size", "--memory-mib", "--reserve-mib", "--timeout", "--first", "--last"];
 	index := 1;
@@ -394,14 +394,14 @@ parse_runner_options :: (arguments: [] string) -> Runner_Options, bool {
 			case;
 				if begins_with(argument, "--") {
 					if index == arguments.count {
-						return options, false;
+						return false, options;
 					}
 
 
-					value, valid := runner_integer(arguments[index]);
+					valid, value := runner_integer(arguments[index]);
 					index += 1;
 					if !valid {
-						return options, false;
+						return false, options;
 					}
 
 
@@ -413,12 +413,12 @@ parse_runner_options :: (arguments: [] string) -> Runner_Options, bool {
 						case .TIMEOUT;		options.timeout_seconds = value;
 						case .FIRST;		options.first = value;
 						case .LAST;			options.last = value;
-						case;				return options, false;
+						case;				return false, options;
 					}
 				} else if !options.selection {
 					options.selection = argument;
 				} else {
-					return options, false;
+					return false, options;
 				}
 		}
 	}
@@ -437,21 +437,21 @@ parse_runner_options :: (arguments: [] string) -> Runner_Options, bool {
 			|| (options.first >= 1 && options.last >= options.first && options.selection.count)
 		);
 
-	return options, valid;
+	return valid, options;
 }
 
-runner_memory_status :: (statistics: *Runner_Statistics) -> MEMORYSTATUSEX, bool {
+runner_memory_status :: (statistics: *Runner_Statistics) -> bool, MEMORYSTATUSEX {
 	status: MEMORYSTATUSEX;
 	status.dwLength = size_of(type_of(status));
 	if !GlobalMemoryStatusEx(*status) {
-		return status, false;
+		return false, status;
 	}
 
 
 	statistics.min_available_physical = min(statistics.min_available_physical, status.ullAvailPhys);
 	statistics.min_commit_headroom = min(statistics.min_commit_headroom, status.ullAvailPageFile);
 	statistics.max_system_commit = max(statistics.max_system_commit, status.ullTotalPageFile - status.ullAvailPageFile);
-	return status, true;
+	return true, status;
 }
 
 runner_wait :: (worker: *Runner_Worker, timeout_ms: u64) -> s32 {
@@ -525,8 +525,8 @@ collect_runner_sections :: (output: string, sections: *[..] Runner_Section) -> b
 		}
 
 
-		index, index_valid := runner_integer(fields[0]);
-		total, total_valid := runner_integer(fields[2]);
+		index_valid, index := runner_integer(fields[0]);
+		total_valid, total := runner_integer(fields[2]);
 		name, name_valid := base64_decode(fields[1]);
 		if (!index_valid
 			|| index != sections.count + 1
@@ -712,7 +712,7 @@ run_runner_self_tests :: (root: string) -> s32 {
 			pid_text, read_valid := read_entire_file(tprint("%/descendant.pid", root));
 			defer free(pid_text.data);
 
-			pid, pid_valid := runner_integer(trim(pid_text));
+			pid_valid, pid := runner_integer(trim(pid_text));
 			if !read_valid || !pid_valid || pid <= 0 || pid > 0xFFFF_FFFF {
 				return 1;
 			}
@@ -768,7 +768,7 @@ run_runner :: (arguments: [] string) -> s32 {
 	}
 
 
-	options, valid := parse_runner_options(arguments);
+	valid, options := parse_runner_options(arguments);
 	if !valid {
 		runner_usage();
 		return 64;
@@ -808,7 +808,7 @@ run_runner :: (arguments: [] string) -> s32 {
 
 
 	statistics: Runner_Statistics;
-	status, memory_valid := runner_memory_status(*statistics);
+	memory_valid, status := runner_memory_status(*statistics);
 	if !memory_valid {
 		return 1;
 	}
@@ -894,7 +894,7 @@ run_runner :: (arguments: [] string) -> s32 {
 
 	expected_total: s64;
 	selected_sections: s64;
-	selection_index, selection_is_index := runner_integer(options.selection);
+	selection_is_index, selection_index := runner_integer(options.selection);
 	for section, index: sections {
 		if !options.all && options.selection != section.name && (!selection_is_index || selection_index != index + 1) {
 			continue;
@@ -972,7 +972,7 @@ run_runner :: (arguments: [] string) -> s32 {
 		}
 
 
-		status, memory_valid = runner_memory_status(*statistics);
+		memory_valid, status = runner_memory_status(*statistics);
 		if !memory_valid {
 			return 1;
 		}
@@ -1211,7 +1211,7 @@ main :: () {
 			case .OK;
 				if arguments.count == 4 {
 					for name: string.["TEMP", "TMP"] {
-						value, valid := get_runner_environment(utf8_to_wide(name,, temp));
+						valid, value := get_runner_environment(utf8_to_wide(name,, temp));
 						if !valid || !value {
 							exit(7);
 						}

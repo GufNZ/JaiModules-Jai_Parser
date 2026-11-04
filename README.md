@@ -540,7 +540,7 @@ Exact constant compound declarations with two or more unmodified names and an el
 Typed compounds with a one-identifier or single-pointer-to-identifier annotation reuse their type wrapper and bindings with an eligible value or no initialiser.
 Exact compound reassignments with unmodified identifier targets and an eligible RHS reuse without declaring new bindings; explicit `---` initialisers, mixed or non-identifier targets, metadata-bearing, and richer typed compounds still parse normally.
 More complex type annotations and other declaration shapes still parse normally.
-For file edits, `parse_file_edit(*old, start, end, new_source, warn_unnecessary_semicolons=false)` returns `(Parsed_Source, bool)`.
+For file edits, `parse_file_edit(*old, start, end, new_source, warn_unnecessary_semicolons=false)` returns `(bool, Parsed_Source)`.
 `[start, end)` is a half-open byte range in `old.source`; `new_source` is the caller-owned, complete replacement buffer.
 The call succeeds only if the range is in bounds and `new_source` retains the old bytes before `start` and after `end`; the bytes between them are the inserted text.
 On failure, it returns an empty result and `false` without parsing.

@@ -543,11 +543,11 @@ report_detail :: (lexer: *Lexer, format: string, arguments: ..Any) {
 	}
 } @PrintLike
 
-get_hex_digit :: (lexer: *Lexer, type: Hex_Digit_Type) -> (value: u8, success: bool) {
+get_hex_digit :: (lexer: *Lexer, type: Hex_Digit_Type) -> (success: bool, value: u8) {
 	c := peek_next_character(lexer);
-	if		(c >= #char "a") && (c <= #char "f") { eat_character(lexer); return (c - #char "a" + 10).(u8), true; }
-	else if	(c >= #char "A") && (c <= #char "F") { eat_character(lexer); return (c - #char "A" + 10).(u8), true; }
-	else if	(c >= #char "0") && (c <= #char "9") { eat_character(lexer); return (c - #char "0").(u8), true; }
+	if		(c >= #char "a") && (c <= #char "f") { eat_character(lexer); return true, (c - #char "a" + 10).(u8); }
+	else if	(c >= #char "A") && (c <= #char "F") { eat_character(lexer); return true, (c - #char "A" + 10).(u8); }
+	else if	(c >= #char "0") && (c <= #char "9") { eat_character(lexer); return true, (c - #char "0").(u8); }
 
 	report_parse_error(lexer, "A hex digit is required here.\n");
 
@@ -560,7 +560,7 @@ get_hex_digit :: (lexer: *Lexer, type: Hex_Digit_Type) -> (value: u8, success: b
 			report_detail(lexer, "\\U must be followed by exactly eight hex digits.\n");
 	}
 
-	return 0, false;
+	return false, 0;
 }
 
 get_decimal_digit :: (lexer: *Lexer) -> s32 {
@@ -1732,8 +1732,8 @@ make_string_constant :: (lexer: *Lexer) -> *Token {
 					case #char "x";
 						eat_character(lexer);
 						// If get_hex_digit failed, we issued an error, so we don't worry about the value of c in that case.
-						high := get_hex_digit(lexer, .ASCII_8_BIT);
-						low  := get_hex_digit(lexer, .ASCII_8_BIT);
+						_, high := get_hex_digit(lexer, .ASCII_8_BIT);
+						_, low  := get_hex_digit(lexer, .ASCII_8_BIT);
 						c = (high * 16 + low).(s16);
 
 					case #char "d";
@@ -1773,7 +1773,7 @@ make_string_constant :: (lexer: *Lexer) -> *Token {
 
 						value: u32;
 						for i: 0..num_digits-1 {
-							digit, success := get_hex_digit(lexer, type);
+							success, digit := get_hex_digit(lexer, type);
 							if !success {
 								break;
 							}

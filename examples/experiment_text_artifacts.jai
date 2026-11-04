@@ -203,15 +203,15 @@ read_decimal :: (cursor: *string, value: *s64) -> bool {
 	return ok && !rest.count;
 }
 
-hex_digit :: (byte: u8) -> (u64, bool) {
+hex_digit :: (byte: u8) -> (bool, u64) {
 	if byte >= #char "0" && byte <= #char "9" {
-		return (byte - #char "0").(u64), true;
+		return true, (byte - #char "0").(u64);
 	}
 
 
 	valid := (byte >= #char "A" && byte <= #char "F");
 	value := ifx valid then (byte - #char "A" + 10).(u64);
-	return value, valid;
+	return valid, value;
 }
 
 read_hex :: (cursor: *string, value: *u64) -> bool {
@@ -223,7 +223,7 @@ read_hex :: (cursor: *string, value: *u64) -> bool {
 
 	result: u64;
 	for byte: token {
-		digit, ok := hex_digit(byte);
+		ok, digit := hex_digit(byte);
 		if !ok {
 			return false;
 		}
@@ -263,8 +263,8 @@ read_blob :: (cursor: *string, value: *string) -> Decode_Status {
 
 	result := string.{count = count, data = alloc(count)};
 	for 0..count - 1 {
-		high, high_ok := hex_digit(token[it * 2]);
-		low, low_ok := hex_digit(token[it * 2 + 1]);
+		high_ok, high := hex_digit(token[it * 2]);
+		low_ok, low := hex_digit(token[it * 2 + 1]);
 		if !high_ok || !low_ok {
 			return .ROW;
 		}

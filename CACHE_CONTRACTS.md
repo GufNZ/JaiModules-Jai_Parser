@@ -265,6 +265,8 @@ Head generation is useful local predecessor information, not global uniqueness: 
 The trusted epoch issuer is outside the disposable cache and its clear/repair/rollback scope; no counter, PID, clock, lock-file contents or restored manifest replaces its durable nonreassignment contract.
 This profile supplies no unqualified local issuer fallback.
 The selected issuer (R10) is a per-project `.jaiParserEpoch` file beside the store root, excluded from version control, holding the authority namespace and last reserved epoch; reservation locks it exclusively, increments, atomically replaces and flushes it before returning.
+Its exact text is `jai-cache-epoch/1`, the namespace in uppercase hex and the canonical decimal epoch, each on its own LF-terminated line; anything else is malformed and reserves nothing.
+The exclusive lock is the sibling `.jaiParserEpoch.lock` and the replacement is staged in `.jaiParserEpoch.staging`; both share the epoch file's version-control exclusion.
 The reserved epoch is also at least one above the highest `writer_epoch` in any readable store head; this floor guards against a deleted epoch file but is not itself the authority.
 The host must bind a reservation authority satisfying the declared durable nonreassignment contract under documented external assumptions, or `OpenSession` retains the specified configuration failure; process-atomic cache commits do not weaken that identity prerequisite.
 Test our authority/adapter logic and failure handling, not independent certification of the OS/storage that supplies those assumed primitives.

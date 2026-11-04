@@ -640,7 +640,7 @@ test_utf8_bom :: () {
 	assert(Extended.reconstruct_source(*parsed) == SOURCE);
 
 	EDITED_SOURCE :: "\xEF\xBB\xBFvalue :: 2;";
-	edited, ok := Extended.parse_file_edit(*parsed, SOURCE.count - 2, SOURCE.count - 1, EDITED_SOURCE);
+	ok, edited := Extended.parse_file_edit(*parsed, SOURCE.count - 2, SOURCE.count - 1, EDITED_SOURCE);
 	assert(ok && edited.status == .COMPLETE);
 	assert(edited.tokens[0].byte_start == 3 && edited.tokens[0].preceding_trivia == slice(EDITED_SOURCE, 0, 3));
 	assert(Extended.reconstruct_source(*edited) == EDITED_SOURCE);
@@ -1090,7 +1090,7 @@ test_reuse_snapshot_lifetime :: () {
 		old_source := copy_string(			   "target :: 1; left, right :: target; blocked := #run target; #if true { inner := target; }");
 		new_source := copy_string("added :: 0;\ntarget :: 1; left, right :: target; blocked := #run target; #if true { inner := target; }");
 		old := Extended.parse_file(old_source);
-		updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+		ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE);
 		old_statements := old.root.(*Extended.Parser_Block).statements;
 		statements := updated.root.(*Extended.Parser_Block).statements;
@@ -1148,7 +1148,7 @@ test_file_edit_api :: () {
 	old_source := copy_string(				 "value := missing;");
 	new_source := copy_string("missing :: 1;\nvalue := missing;");
 	old := Extended.parse_file(old_source, "edited.jai");
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	assert(ok && updated.status == .COMPLETE);
 	assert(updated.fully_pathed_filename == "edited.jai");
 	assert(updated.tokens[0].byte_start == 0);
@@ -1161,20 +1161,20 @@ test_file_edit_api :: () {
 	assert(new_use.resolved_declaration == new_root.statements[0].(*Extended.Parser_Declaration));
 
 	replaced_source := copy_string("missing :: 12;\nvalue := missing;");
-	replaced, replaced_ok := Extended.parse_file_edit(*updated, 12, 12, replaced_source);
+	replaced_ok, replaced := Extended.parse_file_edit(*updated, 12, 12, replaced_source);
 	assert(replaced_ok && replaced.status == .COMPLETE);
 	assert(Extended.reconstruct_source(*replaced) == replaced_source);
 	assert(Extended.reconstruct_source(*updated) == new_source);
 
-	invalid, invalid_ok := Extended.parse_file_edit(*old, -1, 0, new_source);
+	invalid_ok, invalid := Extended.parse_file_edit(*old, -1, 0, new_source);
 	assert(!invalid_ok && invalid.root == null);
-	invalid, invalid_ok = Extended.parse_file_edit(*old, 1, 0, new_source);
+	invalid_ok, invalid = Extended.parse_file_edit(*old, 1, 0, new_source);
 	assert(!invalid_ok && invalid.root == null);
-	invalid, invalid_ok = Extended.parse_file_edit(*old, 0, old_source.count + 1, new_source);
+	invalid_ok, invalid = Extended.parse_file_edit(*old, 0, old_source.count + 1, new_source);
 	assert(!invalid_ok && invalid.root == null);
-	invalid, invalid_ok = Extended.parse_file_edit(*old, 0, 0, "bad");
+	invalid_ok, invalid = Extended.parse_file_edit(*old, 0, 0, "bad");
 	assert(!invalid_ok && invalid.root == null);
-	invalid, invalid_ok = Extended.parse_file_edit(*old, 0, 0, "missing :: 1;\nvalue := changed;");
+	invalid_ok, invalid = Extended.parse_file_edit(*old, 0, 0, "missing :: 1;\nvalue := changed;");
 	assert(!invalid_ok && invalid.root == null);
 
 	Extended.release_parser_tree(*old);
@@ -1285,7 +1285,7 @@ test_numeric_ast_reuse :: () {
 	old_source := copy_string(				"use := missing; missing :: 2; tail :: 3;");
 	new_source := copy_string("prefix :: 1;\nuse := missing; missing :: 2; tail :: 3;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -1343,7 +1343,7 @@ test_numeric_ast_reuse :: () {
 	free(new_source);
 
 	changed := Extended.parse_file("a :: 1;");
-	changed_result, changed_ok := Extended.parse_file_edit(*changed, 6, 6, "a :: 1+2;");
+	changed_ok, changed_result := Extended.parse_file_edit(*changed, 6, 6, "a :: 1+2;");
 	assert(changed_ok && changed_result.status == .COMPLETE);
 	assert(changed_result.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.kind == .BINARY_OPERATOR);
 	Extended.release_parser_tree(*changed);
@@ -1353,7 +1353,7 @@ test_numeric_ast_reuse :: () {
 
 	old_binding := Extended.parse_file("target :: 1; use := target;");
 	assert(old_binding.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration != null);
-	new_binding, binding_ok := Extended.parse_file_edit(*old_binding, 0, "target :: 1;".count, "other :: 1; use := target;");
+	binding_ok, new_binding := Extended.parse_file_edit(*old_binding, 0, "target :: 1;".count, "other :: 1; use := target;");
 	assert(binding_ok && new_binding.status == .COMPLETE);
 	assert(new_binding.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
 	Extended.release_parser_tree(*old_binding);
@@ -1368,7 +1368,7 @@ check_removed_binding_ast_reuse :: (new_text: string, edit_start: s64, edit_end:
 	old_source := copy_string("target :: 1; use := target;");
 	new_source := copy_string(new_text);
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	old_statements := old.root.(*Extended.Parser_Block).statements;
@@ -1408,7 +1408,7 @@ test_repeated_convergence_edit :: () {
 	repeated_new_source := copy_string("first :: 11; middle :: 1; last :: 1; use := last;");
 	repeated_edit := "first :: 1".count;
 	repeated_old := Extended.parse_file(repeated_old_source);
-	repeated_updated, repeated_ok := Extended.parse_file_edit(*repeated_old, repeated_edit, repeated_edit, repeated_new_source);
+	repeated_ok, repeated_updated := Extended.parse_file_edit(*repeated_old, repeated_edit, repeated_edit, repeated_new_source);
 	repeated_fresh := Extended.parse_file(repeated_new_source);
 	assert(repeated_ok && repeated_updated.status == .COMPLETE && repeated_fresh.status == .COMPLETE);
 	repeated_statements := repeated_updated.root.(*Extended.Parser_Block).statements;
@@ -1448,7 +1448,7 @@ test_new_recovered_edit_fallback :: () {
 	new_source := copy_string("value := ; keep := value;");
 	edit_start := "value := ".count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_start + 1, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_start + 1, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == fresh.status && updated.status != .COMPLETE);
 	probe_tokens := Extended.materialise_tokens(new_source);
@@ -1495,7 +1495,7 @@ test_new_recovered_edit_fallback :: () {
 	lexer_new_source := copy_string("bad :: 18446744073709551616; stable :: 1;");
 	lexer_start := "bad :: ".count;
 	lexer_old := Extended.parse_file(lexer_old_source);
-	lexer_updated, lexer_ok := Extended.parse_file_edit(*lexer_old, lexer_start, lexer_start + 1, lexer_new_source);
+	lexer_ok, lexer_updated := Extended.parse_file_edit(*lexer_old, lexer_start, lexer_start + 1, lexer_new_source);
 	lexer_fresh := Extended.parse_file(lexer_new_source);
 	assert(lexer_ok && lexer_old.status == .COMPLETE && lexer_updated.status == .RECOVERED && lexer_fresh.status == .RECOVERED);
 	assert(lexer_updated.diagnostics.count == lexer_fresh.diagnostics.count && lexer_updated.diagnostics[0].kind == .LEXER_ERROR);
@@ -1522,7 +1522,7 @@ test_recovered_snapshot_ast_reuse_fallback :: () {
 	parser_recovery_source := copy_string("broken: ; stable :: 1;");
 	parser_repaired_source := copy_string("broken: s64; stable :: 1;");
 	parser_recovery := Extended.parse_file(parser_recovery_source);
-	parser_repaired, parser_repaired_ok := Extended.parse_file_edit(*parser_recovery, "broken: ".count, "broken: ".count, parser_repaired_source);
+	parser_repaired_ok, parser_repaired := Extended.parse_file_edit(*parser_recovery, "broken: ".count, "broken: ".count, parser_repaired_source);
 	parser_fresh := Extended.parse_file(parser_repaired_source);
 	assert(parser_repaired_ok && parser_recovery.status != .COMPLETE && parser_repaired.status == .COMPLETE && parser_fresh.status == .COMPLETE);
 	parser_probe_tokens := Extended.materialise_tokens(parser_repaired_source);
@@ -1553,7 +1553,7 @@ test_recovered_snapshot_ast_reuse_fallback :: () {
 	old_source := copy_string("broken: ; stable :: 1;");
 	new_source := copy_string("broken: ; stable :: 1; later := stable;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, old_source.count, old_source.count, new_source);
+	ok, updated := Extended.parse_file_edit(*old, old_source.count, old_source.count, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .RECOVERED && updated.status == fresh.status);
 	assert(old.diagnostics.count && updated.diagnostics.count == fresh.diagnostics.count);
@@ -1593,7 +1593,7 @@ test_recovered_snapshot_ast_reuse_fallback :: () {
 	lexer_old_source := copy_string("bad :: 18446744073709551616; stable :: 1;");
 	lexer_new_source := copy_string("bad :: 18446744073709551616; stable :: 1; later := stable;");
 	lexer_old := Extended.parse_file(lexer_old_source);
-	lexer_updated, lexer_ok := Extended.parse_file_edit(*lexer_old, lexer_old_source.count, lexer_old_source.count, lexer_new_source);
+	lexer_ok, lexer_updated := Extended.parse_file_edit(*lexer_old, lexer_old_source.count, lexer_old_source.count, lexer_new_source);
 	lexer_fresh := Extended.parse_file(lexer_new_source);
 	assert(lexer_ok && lexer_old.status == .RECOVERED && lexer_old.diagnostics[0].kind == .LEXER_ERROR);
 	assert(lexer_updated.status == lexer_fresh.status && lexer_updated.diagnostics.count == lexer_fresh.diagnostics.count);
@@ -1701,7 +1701,7 @@ check_semicolon_candidate_edit :: (before: string, after: string, edit_start: s6
 	old_source := copy_string(before);
 	new_source := copy_string(after);
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == fresh.status);
 	probe_tokens := Extended.materialise_tokens(new_source);
@@ -1740,7 +1740,7 @@ check_nested_candidate_syntax_edit :: () {
 	edit_start :=	"#if true { left :: 1; result := ".count;
 	edit_end :=		"#if true { left :: 1; result := left + 2".count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	old_block := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block;
@@ -1784,7 +1784,7 @@ check_simple_candidate_edit :: (before: string, after: string, edit_start: s64, 
 	old_source := copy_string(before);
 	new_source := copy_string(after);
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -1828,7 +1828,7 @@ test_semicolon_boundary_ast_reuse :: () {
 	new_source := copy_string("value := 1");
 	edit_start := new_source.count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, old_source.count, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, old_source.count, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == fresh.status);
 	probe_tokens := Extended.materialise_tokens(new_source);
@@ -1853,7 +1853,7 @@ test_semicolon_boundary_ast_reuse :: () {
 	trivia_new_source := copy_string("value := 1 /* note */; keep := value;");
 	trivia_edit_start := "value := 1".count;
 	trivia_old := Extended.parse_file(trivia_old_source);
-	trivia_updated, trivia_ok := Extended.parse_file_edit(*trivia_old, trivia_edit_start, trivia_edit_start, trivia_new_source);
+	trivia_ok, trivia_updated := Extended.parse_file_edit(*trivia_old, trivia_edit_start, trivia_edit_start, trivia_new_source);
 	trivia_fresh := Extended.parse_file(trivia_new_source);
 	assert(trivia_ok && trivia_updated.status == .COMPLETE && trivia_fresh.status == .COMPLETE);
 	trivia_probe_tokens := Extended.materialise_tokens(trivia_new_source);
@@ -1887,7 +1887,7 @@ test_typed_declaration_ast_reuse :: () {
 	old_source := copy_string(			   "use: Target = value; Target :: 1; value :: 2;");
 	new_source := copy_string("added :: 0;\nuse: Target = value; Target :: 1; value :: 2;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -1928,7 +1928,7 @@ test_typed_declaration_ast_reuse :: () {
 	pointer_old_source := copy_string(			   "use: *Target = value; Target :: 1; value :: 2;");
 	pointer_new_source := copy_string("added :: 0;\nuse: *Target = value; Target :: 1; value :: 2;");
 	pointer_old := Extended.parse_file(pointer_old_source);
-	pointer_updated, pointer_ok := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
+	pointer_ok, pointer_updated := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
 	pointer_fresh := Extended.parse_file(pointer_new_source);
 	assert(pointer_ok && pointer_updated.status == .COMPLETE && pointer_fresh.status == .COMPLETE);
 	pointer_probe_tokens := Extended.materialise_tokens(pointer_new_source);
@@ -1968,7 +1968,7 @@ test_typed_declaration_ast_reuse :: () {
 	constant_old_source := copy_string(			    "Target :: s64; value :: 2; result: Target : value;");
 	constant_new_source := copy_string("added :: 0;\nTarget :: s64; value :: 2; result: Target : value;");
 	constant_old := Extended.parse_file(constant_old_source);
-	constant_updated, constant_ok := Extended.parse_file_edit(*constant_old, 0, 0, constant_new_source);
+	constant_ok, constant_updated := Extended.parse_file_edit(*constant_old, 0, 0, constant_new_source);
 	constant_fresh := Extended.parse_file(constant_new_source);
 	assert(constant_ok && constant_old.status == .COMPLETE && constant_updated.status == .COMPLETE && constant_fresh.status == .COMPLETE);
 	constant_statements := constant_updated.root.(*Extended.Parser_Block).statements;
@@ -2011,7 +2011,7 @@ test_typed_declaration_ast_reuse :: () {
 	changed_source :=		copy_string("Target :: s64; value :: 2; result: Target = value;");
 	changed_old := Extended.parse_file(changed_old_source);
 	separator_start := "Target :: s64; value :: 2; result: Target ".count;
-	changed, changed_ok := Extended.parse_file_edit(*changed_old, separator_start, separator_start + 1, changed_source);
+	changed_ok, changed := Extended.parse_file_edit(*changed_old, separator_start, separator_start + 1, changed_source);
 	changed_fresh := Extended.parse_file(changed_source);
 	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
 	changed_statements := changed.root.(*Extended.Parser_Block).statements;
@@ -2047,7 +2047,7 @@ test_nested_type_instantiation_reuse :: () {
 	old_source := copy_string(			   "value: *[size + 1][..]Target; keep := value; size :: 4; Target :: s64;");
 	new_source := copy_string("added :: 0;\nvalue: *[size + 1][..]Target; keep := value; size :: 4; Target :: s64;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -2113,7 +2113,7 @@ test_nested_type_instantiation_reuse :: () {
 
 	changed_source := copy_string("value: *[size + 2][..]Target; keep := value; size :: 4; Target :: s64;");
 	dimension_start := "value: *[size + ".count;
-	changed, changed_ok := Extended.parse_file_edit(*old, dimension_start, dimension_start + 1, changed_source);
+	changed_ok, changed := Extended.parse_file_edit(*old, dimension_start, dimension_start + 1, changed_source);
 	changed_fresh := Extended.parse_file(changed_source);
 	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
 	changed_statements := changed.root.(*Extended.Parser_Block).statements;
@@ -2179,7 +2179,7 @@ check_excluded_type_instantiation :: (type_source: string) {
 	old_source := copy_string(tprint(			  "Target :: s64; size :: 4; value: %; keep := value;", type_source));
 	new_source := copy_string(tprint("added :: 0;\nTarget :: s64; size :: 4; value: %; keep := value;", type_source));
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "%", type_source);
 	old_type := old.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).type_inst;
@@ -2302,7 +2302,7 @@ test_array_view_declaration_ast_reuse :: () {
 	old_source := copy_string(			   "use: []Target = value; Target :: 1; value :: 2;");
 	new_source := copy_string("added :: 0;\nuse: []Target = value; Target :: 1; value :: 2;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -2335,7 +2335,7 @@ test_array_view_declaration_ast_reuse :: () {
 
 	changed_source := copy_string("use: [..]Target = value; Target :: 1; value :: 2;");
 	insert_at := "use: [".count;
-	changed, changed_ok := Extended.parse_file_edit(*old, insert_at, insert_at, changed_source);
+	changed_ok, changed := Extended.parse_file_edit(*old, insert_at, insert_at, changed_source);
 	changed_fresh := Extended.parse_file(changed_source);
 	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
 	changed_tokens := Extended.materialise_tokens(changed_source);
@@ -2363,7 +2363,7 @@ test_array_view_declaration_ast_reuse :: () {
 	resizable_old_source := copy_string(			 "use: [..]Target = value; Target :: 1; value :: 2;");
 	resizable_new_source := copy_string("added :: 0;\nuse: [..]Target = value; Target :: 1; value :: 2;");
 	resizable_old := Extended.parse_file(resizable_old_source);
-	resizable_updated, resizable_ok := Extended.parse_file_edit(*resizable_old, 0, 0, resizable_new_source);
+	resizable_ok, resizable_updated := Extended.parse_file_edit(*resizable_old, 0, 0, resizable_new_source);
 	resizable_fresh := Extended.parse_file(resizable_new_source);
 	assert(resizable_ok && resizable_old.status == .COMPLETE && resizable_updated.status == .COMPLETE && resizable_fresh.status == .COMPLETE);
 	resizable_statements := resizable_updated.root.(*Extended.Parser_Block).statements;
@@ -2421,7 +2421,7 @@ test_fixed_array_declaration_ast_reuse :: () {
 	old_source := copy_string(			   "use: [size]Target = value; size :: 4; Target :: 1; value :: 2;");
 	new_source := copy_string("added :: 0;\nuse: [size]Target = value; size :: 4; Target :: 1; value :: 2;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -2459,7 +2459,7 @@ test_fixed_array_declaration_ast_reuse :: () {
 
 	changed_source := copy_string("use: [4]Target = value; size :: 4; Target :: 1; value :: 2;");
 	dimension_start := "use: [".count;
-	changed, changed_ok := Extended.parse_file_edit(*old, dimension_start, dimension_start + "size".count, changed_source);
+	changed_ok, changed := Extended.parse_file_edit(*old, dimension_start, dimension_start + "size".count, changed_source);
 	changed_fresh := Extended.parse_file(changed_source);
 	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
 	changed_tokens := Extended.materialise_tokens(changed_source);
@@ -2497,7 +2497,7 @@ test_double_pointer_declaration_ast_reuse :: () {
 	old_source := copy_string(			   "use: **Target = value; Target :: 1; value :: 2;");
 	new_source := copy_string("added :: 0;\nuse: **Target = value; Target :: 1; value :: 2;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -2530,7 +2530,7 @@ test_double_pointer_declaration_ast_reuse :: () {
 	assert_eligible_edit_matches_fresh(*updated, *fresh);
 
 	changed_source := copy_string("use: *Target = value; Target :: 1; value :: 2;");
-	changed, changed_ok := Extended.parse_file_edit(*old, "use: ".count, "use: *".count, changed_source);
+	changed_ok, changed := Extended.parse_file_edit(*old, "use: ".count, "use: *".count, changed_source);
 	changed_fresh := Extended.parse_file(changed_source);
 	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
 	changed_tokens := Extended.materialise_tokens(changed_source);
@@ -2567,7 +2567,7 @@ test_uninitialized_typed_declaration_ast_reuse :: () {
 	old_source := copy_string(			   "item: Target; Target :: 1; use := item;");
 	new_source := copy_string("added :: 0;\nitem: Target; Target :: 1; use := item;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -2607,7 +2607,7 @@ test_uninitialized_typed_declaration_ast_reuse :: () {
 	pointer_old_source := copy_string(			   "item: *Target; Target :: 1; use := item;");
 	pointer_new_source := copy_string("added :: 0;\nitem: *Target; Target :: 1; use := item;");
 	pointer_old := Extended.parse_file(pointer_old_source);
-	pointer_updated, pointer_ok := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
+	pointer_ok, pointer_updated := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
 	pointer_fresh := Extended.parse_file(pointer_new_source);
 	assert(pointer_ok && pointer_updated.status == .COMPLETE && pointer_fresh.status == .COMPLETE);
 	pointer_statements := pointer_updated.root.(*Extended.Parser_Block).statements;
@@ -2646,7 +2646,7 @@ test_uninitialized_typed_declaration_ast_reuse :: () {
 	uninitialized_old_source := copy_string(			 "Target :: s64; item: Target = ---; use := item;");
 	uninitialized_new_source := copy_string("added :: 0;\nTarget :: s64; item: Target = ---; use := item;");
 	uninitialized_old := Extended.parse_file(uninitialized_old_source);
-	uninitialized_updated, uninitialized_ok := Extended.parse_file_edit(*uninitialized_old, 0, 0, uninitialized_new_source);
+	uninitialized_ok, uninitialized_updated := Extended.parse_file_edit(*uninitialized_old, 0, 0, uninitialized_new_source);
 	uninitialized_fresh := Extended.parse_file(uninitialized_new_source);
 	assert(uninitialized_ok && uninitialized_old.status == .COMPLETE && uninitialized_updated.status == .COMPLETE && uninitialized_fresh.status == .COMPLETE);
 	uninitialized_statements := uninitialized_updated.root.(*Extended.Parser_Block).statements;
@@ -2683,7 +2683,7 @@ test_uninitialized_typed_declaration_ast_reuse :: () {
 	import_old_source := copy_string(			  "Basic :: #import \"Basic\"; use := Basic;");
 	import_new_source := copy_string("added :: 0;\nBasic :: #import \"Basic\"; use := Basic;");
 	import_old := Extended.parse_file(import_old_source);
-	import_updated, import_ok := Extended.parse_file_edit(*import_old, 0, 0, import_new_source);
+	import_ok, import_updated := Extended.parse_file_edit(*import_old, 0, 0, import_new_source);
 	import_fresh := Extended.parse_file(import_new_source);
 	assert(import_ok && import_old.status == .COMPLETE && import_updated.status == .COMPLETE && import_fresh.status == .COMPLETE);
 	import_statements := import_updated.root.(*Extended.Parser_Block).statements;
@@ -2720,7 +2720,7 @@ test_uninitialized_typed_declaration_ast_reuse :: () {
 	using_old_source := copy_string(			 "State :: struct { member: s64; }; using global: State; after := 1;");
 	using_new_source := copy_string("added :: 0;\nState :: struct { member: s64; }; using global: State; after := 1;");
 	using_old := Extended.parse_file(using_old_source);
-	using_updated, using_ok := Extended.parse_file_edit(*using_old, 0, 0, using_new_source);
+	using_ok, using_updated := Extended.parse_file_edit(*using_old, 0, 0, using_new_source);
 	using_fresh := Extended.parse_file(using_new_source);
 	assert(using_ok && using_old.status == .COMPLETE && using_updated.status == .COMPLETE && using_fresh.status == .COMPLETE);
 	using_statements := using_updated.root.(*Extended.Parser_Block).statements;
@@ -2757,7 +2757,7 @@ test_typed_compound_ast_reuse :: () {
 	old_source := copy_string(			   "left, right: Target = value; Target :: 1; value :: 2; use := right;");
 	new_source := copy_string("added :: 0;\nleft, right: Target = value; Target :: 1; value :: 2; use := right;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -2806,7 +2806,7 @@ test_typed_compound_ast_reuse :: () {
 	pointer_old_source := copy_string(			   "left, middle, right: *Target = value; Target :: 1; value :: 2; use := middle;");
 	pointer_new_source := copy_string("added :: 0;\nleft, middle, right: *Target = value; Target :: 1; value :: 2; use := middle;");
 	pointer_old := Extended.parse_file(pointer_old_source);
-	pointer_updated, pointer_ok := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
+	pointer_ok, pointer_updated := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
 	pointer_fresh := Extended.parse_file(pointer_new_source);
 	assert(pointer_ok && pointer_updated.status == .COMPLETE && pointer_fresh.status == .COMPLETE);
 	pointer_statements := pointer_updated.root.(*Extended.Parser_Block).statements;
@@ -2847,7 +2847,7 @@ test_typed_compound_ast_reuse :: () {
 	double_old_source := copy_string(			  "left, right: **Target = value; Target :: 1; value :: 2; use := right;");
 	double_new_source := copy_string("added :: 0;\nleft, right: **Target = value; Target :: 1; value :: 2; use := right;");
 	double_old := Extended.parse_file(double_old_source);
-	double_updated, double_ok := Extended.parse_file_edit(*double_old, 0, 0, double_new_source);
+	double_ok, double_updated := Extended.parse_file_edit(*double_old, 0, 0, double_new_source);
 	double_fresh := Extended.parse_file(double_new_source);
 	assert(double_ok && double_old.status == .COMPLETE && double_updated.status == .COMPLETE && double_fresh.status == .COMPLETE);
 	double_statements := double_updated.root.(*Extended.Parser_Block).statements;
@@ -2896,7 +2896,7 @@ test_typed_compound_ast_reuse :: () {
 	array_old_source := copy_string(			 "left, right: [size]Target = value; size :: 4; Target :: u8; value :: 2; use := right;");
 	array_new_source := copy_string("added :: 0;\nleft, right: [size]Target = value; size :: 4; Target :: u8; value :: 2; use := right;");
 	array_old := Extended.parse_file(array_old_source);
-	array_updated, array_ok := Extended.parse_file_edit(*array_old, 0, 0, array_new_source);
+	array_ok, array_updated := Extended.parse_file_edit(*array_old, 0, 0, array_new_source);
 	array_fresh := Extended.parse_file(array_new_source);
 	assert(array_ok && array_old.status == .COMPLETE && array_updated.status == .COMPLETE && array_fresh.status == .COMPLETE);
 	array_statements := array_updated.root.(*Extended.Parser_Block).statements;
@@ -2942,7 +2942,7 @@ test_typed_compound_ast_reuse :: () {
 	fixed_value_old_source := copy_string(			   "Target :: s64; value: [2]Target : .[1, 2]; left, right: [2]Target = value; main :: () { use_left := left; use_right := right; }");
 	fixed_value_new_source := copy_string("added :: 0;\nTarget :: s64; value: [2]Target : .[1, 2]; left, right: [2]Target = value; main :: () { use_left := left; use_right := right; }");
 	fixed_value_old := Extended.parse_file(fixed_value_old_source);
-	fixed_value_updated, fixed_value_ok := Extended.parse_file_edit(*fixed_value_old, 0, 0, fixed_value_new_source);
+	fixed_value_ok, fixed_value_updated := Extended.parse_file_edit(*fixed_value_old, 0, 0, fixed_value_new_source);
 	fixed_value_fresh := Extended.parse_file(fixed_value_new_source);
 	assert(fixed_value_ok && fixed_value_old.status == .COMPLETE && fixed_value_updated.status == .COMPLETE && fixed_value_fresh.status == .COMPLETE);
 	fixed_value_statements := fixed_value_updated.root.(*Extended.Parser_Block).statements;
@@ -3000,7 +3000,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	old_source := copy_string(			   "left, right: Target; Target :: 1; use := right;");
 	new_source := copy_string("added :: 0;\nleft, right: Target; Target :: 1; use := right;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -3049,7 +3049,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	pointer_old_source := copy_string(			   "left, middle, right: *Target; Target :: 1; use := middle;");
 	pointer_new_source := copy_string("added :: 0;\nleft, middle, right: *Target; Target :: 1; use := middle;");
 	pointer_old := Extended.parse_file(pointer_old_source);
-	pointer_updated, pointer_ok := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
+	pointer_ok, pointer_updated := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
 	pointer_fresh := Extended.parse_file(pointer_new_source);
 	assert(pointer_ok && pointer_updated.status == .COMPLETE && pointer_fresh.status == .COMPLETE);
 	pointer_statements := pointer_updated.root.(*Extended.Parser_Block).statements;
@@ -3090,7 +3090,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	double_old_source := copy_string(			  "left, right: **Target; Target :: 1; use := right;");
 	double_new_source := copy_string("added :: 0;\nleft, right: **Target; Target :: 1; use := right;");
 	double_old := Extended.parse_file(double_old_source);
-	double_updated, double_ok := Extended.parse_file_edit(*double_old, 0, 0, double_new_source);
+	double_ok, double_updated := Extended.parse_file_edit(*double_old, 0, 0, double_new_source);
 	double_fresh := Extended.parse_file(double_new_source);
 	assert(double_ok && double_old.status == .COMPLETE && double_updated.status == .COMPLETE && double_fresh.status == .COMPLETE);
 	double_statements := double_updated.root.(*Extended.Parser_Block).statements;
@@ -3136,7 +3136,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	array_old_source := copy_string(			 "left, right: [size]Target; size :: 4; Target :: u8; use := right;");
 	array_new_source := copy_string("added :: 0;\nleft, right: [size]Target; size :: 4; Target :: u8; use := right;");
 	array_old := Extended.parse_file(array_old_source);
-	array_updated, array_ok := Extended.parse_file_edit(*array_old, 0, 0, array_new_source);
+	array_ok, array_updated := Extended.parse_file_edit(*array_old, 0, 0, array_new_source);
 	array_fresh := Extended.parse_file(array_new_source);
 	assert(array_ok && array_old.status == .COMPLETE && array_updated.status == .COMPLETE && array_fresh.status == .COMPLETE);
 	array_statements := array_updated.root.(*Extended.Parser_Block).statements;
@@ -3181,7 +3181,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	dimension_old_source := copy_string(			 "size :: 1; Target :: s64; left, right: [size + 1]Target; main :: () { use_left := left; use_right := right; }");
 	dimension_new_source := copy_string("added :: 0;\nsize :: 1; Target :: s64; left, right: [size + 1]Target; main :: () { use_left := left; use_right := right; }");
 	dimension_old := Extended.parse_file(dimension_old_source);
-	dimension_updated, dimension_ok := Extended.parse_file_edit(*dimension_old, 0, 0, dimension_new_source);
+	dimension_ok, dimension_updated := Extended.parse_file_edit(*dimension_old, 0, 0, dimension_new_source);
 	dimension_fresh := Extended.parse_file(dimension_new_source);
 	assert(dimension_ok && dimension_old.status == .COMPLETE && dimension_updated.status == .COMPLETE && dimension_fresh.status == .COMPLETE);
 	dimension_statements := dimension_updated.root.(*Extended.Parser_Block).statements;
@@ -3242,7 +3242,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	resizable_old_source := copy_string(			 "Target :: s64; left, right: [..]Target; main :: () { use := right; }");
 	resizable_new_source := copy_string("added :: 0;\nTarget :: s64; left, right: [..]Target; main :: () { use := right; }");
 	resizable_old := Extended.parse_file(resizable_old_source);
-	resizable_updated, resizable_ok := Extended.parse_file_edit(*resizable_old, 0, 0, resizable_new_source);
+	resizable_ok, resizable_updated := Extended.parse_file_edit(*resizable_old, 0, 0, resizable_new_source);
 	resizable_fresh := Extended.parse_file(resizable_new_source);
 	assert(resizable_ok && resizable_old.status == .COMPLETE && resizable_updated.status == .COMPLETE && resizable_fresh.status == .COMPLETE);
 	resizable_statements := resizable_updated.root.(*Extended.Parser_Block).statements;
@@ -3297,7 +3297,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	view_old_source := copy_string(				"Target :: s64; left, right: []Target; main :: () { use_left := left; use_right := right; }");
 	view_new_source := copy_string("added :: 0;\nTarget :: s64; left, right: []Target; main :: () { use_left := left; use_right := right; }");
 	view_old := Extended.parse_file(view_old_source);
-	view_updated, view_ok := Extended.parse_file_edit(*view_old, 0, 0, view_new_source);
+	view_ok, view_updated := Extended.parse_file_edit(*view_old, 0, 0, view_new_source);
 	view_fresh := Extended.parse_file(view_new_source);
 	assert(view_ok && view_old.status == .COMPLETE && view_updated.status == .COMPLETE && view_fresh.status == .COMPLETE);
 	view_statements := view_updated.root.(*Extended.Parser_Block).statements;
@@ -3354,7 +3354,7 @@ test_uninitialized_typed_compound_ast_reuse :: () {
 	view_pointer_old_source := copy_string(				"Target :: s64; left, right: *[]Target; main :: () { use_left := left; use_right := right; }");
 	view_pointer_new_source := copy_string("added :: 0;\nTarget :: s64; left, right: *[]Target; main :: () { use_left := left; use_right := right; }");
 	view_pointer_old := Extended.parse_file(view_pointer_old_source);
-	view_pointer_updated, view_pointer_ok := Extended.parse_file_edit(*view_pointer_old, 0, 0, view_pointer_new_source);
+	view_pointer_ok, view_pointer_updated := Extended.parse_file_edit(*view_pointer_old, 0, 0, view_pointer_new_source);
 	view_pointer_fresh := Extended.parse_file(view_pointer_new_source);
 	assert(view_pointer_ok && view_pointer_old.status == .COMPLETE && view_pointer_updated.status == .COMPLETE && view_pointer_fresh.status == .COMPLETE);
 	view_pointer_statements := view_pointer_updated.root.(*Extended.Parser_Block).statements;
@@ -3427,7 +3427,7 @@ test_compound_ast_reuse :: () {
 	old_source := copy_string(			   "left, right :: value; value :: 1; sum := left + right;");
 	new_source := copy_string("added :: 2;\nleft, right :: value; value :: 1; sum := left + right;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -3483,7 +3483,7 @@ test_compound_reassignment_ast_reuse :: () {
 	old_source := copy_string(			   "left :: 1; right :: 2; left, right = value; value :: 3; use := left;");
 	new_source := copy_string("added :: 0;\nleft :: 1; right :: 2; left, right = value; value :: 3; use := left;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -3530,7 +3530,7 @@ test_compound_reassignment_ast_reuse :: () {
 	three_old_source := copy_string(			 "a :: 1; b :: 2; c :: 3; a, b, c = value; value :: 4; use := c;");
 	three_new_source := copy_string("added :: 0;\na :: 1; b :: 2; c :: 3; a, b, c = value; value :: 4; use := c;");
 	three_old := Extended.parse_file(three_old_source);
-	three_updated, three_ok := Extended.parse_file_edit(*three_old, 0, 0, three_new_source);
+	three_ok, three_updated := Extended.parse_file_edit(*three_old, 0, 0, three_new_source);
 	three_fresh := Extended.parse_file(three_new_source);
 	assert(three_ok && three_updated.status == .COMPLETE && three_fresh.status == .COMPLETE);
 	three_statements := three_updated.root.(*Extended.Parser_Block).statements;
@@ -3573,7 +3573,7 @@ test_compound_reassignment_ast_reuse :: () {
 	mixed_old_source := copy_string(			 "right := 2; value :: 3; left:, right = value; use_left := left; use_right := right;");
 	mixed_new_source := copy_string("added :: 0;\nright := 2; value :: 3; left:, right = value; use_left := left; use_right := right;");
 	mixed_old := Extended.parse_file(mixed_old_source);
-	mixed_updated, mixed_ok := Extended.parse_file_edit(*mixed_old, 0, 0, mixed_new_source);
+	mixed_ok, mixed_updated := Extended.parse_file_edit(*mixed_old, 0, 0, mixed_new_source);
 	mixed_fresh := Extended.parse_file(mixed_new_source);
 	assert(mixed_ok && mixed_old.status == .COMPLETE && mixed_updated.status == .COMPLETE && mixed_fresh.status == .COMPLETE);
 	mixed_statements := mixed_updated.root.(*Extended.Parser_Block).statements;
@@ -3617,7 +3617,7 @@ test_compound_reassignment_ast_reuse :: () {
 		"added :: 0;\nContainer :: struct { x: s64; y: s64; }; container: Container; main :: () { container.x, container.y = 1, 2; values: [2]s64; index :: 0; values[index], values[index + 1] = 3, 4; }"
 	);
 	member_old := Extended.parse_file(member_old_source);
-	member_updated, member_ok := Extended.parse_file_edit(*member_old, 0, 0, member_new_source);
+	member_ok, member_updated := Extended.parse_file_edit(*member_old, 0, 0, member_new_source);
 	member_fresh := Extended.parse_file(member_new_source);
 	assert(member_ok && member_old.status == .COMPLETE && member_updated.status == .COMPLETE && member_fresh.status == .COMPLETE);
 	member_statements := member_updated.root.(*Extended.Parser_Block).statements;
@@ -3689,7 +3689,7 @@ test_compound_reassignment_ast_reuse :: () {
 	deref_old_source := copy_string(			 "main :: () { left: s64; pointer := *left; right: s64; pointer.*, right = 1, 2; use_right := right; right=, new_value := 3; use_new := new_value; use_right_again := right; }");
 	deref_new_source := copy_string("added :: 0;\nmain :: () { left: s64; pointer := *left; right: s64; pointer.*, right = 1, 2; use_right := right; right=, new_value := 3; use_new := new_value; use_right_again := right; }");
 	deref_old := Extended.parse_file(deref_old_source);
-	deref_updated, deref_ok := Extended.parse_file_edit(*deref_old, 0, 0, deref_new_source);
+	deref_ok, deref_updated := Extended.parse_file_edit(*deref_old, 0, 0, deref_new_source);
 	deref_fresh := Extended.parse_file(deref_new_source);
 	assert(deref_ok && deref_old.status == .COMPLETE && deref_updated.status == .COMPLETE && deref_fresh.status == .COMPLETE);
 	deref_statements := deref_updated.root.(*Extended.Parser_Block).statements;
@@ -3754,7 +3754,7 @@ test_compound_candidate_edits :: () {
 	new_source := copy_string("left, right: s64 keep := right;");
 	old := Extended.parse_file(old_source);
 	semicolon_start := "left, right: s64".count;
-	updated, ok := Extended.parse_file_edit(*old, semicolon_start, semicolon_start + 1, new_source);
+	ok, updated := Extended.parse_file_edit(*old, semicolon_start, semicolon_start + 1, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == fresh.status && updated.status != .COMPLETE);
 	probe_tokens := Extended.materialise_tokens(new_source);
@@ -3790,7 +3790,7 @@ check_compound_candidate_edit :: (before: string, after: string, edit_start: s64
 	old_source := copy_string(before);
 	new_source := copy_string(after);
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -3847,7 +3847,7 @@ test_three_name_compound_ast_reuse :: () {
 	old_source := copy_string(			   "left, middle, right :: value; value :: 1; use := middle;");
 	new_source := copy_string("added :: 2;\nleft, middle, right :: value; value :: 1; use := middle;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -3897,7 +3897,7 @@ test_four_name_compound_ast_reuse :: () {
 	old_source := copy_string(			   "a, b, c, d :: value; value :: 1; use := d;");
 	new_source := copy_string("added :: 2;\na, b, c, d :: value; value :: 1; use := d;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -3950,7 +3950,7 @@ check_compound_reuse_fallback :: (
 	old_source := copy_string(source);
 	new_source := copy_string(tprint("added :: 0;\n%", old_source));
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -4073,7 +4073,7 @@ test_scalar_literal_ast_reuse :: () {
 		old_source := copy_string(tprint(			   "value := %; use := value;", expression));
 		new_source := copy_string(tprint("prefix :: 0;\nvalue := %; use := value;", expression));
 		old := Extended.parse_file(old_source);
-		updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+		ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 		fresh := Extended.parse_file(new_source);
 		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 		statements := updated.root.(*Extended.Parser_Block).statements;
@@ -4150,7 +4150,7 @@ check_source_position_edit :: (before: string, after: string, edit_start: s64, e
 	old_source := copy_string(before);
 	new_source := copy_string(after);
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -4213,7 +4213,7 @@ test_source_backed_ast_reuse :: () {
 	old_source := copy_string(			   "label :: \"one\\ntwo\"; enabled :: true;");
 	new_source := copy_string("prefix :: 0; label :: \"one\\ntwo\"; enabled :: true;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -4263,7 +4263,7 @@ test_source_backed_ast_reuse :: () {
 	filepath_new_source := copy_string("prefix :: 0;\npath :: #filepath; use := path;");
 	FILEPATH_FILENAME :: "C:/fixtures/source.jai";
 	filepath_old := Extended.parse_file(filepath_old_source, FILEPATH_FILENAME);
-	filepath_updated, filepath_ok := Extended.parse_file_edit(*filepath_old, 0, 0, filepath_new_source);
+	filepath_ok, filepath_updated := Extended.parse_file_edit(*filepath_old, 0, 0, filepath_new_source);
 	filepath_fresh := Extended.parse_file(filepath_new_source, FILEPATH_FILENAME);
 	assert(filepath_ok && filepath_old.status == .COMPLETE && filepath_updated.status == .COMPLETE && filepath_fresh.status == .COMPLETE);
 	filepath_statements := filepath_updated.root.(*Extended.Parser_Block).statements;
@@ -4304,7 +4304,7 @@ test_excluded_literal_ast_reuse_fallback :: () {
 		old_source := copy_string(tprint(			   "%\nuse := value;", declaration_source));
 		new_source := copy_string(tprint("prefix :: 0;\n%\nuse := value;", declaration_source));
 		old := Extended.parse_file(old_source);
-		updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+		ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 		fresh := Extended.parse_file(new_source);
 		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "Excluded literal: %", declaration_source);
 		old_literal := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression;
@@ -4358,7 +4358,7 @@ test_aggregate_payload_edits :: () {
 		old_source := copy_string(tprint("%%%", prefix, old_payload, suffix));
 		new_source := copy_string(tprint("%%%", prefix, replacement, suffix));
 		old := Extended.parse_file(old_source);
-		updated, ok := Extended.parse_file_edit(*old, prefix.count, prefix.count + old_payload.count, new_source);
+		ok, updated := Extended.parse_file_edit(*old, prefix.count, prefix.count + old_payload.count, new_source);
 		fresh := Extended.parse_file(new_source);
 		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 		statements := updated.root.(*Extended.Parser_Block).statements;
@@ -4409,7 +4409,7 @@ test_nested_ast_reuse :: () {
 	old_source := copy_string(				"base :: 2; value := (base + 3) * 4;");
 	new_source := copy_string("prefix :: 1;\nbase :: 2; value := (base + 3) * 4;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -4460,7 +4460,7 @@ check_changed_candidate_ast_reuse :: (new_text: string, edit_start: s64, edit_en
 	old_source := copy_string("value := 1 + 2; keep := value;");
 	new_source := copy_string(new_text);
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -4536,7 +4536,7 @@ check_binary_operator_edit :: (old_spelling: string, new_spelling: string, expec
 	new_source := copy_string(tprint("left :: 7; right :: 3; result := left % right;", new_spelling));
 	operator_start := "left :: 7; right :: 3; result := left ".count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, operator_start, operator_start + old_spelling.count, new_source);
+	ok, updated := Extended.parse_file_edit(*old, operator_start, operator_start + old_spelling.count, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	probe_tokens := Extended.materialise_tokens(new_source);
@@ -4572,7 +4572,7 @@ check_binary_ast_reuse :: (spelling: string, expected_type: Operator_Type) {
 	old_source := copy_string(tprint("left :: 7; right :: 3; result := left % right;", spelling));
 	new_source := copy_string(tprint("added :: 0;\n%", old_source));
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -4622,7 +4622,7 @@ test_logical_ast_reuse :: () {
 	old_source := copy_string(				   "left :: true; middle :: false; right :: true; result := left || middle && right;");
 	new_source := copy_string("added :: false;\nleft :: true; middle :: false; right :: true; result := left || middle && right;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -4657,7 +4657,7 @@ test_logical_ast_reuse :: () {
 
 	changed_source := copy_string("left :: true; middle :: false; right :: true; result := left && middle && right;");
 	operator_start := "left :: true; middle :: false; right :: true; result := left ".count;
-	changed, changed_ok := Extended.parse_file_edit(*old, operator_start, operator_start + 2, changed_source);
+	changed_ok, changed := Extended.parse_file_edit(*old, operator_start, operator_start + 2, changed_source);
 	changed_fresh := Extended.parse_file(changed_source);
 	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
 	changed_tokens := Extended.materialise_tokens(changed_source);
@@ -4699,7 +4699,7 @@ test_bitwise_ast_reuse :: () {
 	old_source := copy_string(			   "left :: 1; middle :: 2; right :: 3; last :: 4; result := left | middle & right ^ last;");
 	new_source := copy_string("added :: 0;\nleft :: 1; middle :: 2; right :: 3; last :: 4; result := left | middle & right ^ last;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -4740,7 +4740,7 @@ test_bitwise_ast_reuse :: () {
 
 	changed_source := copy_string("left :: 1; middle :: 2; right :: 3; last :: 4; result := left & middle & right ^ last;");
 	operator_start := "left :: 1; middle :: 2; right :: 3; last :: 4; result := left ".count;
-	changed, changed_ok := Extended.parse_file_edit(*old, operator_start, operator_start + 1, changed_source);
+	changed_ok, changed := Extended.parse_file_edit(*old, operator_start, operator_start + 1, changed_source);
 	changed_fresh := Extended.parse_file(changed_source);
 	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
 	changed_tokens := Extended.materialise_tokens(changed_source);
@@ -4791,7 +4791,7 @@ test_operator_grouping_edit :: () {
 	new_source := copy_string("left :: 1; right :: 2; value := left + right * 3; keep := value;");
 	expression_start := "left :: 1; right :: 2; value := ".count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, expression_start, expression_start + "(left + right) * 3".count, new_source);
+	ok, updated := Extended.parse_file_edit(*old, expression_start, expression_start + "(left + right) * 3".count, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -4858,7 +4858,7 @@ test_unary_ast_reuse :: () {
 	old_source := copy_string("flag :: true; result := !flag;");
 	new_source := copy_string("added :: false;\nflag :: true; result := !flag;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -4937,7 +4937,7 @@ check_excluded_operator_fallback :: (expression: string, expected_operator: Oper
 	old_source := copy_string(tprint(			  "left :: 1; right :: 2; value := %; keep := value;", expression));
 	new_source := copy_string(tprint("added :: 0;\nleft :: 1; right :: 2; value := %; keep := value;", expression));
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "Excluded operator: %", expression);
 	old_expression := old.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression;
@@ -5003,7 +5003,7 @@ test_query_fallback :: () {
 	old_source := copy_string(			   "value :: 1; result := type_of(null); keep := result;");
 	new_source := copy_string("added :: 0;\nvalue :: 1; result := type_of(null); keep := result;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	old_query := old.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression;
@@ -5117,7 +5117,7 @@ check_excluded_file_node :: (directive: string, expected_kind: type_of(Extended.
 	old_source := copy_string(tprint(			  "value :: 1; % keep := value;", directive));
 	new_source := copy_string(tprint("added :: 0;\nvalue :: 1; % keep := value;", directive));
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "%", directive);
 	old_node := old.root.(*Extended.Parser_Block).statements[1];
@@ -5196,7 +5196,7 @@ test_imperative_body_fallback :: () {
 	old_source := copy_string(			   "outer :: true; run :: () { local := outer; if local { local := false; defer tick(); while local { return; } } } tail := outer;");
 	new_source := copy_string("added :: 0;\nouter :: true; run :: () { local := outer; if local { local := false; defer tick(); while local { return; } } } tail := outer;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	old_body := old.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
@@ -5230,7 +5230,7 @@ test_imperative_body_fallback :: () {
 
 	edit_start :=				"outer :: true; run :: () { local := outer; if local { local := ".count;
 	inner_source := copy_string("outer :: true; run :: () { local := outer; if local { local := outer; defer tick(); while local { return; } } } tail := outer;");
-	inner_updated, inner_ok := Extended.parse_file_edit(*old, edit_start, edit_start + "false".count, inner_source);
+	inner_ok, inner_updated := Extended.parse_file_edit(*old, edit_start, edit_start + "false".count, inner_source);
 	inner_fresh := Extended.parse_file(inner_source);
 	assert(inner_ok && inner_updated.status == .COMPLETE && inner_fresh.status == .COMPLETE);
 	inner_body := inner_updated.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
@@ -5277,7 +5277,7 @@ test_aggregate_body_fallback :: () {
 	old_source := copy_string(			   "Thing :: struct { field: s64; use := field; field = 1; } tail := 2;");
 	new_source := copy_string("added :: 0;\nThing :: struct { field: s64; use := field; field = 1; } tail := 2;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	old_block := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block;
@@ -5296,7 +5296,7 @@ test_aggregate_body_fallback :: () {
 	inner_source := copy_string("Thing :: struct { field: u64; use := field; field = 1; } tail := 2;");
 	inner_fresh := Extended.parse_file(inner_source);
 	edit_start := "Thing :: struct { field: ".count;
-	inner_updated, inner_ok := Extended.parse_file_edit(*old, edit_start, edit_start + "s64".count, inner_source);
+	inner_ok, inner_updated := Extended.parse_file_edit(*old, edit_start, edit_start + "s64".count, inner_source);
 	assert(inner_ok && inner_updated.status == .COMPLETE && inner_fresh.status == .COMPLETE);
 	inner_block := inner_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block;
 	inner_fresh_block := inner_fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct).block;
@@ -5333,7 +5333,7 @@ test_aggregate_parameter_block_fallback :: () {
 	old_source := copy_string(			   "Thing :: struct (T: Type, N := 2) { value: T; C :: N; } tail := 2;");
 	new_source := copy_string("added :: 0;\nThing :: struct (T: Type, N := 2) { value: T; C :: N; } tail := 2;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	old_struct := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct);
@@ -5352,7 +5352,7 @@ test_aggregate_parameter_block_fallback :: () {
 	inner_source := copy_string("Thing :: struct (T: Type, N := 3) { value: T; C :: N; } tail := 2;");
 	inner_fresh := Extended.parse_file(inner_source);
 	edit_start := "Thing :: struct (T: Type, N := ".count;
-	inner_updated, inner_ok := Extended.parse_file_edit(*old, edit_start, edit_start + 1, inner_source);
+	inner_ok, inner_updated := Extended.parse_file_edit(*old, edit_start, edit_start + 1, inner_source);
 	assert(inner_ok && inner_updated.status == .COMPLETE && inner_fresh.status == .COMPLETE);
 	inner_struct := inner_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct);
 	inner_fresh_struct := inner_fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Struct);
@@ -5386,7 +5386,7 @@ test_single_declaration_branch_fallback :: () {
 	old_source := copy_string(			   "#if true target :: 1; use := target;");
 	new_source := copy_string("added :: 0;\n#if true target :: 1; use := target;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	old_branch := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_If).then_block;
@@ -5416,7 +5416,7 @@ test_synthetic_imperative_block_fallback :: () {
 	old_source := copy_string(			   "lambda := x => x; value := ifx true then 1 else 2;");
 	new_source := copy_string("added :: 0;\nlambda := x => x; value := ifx true then 1 else 2;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	old_statements := old.root.(*Extended.Parser_Block).statements;
@@ -5454,7 +5454,7 @@ test_enum_body_fallback :: () {
 	old_source := copy_string(			   "Mode :: enum u16 { FIRST; #if true { SECOND; } THIRD; } tail := 2;");
 	new_source := copy_string("added :: 0;\nMode :: enum u16 { FIRST; #if true { SECOND; } THIRD; } tail := 2;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	old_enum := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Enum);
@@ -5476,7 +5476,7 @@ test_enum_body_fallback :: () {
 	inner_source := copy_string("Mode :: enum u16 { FIRST; #if true { FOURTH; } THIRD; } tail := 2;");
 	inner_fresh := Extended.parse_file(inner_source);
 	edit_start := "Mode :: enum u16 { FIRST; #if true { ".count;
-	inner_updated, inner_ok := Extended.parse_file_edit(*old, edit_start, edit_start + "SECOND".count, inner_source);
+	inner_ok, inner_updated := Extended.parse_file_edit(*old, edit_start, edit_start + "SECOND".count, inner_source);
 	assert(inner_ok && inner_updated.status == .COMPLETE && inner_fresh.status == .COMPLETE);
 	inner_enum := inner_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Enum);
 	inner_fresh_enum := inner_fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Enum);
@@ -5511,7 +5511,7 @@ test_case_arm_fallback :: () {
 	old_source := copy_string(			   "run :: () { outer := 1; if outer == { case 1; local := outer; case 2; local := 2; inner := local; case; return; } } tail := 2;");
 	new_source := copy_string("added :: 0;\nrun :: () { outer := 1; if outer == { case 1; local := outer; case 2; local := 2; inner := local; case; return; } } tail := 2;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	old_body := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
@@ -5545,7 +5545,7 @@ test_case_arm_fallback :: () {
 	inner_source := copy_string("run :: () { outer := 1; if outer == { case 1; local := outer; case 2; local := 3; inner := local; case; return; } } tail := 2;");
 	inner_fresh := Extended.parse_file(inner_source);
 	edit_start := "run :: () { outer := 1; if outer == { case 1; local := outer; case 2; local := ".count;
-	inner_updated, inner_ok := Extended.parse_file_edit(*old, edit_start, edit_start + 1, inner_source);
+	inner_ok, inner_updated := Extended.parse_file_edit(*old, edit_start, edit_start + 1, inner_source);
 	assert(inner_ok && inner_updated.status == .COMPLETE && inner_fresh.status == .COMPLETE);
 	inner_body := inner_updated.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
 	inner_fresh_body := inner_fresh.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
@@ -5588,7 +5588,7 @@ check_excluded_statement_node :: (statement: string, expected_kind: type_of(Exte
 	old_source := copy_string(tprint(			  "value :: 1; run :: () { % keep := value; } tail := value;", statement));
 	new_source := copy_string(tprint("added :: 0;\nvalue :: 1; run :: () { % keep := value; } tail := value;", statement));
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "%", statement);
 	old_statements := old.root.(*Extended.Parser_Block).statements;
@@ -5664,7 +5664,7 @@ check_excluded_expression_node :: (expression: string, expected_kind: type_of(Ex
 	old_source := copy_string(tprint(			  "Target :: s64; value :: 1; result := %; keep := result;", expression));
 	new_source := copy_string(tprint("added :: 0;\nTarget :: s64; value :: 1; result := %; keep := result;", expression));
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "%", expression);
 	old_expression := old.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression;
@@ -5832,7 +5832,7 @@ test_lowered_directive_ast_reuse :: () {
 		old_source := copy_string(tprint(			  "Target :: 1; value :: 2; result := %;", it));
 		new_source := copy_string(tprint("added :: 0;\nTarget :: 1; value :: 2; result := %;", it));
 		old := Extended.parse_file(old_source);
-		updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+		ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 		fresh := Extended.parse_file(new_source);
 		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 		old_expression := old.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression;
@@ -5886,7 +5886,7 @@ test_excluded_directive_payload_edit :: () {
 	old_source := copy_string(tprint("%value; keep := result;", PREFIX));
 	new_source := copy_string(tprint("%Target; keep := result;", PREFIX));
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, PREFIX.count, PREFIX.count + "value".count, new_source);
+	ok, updated := Extended.parse_file_edit(*old, PREFIX.count, PREFIX.count + "value".count, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -5927,7 +5927,7 @@ test_expression_query_ast_reuse :: () {
 	old_source := copy_string(			   "value :: 1; result := type_of(value);");
 	new_source := copy_string("added :: 2;\nvalue :: 1; result := type_of(value);");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -5956,7 +5956,7 @@ test_expression_query_ast_reuse :: () {
 	other_source := copy_string("value :: 1; result := is_constant(value);");
 	other_old := Extended.parse_file(other_source);
 	other_new_source := copy_string("added :: 2;\nvalue :: 1; result := is_constant(value);");
-	other_updated, other_ok := Extended.parse_file_edit(*other_old, 0, 0, other_new_source);
+	other_ok, other_updated := Extended.parse_file_edit(*other_old, 0, 0, other_new_source);
 	other_fresh := Extended.parse_file(other_new_source);
 	assert(other_ok && other_old.status == .COMPLETE && other_updated.status == .COMPLETE && other_fresh.status == .COMPLETE);
 	other_query := other_old.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression;
@@ -5999,7 +5999,7 @@ test_expression_query_ast_reuse :: () {
 	code_old_source := copy_string(				"value :: 1; result := code_of(value);");
 	code_new_source := copy_string("added :: 2;\nvalue :: 1; result := code_of(value);");
 	code_old := Extended.parse_file(code_old_source);
-	code_updated, code_ok := Extended.parse_file_edit(*code_old, 0, 0, code_new_source);
+	code_ok, code_updated := Extended.parse_file_edit(*code_old, 0, 0, code_new_source);
 	code_fresh := Extended.parse_file(code_new_source);
 	assert(code_ok && code_old.status == .COMPLETE && code_updated.status == .COMPLETE && code_fresh.status == .COMPLETE);
 	code_statements := code_updated.root.(*Extended.Parser_Block).statements;
@@ -6038,7 +6038,7 @@ test_expression_query_ast_reuse :: () {
 
 	changed_source := copy_string("value :: 1; result := is_constant(value);");
 	query_start := "value :: 1; result := ".count;
-	changed, changed_ok := Extended.parse_file_edit(*old, query_start, query_start + "type_of".count, changed_source);
+	changed_ok, changed := Extended.parse_file_edit(*old, query_start, query_start + "type_of".count, changed_source);
 	changed_fresh := Extended.parse_file(changed_source);
 	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
 	changed_tokens := Extended.materialise_tokens(changed_source);
@@ -6079,7 +6079,7 @@ check_type_query_ast_reuse :: (spelling: string, expected_kind: type_of(Extended
 	old_source := copy_string(tprint("Target :: %; result := %(Target);", target_definition, spelling));
 	new_source := copy_string(tprint("added :: 2;\n%", old_source));
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -6130,7 +6130,7 @@ test_type_query_ast_reuse :: () {
 	changed_old_source :=	copy_string("Target :: s64; result := size_of(Target);");
 	changed_old := Extended.parse_file(changed_old_source);
 	query_start := "Target :: s64; result := ".count;
-	changed, changed_ok := Extended.parse_file_edit(*changed_old, query_start, query_start + "size_of".count, changed_source);
+	changed_ok, changed := Extended.parse_file_edit(*changed_old, query_start, query_start + "size_of".count, changed_source);
 	changed_fresh := Extended.parse_file(changed_source);
 	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
 	changed_tokens := Extended.materialise_tokens(changed_source);
@@ -6166,7 +6166,7 @@ test_positive_unary_ast_reuse :: () {
 	old_source := copy_string(			   "value :: 1; result := +value;");
 	new_source := copy_string("added :: 2;\nvalue :: 1; result := +value;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -6197,7 +6197,7 @@ test_positive_unary_ast_reuse :: () {
 
 	changed_source := copy_string("value :: 1; result := -value;");
 	operator_start := "value :: 1; result := ".count;
-	changed, changed_ok := Extended.parse_file_edit(*old, operator_start, operator_start + 1, changed_source);
+	changed_ok, changed := Extended.parse_file_edit(*old, operator_start, operator_start + 1, changed_source);
 	changed_fresh := Extended.parse_file(changed_source);
 	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
 	changed_tokens := Extended.materialise_tokens(changed_source);
@@ -6238,7 +6238,7 @@ test_negative_unary_ast_reuse :: () {
 	old_source := copy_string(			   "value :: 1; result := -value;");
 	new_source := copy_string("added :: 2;\nvalue :: 1; result := -value;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -6281,7 +6281,7 @@ test_prefix_dereference_ast_reuse :: () {
 	old_source := copy_string(			   "value :: 1; result := *value;");
 	new_source := copy_string("added :: 2;\nvalue :: 1; result := *value;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -6312,7 +6312,7 @@ test_prefix_dereference_ast_reuse :: () {
 
 	changed_source := copy_string("value :: 1; result := +value;");
 	operator_start := "value :: 1; result := ".count;
-	changed, changed_ok := Extended.parse_file_edit(*old, operator_start, operator_start + 1, changed_source);
+	changed_ok, changed := Extended.parse_file_edit(*old, operator_start, operator_start + 1, changed_source);
 	changed_fresh := Extended.parse_file(changed_source);
 	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
 	changed_tokens := Extended.materialise_tokens(changed_source);
@@ -6353,7 +6353,7 @@ test_pointer_dereference_ast_reuse :: () {
 	old_source := copy_string(			   "value :: 1; result := (.*)value;");
 	new_source := copy_string("added :: 2;\nvalue :: 1; result := (.*)value;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -6384,7 +6384,7 @@ test_pointer_dereference_ast_reuse :: () {
 
 	changed_source := copy_string("value :: 1; result := *value;");
 	operator_start := "value :: 1; result := ".count;
-	changed, changed_ok := Extended.parse_file_edit(*old, operator_start, operator_start + 4, changed_source);
+	changed_ok, changed := Extended.parse_file_edit(*old, operator_start, operator_start + 4, changed_source);
 	changed_fresh := Extended.parse_file(changed_source);
 	assert(changed_ok && changed.status == .COMPLETE && changed_fresh.status == .COMPLETE);
 	changed_tokens := Extended.materialise_tokens(changed_source);
@@ -6425,7 +6425,7 @@ test_postfix_dereference_ast_reuse :: () {
 	old_source := copy_string(			   "pointer :: 1; result := pointer.*;");
 	new_source := copy_string("added :: 2;\npointer :: 1; result := pointer.*;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -6469,7 +6469,7 @@ test_cast_ast_reuse :: () {
 	old_source := copy_string(				"value :: 1; result := cast(Target) value;");
 	new_source := copy_string("Target :: 2;\nvalue :: 1; result := cast(Target) value;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -6513,7 +6513,7 @@ test_cast_ast_reuse :: () {
 	pointer_old_source := copy_string(				"value :: 1; result := cast(*Target) value;");
 	pointer_new_source := copy_string("Target :: 2;\nvalue :: 1; result := cast(*Target) value;");
 	pointer_old := Extended.parse_file(pointer_old_source);
-	pointer_updated, pointer_ok := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
+	pointer_ok, pointer_updated := Extended.parse_file_edit(*pointer_old, 0, 0, pointer_new_source);
 	pointer_fresh := Extended.parse_file(pointer_new_source);
 	assert(pointer_ok && pointer_updated.status == .COMPLETE && pointer_fresh.status == .COMPLETE);
 	pointer_probe_tokens := Extended.materialise_tokens(pointer_new_source);
@@ -6555,7 +6555,7 @@ test_cast_ast_reuse :: () {
 	view_old_source := copy_string(				 "value :: 1; result := cast([]Target) value;");
 	view_new_source := copy_string("Target :: 2;\nvalue :: 1; result := cast([]Target) value;");
 	view_old := Extended.parse_file(view_old_source);
-	view_updated, view_ok := Extended.parse_file_edit(*view_old, 0, 0, view_new_source);
+	view_ok, view_updated := Extended.parse_file_edit(*view_old, 0, 0, view_new_source);
 	view_fresh := Extended.parse_file(view_new_source);
 	assert(view_ok && view_old.status == .COMPLETE && view_updated.status == .COMPLETE && view_fresh.status == .COMPLETE);
 	view_statements := view_updated.root.(*Extended.Parser_Block).statements;
@@ -6595,7 +6595,7 @@ test_cast_ast_reuse :: () {
 	array_old_source := copy_string(						 "value :: 1; result := cast([size]Target) value;");
 	array_new_source := copy_string("size :: 4; Target :: 2;\nvalue :: 1; result := cast([size]Target) value;");
 	array_old := Extended.parse_file(array_old_source);
-	array_updated, array_ok := Extended.parse_file_edit(*array_old, 0, 0, array_new_source);
+	array_ok, array_updated := Extended.parse_file_edit(*array_old, 0, 0, array_new_source);
 	array_fresh := Extended.parse_file(array_new_source);
 	assert(array_ok && array_old.status == .COMPLETE && array_updated.status == .COMPLETE && array_fresh.status == .COMPLETE);
 	array_statements := array_updated.root.(*Extended.Parser_Block).statements;
@@ -6637,7 +6637,7 @@ test_cast_ast_reuse :: () {
 	double_old_source := copy_string(			   "value :: 1; result := cast(**Target) value;");
 	double_new_source := copy_string("Target :: 2;\nvalue :: 1; result := cast(**Target) value;");
 	double_old := Extended.parse_file(double_old_source);
-	double_updated, double_ok := Extended.parse_file_edit(*double_old, 0, 0, double_new_source);
+	double_ok, double_updated := Extended.parse_file_edit(*double_old, 0, 0, double_new_source);
 	double_fresh := Extended.parse_file(double_new_source);
 	assert(double_ok && double_old.status == .COMPLETE && double_updated.status == .COMPLETE && double_fresh.status == .COMPLETE);
 	double_statements := double_updated.root.(*Extended.Parser_Block).statements;
@@ -6683,7 +6683,7 @@ test_cast_flags_ast_reuse :: () {
 		old_source := copy_string(tprint(			  "Target :: 1; value :: 2; result := %;", it));
 		new_source := copy_string(tprint("added :: 0;\nTarget :: 1; value :: 2; result := %;", it));
 		old := Extended.parse_file(old_source);
-		updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+		ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 		fresh := Extended.parse_file(new_source);
 		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "%", it);
 		statements := updated.root.(*Extended.Parser_Block).statements;
@@ -6732,7 +6732,7 @@ test_call_ast_reuse :: () {
 	old_source := copy_string(		   "value :: 2; result := f(value, 3 + 4);");
 	new_source := copy_string("f :: 1;\nvalue :: 2; result := f(value, 3 + 4);");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -6782,7 +6782,7 @@ test_call_ast_reuse :: () {
 	named_old_source :=	copy_string(		   "result := f(name=3);");
 	named_new :=		copy_string("name :: 0; result := f(name=3);");
 	named_old := Extended.parse_file(named_old_source);
-	named_updated, named_ok := Extended.parse_file_edit(*named_old, 0, 0, named_new);
+	named_ok, named_updated := Extended.parse_file_edit(*named_old, 0, 0, named_new);
 	named_fresh := Extended.parse_file(named_new);
 	assert(named_ok && named_updated.status == .COMPLETE);
 	named_tokens := Extended.materialise_tokens(named_new);
@@ -6814,7 +6814,7 @@ test_member_callee_ast_reuse :: () {
 	old_source := copy_string(			   "object :: 1; value :: 2; result := object.method(named=value + 1);");
 	new_source := copy_string("named :: 0;\nobject :: 1; value :: 2; result := object.method(named=value + 1);");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -6862,7 +6862,7 @@ test_call_context_ast_reuse :: () {
 	old_source := copy_string(		   "extra :: 2; result := f(1,, extra);");
 	new_source := copy_string("f :: 1;\nextra :: 2; result := f(1,, extra);");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -6903,7 +6903,7 @@ test_call_context_fallback :: () {
 	old_source := copy_string(			   "f :: 1; extra :: 2; result := f(1,, logger_data = extra); keep := result;");
 	new_source := copy_string("added :: 0;\nf :: 1; extra :: 2; result := f(1,, logger_data = extra); keep := result;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	old_call := old.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression;
@@ -6952,7 +6952,7 @@ test_call_cast_fallback :: () {
 		old_source := copy_string(tprint(			  "target :: 1; value :: 2; result := %; keep := result;", it));
 		new_source := copy_string(tprint("added :: 0;\ntarget :: 1; value :: 2; result := %; keep := result;", it));
 		old := Extended.parse_file(old_source);
-		updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+		ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 		fresh := Extended.parse_file(new_source);
 		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "%", it);
 		old_expression := old.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression;
@@ -7004,7 +7004,7 @@ check_call_cast_candidate_edit :: (old_expression: string, new_expression: strin
 	old_source := copy_string(tprint("%%; keep := result;", PREFIX, old_expression));
 	new_source := copy_string(tprint("%%; keep := result;", PREFIX, new_expression));
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, PREFIX.count + edit_first, PREFIX.count + edit_last, new_source);
+	ok, updated := Extended.parse_file_edit(*old, PREFIX.count + edit_first, PREFIX.count + edit_last, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "% -> %", old_expression, new_expression);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -7084,7 +7084,7 @@ test_member_ast_reuse :: () {
 	old_source := copy_string(			   "object :: 1; result := object.field;");
 	new_source := copy_string("field :: 5;\nobject :: 1; result := object.field;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -7122,7 +7122,7 @@ test_member_ast_reuse :: () {
 	chain_old_source := copy_string(						  "index :: 0; object :: 1; result := (object.field)[index].member;");
 	chain_new_source := copy_string("field :: 5; member :: 6;\nindex :: 0; object :: 1; result := (object.field)[index].member;");
 	chain_old := Extended.parse_file(chain_old_source);
-	chain_updated, chain_ok := Extended.parse_file_edit(*chain_old, 0, 0, chain_new_source);
+	chain_ok, chain_updated := Extended.parse_file_edit(*chain_old, 0, 0, chain_new_source);
 	chain_fresh := Extended.parse_file(chain_new_source);
 	assert(chain_ok && chain_old.status == .COMPLETE && chain_updated.status == .COMPLETE && chain_fresh.status == .COMPLETE);
 	chain_statements := chain_updated.root.(*Extended.Parser_Block).statements;
@@ -7174,7 +7174,7 @@ test_subscript_ast_reuse :: () {
 	old_source := copy_string(			   "values := .[10]; result := values[index];");
 	new_source := copy_string("index :: 0;\nvalues := .[10]; result := values[index];");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -7212,7 +7212,7 @@ test_aggregate_ast_reuse :: () {
 	old_source := copy_string(				"name :: 1; items := .[name, .{2, \"blue\"}];");
 	new_source := copy_string("prefix :: 0;\nname :: 1; items := .[name, .{2, \"blue\"}];");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -7264,7 +7264,7 @@ test_aggregate_ast_reuse :: () {
 
 	typed_old := Extended.parse_file("items := u8.[1, 2];");
 	typed_new := 			"u8 :: 0; items := u8.[1, 2];";
-	typed_updated, typed_ok := Extended.parse_file_edit(*typed_old, 0, 0, typed_new);
+	typed_ok, typed_updated := Extended.parse_file_edit(*typed_old, 0, 0, typed_new);
 	typed_fresh := Extended.parse_file(typed_new);
 	assert(typed_ok && typed_updated.status == .COMPLETE && typed_fresh.status == .COMPLETE);
 	typed_tokens := Extended.materialise_tokens(typed_new);
@@ -7292,7 +7292,7 @@ test_aggregate_ast_reuse :: () {
 
 	struct_old := Extended.parse_file("item := Thing.{1, 2};");
 	struct_new := 		  "Thing :: 0; item := Thing.{1, 2};";
-	struct_updated, struct_ok := Extended.parse_file_edit(*struct_old, 0, 0, struct_new);
+	struct_ok, struct_updated := Extended.parse_file_edit(*struct_old, 0, 0, struct_new);
 	struct_fresh := Extended.parse_file(struct_new);
 	assert(struct_ok && struct_updated.status == .COMPLETE && struct_fresh.status == .COMPLETE);
 	struct_literal := struct_updated.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Literal);
@@ -7318,7 +7318,7 @@ test_nested_block_ast_reuse :: () {
 	new_source := copy_string("#if true { added :: 3; use := later; later :: 2; }\nouter :: 1;");
 	edit_start := "#if true { ".count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_start, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_start, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -7392,7 +7392,7 @@ test_nested_block_ast_reuse :: () {
 	brace_source := "#if true { a :: 1; }";
 	brace_old := Extended.parse_file(brace_source);
 	brace_at := "#if true ".count;
-	brace_updated, brace_ok := Extended.parse_file_edit(*brace_old, brace_at, brace_at + 1, brace_source);
+	brace_ok, brace_updated := Extended.parse_file_edit(*brace_old, brace_at, brace_at + 1, brace_source);
 	assert(brace_ok && brace_updated.status == .COMPLETE);
 	brace_probe := Extended.Parser.{parsed = *brace_updated, edit_source = *brace_old, edit_start = brace_at, edit_end = brace_at + 1};
 	assert(Extended.find_old_declaration_block(*brace_probe, brace_old.root_scope, 3, .DATA_DECLARATIONS) == null);
@@ -7408,7 +7408,7 @@ test_nested_block_scope_reuse :: () {
 	new_source := copy_string("#if true { added :: 3; #if true { use := outer; } outer :: 1; }");
 	edit_start := "#if true { ".count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_start, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_start, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -7447,7 +7447,7 @@ test_nested_block_scope_reuse :: () {
 	boundary_source := copy_string("#if true { #if true { use := target; } target :: 1; }");
 	boundary_old := Extended.parse_file(boundary_source);
 	outer_at := "#if true ".count;
-	boundary_updated, boundary_ok := Extended.parse_file_edit(*boundary_old, outer_at, outer_at + 1, boundary_source);
+	boundary_ok, boundary_updated := Extended.parse_file_edit(*boundary_old, outer_at, outer_at + 1, boundary_source);
 	boundary_fresh := Extended.parse_file(boundary_source);
 	assert(boundary_ok && boundary_updated.status == .COMPLETE && boundary_fresh.status == .COMPLETE);
 	boundary_tokens := Extended.materialise_tokens(boundary_source);
@@ -7492,7 +7492,7 @@ check_indentation_only_ast_reuse :: (before: string, after: string, old_indent_l
 	new_source := copy_string(after);
 	edit_start := "#if true {\n".count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_start + old_indent_length, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_start + old_indent_length, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -7545,7 +7545,7 @@ test_nested_shadowing_ast_reuse :: () {
 	new_source := copy_string("#if true { target :: 1; #if true { target :: 2; use := target; } }");
 	edit_start := "#if true { target :: 1; #if true { ".count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_start, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_start, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -7622,7 +7622,7 @@ test_dependency_forward_binding_edit :: () {
 	new_source := copy_string("use := target; target :: 1; keep := use;");
 	edit_start := "use := target; ".count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_start, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_start, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	old_statements := old.root.(*Extended.Parser_Block).statements;
@@ -7660,7 +7660,7 @@ test_import_dependency_edit :: () {
 	edit_start := "Basic :: #import \"".count;
 	edit_end := "Basic :: #import \"Basic".count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -7699,7 +7699,7 @@ test_using_dependency_edit :: () {
 	old_source := copy_string("State :: struct { member: s64; }; using global: State; keep := global;");
 	new_source := copy_string("Other :: struct { member: s64; }; using global: State; keep := global;");
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, "State".count, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, "State".count, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -7746,7 +7746,7 @@ test_dependency_scope_move :: () {
 	new_source := copy_string("target :: 1; #if true { } use := target;");
 	edit_end := "#if true { target :: 1; } ".count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, edit_end, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, edit_end, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	old_statements := old.root.(*Extended.Parser_Block).statements;
@@ -7784,7 +7784,7 @@ check_dependency_declaration_edit :: (before: string, after: string, edit_start:
 	old_source := copy_string(before);
 	new_source := copy_string(after);
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -7831,7 +7831,7 @@ test_moved_closing_brace_ast_reuse :: () {
 	new_source := copy_string("#if true { use := outer; outer :: 1; }");
 	edit_start := "#if true { use := outer; ".count;
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, old_source.count, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, old_source.count, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 
@@ -7876,7 +7876,7 @@ test_moved_closing_brace_ast_reuse :: () {
 
 test_default_edit_fallback :: () {
 	old := Default.parse_file("a :: 1; @tag");
-	updated, ok := Default.parse_file_edit(*old, 0, 0, "b :: 2; a :: 1; @tag");
+	ok, updated := Default.parse_file_edit(*old, 0, 0, "b :: 2; a :: 1; @tag");
 	fresh := Default.parse_file("b :: 2; a :: 1; @tag");
 	assert(ok && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	assert(updated.root.(*Default.Parser_Block).statements.count == fresh.root.(*Default.Parser_Block).statements.count);
@@ -7887,7 +7887,7 @@ test_default_edit_fallback :: () {
 	Default.release_parser_tree(*fresh);
 
 	compound_old := Default.parse_file("a, b :: 1; @tag");
-	compound_updated, compound_ok := Default.parse_file_edit(*compound_old, 0, 0, "prefix :: 2; a, b :: 1; @tag");
+	compound_ok, compound_updated := Default.parse_file_edit(*compound_old, 0, 0, "prefix :: 2; a, b :: 1; @tag");
 	compound_fresh := Default.parse_file("prefix :: 2; a, b :: 1; @tag");
 	assert(compound_ok && compound_updated.status == .COMPLETE && compound_fresh.status == .COMPLETE);
 	assert(compound_updated.root.(*Default.Parser_Block).statements[1].kind == .COMPOUND_DECLARATION);
@@ -7905,7 +7905,7 @@ test_default_edit_fallback :: () {
 	import_after := copy_string("Basic :: #import \"String\"; use := Basic;");
 	import_start := "Basic :: #import \"".count;
 	import_old := Default.parse_file(import_before);
-	import_updated, import_ok := Default.parse_file_edit(*import_old, import_start, import_start + "Basic".count, import_after);
+	import_ok, import_updated := Default.parse_file_edit(*import_old, import_start, import_start + "Basic".count, import_after);
 	import_fresh := Default.parse_file(import_after);
 	assert(import_ok && import_old.status == .COMPLETE && import_updated.status == .COMPLETE && import_fresh.status == .COMPLETE);
 	probe_tokens := Default.materialise_tokens(import_after);
@@ -7938,7 +7938,7 @@ test_default_edit_fallback :: () {
 
 check_regional_lex :: (old_source: string, new_source: string, start: s64, end: s64) {
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, start, end, new_source);
+	ok, updated := Extended.parse_file_edit(*old, start, end, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && updated.status == fresh.status);
 	assert(updated.tokens.count == fresh.tokens.count);
@@ -8772,7 +8772,7 @@ test_file_import_resolution :: () {
 	EDIT_NEW_SOURCE :: "item :: 2; value := item;";
 	edit_old := Extended.parse_file(EDIT_OLD_SOURCE);
 	edit_start := "item :: ".count;
-	edit_syntax, edit_success := Extended.parse_file_edit(*edit_old, edit_start, edit_start + 1, EDIT_NEW_SOURCE, resolve_identifiers = false);
+	edit_success, edit_syntax := Extended.parse_file_edit(*edit_old, edit_start, edit_start + 1, EDIT_NEW_SOURCE, resolve_identifiers = false);
 	assert(edit_success);
 	assert(edit_syntax.root.(*Extended.Parser_Block).statements[1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Ident).resolved_declaration == null);
 	Extended.release_parser_tree(*edit_syntax);
@@ -13612,7 +13612,7 @@ check_declaration_metadata_edit :: (old_text: string, new_text: string, edit_sta
 	old_source := copy_string(old_text);
 	new_source := copy_string(new_text);
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
+	ok, updated := Extended.parse_file_edit(*old, edit_start, edit_end, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -13667,7 +13667,7 @@ check_flagged_declaration_fallback :: (source: string, expected_flag: type_of(Co
 	old_source := copy_string(tprint(			  "% main :: () { use := value; }", source));
 	new_source := copy_string(tprint("added :: 0;\n% main :: () { use := value; }", source));
 	old := Extended.parse_file(old_source);
-	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
+	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
 	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE);
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -13753,7 +13753,7 @@ test_declaration_metadata :: () {
 	aligned_old_source := copy_string("value: s64 #align 16; main :: () { use := value; }");
 	aligned_new_source := copy_string("added :: 0;\nvalue: s64 #align 16; main :: () { use := value; }");
 	aligned_old := Extended.parse_file(aligned_old_source);
-	aligned_updated, aligned_ok := Extended.parse_file_edit(*aligned_old, 0, 0, aligned_new_source);
+	aligned_ok, aligned_updated := Extended.parse_file_edit(*aligned_old, 0, 0, aligned_new_source);
 	aligned_fresh := Extended.parse_file(aligned_new_source);
 	assert(aligned_ok && aligned_old.status == .COMPLETE && aligned_updated.status == .COMPLETE && aligned_fresh.status == .COMPLETE);
 	aligned_statements := aligned_updated.root.(*Extended.Parser_Block).statements;
@@ -13801,7 +13801,7 @@ test_declaration_metadata :: () {
 	noted_old_source := copy_string(			 "value: s64; @Tag(1) main :: () { use := value; }");
 	noted_new_source := copy_string("added :: 0;\nvalue: s64; @Tag(1) main :: () { use := value; }");
 	noted_old := Extended.parse_file(noted_old_source);
-	noted_updated, noted_ok := Extended.parse_file_edit(*noted_old, 0, 0, noted_new_source);
+	noted_ok, noted_updated := Extended.parse_file_edit(*noted_old, 0, 0, noted_new_source);
 	noted_fresh := Extended.parse_file(noted_new_source);
 	assert(noted_ok && noted_old.status == .COMPLETE && noted_updated.status == .COMPLETE && noted_fresh.status == .COMPLETE);
 	noted_statements := noted_updated.root.(*Extended.Parser_Block).statements;
@@ -13845,7 +13845,7 @@ test_declaration_metadata :: () {
 	scoped_old_source := copy_string(			  "`value := 1; use := value;");
 	scoped_new_source := copy_string("added :: 0;\n`value := 1; use := value;");
 	scoped_old := Extended.parse_file(scoped_old_source);
-	scoped_updated, scoped_ok := Extended.parse_file_edit(*scoped_old, 0, 0, scoped_new_source);
+	scoped_ok, scoped_updated := Extended.parse_file_edit(*scoped_old, 0, 0, scoped_new_source);
 	scoped_fresh := Extended.parse_file(scoped_new_source);
 	assert(scoped_ok && scoped_old.status == .COMPLETE && scoped_updated.status == .COMPLETE && scoped_fresh.status == .COMPLETE);
 	scoped_statements := scoped_updated.root.(*Extended.Parser_Block).statements;

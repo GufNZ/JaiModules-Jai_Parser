@@ -490,7 +490,7 @@ test_snapshot_oracle :: () {
 		COUNTER_SOURCE :: "object :: 1; left, right :: object.field; work :: () { return; } #if true { nested :: object; }";
 		PREFIX :: "// inserted\n";
 		old := Parser.parse_file(COUNTER_SOURCE);
-		updated, ok := Parser.parse_file_edit(*old, 0, 0, sprint("%%", PREFIX, COUNTER_SOURCE));
+		ok, updated := Parser.parse_file_edit(*old, 0, 0, sprint("%%", PREFIX, COUNTER_SOURCE));
 		defer Parser.release_parser_tree(*old);
 		defer Parser.release_parser_tree(*updated);
 

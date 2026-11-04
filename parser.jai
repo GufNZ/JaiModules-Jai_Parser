@@ -756,7 +756,7 @@ parse_file :: (source: string, fully_pathed_filename: string = "", warn_unnecess
 // On success, retain the old filename and return a new, independently owned tree and token snapshot.
 // Unchanged syntax may be copied only when eligible; other regions are reparsed.
 // Keep both source buffers alive while their snapshots are in use, and pass warning mode again if it was enabled.
-parse_file_edit :: (old: *Parsed_Source, start: s64, end: s64, new_source: string, warn_unnecessary_semicolons: bool = false, resolve_identifiers: bool = true) -> Parsed_Source, bool {
+parse_file_edit :: (old: *Parsed_Source, start: s64, end: s64, new_source: string, warn_unnecessary_semicolons: bool = false, resolve_identifiers: bool = true) -> bool, Parsed_Source {
 	old_source := old.source;
 	if start >= 0 && end >= start && end <= old_source.count {
 		inserted_count := new_source.count - (old_source.count - (end - start));
@@ -767,13 +767,13 @@ parse_file_edit :: (old: *Parsed_Source, start: s64, end: s64, new_source: strin
 			) {
 				materialised := materialise_tokens(new_source, old, start, end);
 				result, parser := parseInit(new_source, parse_file_node, old.fully_pathed_filename, warn_unnecessary_semicolons, *materialised, old, start, end, resolve_identifiers);
-				return result, true;
+				return true, result;
 			}
 		}
 	}
 
 
-	return .{}, false;
+	return false, .{};
 }
 
 // Keep parsing declarations after an error, but force progress when recovery lands on another possible declaration start.
