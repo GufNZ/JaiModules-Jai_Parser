@@ -796,7 +796,7 @@ append_compiler_diagnostics :: (output: string, diagnostics: *[..] Compiler_Diag
 	current: *Compiler_Diagnostic;
 	pending_location: *Compiler_Source_Location;
 	lines := split(output, "\n");
-	defer free(lines);
+	defer array_free(lines);
 
 	for line: lines {
 		found_error, location, message := parse_compiler_message_line(line, ": Error: ");
@@ -997,7 +997,7 @@ test_comparison_layers :: () {
 }
 
 test_context_modification_compiler_shape :: () {
-	call := compiler_get_nodes(#code f(5, 10,, temp)).(*Code_Procedure_Call);
+	call := compiler_get_nodes(#code f(5, 10,, logger_data = data)).(*Code_Procedure_Call);
 	assert(call.arguments_unsorted.count == 2);
 	assert(call.context_modification != null);
 	assert(call.context_modification.modification_expressions.count == 1);
@@ -3874,14 +3874,14 @@ JAI
 	assert_expression_fixture("no_inline foo(1)");
 	assert_expression_fixture("foo(1, named = value)");
 	assert_expression_fixture("join(strings,, temp)");
-	assert_expression_fixture("f(16, 8,, pool_allocator)");
+	assert_expression_fixture("f(16, 8,, logger_data = my_data)");
 	assert_expression_fixture("f(1000, 3,, logger = my_logger)");
 	assert_expression_fixture("f(5, 10,, some_value = 42)");
 	assert_expression_fixture("f(16, 8,, allocator = pool_allocator, logger = my_logger)");
 	assert_expression_fixture("f(5, 10,, pool_allocator, logger = my_logger)");
 	assert_expression_fixture("f(1000, 3,, pool_allocator)");
 	assert_expression_fixture("f(,, pool_allocator)");
-	assert_expression_fixture("f(,, pool_allocator)");
+	assert_expression_fixture("f(,, logger_data = my_data)");
 	assert_expression_fixture("object.method(1)[index].*");
 	assert_expression_fixture("cast(s32) value");
 	assert_expression_fixture("cast,no_check(s32) value");

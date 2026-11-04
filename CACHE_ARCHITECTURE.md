@@ -942,7 +942,7 @@ Qualification items apply only after separate implementation authorisation, usin
 	- [x] Include the R12 parser changes: unified compound-declaration builder with recorded operator/modifier/separator tokens, and declaration `#export` support.
 	- [x] Include the R10 epoch issuer and the R11 Windows store binding.
 - [ ] Document effective safety minima/ceilings and optional quota enforcement as each bounded component is implemented.
-- [ ] Obtain implementation authorisation for the plan.
+- [x] Obtain implementation authorisation for the plan (2026-11-04).
 
 ### Qualification After Implementation Authorisation
 

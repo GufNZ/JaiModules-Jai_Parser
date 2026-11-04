@@ -6899,8 +6899,8 @@ test_call_context_ast_reuse :: () {
 }
 
 test_call_context_fallback :: () {
-	old_source := copy_string(			   "f :: 1; extra :: 2; result := f(1,, extra); keep := result;");
-	new_source := copy_string("added :: 0;\nf :: 1; extra :: 2; result := f(1,, extra); keep := result;");
+	old_source := copy_string(			   "f :: 1; extra :: 2; result := f(1,, logger_data = extra); keep := result;");
+	new_source := copy_string("added :: 0;\nf :: 1; extra :: 2; result := f(1,, logger_data = extra); keep := result;");
 	old := Extended.parse_file(old_source);
 	updated, ok := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
@@ -12603,7 +12603,7 @@ test_postfix_expressions :: () {
 }
 
 test_call_context_modification :: () {
-	SOURCE :: "f(16, 8,, pool_allocator, logger = my_logger)";
+	SOURCE :: "f(16, 8,, logger_data = my_data, logger = my_logger)";
 	parsed := Extended.parse_expression(SOURCE);
 	assert(parsed.status == .COMPLETE);
 	call := parsed.root.(*Extended.Parser_Procedure_Call);
@@ -12612,8 +12612,8 @@ test_call_context_modification :: () {
 	assert(call.context_modification.modification_expressions.count == 2);
 	first := call.context_modification.modification_expressions[0].(*Extended.Parser_Binary_Operator);
 	assert(first.operator_type == #char "=");
-	assert(first.left.(*Extended.Parser_Ident).name == "allocator");
-	assert(first.right.(*Extended.Parser_Ident).name == "pool_allocator");
+	assert(first.left.(*Extended.Parser_Ident).name == "logger_data");
+	assert(first.right.(*Extended.Parser_Ident).name == "my_data");
 	second := call.context_modification.modification_expressions[1].(*Extended.Parser_Binary_Operator);
 	assert(second.operator_type == #char "=");
 	assert(second.left.(*Extended.Parser_Ident).name == "logger");
@@ -12632,12 +12632,12 @@ test_call_context_modification :: () {
 	context_call := context_only.root.(*Extended.Parser_Procedure_Call);
 	assert(context_call.arguments_unsorted.count == 0);
 	assert(context_call.context_modification.modification_expressions.count == 1);
-	context_only_named := Extended.parse_expression("f(,, pool_allocator)");
+	context_only_named := Extended.parse_expression("f(,, logger_data = my_data)");
 	assert(context_only_named.status == .COMPLETE);
 	context_named_call := context_only_named.root.(*Extended.Parser_Procedure_Call);
 	assert(context_named_call.arguments_unsorted.count == 0);
 	assert(context_named_call.context_modification.modification_expressions.count == 1);
-	assert(context_named_call.context_modification.modification_expressions[0].(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Ident).name == "allocator");
+	assert(context_named_call.context_modification.modification_expressions[0].(*Extended.Parser_Binary_Operator).left.(*Extended.Parser_Ident).name == "logger_data");
 
 	empty_context := Extended.parse_expression("f(1,,)");
 	assert(empty_context.status == .RECOVERED);

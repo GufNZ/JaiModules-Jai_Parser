@@ -5,7 +5,7 @@ The specification is [CACHE_ARCHITECTURE.md](CACHE_ARCHITECTURE.md) with its com
 Decision labels (R1-R14), milestones, gates (C1-C5, P1-P5) and traces (T, V, X, S, A, W) are defined there.
 
 Drafted 2026-11-04 after whole-specification sign-off (R9).
-**Implementation is not authorised until the user approves this plan.**
+The user approved this plan and authorised implementation on 2026-11-04.
 Approval authorises the phases below in order; it does not approve their results, which still pass through the milestone-6 verdict rules.
 
 ## 1. Starting Point
@@ -36,8 +36,8 @@ The only deliberate shape change is the compound-declaration node in phase 1, wh
 
 ### Code Location
 
-Service code lives in this repository under `service/`, as files loaded by one entry file that imports the parser with `ENABLE_TRIVIA = true`.
-The exact import form (a nested module directory versus `#import,file`) is settled in phase 0 by a compile check; if neither works cleanly, the fallback is a sibling module directory, recorded as a plan amendment.
+Service code lives in this repository under `service/`, whose `module.jai` imports the parser with `ENABLE_TRIVIA = true`.
+Clients use `#import "Jai_Parser/service"`; a phase-0 compile check confirmed that this nested-module import (and `#import,dir`) resolves and yields a trivia-enabled parser alongside the default-parameter instance.
 
 ### Working Rules
 
@@ -71,6 +71,27 @@ Phases 1 and 2 are independent of each other; phase 6 can proceed alongside phas
 3. Add the acceptance-case record format and verdict tally (milestone 6) as a small harness library, plus an empty runner that reports `NOT_RUN` for every listed case.
 
 Exit: baseline recorded; empty service entry and runner compile and run.
+
+#### Baseline (2026-11-04)
+
+Jai beta 0.2.030 (2 July 2026), fast x64 backend, run from `examples/`.
+
+| Suite. | Command. | Result. |
+| --- | --- | --- |
+| Lexer layout. | `jai layout_test.jai -x64 -quiet && ./layout_test.exe` | Pass; SIMD widths 16/32 parity, width 64 skipped (no CPU support). |
+| Lexer corpus. | `jai lex_all_files.jai -x64 -quiet && ./lex_all_files.exe` | Pass; 2,239,352 tokens across 712 files. |
+| Parser tokens. | `jai parser_tokens_test.jai -x64 -quiet && ./parser_tokens_test.exe` | Pass. |
+| How-to corpus. | `jai parse_how_to.jai -x64 -quiet && ./parse_how_to.exe` | Pass; 84/84 files with zero diagnostics. |
+| Differential. | `jai differential_runner.jai -x64 -quiet && ./differential_runner.exe --all` | Pass; 4,175/4,175 fixtures, 252 jobs, about 310 s. |
+| AST reuse verification. | `jai benchmark_ast_reuse.jai -x64 -quiet -exe verify_ast_reuse - verify-only && ./verify_ast_reuse.exe ../../../examples/invaders` | Pass; deep snapshot/lifetime checks. |
+| Acceptance ledger. | `jai cache_acceptance.jai -x64 -quiet && ./cache_acceptance.exe --self-test && ./cache_acceptance.exe` | Pass; 55 cases (47 `NOT_RUN`, 8 `DEFERRED`). |
+
+Three pre-existing failures were repaired first:
+
+- `differential_test.jai` called `free` on a `[] string`; now `array_free`.
+- `lex_all_files.jai`'s default corpus walk followed a dangling E4 symlink under `examples/.build`; it now passes `visit_symlinks = false`, like its benchmark walk.
+- Commit `7a52037` had turned named context-modification fixtures (`,, allocator = x`) into the unnamed shorthand (`,, x`), which the compiler keeps as a plain identifier rather than an assignment.
+The named-slot tests now use `logger_data = ...` so named, and unnamed slots are both covered.
 
 ### Phase 1: Parser Evidence (R12)
 
@@ -174,11 +195,11 @@ Exit: user decision recorded.
 
 ## 6. Progress
 
-- [ ] Plan approved and implementation authorised.
-- [ ] Phase 0: baseline and layout.
-	- [ ] Record the baseline test results.
-	- [ ] Settle the service code location.
-	- [ ] Add the acceptance record format and empty runner.
+- [x] Plan approved and implementation authorised (2026-11-04).
+- [x] Phase 0: baseline and layout.
+	- [x] Record the baseline test results.
+	- [x] Settle the service code location.
+	- [x] Add the acceptance record format and empty runner ([cache_acceptance.jai](examples/cache_acceptance.jai), with `--self-test`).
 - [ ] Phase 1: parser evidence.
 	- [ ] Unify the compound-declaration builders and record operator, modifier and separator tokens.
 	- [ ] Add declaration `#export`.

@@ -57,7 +57,7 @@ main :: () {
 	reduced := path_to_string(reduce_path(parse_path(path)));
 
 	filenames: [..] string;
-	visit_files(reduced, true, *filenames, visit);
+	visit_files(reduced, true, *filenames, visit, visit_symlinks = false);
 
 	lexer: Parser_Lexer.Lexer;
 	total_tokens: s64;
