@@ -946,12 +946,25 @@ parse_here_string_body :: (lexer: *Lexer, terminator: string, want_cr := false, 
 		trivia_start := lexer.input_cursor;
 	}
 
+	// An unreadable body gives back what it consumed, so the following tokens keep their trivia and source offsets.
+	start_cursor := lexer.input_cursor;
+	start_line := lexer.current_line_number;
+	start_character := lexer.current_character_index;
+	start_lines := lexer.total_lines_processed;
+	rewind :: () #expand {
+		`lexer.input_cursor = `start_cursor;
+		`lexer.current_line_number = `start_line;
+		`lexer.current_character_index = `start_character;
+		`lexer.total_lines_processed = `start_lines;
+	}
+
 	// Eat whitespace until newline.
 	while 1 {
 		c := peek_next_character(lexer);
 
 		if c == EOF {
 			report_parse_error(lexer, "Reached end-of-file in #string.\n");
+			rewind();
 			return null;
 		}
 
@@ -963,6 +976,7 @@ parse_here_string_body :: (lexer: *Lexer, terminator: string, want_cr := false, 
 
 		if !is_space(c.(u8)) {
 			report_parse_error(lexer, "Unexpected non-whitespace characters after #string identifier.\n");
+			rewind();
 			return null;
 		}
 
@@ -1004,6 +1018,7 @@ parse_here_string_body :: (lexer: *Lexer, terminator: string, want_cr := false, 
 
 		if cursor >= lexer.input.count {
 			report_parse_error(lexer, "Unexpected end of file inside #string.\n");
+			rewind();
 			return null;
 		}
 
@@ -2090,7 +2105,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 		if c == #char "`" {
 			eat_character(lexer);
 			c = peek_next_character(lexer);
-			if !starts_identifier(c.(u8)) {
+			if c == EOF || !starts_identifier(c.(u8)) {
 				report_parse_error(lexer, "Expected an identifier after '`'.\n");
 			}
 
@@ -2129,7 +2144,7 @@ compose_new_token :: (lexer: *Lexer) -> *Token {
 			}
 
 
-			if is_digit(c.(u8)) {
+			if c != EOF && is_digit(c.(u8)) {
 				unwind_one_character(lexer);	// Get the '.' back.
 				result = make_number(lexer);
 				return result;

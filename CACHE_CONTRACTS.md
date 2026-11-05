@@ -1606,6 +1606,17 @@ The provider validates absolute-path/base requirements using its registered plat
 Empty required path values are invalid; a future anonymous/virtual-document context needs an explicit alternative schema rather than an invented disk path.
 Path encodings describe observed inputs, not proof of filesystem equivalence, stable file identity, permission or atomic capture.
 
+Implemented binding (2026-11-05, [service/context.jai](service/context.jai)):
+
+- Enum-like tags (`WINDOWS_UTF16LE`, `POSIX_BYTES`, `NO_RESOLUTION`, `UNSUPPORTED`) are encoded as ASCII without the leading dot.
+- `producer` holds six values: namespace `jai-parser-service`; the parser build digest; `K("compiler-sdk", [compiler version string, layout digest])`; the lexer build digest; the adapter build digest; the exact `jai-cache-syntax-adapter/1` descriptor.
+The build digests are Meow128 over `K("source-file", [relative path, bytes])` for each compiled source file, taken at compile time (`#run,host` when cross-compiling): `module.jai`, `parser.jai` and `resolution.jai` for the parser, `lexer.jai` for the lexer, and the payload-producing service files for the adapter.
+The layout digest covers every `TYPES` layout's name, size and member offsets.
+- `parse_profile` is `jai-cache-parse-profile/1`, resolving to grammar profile `jai-parser-grammar/1` and recovery policy `jai-parser-recovery/1`.
+- `diagnostic_profile` is `jai-cache-diagnostic-profile/1`, resolving to `jai-cache-syntax-diagnostics/1`, message/severity policy `jai-parser-messages/1` and presentation language `en`.
+- `parser_parameters` must equal this build's five module parameters; `ENABLE_TRIVIA = false` cannot compile into the service at all.
+- Admission returns `MALFORMED`, `FIELD_ORDER`, `UNSUPPORTED_PRODUCER`, `UNSUPPORTED_SCHEMAS`, `INVALID_BOOLEAN`, `UNSUPPORTED_PARAMETERS`, `UNSUPPORTED_PROFILE`, `INVALID_PATH`, `UNSUPPORTED_RESOLVER`, `UNSUPPORTED_SEMANTICS` or `IDENTITY_MISMATCH`; only the implemented `SchemaTuple` is admitted, and the registry supplies all three syntax `QueryKind` payloads.
+
 Adapter binding is admission metadata for the existing session/source operations, not a sixteenth public operation:
 
 1. `OpenSession` binds the host/workspace/provider namespaces to an owned descriptor `{adapter_schema, authority_identity, document_policy_version:u32, path_platform, case_alias_link_policy, reappearance_policy, consistency_capabilities, lease_capabilities}`.
@@ -2395,7 +2406,7 @@ Base kind/location/token-span observations already in the node header are not du
 M1's per-layout/shared/helper field tables define the exact required paths, active guards, owning edges, aliases, scalar domains and excluded fields; the field projection is normative reuse of that registry, not a fresh walk over every public compiler field.
 Changing those tables changes this schema and must revise its binding.
 
-`FieldValue` is exactly `.INACTIVE`, `.BOOL {value:bool}`, `.SIGNED {value:s64}`, `.UNSIGNED {value:u64}`, `.FLOAT64_BITS {bits:u64}`, `.BYTES {value:[] u8}`, `.TOKEN_TAG {value:TokenTag}`, `.ENUM {domain:RegistryName, name_ascii:RegistryName}`, `.FLAGS {domain:RegistryName, names:[]RegistryName}`, `.NODE {local_node_id:s64, relationship:.OWNED|.ALIAS}`, `.HELPER {local_helper_id:s64}`, `.LIST {elements:[]FieldValue}`, `.TOKEN_SPAN {value:TokenSpan}`, or `.SOURCE_NULL`.
+`FieldValue` is exactly `.INACTIVE`, `.BOOL {value:bool}`, `.SIGNED {value:s64}`, `.UNSIGNED {value:u64}`, `.FLOAT64_BITS {bits:u64}`, `.BYTES {value:[] u8}`, `.TOKEN_TAG {value:TokenTag}`, `.OPERATOR {value:OperatorTag}`, `.ENUM {domain:RegistryName, name_ascii:RegistryName}`, `.FLAGS {domain:RegistryName, names:[]RegistryName}`, `.NODE {local_node_id:s64, relationship:.OWNED|.ALIAS}`, `.HELPER {local_helper_id:s64}`, `.LIST {elements:[]FieldValue}`, `.TOKEN_SPAN {value:TokenSpan}`, or `.SOURCE_NULL`.
 
 Guard-inactive fields use `.INACTIVE` without reading their backing memory; a missing active pointer is `.NODE` with `local_node_id == -1` or `.HELPER` with `local_helper_id == -1`, not `.INACTIVE`.
 
@@ -2407,7 +2418,9 @@ Safe source strings are `.BYTES`; narrow native integers extend without losing s
 Numeric literal union selection follows the existing literal-route rules, using `.UNSIGNED` for the accumulator and `.FLOAT64_BITS` for the float arm; scalar byte strings, `.BOOLEAN` and `.SOURCE_NULL` remain distinct.
 Never read multiple overlapping arms.
 `.ENUM` domain is the exact qualified producer enum type at that field; `name_ascii` is its declared canonical name, including a declared zero/default where observed, under the bound compiler SDK identity.
-The registry excludes native aliases unless explicitly normalised; operator fields instead use `TokenTag`.
+The registry excludes native aliases unless explicitly normalised.
+Operator fields (`operator_type` on unary, binary and compound nodes) use `OperatorTag`, which is `.NAMED {name_ascii}` for a value declared by the bound SDK's `Operator_Type` enum, using that declared name, or otherwise `.BYTE_CHAR {value:u8}` for 0 through 255; any other value fails conversion.
+Declared names take precedence because several (131 through 169) lie in the byte range; the compound declaration's `:` is byte character 0.
 Producer enum values may be sparse or shared by several names, so each domain's registry maps every admitted value to exactly one recorded canonical name rather than deriving names from values or ordinals.
 Unknown integer enum values reject conversion, not a guessed name.
 Flags use the following closed source-only domains, never generic enum ordinal/mask serialisation.
@@ -2451,7 +2464,10 @@ Conflicting IDs, unsafe pointers or unregistered active helpers fail conversion.
 
 #### Recovery and Raw Diagnostics
 
-`RecoveryRecord` is `{kind:.MISSING_TOKEN|.EXPECTED_EXPRESSION|.SKIPPED_TOKENS|.ERROR_SPAN, token_span:TokenSpan, diagnostic_index:s64, synthetic_token_index:s64}` in producer append order.
+`RecoveryRecord` is `{kind:.MISSING_TOKEN|.EXPECTED_EXPRESSION|.SKIPPED_TOKENS|.ERROR_SPAN, token_span:TokenSpan, diagnostic_index:s64, synthetic_token_index:s64, cursor:s64, discarded:bool, owner:.NONE|.NODE{local_node_id}|.UNPUBLISHED}` in producer append order.
+`cursor` is the parser cursor when the event was recorded; `discarded` marks an event from an attempt that `parser_restore` abandoned.
+`owner` is the smallest published node whose builder recorded the event: `finish_node` gives a node every unowned, kept event recorded after its first token, `finish_statement` gives a statement its terminator's events, and a declared non-identifier compound target owns its own diagnostic.
+`.NONE` means no published node encloses the event; `.UNPUBLISHED` means the recorded owner is not reachable from the root.
 Retain signed indices verbatim for C1 observation, including the producer's -1 no-synthetic sentinel; do not turn them directly into dereferenceable local IDs.
 
 Correlated index/name recovery uses checked `s64` references instead, with `-1` unset and set values range-checked before use.
@@ -2498,7 +2514,7 @@ World identity remains distinct from configuration, document context and provide
 | Closure check/future independent negative control. | Existing acceptance mapping and boundary. |
 | --- | --- |
 | Match all fifteen signatures to response records; reject foreign/released/wrong-kind handles; retain a result/world after session release. | T5/T6, X1-X3, X7/X8.  The six accessors borrow only; acquiring/retaining still creates independent registrations. |
-| Canonical encode empty/present/absent, signed widths, float bits, all 79 token names, aliases, all closed flags, all field-value arms, nested lengths and wrong schema/field counts. | C1/C2/C5, T2/T5.  Compare exact authored expected bytes/observations, not only encode/decode through the same mapping. |
+| Canonical encode empty/present/absent, signed widths, float bits, all 77 token names, aliases, operator names, all closed flags, all field-value arms, nested lengths and wrong schema/field counts. | C1/C2/C5, T2/T5.  Compare exact authored expected bytes/observations, not only encode/decode through the same mapping. |
 | Stage a first binding/new context alongside a bad second event; reject without installing either; permute analysis membership but preserve sequential edit order. | V1/V5/V6, T2/T3.  No hidden provider read, partial transaction or invented membership. |
 | Save B after newer overlay C, including B/C with identical bytes but different installation revisions; preserve C and report disk/overlay branches separately. | V5/V7, T3, S3/S4.  Content equality does not establish overlay identity; store/runtime qualification remains separate. |
 | Change only a provider/adapter policy, schema tuple or feature binding; reject unsupported combinations and never relabel retained results. | C2/C5, T5/T8, V2/V4.  Declared capabilities require actual registered implementations, not manifests or client assertions. |

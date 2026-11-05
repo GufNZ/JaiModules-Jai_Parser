@@ -457,6 +457,36 @@ Further independent cases cover unavailable compound observations with usable sy
 Assert exact binding equality/misses, admission/query outcomes and per-result coverage against independent expectations.
 This matrix records the integration choices still requiring review; it does not approve instrumentation, a reconstruction adapter, policy defaults or the final API.
 
+### Implemented Adapter Binding
+
+Added 2026-11-05 (phase 3 of the migration plan): [service/index.jai](service/index.jai) builds `jai-cache-syntax-declaration-index/1` from one syntax snapshot and advertises registry binding `jai-parser-syntax-registry/1` with these features:
+
+| Feature. | Method. | Observation schema and what it covers. |
+| --- | --- | --- |
+| `authored_edges`. | `.CAPTURED` | `jai-cache-authored-edges/1`: the snapshot's owning fields; node IDs are authored preorder, so the walk visits them in ID order. |
+| `builder_function_routes`. | `.RECONSTRUCTED` | `jai-parser-route-correlation/1`: enum-member mode along the enum body and non-switch static-if branches, unnamed header slots, quick-lambda parameters.  Recovery attribution uses the parser-captured owner on each recovery record (see below). |
+| `compound_routes`. | `.CAPTURED` | `jai-parser-compound-tokens/1`: the recorded shared operator, modifier and separator tokens, each checked against the token stream; a mismatch fails conversion. |
+| `name_origins`. | `.RECONSTRUCTED` | `jai-parser-name-correlation/1`: the `parse_declaration_node` prefix (`#program_export ["name"]`, `#no_reset`, `$`/`$$`, `operator`) is replayed against the recorded flags, then the name tokens must spell the producer value and be followed by `:` (or, for a quick-lambda parameter, stand alone).  Anything else is `.UNMAPPED` with an `.UNMAPPED_NAME` reason. |
+| `metadata_origins`. | `.RECONSTRUCTED` | `jai-parser-metadata-correlation/1`: the program-export marker and name tokens at the declaration's first token, checked against `.PROGRAM_EXPORT` and `program_export_name`; disagreement drops the occurrence with an `.UNCORRELATED_METADATA` reason. |
+
+Further dispositions of this binding:
+
+- Recovery attribution (revised 2026-11-05): the parser records each recovery event's cursor and owner.
+`finish_node` gives a node every unowned, kept event recorded after its first token, so events go to the smallest published node around them, and failed children's events fall to the enclosing builder.
+`finish_statement` gives a statement its terminator's events; a declared non-identifier compound target owns its own diagnostic; `parser_restore` marks an abandoned attempt's events discarded and unowned; a caller that discards a finished node hands its events back with `release_recoveries`.
+The discard sites are a non-declaration parameter or named return, a non-call after `inline`/`no_inline`, `#bake` or `#procedure_of_call`, and a prefix cast whose operand is missing; an assembly value that does not fill its operand is a restored attempt, reported as a malformed operand.
+A mutation sweep over W2 (11,620 parses deleting, duplicating or truncating at single tokens) found no event with an unpublished owner after these fixes.
+The adapter marks every entry on a kept event's ownership path `.RECOVERED`; through a compound, target events reach only the outer context, while the compound's own syntax and shared payload reach every binding.
+An event at a descendant declaration's first token that covers no earlier token may predate that declaration's builder, so that declaration is `.UNCLASSIFIED` with a node reason unless another event recovers it.
+An owner that is not reachable from the root makes every entry `.UNCLASSIFIED` under one `.DOCUMENT` reason; events with no owner lie outside every published node and affect no entry.
+On W1 and W2 every kept event has a published owner and no index is partial.
+- Unnamed type-only parameter and return slots are `.DECLARATION` entries with `.ANONYMOUS` names; the current producer has no `.MISSING` route, since `parse_declaration_node` publishes nothing without a name.
+- Identifier spellings keep the lexer's dropped characters: a leading backtick, and a backslash with the spaces after it (`shot\_countdown` and `SHIP\  _INVINCIBILITY_TIME` in Invaders).
+- Unparsed assembly regions add no reason: assembly bodies cannot hold index declarations, and assembly symbols are outside this index.
+- Recovered operator names (a missing `]`) are `.UNMAPPED`; name-specific recovery origins are therefore always empty.
+
+Tests: authored vectors in [service_snapshot_test.jai](examples/service_snapshot_test.jai) and independent invariants (owners recomputed from fields, containers derived upwards, same-list provenance, declared-binding counts) on every W1 and W2 file.
+
 ## Compound Token Evidence and Binding Classification
 
 Revised 2026-11-05 (phase 1 of the migration plan, decision R12).
@@ -1706,7 +1736,6 @@ Performance comparisons for this profile must use an equivalent trivia-enabled f
 | Operators. | `.PLUSEQUALS`, `.MINUSEQUALS`, `.TIMESEQUALS`, `.DIVEQUALS`, `.MODEQUALS`, `.ISEQUAL`, `.ISNOTEQUAL`, `.LOGICAL_AND`, `.LOGICAL_OR`, `.LESSEQUALS`, `.GREATEREQUALS`, `.RIGHT_ARROW`, `.DOUBLE_DOT`, `.DOUBLE_DOLLAR`, `.SHIFT_LEFT`, `.SHIFT_RIGHT`, `.ROTATE_LEFT`, `.ROTATE_RIGHT`, `.TRIPLE_EQUALS`, `.SHIFT_LEFT_EQUALS`, `.SHIFT_RIGHT_EQUALS`, `.ROTATE_LEFT_EQUALS`, `.ROTATE_RIGHT_EQUALS`, `.BITWISE_AND_EQUALS`, `.BITWISE_OR_EQUALS`, `.BITWISE_XOR_EQUALS`, `.LOGICAL_AND_EQUALS`, `.LOGICAL_OR_EQUALS`, `.POSTFIX_DEREFERENCE`, `.PREFIX_DEREFERENCE`, `.ISEQUAL_FOR_SWITCH_STATEMENT`, `.DOUBLE_MINUS`, `.TRIPLE_MINUS`, `.DOUBLE_COMMA`, `.BEGIN_STRUCT_LITERAL`, `.BEGIN_ARRAY_LITERAL`. |
 | Keywords. | `.KEYWORD_FOR`, `.KEYWORD_IF`, `.KEYWORD_IFX`, `.KEYWORD_THEN`, `.KEYWORD_ELSE`, `.KEYWORD_CASE`, `.KEYWORD_RETURN`, `.KEYWORD_STRUCT`, `.KEYWORD_WHILE`, `.KEYWORD_BREAK`, `.KEYWORD_CONTINUE`, `.KEYWORD_REMOVE`, `.KEYWORD_USING`, `.KEYWORD_DEFER`, `.KEYWORD_SIZE_OF`, `.KEYWORD_TYPE_OF`, `.KEYWORD_CODE_OF`, `.KEYWORD_INITIALIZER_OF`, `.KEYWORD_TYPE_INFO`, `.KEYWORD_NULL`, `.KEYWORD_ENUM`, `.KEYWORD_TRUE`, `.KEYWORD_FALSE`, `.KEYWORD_INLINE`, `.KEYWORD_NO_INLINE`, `.KEYWORD_CAST`, `.KEYWORD_AUTO_CAST`, `.KEYWORD_CONTEXT`, `.KEYWORD_PUSH_CONTEXT`, `.KEYWORD_OPERATOR`, `.KEYWORD_IS_CONSTANT`, `.KEYWORD_ENUM_FLAGS`, `.KEYWORD_UNION`, `.KEYWORD_INTERFACE`. |
 | Other. | `.QUICK_LAMBDA`, `.NOTE`, `.END_OF_INPUT`, `.ERROR`. |
-| AST-only operators. | `.OPERATOR_ARRAY_SUBSCRIPT`, `.OPERATOR_ASSIGNMENT_TO_ARRAY_SUBSCRIPT`. |
 
 `.BYTE_CHAR` represents an unsigned byte value from `0` through `255`; representability does not claim that every byte is a valid source token.
 
@@ -1718,7 +1747,7 @@ Producer aliases `.BITWISE_XOR`, `.BITWISE_NOT`, `.BITWISE_AND`, `.BITWISE_OR` e
 
 Those six alias spellings are not accepted as canonical `.NAMED` payloads; payload decoding accepts only the table's exact names or a valid byte-character value.
 
-The two AST-only operator names may appear in registered operator fields, not as claimed lexer-emitted source tokens.
+The producer's AST-only `OPERATOR_ARRAY_SUBSCRIPT` and `OPERATOR_ASSIGNMENT_TO_ARRAY_SUBSCRIPT` values are not registered token tags; node operator fields use the separate `OperatorTag` instead (2026-11-05).
 
 Other token-role constraints must likewise agree with the actual producer; registration alone does not prove a value can occur in every field.
 

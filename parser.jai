@@ -8,7 +8,10 @@ Code_Directive_Import_Flags_SOURCE_PATH :: 0x4;
 Code_Directive_Run_Flags_HOST :: 0x10;
 
 Token_Index :: #type,distinct s64;
-Parser_Checkpoint :: #type,distinct s64;
+Parser_Checkpoint :: struct {
+	cursor: s64;
+	recovery_count: s64;
+}
 
 Token_Span :: struct {
 	first: Token_Index;
@@ -155,6 +158,13 @@ Recovery_Record :: struct {
 	span: Token_Span;
 	diagnostic_index: s64;
 	synthetic_token_index: s64 = -1;
+
+	// Parser cursor when the event was recorded.
+	cursor: s64;
+	// Smallest published node whose builder made this event; null when no published node encloses it.
+	owner: *Parser_Node;
+	// Recorded by an attempt that `parser_restore` abandoned.
+	discarded: bool;
 }
 
 Restart_Point :: struct {
@@ -513,6 +523,9 @@ Parser :: struct {
 	parsing_condition: bool;
 	allow_unprefixed_struct_literal: bool;
 	warn_unnecessary_semicolons: bool;
+
+	// Recovery records before this index are owned or discarded.
+	unclaimed_recovery: s64;
 }
 
 parser_node_allocator :: inline (parsed: *Parsed_Source) -> Allocator {
@@ -1689,6 +1702,7 @@ parse_block_node :: (parser: *Parser, parent: *Parser_Block = null, block_type :
 }
 
 finish_statement :: (parser: *Parser, statement: *Parser_Node) {
+	recorded := parser.parsed.recovery_records.count;
 	if parser_peek(parser).type == #char ";" {
 		if parser.warn_unnecessary_semicolons && !statement_requires_semicolon(statement) {
 			add_unnecessary_semicolon(parser);
@@ -1697,6 +1711,14 @@ finish_statement :: (parser: *Parser, statement: *Parser_Node) {
 		parser_eat(parser);
 	} else if statement_requires_semicolon(statement) {
 		parser_expect(parser, #char ";");
+	}
+
+	// The statement node is already finished, so it takes its own terminator's recovery directly.
+	for recorded..parser.parsed.recovery_records.count - 1 {
+		record := *parser.parsed.recovery_records[it];
+		if !record.owner && !record.discarded {
+			record.owner = statement;
+		}
 	}
 
 	if statement.kind == .DECLARATION || statement.kind == .COMPOUND_DECLARATION {
@@ -1928,8 +1950,9 @@ parse_asm_register_pinning_span :: (parser: *Parser, first: s64, equals_index: s
 
 	result := New(Parser_Asm_Register_Pinning,, parser_node_allocator(parser.parsed));
 	result.span = make_token_span(first, one_past_last);
-	result.source = parse_asm_value_span(parser, first, first + 1);
-	result.target = parse_asm_value_span(parser, equals_index + 1, one_past_last);
+	// Single-token source and target spans always parse.
+	_, result.source = parse_asm_value_span(parser, first, first + 1);
+	_, result.target = parse_asm_value_span(parser, equals_index + 1, one_past_last);
 	return result;
 }
 
@@ -1999,15 +2022,22 @@ asm_memory_constant_end :: (parser: *Parser, first: s64, limit: s64) -> s64 {
 	return first;
 }
 
-parse_asm_value_span :: (parser: *Parser, first: s64, one_past_last: s64) -> Parser_Asm_Value {
+// An expression that does not end exactly at `one_past_last` is abandoned, so its nodes and recovery events are not published.
+parse_asm_value_span :: (parser: *Parser, first: s64, one_past_last: s64) -> bool, Parser_Asm_Value {
 	result: Parser_Asm_Value;
 	result.span = make_token_span(first, one_past_last);
 	saved_cursor := parser.cursor;
 	parser.cursor = first;
+	attempt := parser_checkpoint(parser);
 	result.expression = parse_prefix(parser);
-	assert(parser.cursor == one_past_last);
+	filled := parser.cursor == one_past_last;
+	if !filled {
+		parser_restore(parser, attempt);
+		result.expression = null;
+	}
+
 	parser.cursor = saved_cursor;
-	return result;
+	return filled, result;
 }
 
 // Validate the whole addressing form before constructing subexpressions, so malformed operands stay a single recoverable span.
@@ -2093,12 +2123,22 @@ parse_asm_memory_span :: (parser: *Parser, first: s64, one_past_last: s64) -> *P
 	}
 
 	if scale_first {
-		result.scale = parse_asm_value_span(parser, scale_first, scale_end);
+		filled: bool;
+		filled, result.scale = parse_asm_value_span(parser, scale_first, scale_end);
+		if !filled {
+			return null;
+		}
 	}
 
+
 	if displacement_first {
-		result.displacement = parse_asm_value_span(parser, displacement_first, close);
+		filled: bool;
+		filled, result.displacement = parse_asm_value_span(parser, displacement_first, close);
+		if !filled {
+			return null;
+		}
 	}
+
 
 	return result;
 }
@@ -2248,8 +2288,13 @@ add_asm_operand :: (parser: *Parser, operands: *[..]*Parser_Asm_Operand, first: 
 		);
 
 		if is_number || is_signed_number || is_ident || is_parenthesized {
-			operand.value = parse_asm_value_span(parser, first, base_end);
-			operand.kind = .VALUE;
+			filled, value := parse_asm_value_span(parser, first, base_end);
+			if filled {
+				operand.value = value;
+				operand.kind = .VALUE;
+			} else {
+				add_asm_operand_diagnostic(parser, first, base_end, "Malformed assembly operand value.");
+			}
 		}
 	}
 
@@ -2846,7 +2891,8 @@ add_duplicate_for_flag :: (parser: *Parser, first: s64) {
 		Recovery_Record.{
 			kind = .ERROR_SPAN,
 			span = diagnostic.span,
-			diagnostic_index = parser.parsed.diagnostics.count - 1
+			diagnostic_index = parser.parsed.diagnostics.count - 1,
+			cursor = parser.cursor
 		}
 	);
 
@@ -3580,7 +3626,10 @@ add_undeclarable_target :: (parser: *Parser, target: *Parser_Node, operator_firs
 		Recovery_Record.{
 			kind = .ERROR_SPAN,
 			span = diagnostic.span,
-			diagnostic_index = parser.parsed.diagnostics.count - 1
+			diagnostic_index = parser.parsed.diagnostics.count - 1,
+			cursor = parser.cursor,
+			// The target finished before its declaration was classified.
+			owner = target
 		}
 	);
 
@@ -3606,21 +3655,21 @@ parse_operator_declaration_name :: (parser: *Parser) -> string {
 
 
 	name: string;
-	if token.type == {
-		case #char "+";				#through;
-		case #char "-";				#through;
-		case #char "*";				#through;
-		case #char "/";				#through;
-		case #char "%";				#through;
-		case #char "<";				#through;
-		case #char ">";				#through;
-		case #char "=";				#through;
-		case #char ".";				#through;
-		case #char "!";				#through;
-		case #char "~";				#through;
-		case #char "&";				#through;
-		case #char "|";				#through;
-		case #char "^";				name = .{ 1, xx *token.type };//QUESTION: is this safe to do given relative lifespans of token and name?
+	if token.type == {	//NOTE: don't point at the stack allocated token.type:
+		case #char "+";				name = "+";
+		case #char "-";				name = "-";
+		case #char "*";				name = "*";
+		case #char "/";				name = "/";
+		case #char "%";				name = "%";
+		case #char "<";				name = "<";
+		case #char ">";				name = ">";
+		case #char "=";				name = "=";
+		case #char ".";				name = ".";
+		case #char "!";				name = "!";
+		case #char "~";				name = "~";
+		case #char "&";				name = "&";
+		case #char "|";				name = "|";
+		case #char "^";				name = "^";
 
 		case .ISEQUAL;				name = "==";
 		case .ISNOTEQUAL;			name = "!=";
@@ -4025,8 +4074,10 @@ parse_procedure_type_header :: (parser: *Parser, parse_body := false) -> *Parser
 			finish_node(parser, argument, argument_first);
 		} else {
 			// The comma separates parameters, not values in a parameter initializer.
+			argument_first := parser.cursor;
 			argument_node := parse_declaration_node(parser, false);
 			if !argument_node || argument_node.kind != .DECLARATION {
+				release_recoveries(parser, argument_first);
 				add_expected_expression(parser);
 				break;
 			}
@@ -4172,6 +4223,8 @@ parse_arrow_procedure_header :: (parser: *Parser, first: s64) -> *Parser_Procedu
 			declaration_node := parse_declaration_node(parser, false);
 			if declaration_node && declaration_node.kind == .DECLARATION {
 				declaration = declaration_node.(*Parser_Declaration);
+			} else {
+				release_recoveries(parser, return_first);
 			}
 		} else {
 			return_type := parse_type_instantiation(parser);
@@ -4951,13 +5004,17 @@ parser_expect :: inline (parser: *Parser, expected: ..Token_Type) -> bool {
 }
 
 parser_checkpoint :: inline (parser: *Parser) -> Parser_Checkpoint {
-	return xx parser.cursor;
+	return .{cursor = parser.cursor, recovery_count = parser.parsed.recovery_records.count};
 }
 
 parser_restore :: inline (parser: *Parser, checkpoint: Parser_Checkpoint) {
-	cursor := checkpoint.(s64);
-	assert(cursor >= 0 && cursor < parser.parsed.tokens.count);
-	parser.cursor = cursor;
+	assert(checkpoint.cursor >= 0 && checkpoint.cursor < parser.parsed.tokens.count);
+	parser.cursor = checkpoint.cursor;
+	for checkpoint.recovery_count..parser.parsed.recovery_records.count - 1 {
+		// Nodes from the abandoned attempt may already own its events.
+		parser.parsed.recovery_records[it].discarded = true;
+		parser.parsed.recovery_records[it].owner = null;
+	}
 }
 
 parser_progress_guard :: inline (parser: *Parser) -> Parser_Progress_Guard {
@@ -4984,7 +5041,8 @@ parser_ensure_progress :: inline (parser: *Parser, guard: Parser_Progress_Guard)
 		Recovery_Record.{
 			kind = .SKIPPED_TOKENS,
 			span = make_token_span(first, parser.cursor),
-			diagnostic_index = -1
+			diagnostic_index = -1,
+			cursor = parser.cursor
 		}
 	);
 
@@ -5104,7 +5162,8 @@ parser_synchronise :: (parser: *Parser, synchronization_context: Synchronization
 			Recovery_Record.{
 				kind = .SKIPPED_TOKENS,
 				span = span,
-				diagnostic_index = -1
+				diagnostic_index = -1,
+				cursor = parser.cursor
 			}
 		);
 	}
@@ -5327,6 +5386,8 @@ parse_prefix :: (parser: *Parser) -> *Parser_Node {
 
 		expression := parse_prefix(parser);
 		if !expression {
+			// The parsed target type is dropped with the cast.
+			release_recoveries(parser, first);
 			add_expected_expression(parser);
 			return null;
 		}
@@ -5685,6 +5746,7 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			if parser_peek(parser).type != #char "(" || !looks_like_procedure_header(parser) {
 				call := parse_postfix(parser);
 				if !call || call.kind != .PROCEDURE_CALL {
+					release_recoveries(parser, first);
 					add_expected_expression(parser);
 					return null;
 				}
@@ -6002,6 +6064,7 @@ parse_expression_directive :: (parser: *Parser, first: s64, name: string) -> *Pa
 			parser_eat(parser, 2);
 			call := parse_postfix(parser);
 			if !call || call.kind != .PROCEDURE_CALL {
+				release_recoveries(parser, first);
 				add_expected_expression(parser);
 				return null;
 			}
@@ -6472,6 +6535,7 @@ parse_expression_directive :: (parser: *Parser, first: s64, name: string) -> *Pa
 			if call && call.kind == .PROCEDURE_CALL {
 				result.procedure_call = call.(*Parser_Procedure_Call);
 			} else {
+				release_recoveries(parser, first);
 				add_expected_expression_at(parser, make_token_span(first, parser.cursor), "Expected a procedure call after #bake.");
 			}
 
@@ -6512,7 +6576,8 @@ add_missing_token :: (parser: *Parser, expectedType: Token_Type) {
 			kind = .MISSING_TOKEN,
 			span = diagnostic.span,
 			diagnostic_index = parser.parsed.diagnostics.count - 1,
-			synthetic_token_index = parser.parsed.synthetic_tokens.count - 1
+			synthetic_token_index = parser.parsed.synthetic_tokens.count - 1,
+			cursor = parser.cursor
 		}
 	);
 
@@ -6541,7 +6606,8 @@ add_expected_expression_at :: (parser: *Parser, span: Token_Span, message: strin
 		.{
 			kind = .EXPECTED_EXPRESSION,
 			span = diagnostic.span,
-			diagnostic_index = parser.parsed.diagnostics.count - 1
+			diagnostic_index = parser.parsed.diagnostics.count - 1,
+			cursor = parser.cursor
 		}
 	);
 
@@ -6550,6 +6616,13 @@ add_expected_expression_at :: (parser: *Parser, span: Token_Span, message: strin
 
 add_unexpected_token :: (parser: *Parser) {
 	actual := parser_peek(parser);
+	// End of input cannot be skipped; eating it would move the cursor past the token array.
+	if actual.type == .END_OF_INPUT {
+		add_expected_expression(parser);
+		return;
+	}
+
+
 	first := parser.cursor;
 
 	parser_eat(parser);
@@ -6567,7 +6640,8 @@ add_unexpected_token :: (parser: *Parser) {
 		.{
 			kind = .SKIPPED_TOKENS,
 			span = diagnostic.span,
-			diagnostic_index = parser.parsed.diagnostics.count - 1
+			diagnostic_index = parser.parsed.diagnostics.count - 1,
+			cursor = parser.cursor
 		}
 	);
 
@@ -6618,7 +6692,34 @@ finish_node :: (parser: *Parser, node: *$T/Parser_Node, first: s64) -> *T {
 		array_add(*parser.parsed.restart_points, .{kind = kind, span = make_token_span(first, parser.cursor)});
 	}
 
+	claim_recoveries(parser, node, first);
 	return node;
+}
+
+// Builders finish innermost first, so an unowned event recorded after this node's first token belongs to the smallest node around it.
+// An event at the first token itself stays with the enclosing builder, which may have recorded it before this builder began.
+claim_recoveries :: (parser: *Parser, node: *Parser_Node, first: s64) {
+	records := parser.parsed.recovery_records;
+	for parser.unclaimed_recovery..records.count - 1 {
+		record := *records[it];
+		if !record.owner && !record.discarded && record.cursor > first {
+			record.owner = node;
+		}
+	}
+
+	while parser.unclaimed_recovery < records.count && (records[parser.unclaimed_recovery].owner || records[parser.unclaimed_recovery].discarded) {
+		parser.unclaimed_recovery += 1;
+	}
+}
+
+// A caller discarding a finished node that started at `first` returns its events to the enclosing builder.
+release_recoveries :: (parser: *Parser, first: s64) {
+	for * parser.parsed.recovery_records {
+		if it.owner && it.cursor > first {
+			it.owner = null;
+			parser.unclaimed_recovery = min(parser.unclaimed_recovery, it_index);
+		}
+	}
 }
 
 // Relex around an edit until a stable token boundary is found, then reuse the unchanged suffix with adjusted positions.

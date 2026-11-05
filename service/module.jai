@@ -16,6 +16,7 @@ Parser :: #import "Jai_Parser"(ENABLE_TRIVIA = true);
 }
 
 #load "canonical.jai";
+#load "context.jai";
 #load "diagnostics.jai";
 #load "digest.jai";
 #load "epoch.jai";
