@@ -224,7 +224,7 @@ Exit: user decision recorded.
 	- [x] Type-check the service and foundations test for a Linux x64 target from Windows (`os_target = .LINUX`, no output); negative control: an undeclared call in the POSIX branch fails the check.
 	- [ ] Run `service_foundations_test.jai` on Linux x64, including the concurrent-process epoch check.
 	- [ ] Type-check and run on macOS; the Windows cross-check stops in the SDK's `Objective_C` module (`#import "macOS"` filename case) before reaching service code.
-- [ ] Phase 3: owned snapshot and declaration index.
+- [x] Phase 3: owned snapshot and declaration index.
 	- [x] Owned parse ([snapshot.jai](service/snapshot.jai)): source and filename copied into an owner whose pool backs every parse allocation; `resolve_identifiers = false`.
 	[service_snapshot_test.jai](examples/service_snapshot_test.jai) poisons and frees the input, releases a sibling owner, then compares with an independent fresh parse through `snapshot_oracle.jai` on 16 W1 seeds and all 86 W2 files (56 tutorials, 8 Invaders, 4 parser, 18 Basic).
 	Negative control: an owner that borrows its input fails the comparison.
@@ -270,7 +270,9 @@ Exit: user decision recorded.
 	Controls: each module parameter flipped, a non-boolean byte, forged parser build and adapter descriptor, changed schema/profile/language, resolver and semantic arms, invalid paths, renamed/reordered/missing/extra fields, trailing bytes, wrong tag and a forged identity; alias, base and encoding variants admit with distinct identities.
 	Disabling the parameter check fails the controls.
 	The cross-target type-check needs `#run,host` for the source digests.
-	- [ ] C1 on W1 and W2.
+	- [x] C1 on W1 and W2 (2026-11-06): every W1 seed and all 86 W2 files compare an owned, poisoned-input parse with an independent fresh parse, then check token, node, diagnostics and index projections; registry routes are tallied across every checked projection, and the test fails on a registered kind, helper, enum name or source flag that has neither a vector nor a recorded disposition (registry "C1 Route Coverage").
+	New route and flag vectors cover the rare directives, import forms, using filters, `---`, unparsed and pinned assembly arms, modifier flags and a populated backreference; the remaining unobserved names are compiler-only or never set by a builder.
+	Negative control: dropping the eight-digit literal vector fails the flag check.
 - [ ] Phase 4: provider and coordinator.
 	- [ ] Source provider.
 	- [ ] Session and coordinator with the deterministic executor.

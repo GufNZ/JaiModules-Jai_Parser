@@ -39,6 +39,9 @@ W1_SOURCES :: string.[
 ];
 
 main :: () {
+	route_allocator = context.allocator;
+	route_counts.allocator = context.allocator;
+
 	test_snapshot_oracle();
 	test_borrowed_parse_negative_control();
 	test_token_tags();
@@ -49,6 +52,8 @@ main :: () {
 	test_statement_and_procedure_vectors();
 	test_directive_vectors();
 	test_assembly_vectors();
+	test_route_vectors();
+	test_flag_vectors();
 	test_snapshot_and_diagnostics();
 	test_snapshot_and_diagnostics_controls();
 	test_declaration_index_vectors();
@@ -79,6 +84,7 @@ main :: () {
 		report_node_coverage();
 	}
 
+	report_route_coverage();
 	print("Service snapshot PASS.\n");
 }
 
@@ -128,6 +134,7 @@ check_owned_parse :: (text: string, temporary_path: string) {
 	valid, problem := node_projection_invariants(snapshot.node_projection);
 	assert(valid, "Node projection of % violates an invariant: %.", path, problem);
 	node_coverage.projected += 1;
+	tally_routes(snapshot.node_projection);
 	for snapshot.recoveries {
 		producer := owned.parsed.recovery_records[it_index];
 		assert((it.owner == .NONE) == !producer.owner && it.cursor == producer.cursor && it.discarded == producer.discarded, "Recovery % of % ownership.", it_index, path);
@@ -957,6 +964,7 @@ project_source_nodes :: (source: string) -> *Service.Owned_Syntax, *Service.Node
 	assert(fault.failure == .NONE, "Node projection of '%' failed: % (%).", source, fault.failure, fault.record);
 	valid, problem := node_projection_invariants(projection);
 	assert(valid, "Invariant: %", problem);
+	tally_routes(projection);
 	return owned, projection;
 }
 
@@ -1478,6 +1486,106 @@ test_directive_vectors :: () {
 	print("Directive vectors PASS\n");
 }
 
+// Routes no other vector or W1/W2 file reaches: rarely used directives, using filters, import forms, `---` and assembly arms.
+ROUTE_SOURCE :: #string END
+#placeholder P;
+w :: #wildcard;
+e :: #exists(Foo);
+e2 :: #exists(Foo, true);
+n :: #procedure_name();
+n2 :: #procedure_name(g);
+bytes :: #bytes "abc";
+#poke_name Basic poked;
+F :: #import,file "a.jai";
+D :: #import,dir "lib";
+S :: #import,string "x :: 1;";
+g :: () {
+	#through;
+	using,only(a) s;
+	using,except(b) t;
+	using,map(m) u;
+	x = ---;
+	#asm {
+		5;
+		mov p === rax, q;
+		mov c !n, d !d, e !u, f &h;
+	}
+}
+END
+
+test_route_vectors :: () {
+	owned, projection := project_source_nodes(ROUTE_SOURCE);
+	defer Service.release_owned_syntax(owned);
+	defer Service.release_node_projection(projection);
+
+	assert(!owned.parsed.diagnostics.count, "Route vectors should parse cleanly; first diagnostic: %.", ifx owned.parsed.diagnostics.count then owned.parsed.diagnostics[0].message);
+	for string.["PLACEHOLDER", "DIRECTIVE_WILDCARD", "DIRECTIVE_EXISTS", "DIRECTIVE_PROCEDURE_NAME", "DIRECTIVE_BYTES", "DIRECTIVE_POKE_NAME", "DIRECTIVE_THROUGH"] {
+		find_node(projection, it);
+	}
+
+	exists_with_sync := find_node(projection, "DIRECTIVE_EXISTS", 1);
+	assert(get_field(exists_with_sync.fields, "sync_expression").signed > 0);
+	assert(get_field(find_node(projection, "DIRECTIVE_PROCEDURE_NAME").fields, "argument").signed == -1);
+	assert(get_field(find_node(projection, "DIRECTIVE_PROCEDURE_NAME", 1).fields, "argument").signed > 0);
+	imports := string.["PATH_TO_FILE", "PATH_TO_DIRECTORY", "FULL_TEXT"];
+	for imports {
+		assert(get_field(find_node(projection, "DIRECTIVE_IMPORT", it_index).fields, "import_type").name == it);
+	}
+
+	filters := string.["ONLY", "EXCEPT", "MAP"];
+	for filters {
+		assert(get_field(find_node(projection, "USING", it_index).fields, "filter_type").name == it);
+	}
+
+	// A populated semantic backreference is never traversed or recorded.
+	{
+		SOURCE :: "a :: 1; b :: a;";
+		plain_owned, plain := project_source_nodes(SOURCE);
+		defer Service.release_owned_syntax(plain_owned);
+		defer Service.release_node_projection(plain);
+
+		linked := Service.own_parse(SOURCE, "linked.jai");
+		defer Service.release_owned_syntax(linked);
+		statements := linked.parsed.root.(*Parser.Parser_Block).statements;
+		use := statements[1].(*Parser.Parser_Declaration).expression.(*Parser.Parser_Ident);
+		use.resolved_declaration = statements[0].(*Parser.Parser_Declaration);
+		fault, projection := Service.project_nodes(linked);
+		assert(fault.failure == .NONE && projection.nodes.count == plain.nodes.count && projection.helpers.count == plain.helpers.count);
+		defer Service.release_node_projection(projection);
+		for projection.nodes {
+			assert(it.kind == plain.nodes[it_index].kind && it.fields.count == plain.nodes[it_index].fields.count, "Node % changed with a populated backreference.", it_index);
+		}
+	}
+
+	print("Route vectors PASS\n");
+}
+
+// Source flags that only rare modifiers set.
+FLAG_SOURCE :: #string END
+h :: () #compiler #no_context #intrinsic #no_debug #entry_point #entry_point_hook #no_call {}
+St :: struct #foreign #type_info_no_size_complaint { x: int; }
+v: int #elsewhere;
+k :: cast,truncate,very_force(int) 1;
+L :: #library,no_static_library "lib";
+r :: #run,stallable h();
+precise :: 1.2345678;
+g :: () {
+	no_inline h();
+	push_context,defer_pop c;
+	`push_context c {
+	}
+}
+END
+
+test_flag_vectors :: () {
+	owned, projection := project_source_nodes(FLAG_SOURCE);
+	defer Service.release_owned_syntax(owned);
+	defer Service.release_node_projection(projection);
+
+	assert(!owned.parsed.diagnostics.count, "Flag vectors should parse cleanly; first diagnostic: %.", ifx owned.parsed.diagnostics.count then owned.parsed.diagnostics[0].message);
+	print("Flag vectors PASS\n");
+}
+
 ASSEMBLY_SOURCE :: #string END
 f :: () {
 	#asm AVX512F {
@@ -1960,6 +2068,7 @@ project_source_index :: (source: string) -> *Service.Owned_Syntax, *Service.Synt
 	assert(index_fault.failure == .NONE, "Index of '%' failed: % at %[%].", source, index_fault.failure, index_fault.record, index_fault.index);
 	valid, problem := declaration_index_invariants(index, snapshot);
 	assert(valid, "Index invariant for '%': %", source, problem);
+	tally_routes(snapshot.node_projection);
 	return owned, snapshot, index;
 }
 
@@ -2346,3 +2455,222 @@ test_syntax_adapter_descriptor :: () {
 	assert(Service.bytes_equal(descriptor, Service.syntax_adapter_descriptor()), "The descriptor is deterministic.");
 	print("Syntax adapter descriptor PASS\n");
 }
+
+#import "Hash_Table";
+
+// Route coverage across every projection checked by this run: node kinds, helper layouts, producer enum names, source flags and populated owning fields.
+// Keys are `kind:NAME`, `helper:LAYOUT`, `enum:DOMAIN=NAME`, `flag:DOMAIN.NAME` and `child:KIND.FIELD`.
+route_counts: Table(string, s64);
+// Tallies outlive the per-parse pools that are current when they are recorded.
+route_allocator: Allocator;
+
+tally :: (key: string) {
+	count := table_find_pointer(*route_counts, key);
+	if count {
+		count.* += 1;
+	} else {
+		table_add(*route_counts, copy_string(key,, route_allocator), 1);
+	}
+}
+
+tally_routes :: (projection: *Service.Node_Projection) {
+	tally_value :: (owner: string, path: [] Service.Path_Step, value: Service.Field_Value) {
+		if value.kind == {
+			case .ENUM;
+				tally(tprint("enum:%=%", value.domain, value.name));
+
+			case .FLAGS;
+				for value.names {
+					tally(tprint("flag:%.%", value.domain, it));
+				}
+
+			case .NODE;
+				if value.signed >= 0 {
+					tally(tprint("child:%.%", owner, path[0].name));
+				}
+
+			case .LIST;
+				for value.elements {
+					tally_value(owner, path, it);
+				}
+		}
+	}
+
+	for projection.nodes {
+		tally(tprint("kind:%", it.kind));
+		for field: it.fields {
+			tally_value(it.kind, field.path, field.value);
+		}
+	}
+
+	for projection.helpers {
+		tally(tprint("helper:%", it.layout));
+		for field: it.fields {
+			tally_value(it.layout, field.path, field.value);
+		}
+	}
+
+	reset_temporary_storage();
+}
+
+Enum_Domain :: struct {
+	domain: string;
+	type: Type;
+}
+
+ENUM_DOMAINS :: Enum_Domain.[
+	.{"Code_Comma_Separated_Argument.modifier",		type_of(Parser.Parser_Comma_Separated_Argument.modifier)},
+	.{"Parser_Asm_Statement.kind",					Parser.Parser_Asm_Statement_Kind},
+	.{"Parser_Asm_Mnemonic_Size.kind",				Parser.Parser_Asm_Mnemonic_Size_Kind},
+	.{"Parser_Asm_Operand.kind",					Parser.Parser_Asm_Operand_Kind},
+	.{"Parser_Asm_Operand_Modifier.kind",			Parser.Parser_Asm_Operand_Modifier_Kind},
+	.{"Code_Expression_Query.query_kind",			type_of(Parser.Parser_Expression_Query.query_kind)},
+	.{"Code_Type_Query.query_kind",					type_of(Parser.Parser_Type_Query.query_kind)},
+	.{"Code_Block.block_type",						type_of(Parser.Parser_Block.block_type)},
+	.{"Code_Loop_Control.control_type",				type_of(Parser.Parser_Loop_Control.control_type)},
+	.{"Code_Using.filter_type",						type_of(Parser.Parser_Using.filter_type)},
+	.{"Code_Directive_Import.import_type",			type_of(Parser.Parser_Directive_Import.import_type)},
+	.{"Code_Directive_Bake.bake_type",				type_of(Parser.Parser_Directive_Bake.bake_type)},
+	.{"Code_Directive_Scope.scope_type",			type_of(Parser.Parser_Directive_Scope.scope_type)},
+	.{"Code_Literal.value_type",					type_of(Parser.Parser_Literal.value_type)}
+];
+
+HELPER_LAYOUTS :: string.[
+	"Parser_Argument",
+	"Parser_Context_Modification",
+	"Parser_Comma_Separated_Argument",
+	"Parser_Struct_Literal_Info",
+	"Parser_Array_Literal_Info",
+	"Parser_Asm_Feature",
+	"Parser_Asm_Statement",
+	"Parser_Asm_Instruction",
+	"Parser_Asm_Mnemonic_Size",
+	"Parser_Asm_Operand",
+	"Parser_Asm_Operand_Modifier",
+	"Parser_Asm_Value",
+	"Parser_Asm_Register_Declaration",
+	"Parser_Asm_Register_Pinning",
+	"Parser_Asm_Memory_Operand"
+];
+
+// Prints every registered route this run never observed, so each can be given a vector or a recorded disposition.
+report_route_coverage :: () {
+	missing: [..] string;
+	kinds := type_info(type_of(Parser.Parser_Node.kind)).(*Type_Info_Enum);
+	for kinds.names {
+		if !table_find_pointer(*route_counts, tprint("kind:%", it)) {
+			array_add(*missing, tprint("kind:%", it));
+		}
+	}
+
+	for HELPER_LAYOUTS {
+		if !table_find_pointer(*route_counts, tprint("helper:%", it)) {
+			array_add(*missing, tprint("helper:%", it));
+		}
+	}
+
+	for domain: ENUM_DOMAINS {
+		info := domain.type.(*Type_Info_Enum);
+		for info.names {
+			key := tprint("enum:%=%", domain.domain, it);
+			if !table_find_pointer(*route_counts, key) {
+				array_add(*missing, key);
+			}
+		}
+	}
+
+	print("Route coverage: % distinct routes observed; % registered enum names or kinds never observed:\n", route_counts.count, missing.count);
+	for missing {
+		print("  %\n", it);
+	}
+
+	// Compiler-only kinds and arms: no parser builder function produces them, and projection rejects unregistered kinds.
+	COMPILER_ONLY :: string.[
+		"kind:UNINITIALIZED",
+		"kind:TYPE_DEFINITION",
+		"kind:EXTRACT",
+		"kind:MAKE_VARARGS",
+		"kind:DIRECTIVE_PLACE",
+		"kind:DIRECTIVE_COMPILE_TIME",
+		"kind:RESOLVED_OVERLOAD",
+		"enum:Code_Block.block_type=UNINITIALIZED",
+		"enum:Code_Block.block_type=ARGUMENTS",
+		"enum:Code_Block.block_type=RETURNS",
+		"enum:Code_Block.block_type=CONSTANTS",
+		"enum:Code_Literal.value_type=TYPE_INFO"
+	];
+	for missing {
+		assert(array_find(COMPILER_ONLY, it), "Registered route % has neither a vector nor a recorded disposition.", it);
+	}
+
+	// Flags no parser builder function sets: the first group is in the projection's closed source-flag domains, the rest are compiler-only.
+	UNPRODUCED_FLAGS :: string.[
+		"NODE.EXPRESSION_IS_SPREAD",
+		"NODE.NO_ARRAY_BOUNDS_CHECK",
+		"NODE.STATEMENT_IS_DEFERRED",
+		"BINARY.SHIFT_MARKED_AS_LOGICAL",
+		"BINARY.SHIFT_MARKED_AS_SMALL",
+		"CALL.NO_DEBUG",
+		"CALL.IS_MODULE_PARAMETERS",
+		"BLOCK.NO_ARRAY_BOUNDS_CHECK",
+		"BLOCK.NO_ARITHMETIC_OVERFLOW_CHECK",
+		"DECLARATION.IS_MARKED_AS_DISCARD",
+		"LIBRARY.DYNAMIC_LIBRARY_UNAVAILABLE",
+		"LIBRARY.LINK_ALWAYS",
+		"CAST.HAS_FUNCTION_SYNTAX",
+
+		"NODE.CREATED_BY_DESUGARING",
+		"NODE.EXPRESSION_IS_DEPRECATED",
+		"IDENT.RESOLVES_ONLY_SHALLOWLY",
+		"IDENT.GENERATED_BY_OPERATOR_OVERLOAD",
+		"IDENT.DO_NOT_RESOLVE_DUE_TO_PARSER",
+		"IDENT.CAN_RESOLVE_TO_REG",
+		"DECLARATION.IS_ITERATOR",
+		"DECLARATION.COMES_FROM_ASM",
+		"DECLARATION.IS_IMPORTED",
+		"DECLARATION.IS_OVERLAY",
+		"DECLARATION.SCOPE_FILE",
+		"DECLARATION.IS_GLOBAL",
+		"STRUCT.UNION_IS_TAGGED",
+		"PROCEDURE.COMPILER_GENERATED",
+		"PROCEDURE.CPP_METHOD",
+		"PROCEDURE.HAS_IMPLICIT_RETURN_VALUE",
+		"PROCEDURE.CPP_RETURN_TYPE_IS_NON_POD",
+		"PROCEDURE.INITIALIZER",
+		"CAST.IS_IMPLICIT",
+		"CAST.IS_POINTER_DEREFERENCE",
+		"CAST.AS",
+		"CAST.ISA"
+	];
+	for domain: FLAG_DOMAINS {
+		info := domain.type.(*Type_Info_Enum);
+		for info.names {
+			name := tprint("%.%", domain.domain, it);
+			if !table_find_pointer(*route_counts, tprint("flag:%", name)) {
+				assert(array_find(UNPRODUCED_FLAGS, name), "Source flag % has neither a vector nor a recorded disposition.", name);
+			}
+		}
+	}
+}
+
+FLAG_DOMAINS :: Enum_Domain.[
+	.{"NODE",				type_of(Parser.Parser_Node.node_flags)},
+	.{"IDENT",				type_of(Parser.Parser_Ident.flags)},
+	.{"BINARY",				type_of(Parser.Parser_Binary_Operator.flags)},
+	.{"CALL",				type_of(Parser.Parser_Procedure_Call.flags)},
+	.{"BLOCK",				type_of(Parser.Parser_Block.block_flags)},
+	.{"DECLARATION",		type_of(Parser.Parser_Declaration.flags)},
+	.{"IF",					type_of(Parser.Parser_If.if_flags)},
+	.{"FOR",				type_of(Parser.Parser_For.for_flags)},
+	.{"RETURN",				type_of(Parser.Parser_Return.return_flags)},
+	.{"PUSH_CONTEXT",		type_of(Parser.Parser_Push_Context.push_context_flags)},
+	.{"STRUCT",				type_of(Parser.Parser_Struct.textual_flags)},
+	.{"IMPORT",				type_of(Parser.Parser_Directive_Import.flags)},
+	.{"LIBRARY",			type_of(Parser.Parser_Directive_Library.library_flags)},
+	.{"RUN",				type_of(Parser.Parser_Directive_Run.flags)},
+	.{"PROCEDURE",			type_of(Parser.Parser_Procedure_Header.procedure_flags)},
+	.{"CAST",				type_of(Parser.Parser_Cast.cast_flags)},
+	.{"LITERAL",			type_of(Parser.Parser_Literal.value_flags)},
+	.{"TYPE_INSTANTIATION",	type_of(Parser.Parser_Type_Instantiation.inst_flags)},
+	.{"ARRAY_LITERAL",		type_of(Parser.Parser_Array_Literal_Info.array_literal_flags)}
+];

@@ -487,6 +487,21 @@ On W1 and W2 every kept event has a published owner and no index is partial.
 
 Tests: authored vectors in [service_snapshot_test.jai](examples/service_snapshot_test.jai) and independent invariants (owners recomputed from fields, containers derived upwards, same-list provenance, declared-binding counts) on every W1 and W2 file.
 
+### C1 Route Coverage (2026-11-06)
+
+[service_snapshot_test.jai](examples/service_snapshot_test.jai) tallies every node kind, helper layout, producer enum name, source flag and populated owning field across all projections it checks, then fails if a registered name was never observed and has no disposition below.
+Route and flag vectors cover the rarely used directives (`#placeholder`, `#wildcard`, `#exists` with and without a sync expression, `#procedure_name` with and without an argument, `#bytes`, `#poke_name`, a standalone `#through`), all three import forms, all three using filters, `---` in an assignment, unparsed assembly statements, pinned operands, every modifier, and the procedure, struct, cast, library, run, push-context, call and eight-significant-digit literal flags.
+A populated semantic backreference (`resolved_declaration`) leaves the projection unchanged.
+
+No parser builder function produces the following, so they have no vector:
+
+- Node kinds `UNINITIALIZED`, `TYPE_DEFINITION`, `EXTRACT`, `MAKE_VARARGS`, `DIRECTIVE_PLACE`, `DIRECTIVE_COMPILE_TIME` and `RESOLVED_OVERLOAD`; projection rejects them as unregistered.
+- Block types `UNINITIALIZED`, `ARGUMENTS`, `RETURNS` and `CONSTANTS`, and literal value type `TYPE_INFO`.
+- Registered source flags `NODE.EXPRESSION_IS_SPREAD`, `NODE.NO_ARRAY_BOUNDS_CHECK`, `NODE.STATEMENT_IS_DEFERRED`, `BINARY.SHIFT_MARKED_AS_LOGICAL`, `BINARY.SHIFT_MARKED_AS_SMALL`, `CALL.NO_DEBUG`, `CALL.IS_MODULE_PARAMETERS`, both `BLOCK` flags, `DECLARATION.IS_MARKED_AS_DISCARD`, `LIBRARY.DYNAMIC_LIBRARY_UNAVAILABLE`, `LIBRARY.LINK_ALWAYS` and `CAST.HAS_FUNCTION_SYNTAX`; they stay in the closed domains for compiler-layout parity.
+- Compiler-only flags outside the closed domains; projection rejects them as unknown source flags.
+
+Limits that remain partial rather than covered: repeated struct modifiers, alignments and procedure suffixes keep only their final producer values, and the `.MISSING` name form has no producer route.
+
 ## Compound Token Evidence and Binding Classification
 
 Revised 2026-11-05 (phase 1 of the migration plan, decision R12).
