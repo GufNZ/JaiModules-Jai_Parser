@@ -3,6 +3,8 @@
 Parser :: #import "Jai_Parser"(ENABLE_TRIVIA = true);
 
 #import "Basic";
+#import "Hash_Table";
+#import "Pool";
 #import "String";
 #import "meow_hash";
 
@@ -14,7 +16,12 @@ Parser :: #import "Jai_Parser"(ENABLE_TRIVIA = true);
 }
 
 #load "canonical.jai";
+#load "diagnostics.jai";
 #load "digest.jai";
-#load "identity.jai";
-#load "limits.jai";
 #load "epoch.jai";
+#load "identity.jai";
+#load "index.jai";
+#load "limits.jai";
+#load "nodes.jai";
+#load "projection.jai";
+#load "snapshot.jai";

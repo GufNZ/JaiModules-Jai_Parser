@@ -8493,6 +8493,39 @@ test_recovery_records :: () {
 	assert(continued.recovery_records[0].kind == .MISSING_TOKEN);
 	assert(continued.recovery_records[0].span.first == continued.synthetic_tokens[0].insertion_index);
 	assert(Extended.reconstruct_source(*continued) == CONTINUED_SOURCE);
+	assert(continued.recovery_records[0].owner == continued.root.(*Extended.Parser_Block).statements[0], "A missing terminator belongs to its statement.");
+
+	// The smallest published node around an event owns it; the parenthesised expression owns its missing `)`.
+	assert(missing_record.owner == missing.root && missing_record.cursor == 2);
+
+	nested := Extended.parse_file("f :: () { inner :: ; other :: 1; }");
+	body := nested.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null;
+	inner := body.block.statements[0];
+	assert(nested.recovery_records.count == 1 && nested.recovery_records[0].owner == inner, "A nested hole belongs to its declaration, not the procedure or a sibling.");
+
+	// An abandoned expression-led compound attempt keeps its records but marks them discarded and unowned.
+	abandoned := Extended.parse_block("{ x, (1 + ); }");
+	discarded := 0;
+	for abandoned.recovery_records {
+		if it.discarded {
+			discarded += 1;
+			assert(!it.owner);
+		} else {
+			assert(it.owner != null, "Kept record % (% at %, span %) has no owner.", it_index, it.kind, it.cursor, it.span);
+		}
+	}
+
+	assert(discarded >= 1, "Expected a discarded record.");
+
+	// Truncated and mutated inputs found by mutation: none may crash, leave the cursor past the token array or misplace token bytes.
+	for string.["value :: a.", "value :: `", "f :: () { operator", "f :: () { #asm { add x, (a b); } }", "g :: inline (dest: *", "s :: #string DONE  \nmain :: () {}\n"] {
+		parsed := Extended.parse_file(it);
+		assert(parsed.status != .COMPLETE, "'%' should be diagnosed.", it);
+		source := it;
+		for parsed.tokens {
+			assert(slice(source, it.byte_start, it.byte_end - it.byte_start) == it.original_text, "Token % of '%' is misplaced.", it_index, source);
+		}
+	}
 }
 
 test_restart_points :: () {

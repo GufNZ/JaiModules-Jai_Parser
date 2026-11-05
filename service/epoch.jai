@@ -151,6 +151,7 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 			sleep_milliseconds(EPOCH_LOCK_RETRY_MILLISECONDS);
 		}
 
+
 		return .LOCK_UNAVAILABLE, INVALID_HANDLE_VALUE;
 	}
 
@@ -159,8 +160,25 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 	}
 
 	// `MOVEFILE_WRITE_THROUGH` makes the directory entry durable, so `directory` needs no separate flush.
+	// Scanners such as antivirus briefly open the new file without delete sharing, so retry those transient denials while still holding the lock.
 	replace_epoch_file :: (staging_path: string, epoch_path: string, directory: string) -> bool {
-		return !!MoveFileExW(utf8_to_wide(staging_path,, temp), utf8_to_wide(epoch_path,, temp), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+		for 1..EPOCH_LOCK_ATTEMPTS {
+			if MoveFileExW(utf8_to_wide(staging_path,, temp), utf8_to_wide(epoch_path,, temp), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) {
+				return true;
+			}
+
+
+			error := GetLastError();
+			if error != ERROR_ACCESS_DENIED && error != ERROR_SHARING_VIOLATION {
+				return false;
+			}
+
+
+			sleep_milliseconds(EPOCH_LOCK_RETRY_MILLISECONDS);
+		}
+
+
+		return false;
 	}
 
 	// A missing file reads as empty; anything over the bound or unreadable is an error rather than a truncated read.
@@ -235,6 +253,7 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 			sleep_milliseconds(EPOCH_LOCK_RETRY_MILLISECONDS);
 		}
 
+
 		close(fd);
 		return .LOCK_UNAVAILABLE, -1;
 	}
@@ -250,6 +269,7 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 				return true;
 			}
 		}
+
 
 		return fsync(fd) == 0;
 	}
@@ -303,6 +323,7 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 			total += got;
 		}
 
+
 		if !total || total > EPOCH_FILE_MAXIMUM_BYTES {
 			return .MALFORMED_FILE, "";
 		}
@@ -335,6 +356,7 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 
 			written += count;
 		}
+
 
 		return flush_descriptor(fd);
 	}

@@ -8,8 +8,8 @@
 #import "String";
 
 Service :: #import "Jai_Parser/service";
-// Operator overloads only resolve through an unnamed import of the same module instance.
-#import "Jai_Parser/service";
+// Operators from a named import are not visible here, so alias the one the tests use.
+operator == :: Service.operator ==;
 
 main :: () {
 	arguments := get_command_line_arguments();

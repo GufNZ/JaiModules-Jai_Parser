@@ -93,6 +93,27 @@ is_retained_output() {
 	return 1
 }
 
+is_build_path() {
+	case "$1" in
+		.build|*/.build|.build/*|*/.build/*)
+			return 0
+			;;
+	esac
+
+
+	return 1
+}
+
+# Directories that keep at least one entry after cleaning, so they are never removed.
+declare -A kept_directories=()
+keep_ancestors() {
+	local directory=$1
+	while [[ $directory == */* ]]; do
+		directory=${directory%/*}
+		kept_directories["$directory"]=true
+	done
+}
+
 pending=()
 pending_length=0
 remove_pending() {
@@ -115,6 +136,7 @@ count=0
 while IFS= read -r -d '' entry; do
 	path=${entry#./}
 	if [[ ${tracked["$path"]+present} ]]; then
+		keep_ancestors "$path"
 		continue
 	fi
 
@@ -122,6 +144,7 @@ while IFS= read -r -d '' entry; do
 	filename=${path##*/}
 	stem=${filename%.*}
 	if is_retained_output "$stem"; then
+		keep_ancestors "$path"
 		continue
 	fi
 
@@ -150,6 +173,7 @@ while IFS= read -r -d '' entry; do
 	esac
 
 	if ! $candidate; then
+		keep_ancestors "$path"
 		continue
 	fi
 
@@ -174,4 +198,34 @@ if $dry_run; then
 else
 	remove_pending
 	printf '\033[92mRemoved\033[0m \033[97m%s\033[0m generated files.\n' "$count"
+fi
+
+# Symlinks and other non-regular entries are never removed, so their directories stay.
+while IFS= read -r -d '' entry; do
+	keep_ancestors "${entry#./}"
+done < <(find . -type d -name .git -prune -o ! -type f ! -type d -print0)
+
+# Depth-first, so a directory is considered after its subdirectories.
+directory_count=0
+while IFS= read -r -d '' entry; do
+	directory=${entry#./}
+	if ! is_build_path "$directory" || [[ ${kept_directories["$directory"]+present} ]]; then
+		continue
+	fi
+
+
+	if $dry_run; then
+		printf '\033[93mWould remove directory\033[0m: \033[96m%s\033[0m\n' "$directory"
+	else
+		rmdir -- "$entry"
+		printf '\033[92mRemoved directory\033[0m: \033[96m%s\033[0m\n' "$directory"
+	fi
+
+	directory_count=$((directory_count + 1))
+done < <(find . -depth -type d -print0)
+
+if $dry_run; then
+	printf '\033[93mWould remove\033[0m \033[97m%s\033[0m empty build directories.\n' "$directory_count"
+else
+	printf '\033[92mRemoved\033[0m \033[97m%s\033[0m empty build directories.\n' "$directory_count"
 fi
