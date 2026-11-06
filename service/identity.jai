@@ -52,7 +52,7 @@ issue_session :: (incarnation: *Service_Incarnation) -> bool, Session_Identities
 	}
 
 
-	return true, .{session = xx make_key("session", incarnation.namespace, little_endian(token, 8))};
+	return true, .{session = xx make_key("session", incarnation.namespace, little_endian(token, 8,, temp))};
 }
 
 issue_world :: (identities: *Session_Identities) -> bool, World_ID {
@@ -98,6 +98,8 @@ Handle :: struct (KIND: Handle_Kind) {
 	session: Session_ID;
 	slot: u64;
 	generation: u64;
+	owner_service: *void;
+	owner_token: u64;
 }
 
 Registration_Slot :: struct {
@@ -110,6 +112,8 @@ Registration_Slot :: struct {
 // Slots are zero-based and start at generation 1; a reused slot gets the next generation, and a slot whose generation reaches U64_MAX is retired permanently.
 Handle_Registry :: struct {
 	session: Session_ID;
+	owner_service: *void;
+	owner_token: u64;
 	slots: [..] Registration_Slot;
 	free_slots: [..] u64;
 }
@@ -121,16 +125,27 @@ register_handle :: (registry: *Handle_Registry, $kind: Handle_Kind) -> bool, Han
 		entry.generation += 1;
 		entry.kind = kind;
 		entry.live = true;
-		return true, .{session = registry.session, slot = slot, generation = entry.generation};
+		return true, .{session = registry.session, slot = slot, generation = entry.generation, owner_service = registry.owner_service, owner_token = registry.owner_token};
 	}
 
 
 	array_add(*registry.slots, .{generation = 1, kind = kind, live = true});
-	return true, .{session = registry.session, slot = xx (registry.slots.count - 1), generation = 1};
+	return true, .{session = registry.session, slot = xx (registry.slots.count - 1), generation = 1, owner_service = registry.owner_service, owner_token = registry.owner_token};
 }
 
 handle_is_live :: (registry: *Handle_Registry, handle: Handle($K)) -> bool {
-	if !bytes_equal(handle.session.([] u8), registry.session.([] u8)) || handle.slot >= xx registry.slots.count {
+	if handle.slot >= xx registry.slots.count {
+		return false;
+	}
+
+
+	if registry.owner_service {
+		if handle.owner_service != registry.owner_service || handle.owner_token != registry.owner_token {
+			return false;
+		}
+	}
+
+	if !bytes_equal(handle.session.([] u8), registry.session.([] u8)) {
 		return false;
 	}
 

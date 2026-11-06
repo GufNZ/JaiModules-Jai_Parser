@@ -88,6 +88,12 @@ Jai beta 0.2.030 (2 July 2026), fast x64 backend, run from `examples/`.
 | Service foundations (phase 2). | `jai service_foundations_test.jai -x64 -quiet && ./service_foundations_test.exe` | Pass on x64 and LLVM. |
 | Service snapshot (phase 3). | `jai service_snapshot_test.jai -x64 -quiet && ./service_snapshot_test.exe` | Pass on x64 and LLVM. |
 | Service context registry (phase 3). | `jai service_context_test.jai -x64 -quiet && ./service_context_test.exe` | Pass on x64 and LLVM. |
+| Service provider model (phase 4). | `jai service_provider_test.jai -x64 -quiet && ./service_provider_test.exe` | Pass on x64 and LLVM. |
+| Service coordinator (phase 4). | `jai service_coordinator_test.jai -x64 -quiet && ./service_coordinator_test.exe` | Pass on x64 and LLVM. |
+| Service harness host (phase 4). | `jai service_host_test.jai -x64 -quiet && ./service_host_test.exe` | Pass on x64 and LLVM. |
+| Service traces T1-T8, V1-V8 (phase 4). | `jai service_traces_test.jai -x64 -quiet && ./service_traces_test.exe` | Pass on x64 and LLVM. |
+| Service worker interleavings (phase 5, partial qualification). | `jai service_worker_test.jai -x64 -quiet && ./service_worker_test.exe` | Pass on x64 and optimized LLVM; attained barriers and independent session-allocation ledger.  Remaining qualification is listed below. |
+| Service traces on the real worker (phase 5). | `jai service_traces_test.jai -x64 -quiet - real-worker && ./service_traces_test.exe` | T1-T8 and V1-V8 pass on x64 and optimized LLVM, retaining the authored and fresh-parse oracles. |
 | Service cross-target type-check. | `jai service_cross_check.jai -quiet` | `LINUX -> NONE`; macOS stops in the SDK's `Objective_C` module. |
 | Recovery owner sweep (phase 3). | `jai recovery_owner_sweep.jai -x64 -quiet && ./recovery_owner_sweep.exe` | Pass; no unpublished owners across single-token mutations of W2. |
 
@@ -219,6 +225,7 @@ Exit: user decision recorded.
 	- [x] Identity allocation and handle registry: K-based incarnation/session/world/result/operation identities, counters retiring at `U64_MAX`, slot registry rejecting stale generations, wrong kinds, foreign sessions and double release, and retiring exhausted slots.
 	- [x] Epoch issuer: sequential and floored reservations, deleted file restarting above the floor, authority mismatch, eight malformed files, exhaustion, and 4 concurrent processes * 25 reservations yielding unique contiguous epochs.
 	Negative control: a shareable lock makes the concurrency check fail.
+	With `TEST_HOOKS`, injected failures at the read, staging-write and replace steps each return `IO_ERROR`, leave the epoch file byte-identical and release the lock; a held lock blocks reservation, and the hooks' `shared_lock` switch lets the same holder through (automated negative control).  The Linux cross-check type-checks the POSIX hook paths.
 	- [x] Limits and reservation ledger: `-1`/zero/clamped/below-minimum/invalid negotiation; all-or-nothing reservation at exactly the limit, one over, and with overflowing amounts.
 - [ ] Qualify the POSIX epoch issuer (`flock` lock, `fsync`/`F_FULLFSYNC` staging, `rename`, directory flush); deferred until Linux and macOS test environments exist.
 	- [x] Type-check the service and foundations test for a Linux x64 target from Windows (`os_target = .LINUX`, no output); negative control: an undeclared call in the POSIX branch fails the check.
@@ -273,21 +280,68 @@ Exit: user decision recorded.
 	- [x] C1 on W1 and W2 (2026-11-06): every W1 seed and all 86 W2 files compare an owned, poisoned-input parse with an independent fresh parse, then check token, node, diagnostics and index projections; registry routes are tallied across every checked projection, and the test fails on a registered kind, helper, enum name or source flag that has neither a vector nor a recorded disposition (registry "C1 Route Coverage").
 	New route and flag vectors cover the rare directives, import forms, using filters, `---`, unparsed and pinned assembly arms, modifier flags and a populated backreference; the remaining unobserved names are compiler-only or never set by a builder.
 	Negative control: dropping the eight-digit literal vector fails the flag check.
-- [ ] Phase 4: provider and coordinator.
-	- [ ] Source provider.
-	- [ ] Session and coordinator with the deterministic executor.
-	- [ ] Harness host.
-	- [ ] T1-T8 and V1-V8.
+- [x] Phase 4: provider and coordinator.
+	- [x] Source provider.
+		- [x] Provider model ([provider.jai](service/provider.jai), tested by [service_provider_test.jai](examples/service_provider_test.jai) on x64 and LLVM): descriptor admission for distinct keys and copy-only sources, `DocumentID`/`SourceRevision`/`ProviderRevision`/`ProviderFrontier` recipes, and atomic source batches over separate overlay and disk branches.
+		Each batch is staged against private copies and commits every member plus one new frontier, or nothing; the model owns copies of accepted bytes and metadata, and source backings are reference-counted, so a retained capture keeps its bytes (V7).
+		Vectors cover an in-order edit chain, a save acknowledgement for an older installation preserving the newer overlay (T3), reset and restore with host confirmations (T4), an invalid member rejecting a valid one (V5), caller buffers reused after acceptance and an absent disk observation.
+		Controls: stale frontier, document and source bases; out-of-range edits; reused revisions; duplicate documents and registrations; forged context identity; unregistered and unreferenced contexts; missing, changed, wrong-policy and wrong-platform bindings; foreign document keys and revisions; foreign or mismatched confirmations; a save of different bytes; `RENAME`; provider leases; coherent capture without the capability; a false disk revision claim; missing provenance; and source-byte and batch-event limits.
+		Clearing the overlay on any save acknowledgement fails the T3 vector.
+		- [x] In-memory and disk providers for the harness host (overlays from host text, disk observations read from the project root).
+	- [x] Session and coordinator with the deterministic executor.
+		- [x] Coordinator core ([coordinator.jai](service/coordinator.jai), tested by [service_coordinator_test.jai](examples/service_coordinator_test.jai) on x64 and LLVM): all fifteen operations plus `ReadWorld`/`ReadResult`/`ReadSource`, update tickets and waiters, capture-keyed candidate worlds with joins, the head target, query tasks, completion entries in commit order, ledger charges for handles, pending registrations, completion records and in-flight operations, and the reserved first shutdown.
+		A candidate's parse task builds each present member's snapshot, declaration index and diagnostic summary before publication; snapshot and index queries answer at once, and diagnostics queries share one task per world and document.
+		The deterministic executor dispatches the required FIFO head into a single-use mailbox and delivers it separately, so tests choose the interleaving; `wait` drives it and advances a session clock.
+		The test controls (`session_of`, `executor_dispatch`, `executor_deliver`, `executor_run`) compile only with the service module parameter `TEST_HOOKS = true`; a default import exposes neither the executor nor session internals.
+		Vectors: T1 (edit, await, query, old results unchanged), T6 (shared waiters, caller cancel, duplicate completion rejected), T7 (supersession of pending updates and query waiters, discarded late result, no reissue), analysis joins and request errors, open-session admission errors, and shutdown at full handle capacity with a producer outliving its deadline; every test ends with the ledger back to the `.SESSION` charge.
+		Negative controls run on every test pass through `TEST_HOOKS` fault switches: either the stop request or the publication frontier check alone keeps a late obsolete result out, and dropping both publishes it; keeping unconsumed work leaves the queue non-empty; taking the first shutdown slot from ordinary capacity fails at full capacity.
+		- [x] `ResolveNode`/`ResolveToken`/`ResolveRecovery` (`resolve_node`, `resolve_token`, `resolve_recovery`) borrow from any result's own syntax backing with range checks; observations, accepted frontiers and session descriptions are caller-owned copies (`free_observation`, or `,, temp`), and waiters own their stored terminal copies.
+		Vectors: an index result resolves its declaration node and a token with no snapshot query held; out-of-range references reject; mutating a returned observation or description leaves the next one unchanged.
+		Handles still carry the session identity bytes, which the service keeps for its lifetime.
+		Store policy admission (`SessionOptions.store_policy`) moved to phase 6 service wiring; sessions report `.DISABLED` until then.
+	- [x] Harness host ([host.jai](service/host.jai), tested by [service_host_test.jai](examples/service_host_test.jai) on x64 and LLVM through the default import, with `wait` driving all work).
+	One project root per host: the service incarnation binds an epoch reserved in that root, documents are keyed by contained root-relative paths, and the host issues provider revisions, observation tokens and action-bound confirmations.
+	A batch builder reads its bases from one `DescribeSession` snapshot and supplies set/edit overlay, disk observation, save acknowledgement, reset and restore events with their contexts and first bindings; a disk read failure on an existing path is never reported as absence.
+	Serial completion dispatch drains in bounded batches, returns at once from a nested call and counts handler failures without redelivering.
+	Vectors: fresh epochs and session identities per host, rejected escaping paths, an external disk change under an overlay (old world unchanged), saves of matching and different bytes, reset then confirmed restore, deletion to confirmed absence with an unavailable snapshot query, an unreadable path, and nested dispatch.
+	- [x] T1-T8 and V1-V8 ([service_traces_test.jai](examples/service_traces_test.jai), on x64 and LLVM): each trace runs through the harness host with authored expected selections, frontiers and outcomes, and every published syntax result is compared with an independent fresh parse of the authored bytes through `snapshot_oracle.jai`; each ends with the ledger back to the session charge and the session destroyed on release.
+	T1 edit and query with a leased old result; T2 stale source base and invalid range rejected atomically, then a full replacement; T3 a late save of B after a byte-identical newer overlay C; T4 reset, restart with a fresh epoch, then a separately confirmed restore; T5 a leased index result outliving its world and ticket, and a stale handle rejected after its slot is reused; T6 one task shared by two waiters with a caller cancel and a rejected duplicate completion; T7 supersession of a pending update, its waiters and running query work with no late publication or reissue; T8 unsupported semantic and evaluation queries creating no work.
+	V1 a captured overlay world unchanged through disk events, a save and a reset; V2 not-captured versus confirmed-absent members; V3 later documents not attached to an older world and analysis bound to the current frontier; V4 bytes captured before a concurrent write, labelled immutable rather than coherent; V5 a stale member and an unsupported rename each rejecting the whole batch; V6 an injected member failure (`TEST_HOOKS` `fail_parse_document`) failing the milestone with no mixed head and the accepted source kept, then a retry by `RequestAnalysis`; V7 caller buffers poisoned and freed after acceptance; V8 an unreadable path, shutdown waiting for a running producer, a rejected repeated completion and no source writes.
+	Supporting changes: a query for a document the world never captured is now `.UNAVAILABLE`/`.NOT_CAPTURED` instead of an argument error; worlds record their capture consistency (coherent only under one attested capture token across disk observations); `ResultDescription` exposes its backing snapshot; `ack_save` can name the installation it saved.
+	Outside phase 4: T5 eviction and rehydration and T8 store denial need the phase-6 store; one parse task covers all of a candidate's members, so V6's out-of-order member completion has no separate interleaving; and no compiler process exists to monitor.
 - [ ] Phase 5: worker, cancellation and shutdown.
-	- [ ] Compute worker and reaper.
-	- [ ] X1-X8.
+	- [x] Compute worker and independently progressing reaper ([service/worker.jai](service/worker.jai)); default imports progress without host polling/draining.  The compute thread is joined outside the session gate before shutdown becomes terminal.
+	- [x] Condition-variable `wait`, integer monotonic deadlines, pinned owner-directory lookup and stable inline handle routing.  Retirement wakes sleeping calls; generation and session binding are revalidated after waking.
+	- [x] Source staging outside the gate over protected provider copies; bounded `CONCURRENT_ACQUISITIONS` admission and frontier/lifecycle revalidation before commit.  Shutdown waits for admitted staging and cleanup to unwind.
+	- [x] Required/optional FIFO selection and promotion, cooperative checks between documents/parser/conversion phases, mailbox validation, supersession and unconsumed-output discard.  Optional test work is injected; real store/maintenance chunks remain phase 6.
+	- [x] Preallocated first-shutdown control and reserved handles; undrained completions and surviving payload handles do not prevent `STOPPED`.
+	- [x] Separate caller outputs and session-owned allocation backing ([service/ownership.jai](service/ownership.jai)); recursive payload/source cleanup runs outside the gate with cleanup pins.  Final owner release reclaims the tracked heap, and session-private head/source references detach on session release.
+	- [x] Keep deterministic execution as a compile-time seam: `TEST_HOOKS = true`; use `REAL_WORKER = true` with hooks to test native execution.  Barriers, fault controls and aggregate test allocation counters are absent from normal imports.
+	- [ ] Complete X1-X8 qualification ([examples/service_worker_test.jai](examples/service_worker_test.jai)).
+		- [x] X1: completion before registration, during wait arming and after arming; exact authored source result and retirement revalidation.
+		- [x] X2: shared current-world caller cancellation versus completion in both winning orders; independent survivor and exactly two completion records.  Real-worker T7 also checks obsolete-world cancellation and late delivery.
+		- [x] X3: release while waiting, immediate slot reuse, stale generation waking with `INVALID_HANDLE`, and stale lookup after final owner removal.
+		- [x] X4: host dispatch re-enters query, retain/release, cancellation and shutdown; nested dispatch defers, a handler failure is not redelivered, and its independently retained payload stays readable.
+		- [x] X5: delayed/zero-sized drain, exact handle capacity, reserved shutdown and an automated removed-reservation negative control.
+		- [x] X6: required background FIFO under later joined demand, optional fallback/promotion and an automated optional-first negative control; held provider admission does not block unrelated diagnostics compute.
+		- [x] X7/X8: quiescing rejects a held source commit, repeated shutdown identity is stable, held parser/publication/cleanup boundaries keep shutdown pending past its deadline, and reaper completion requires no host polling.  Retained results remain exact after session release.
+		- [x] Independent allocator spy reconciles allocation/free addresses and bytes, detects double/wrong-owner release, and reaches zero session-owned allocations after each final release.  Caller-owned service/host scaffolding and descriptive outputs are outside this ledger; heap sweeping at final destruction does not qualify steady-state byte bounds.
+		- [ ] Add every remaining gate/registration/free ordering and each trace's own discriminating negative control, including failed output-copy/drain and execution-backing admission failures.  Primary trace coverage above is not full milestone-4 qualification.
+		- [ ] Implement recoverable worker scratch/allocation failure with the preallocated `FAILED`/`RESOURCE_LIMIT` outcome.  The current SDK `array_reserve` asserts on failed reallocation; returning null from the tracked allocator is not a safe service failure boundary.
+		- [ ] Enforce aggregate `OWNED_BYTES` and `RETAINED_SOURCE_BYTES`, charge fixed worker/reaper/control backing and reserved scratch before admission, and qualify exact/one-over byte limits.  Current heap accounting and final sweeping are not quota enforcement.
+		- [ ] Stage caller-output capacity outside the state gate, revalidate before copying/consuming registrations, and qualify a blocking/reentrant/failing caller allocator.  Current output copying still invokes the caller allocator while the gate is held; the no-host-callback-under-gate contract is not yet qualified.
+	- [x] Rerun T1-T8/V1-V8 on the real worker with the phase-4 fresh-parse oracle; delayed cases use attained barriers instead of executing another worker in the harness.
+	- [x] Regression evidence (2026-11-06): service worker/host/coordinator/provider/snapshot/context/foundations pass on x64 and optimized LLVM; parser tokens, SIMD layout/parity, lexer corpus and 84/84 tutorials pass on x64; compiler differential passes 4,181/4,181 fixtures across 252 jobs; Invaders AST deep snapshot/lifetime baseline passes.  Linux type-check passes; macOS retains the known SDK `Objective_C`/`macos` filename-case failure.
+	- [ ] Close C3/C5 evidence only after the remaining allocation/admission and X-trace requirements above pass.  Phase 5 remains open; no allocation-failure contract amendment has been made.
 - [ ] Phase 6: persistent store.
 	- [ ] Wire codec.
 	- [ ] Records and policy.
 	- [ ] Windows native binding.
 	- [ ] Commit, read, recovery, GC and maintenance.
 	- [ ] Service wiring.
+		- [ ] Store policy admission (`SessionOptions.store_policy`) and store status in `DescribeSession`.
 	- [ ] S1-S8.
+		- [ ] Phase-4 store branches: T5 eviction and rehydration, T8 store-write denial and corrupt artifacts.
 - [ ] Phase 7: integration and acceptance.
 	- [ ] Coverage ledger expansion.
 	- [ ] A1-A15 over W1-W6.

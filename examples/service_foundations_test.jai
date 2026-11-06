@@ -7,7 +7,7 @@
 #import "Sort";
 #import "String";
 
-Service :: #import "Jai_Parser/service";
+Service :: #import "Jai_Parser/service"(TEST_HOOKS = true);
 // Operators from a named import are not visible here, so alias the one the tests use.
 operator == :: Service.operator ==;
 
@@ -360,6 +360,37 @@ test_epoch_issuer :: (executable: string) {
 	write_entire_file(epoch_path, Service.encode_epoch_file(authority, Service.U64_MAX - 1,, temp));
 	ok_exhausted, _, exhausted_failure := Service.reserve_epoch(directory, authority);
 	assert(!ok_exhausted && exhausted_failure == .EXHAUSTED);
+
+	// One lock attempt makes a lock left held by a failure path fail fast instead of waiting.
+	hooks := *Service.epoch_test_hooks;
+	hooks.lock_attempts = 1;
+
+	// Injected I/O failures reserve nothing, leave the epoch file intact and release the lock.
+	intact := Service.encode_epoch_file(authority, 20);
+	write_entire_file(epoch_path, intact);
+	for Service.Epoch_Fault_Point.[.READ, .STAGING_WRITE, .REPLACE] {
+		hooks.fail_at = it;
+		ok_fault, _, fault_failure := Service.reserve_epoch(directory, authority);
+		hooks.fail_at = .NONE;
+		assert(!ok_fault && fault_failure == .IO_ERROR, "Fault % gave %.", it, fault_failure);
+		contents, read_ok := read_entire_file(epoch_path);
+		assert(read_ok && contents == intact, "Fault % changed the epoch file.", it);
+	}
+
+	ok_recovered, recovered := Service.reserve_epoch(directory, authority);
+	assert(ok_recovered && recovered == 21, "A failed reservation consumed an epoch or left the lock held.");
+
+	// A held lock blocks reservation; without the lock's exclusion the same holder does not (negative control).
+	held_ok, held := Service.hold_epoch_lock(directory);
+	assert(held_ok);
+	ok_blocked, _, blocked_failure := Service.reserve_epoch(directory, authority);
+	assert(!ok_blocked && blocked_failure == .LOCK_UNAVAILABLE, "A reservation ran while the lock was held (%).", blocked_failure);
+	hooks.shared_lock = true;
+	ok_shared := Service.reserve_epoch(directory, authority);
+	hooks.shared_lock = false;
+	assert(ok_shared, "Control undetected: a reservation without exclusion was still blocked.");
+	Service.drop_epoch_lock(held);
+	hooks.lock_attempts = Service.EPOCH_LOCK_ATTEMPTS;
 
 	// Concurrent processes must never receive the same epoch.
 	file_delete(epoch_path);

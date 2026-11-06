@@ -1546,12 +1546,14 @@ test_route_vectors :: () {
 
 		linked := Service.own_parse(SOURCE, "linked.jai");
 		defer Service.release_owned_syntax(linked);
+
 		statements := linked.parsed.root.(*Parser.Parser_Block).statements;
 		use := statements[1].(*Parser.Parser_Declaration).expression.(*Parser.Parser_Ident);
 		use.resolved_declaration = statements[0].(*Parser.Parser_Declaration);
 		fault, projection := Service.project_nodes(linked);
 		assert(fault.failure == .NONE && projection.nodes.count == plain.nodes.count && projection.helpers.count == plain.helpers.count);
 		defer Service.release_node_projection(projection);
+
 		for projection.nodes {
 			assert(it.kind == plain.nodes[it_index].kind && it.fields.count == plain.nodes[it_index].fields.count, "Node % changed with a populated backreference.", it_index);
 		}

@@ -89,6 +89,12 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 
 		last: u64;
 		read_failure, existing := read_small_file(epoch_path);
+		#if TEST_HOOKS {
+			if epoch_test_hooks.fail_at == .READ {
+				read_failure = .IO_ERROR;
+			}
+		}
+
 		if read_failure != .NONE {
 			return false, 0, read_failure;
 		}
@@ -112,8 +118,24 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 
 
 		epoch := base + 1;
-		if !write_flushed_file(staging_path, encode_epoch_file(authority_namespace, epoch,, temp)) {
+		text := encode_epoch_file(authority_namespace, epoch,, temp);
+		#if TEST_HOOKS {
+			if epoch_test_hooks.fail_at == .STAGING_WRITE {
+				write_flushed_file(staging_path, slice(text, 0, text.count / 2));
+				return false, 0, .IO_ERROR;
+			}
+		}
+
+
+		if !write_flushed_file(staging_path, text) {
 			return false, 0, .IO_ERROR;
+		}
+
+
+		#if TEST_HOOKS {
+			if epoch_test_hooks.fail_at == .REPLACE {
+				return false, 0, .IO_ERROR;
+			}
 		}
 
 
@@ -123,6 +145,52 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 
 
 		return true, epoch, .NONE;
+	}
+}
+
+#if TEST_HOOKS && EPOCH_ISSUER_SUPPORTED {
+	Epoch_Fault_Point :: enum u8 {
+		NONE;
+		READ;
+		STAGING_WRITE;
+		REPLACE;
+	}
+
+	// `shared_lock` drops the exclusion the lock provides; `lock_attempts` shortens contention waits.
+	Epoch_Test_Hooks :: struct {
+		fail_at: Epoch_Fault_Point;
+		shared_lock: bool;
+		lock_attempts := EPOCH_LOCK_ATTEMPTS;
+	}
+
+	epoch_test_hooks: Epoch_Test_Hooks;
+
+	#if OS == .WINDOWS {
+		Epoch_Lock :: HANDLE;
+	} else {
+		Epoch_Lock :: s32;
+	}
+
+	// Holds the lock file the way a `shared_lock` reservation would, standing in for a concurrent holder.
+	hold_epoch_lock :: (directory: string) -> bool, Epoch_Lock {
+		path := tprint("%/%.lock", directory, EPOCH_FILE_NAME);
+		#if OS == .WINDOWS {
+			lock := CreateFileW(utf8_to_wide(path,, temp), FILE_GENERIC_READ | FILE_GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, null, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
+			return lock != INVALID_HANDLE_VALUE, lock;
+		} else {
+			fd := open(temp_c_string(path), O_RDWR | O_CREAT | O_CLOEXEC, EPOCH_FILE_MODE);
+			if fd >= 0 && epoch_flock(fd, LOCK_EX | LOCK_NB) {
+				close(fd);
+				return false, -1;
+			}
+
+
+			return fd >= 0, fd;
+		}
+	}
+
+	drop_epoch_lock :: (lock: Epoch_Lock) {
+		release_epoch_lock(lock);
 	}
 }
 
@@ -136,8 +204,17 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 
 	// Share mode 0 is the exclusive lock; closing the handle releases it.
 	acquire_epoch_lock :: (path: string) -> Epoch_Failure, HANDLE {
-		for 1..EPOCH_LOCK_ATTEMPTS {
-			lock := CreateFileW(utf8_to_wide(path,, temp), FILE_GENERIC_READ | FILE_GENERIC_WRITE, 0, null, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
+		attempts := EPOCH_LOCK_ATTEMPTS;
+		share: u32 = 0;
+		#if TEST_HOOKS {
+			attempts = epoch_test_hooks.lock_attempts;
+			if epoch_test_hooks.shared_lock {
+				share = FILE_SHARE_READ | FILE_SHARE_WRITE;
+			}
+		}
+
+		for 1..attempts {
+			lock := CreateFileW(utf8_to_wide(path,, temp), FILE_GENERIC_READ | FILE_GENERIC_WRITE, share, null, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
 			if lock != INVALID_HANDLE_VALUE {
 				return .NONE, lock;
 			}
@@ -237,7 +314,16 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 		}
 
 
-		for 1..EPOCH_LOCK_ATTEMPTS {
+		attempts := EPOCH_LOCK_ATTEMPTS;
+		#if TEST_HOOKS {
+			attempts = epoch_test_hooks.lock_attempts;
+			if epoch_test_hooks.shared_lock {
+				return .NONE, fd;
+			}
+		}
+
+
+		for 1..attempts {
 			if !epoch_flock(fd, LOCK_EX | LOCK_NB) {
 				return .NONE, fd;
 			}

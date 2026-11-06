@@ -377,6 +377,46 @@ build_source_digests :: () -> [16] u8, [16] u8, [16] u8 {
 		source_digest(.["canonical.jai", "context.jai", "diagnostics.jai", "digest.jai", "index.jai", "module.jai", "nodes.jai", "projection.jai", "snapshot.jai"]);
 }
 
+// Nonempty, NUL-free, and an even byte count for UTF-16LE.
+path_is_valid :: (path: Path_Value) -> bool {
+	return valid_path(path);
+}
+
+// UTF-8 spelling for the parser's filename; POSIX bytes are copied unchanged.
+path_spelling :: (path: Path_Value) -> string {
+	if path.encoding == .POSIX_BYTES {
+		return copy_string(xx path.code_units);
+	}
+
+
+	units := path.code_units;
+	bytes: [..] u8;
+	i := 0;
+	while i + 1 < units.count {
+		code := units[i].(u32) | (units[i + 1].(u32) << 8);
+		i += 2;
+		if code >= 0xD800 && code < 0xDC00 && i + 1 < units.count {
+			low := units[i].(u32) | (units[i + 1].(u32) << 8);
+			if low >= 0xDC00 && low < 0xE000 {
+				code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+				i += 2;
+			}
+		}
+
+		if code < 0x80 {
+			array_add(*bytes, xx code);
+		} else if code < 0x800 {
+			array_add(*bytes, (0xC0 | (code >> 6)).(u8), (0x80 | (code & 0x3F)).(u8));
+		} else if code < 0x10000 {
+			array_add(*bytes, (0xE0 | (code >> 12)).(u8), (0x80 | ((code >> 6) & 0x3F)).(u8), (0x80 | (code & 0x3F)).(u8));
+		} else {
+			array_add(*bytes, (0xF0 | (code >> 18)).(u8), (0x80 | ((code >> 12) & 0x3F)).(u8), (0x80 | ((code >> 6) & 0x3F)).(u8), (0x80 | (code & 0x3F)).(u8));
+		}
+	}
+
+	return xx bytes;
+}
+
 #scope_file
 
 append_utf16_unit :: (units: *[..] u8, unit: u32) {
