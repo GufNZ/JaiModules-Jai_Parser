@@ -516,7 +516,7 @@ register_contexts :: (model: *Provider_Model, registrations: [] Context_Registra
 }
 
 // Validates the whole batch against staged copies, then commits every member and one new frontier together, or nothing.
-apply_source_batch :: (model: *Provider_Model, batch: Source_Batch) -> bool, [] u8, Operation_Error {
+apply_source_batch :: (model: *Provider_Model, batch: Source_Batch) -> (ok: bool, frontier: [] u8, error: Operation_Error) {
 	staging: Batch_Staging;
 	staging.model = model;
 	staging.storage = New(Pool);

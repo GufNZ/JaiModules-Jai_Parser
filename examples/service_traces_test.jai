@@ -80,17 +80,19 @@ reopen :: (trace: *Trace) {
 
 // Every child registration has been released: only the `.SESSION` handle and, before shutdown, the shutdown reservation remain charged.
 finish :: (trace: *Trace) {
-	lock(*trace.session.gate);
-	ledger := trace.session.ledger;
-	stopped := trace.session.lifecycle == .STOPPED;
-	for ledger.live {
-		name := it_index.(Service.Limit_Name);
-		live_expected := ifx name == .LIVE_HANDLES then 1;
-		reserved_expected := ifx !stopped && (name == .LIVE_HANDLES || name == .IN_FLIGHT_OPERATIONS) then 1;
-		assert(it == live_expected && ledger.reserved[it_index] == reserved_expected, "%: ledger % holds % live, % reserved.", trace.name, name, it, ledger.reserved[it_index]);
-	}
-
-	unlock(*trace.session.gate);
+	Service.with_lock(
+		*trace.session.gate,
+		#code {
+			ledger := trace.session.ledger;
+			stopped := trace.session.lifecycle == .STOPPED;
+			for ledger.live {
+				name := it_index.(Service.Limit_Name);
+				live_expected := ifx name == .LIVE_HANDLES then 1;
+				reserved_expected := ifx !stopped && (name == .LIVE_HANDLES || name == .IN_FLIGHT_OPERATIONS) then 1;
+				assert(it == live_expected && ledger.reserved[it_index] == reserved_expected, "%: ledger % holds % live, % reserved.", trace.name, name, it, ledger.reserved[it_index]);
+			}
+		}
+	);
 
 	service := trace.host.service;
 	handle := trace.host.session;

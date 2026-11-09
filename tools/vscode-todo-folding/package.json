@@ -2,7 +2,7 @@
 	"name": "todo-folding",
 	"displayName": "Todo Folding",
 	"description": "Fold a Markdown task list so only open tasks and their ancestors are expanded.",
-	"version": "0.0.1",
+	"version": "0.0.3",
 	"publisher": "local",
 	"private": true,
 	"engines": {
@@ -41,7 +41,17 @@
 				"todoFolding.foldOnSave": {
 					"type": "boolean",
 					"default": true,
-					"description": "Run 'Todo: Show Open Tasks' when a file named todo.md is saved in the active editor."
+					"description": "Run 'Todo: Show Open Tasks' when a file matching 'todoFolding.foldOnSavePatterns' is saved in the active editor."
+				},
+				"todoFolding.foldOnSavePatterns": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [
+						"*.md"
+					],
+					"description": "Glob patterns selecting files that fold on save.  Patterns without '/' match the file name in any folder; others match the full path."
 				}
 			}
 		}

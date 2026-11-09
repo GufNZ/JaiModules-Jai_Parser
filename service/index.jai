@@ -617,7 +617,7 @@ visibility_of :: (b: *Index_Builder, id: s64) -> Visibility_Syntax {
 // The `parse_declaration_node` prefix: `#program_export ["name"]`, `#no_reset`, then `$` or `$$`.
 // Returns the first token after it, the export occurrence and whether the prefix agrees with the recorded flags.
 // An uncorrelated export marker reports partial metadata.
-correlate_prefix :: (b: *Index_Builder, id: s64, first: s64, flags: Field_Value, export_name: [] u8) -> s64, *Program_Export_Occurrence, bool {
+correlate_prefix :: (b: *Index_Builder, id: s64, first: s64, flags: Field_Value, export_name: [] u8) -> (next_token: s64, program_export: *Program_Export_Occurrence, prefix_ok: bool) {
 	i := first;
 	export: *Program_Export_Occurrence;
 	marked := token_is(b, i, byte_tag(#char "#")) && identifier_is(b, i + 1, "program_export");

@@ -434,6 +434,7 @@ Session :: struct {
 	head_target: *World;
 	shutdown: *Operation;
 	shutdown_control: *Operation;
+	shutdown_registration: Handle(.SHUTDOWN);
 	session_released: bool;
 	// Deterministic monotonic clock, advanced only by `wait`.
 	now: u64;
@@ -450,6 +451,16 @@ Service :: struct {
 	#if TEST_HOOKS {
 		owned_allocations: s64;
 		owned_bytes: s64;
+		fail_worker_startup: bool;
+		fail_shutdown_reserve_at: s64;
+		shutdown_reserve_attempts: s64;
+		allow_failed_open_output: bool;
+		allow_failed_open_argument: bool;
+		cached_open_argument_allocator: bool;
+		session_owned_directory: bool;
+		directory_allocator: Allocator;
+		retry_failed_directory_allocation: bool;
+		reject_changed_directory: bool;
 	}
 	incarnation: Service_Incarnation;
 	clock_identity: [] u8;
@@ -476,19 +487,20 @@ open_service :: (authority_namespace: [] u8, epoch: u64, ceilings: Limits, minim
 	return service;
 }
 
-open_session :: (service: *Service, options: Session_Options) -> bool, Opened, Operation_Error {
+open_session :: (service: *Service, options: Session_Options) -> (ok: bool, opened: Opened, error: Operation_Error) {
 	if options.version != INTERFACE_VERSION {
 		return false, .{}, .{code = .INVALID_VERSION};
 	}
 
 
 	if !options.workspace.count || !options.provider_namespace.count || !options.host_authority.count {
-		return false, .{}, invalid(.MISSING, ifx !options.workspace.count
-			then "workspace"
-			else ifx !options.provider_namespace.count
-				then "provider_namespace"
-				else "host_authority"
-		);
+		name := ifx options.workspace.count
+			then ifx options.provider_namespace.count
+				then "host_authority"
+				else "provider_namespace"
+			else "workspace";
+
+		return false, .{}, open_argument_error(service, .MISSING, name);
 	}
 
 
@@ -498,7 +510,7 @@ open_session :: (service: *Service, options: Session_Options) -> bool, Opened, O
 
 
 	// Only the implemented tuple is admitted; there is no fallback to a neighbouring schema.
-	tuples_ok := configuration_id(options.supported_tuples);
+	tuples_ok := options.supported_tuples.count == 1;
 	for options.supported_tuples {
 		tuples_ok &&= it == IMPLEMENTED_SCHEMA_TUPLE;
 	}
@@ -510,7 +522,7 @@ open_session :: (service: *Service, options: Session_Options) -> bool, Opened, O
 
 	limit_failure, limits, limit_name := negotiate_limits(options.requested_limits, service.ceilings, service.minima);
 	if limit_failure == .INVALID_ARGUMENT {
-		return false, .{}, invalid(.OUT_OF_RANGE, "requested_limits");
+		return false, .{}, open_argument_error(service, .OUT_OF_RANGE, "requested_limits");
 	}
 
 
@@ -519,10 +531,19 @@ open_session :: (service: *Service, options: Session_Options) -> bool, Opened, O
 	}
 
 
-	lock(*service.directory);
-	identities_ok, identities := issue_session(*service.incarnation);
-	owner_token := service.incarnation.session_counter.next - 1;
-	unlock(*service.directory);
+	identities_ok: bool;
+	identities: Session_Identities;
+	owner_token: u64;
+	lock(
+		*service.directory,
+		#code {
+			push_allocator(service.allocator);
+
+			identities_ok, identities = issue_session(*service.incarnation);
+			owner_token = service.incarnation.session_counter.next - 1;
+		}
+	);
+
 	if !identities_ok {
 		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
 	}
@@ -548,7 +569,7 @@ open_session :: (service: *Service, options: Session_Options) -> bool, Opened, O
 	session.service = service;
 	session.identities = identities;
 	session.identities.session = xx array_copy(identities.session.([] u8));
-	free(identities.session.data,, output_allocator());
+	free(identities.session.data,, service.allocator);
 	session.workspace = array_copy(options.workspace);
 	session.ledger.limits = limits;
 	session.registry.session = session.identities.session;
@@ -557,8 +578,16 @@ open_session :: (service: *Service, options: Session_Options) -> bool, Opened, O
 	session.provider = open_provider_model(options.provider_capabilities, options.provider_namespace, session.identities.session, options.host_authority, limits);
 	contexts_ok, context_error := register_contexts(session.provider, options.contexts);
 	if !contexts_ok {
+		error_ok, output_error := try_output_operation_error(output_allocator(), context_error);
+		#if TEST_HOOKS {
+			if !error_ok && service.allow_failed_open_output {
+				output_error = .{code = context_error.code, rule = context_error.rule};
+			}
+		}
+
+		free(context_error.path.data);
 		destroy_session(session);
-		return false, .{}, context_error;
+		return false, .{}, output_error;
 	}
 
 
@@ -569,26 +598,74 @@ open_session :: (service: *Service, options: Session_Options) -> bool, Opened, O
 	}
 
 
-	commit_reserved(*session.ledger, .LIVE_HANDLES, 1);
-	session.shutdown_control = New(Operation);
-	handle := register(session, .SESSION, .{});
-	if !start_workers(session) {
-		session.registrations[handle.slot].* = .{};
-		release_handle(*session.registry, handle);
+	if !prepare_shutdown_backing(session) {
 		destroy_session(session);
 		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
 	}
 
 
-	lock(*service.directory);
-	array_add(*service.sessions, session);
-	unlock(*service.directory);
-	return true, .{session = handle, description = describe(session)}, .{};
+	snapshot := describe(session, context.allocator);
+	output_ok, description := try_output_description(output_allocator(), snapshot);
+	free_description(*snapshot);
+	#if TEST_HOOKS {
+		output_ok ||= service.allow_failed_open_output;
+	}
+
+	if !output_ok {
+		destroy_session(session);
+		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	}
+
+
+	commit_reserved(*session.ledger, .LIVE_HANDLES, 1);
+	handle := Handle(.SESSION).{
+		session = session.identities.session,
+		slot = 0,
+		generation = 1,
+		owner_service = service,
+		owner_token = owner_token,
+	};
+
+	session.registry.slots[0].live = true;
+	session.registrations[0].kind = .SESSION;
+	if !start_workers(session) {
+		session.registrations[handle.slot].* = .{};
+		release_handle(*session.registry, handle);
+		free_description(*description,, output_allocator());
+		destroy_session(session);
+		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	}
+
+
+	if !admit_directory(session) {
+		lock(
+			*session.gate,
+			#code {
+				session.lifecycle = .DRAINING;
+				session.shutdown = session.shutdown_control;
+				session.shutdown_control = null;
+				wake_all(*session.changed);
+			}
+		);
+
+		if session.threaded {
+			thread_is_done(*session.reaper, -1);
+			thread_deinit(*session.reaper);
+		}
+
+		session.registrations[handle.slot].* = .{};
+		release_handle(*session.registry, handle);
+		free_description(*description,, output_allocator());
+		destroy_session(session);
+		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	}
+
+
+	return true, .{session = handle, description = description}, .{};
 }
 
-describe_session :: (service: *Service, handle: Handle(.SESSION)) -> bool, Session_Description, Operation_Error {
-	call := enter_call(service, handle);
-	defer leave_call(call);
+describe_session :: (service: *Service, handle: Handle(.SESSION)) -> (ok: bool, description: Session_Description, error: Operation_Error) {
+	call := use_call(service, handle);
 
 	session := validate_session(call, handle);
 	if !session {
@@ -598,87 +675,518 @@ describe_session :: (service: *Service, handle: Handle(.SESSION)) -> bool, Sessi
 
 	use_owner_memory(session);
 
-	return true, describe(session), .{};
+	snapshot := describe(session, context.allocator);
+	allocator := output_allocator();
+	ok: bool;
+	output: Session_Description;
+	unlock(
+		*session.gate,
+		#code {
+			ok, output = try_output_description(allocator, snapshot);
+			free_description(*snapshot);
+		}
+	);
+
+	live := !!validate_session(session, handle);
+	#if TEST_HOOKS {
+		live ||= session.faults.allow_retired_description;
+	}
+
+	if !live {
+		unlock(
+			*session.gate,
+			#code {
+				free_description(*output,, allocator);
+			}
+		);
+
+		return false, .{}, stale(.SESSION);
+	}
+
+
+	if !ok {
+		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	}
+
+
+	return true, output, .{};
 }
 
-submit_source_batch :: (service: *Service, handle: Handle(.SESSION), batch: Source_Batch) -> bool, Accepted, Operation_Error {
-	call := enter_call(service, handle);
-	defer leave_call(call);
+submit_source_batch :: (service: *Service, handle: Handle(.SESSION), batch: Source_Batch) -> (ok: bool, accepted: Accepted, error: Operation_Error) {
+	call := use_call(service, handle);
 
 	session := validate_session(call, handle);
 	if !session {
 		return false, .{}, stale(.SESSION);
 	}
 
+
 	use_owner_memory(session);
+
+	backing: Source_Update_Backing;
+	defer finish_source_update_backing(session, *backing);
+
+	provider_backing: Source_Provider_Backing;
+	defer finish_source_provider_backing(session, *provider_backing);
+
+	while true {
+		ready, preparation_error := prepare_source_ticket_registration(session, handle, batch.expected_frontier);
+		if !ready {
+			return false, .{}, preparation_error;
+		}
+
+		if session.identities.operation_counter.next == U64_MAX {
+			return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		}
+
+
+		if !source_operation_backing_ready(session) {
+			prepared := prepare_source_operation_backing(session);
+			current := validate_session(session, handle);
+			#if TEST_HOOKS {
+				if !current && session.faults.allow_stale_source_operation {
+					current = session;
+				}
+			}
+
+			if !current {
+				return false, .{}, stale(.SESSION);
+			}
+
+
+			if session.lifecycle != .OPEN {
+				return false, .{}, .{code = .SERVICE_CLOSED};
+			}
+
+
+			if !bytes_equal(batch.expected_frontier, session.provider.accepted_frontier) {
+				return false, .{}, .{code = .BASE_MISMATCH, scope = .FRONTIER};
+			}
+
+
+			if !prepared {
+				#if TEST_HOOKS {
+					if session.faults.retry_failed_source_operation {
+						continue;
+					}
+				}
+
+
+				return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+			}
+
+
+			continue;
+		}
+
+
+		if !backing.operation {
+			prepared := prepare_source_update_backing(session, batch.events.count, *backing);
+			if !prepared {
+				finish_source_update_backing(session, *backing);
+			}
+
+			if !validate_session(session, handle) {
+				return false, .{}, stale(.SESSION);
+			}
+
+
+			if session.lifecycle != .OPEN {
+				return false, .{}, .{code = .SERVICE_CLOSED};
+			}
+
+
+			if !bytes_equal(batch.expected_frontier, session.provider.accepted_frontier) {
+				return false, .{}, .{code = .BASE_MISMATCH, scope = .FRONTIER};
+			}
+
+
+			if !prepared {
+				#if TEST_HOOKS {
+					if session.faults.retry_failed_source_update {
+						continue;
+					}
+				}
+
+
+				return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+			}
+
+
+			continue;
+		}
+
+
+		if !provider_backing.model {
+			prepared := prepare_source_provider_backing(session, *provider_backing);
+			current := validate_session(session, handle);
+			#if TEST_HOOKS {
+				if !current && session.faults.allow_stale_source_provider {
+					current = session;
+				}
+			}
+
+			if !current {
+				return false, .{}, stale(.SESSION);
+			}
+
+
+			if session.lifecycle != .OPEN {
+				return false, .{}, .{code = .SERVICE_CLOSED};
+			}
+
+
+			if !bytes_equal(batch.expected_frontier, session.provider.accepted_frontier) {
+				return false, .{}, .{code = .BASE_MISMATCH, scope = .FRONTIER};
+			}
+
+
+			if !prepared {
+				#if TEST_HOOKS {
+					if session.faults.retry_failed_source_provider {
+						continue;
+					}
+				}
+
+
+				return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+			}
+
+
+			continue;
+		}
+
+
+		if !source_provider_arrays_ready(session, *provider_backing) {
+			prepared := prepare_source_provider_arrays(session, *provider_backing);
+			current := validate_session(session, handle);
+			#if TEST_HOOKS {
+				if !current && session.faults.allow_stale_source_provider_arrays {
+					current = session;
+				}
+			}
+
+			if !current {
+				return false, .{}, stale(.SESSION);
+			}
+
+
+			if session.lifecycle != .OPEN {
+				return false, .{}, .{code = .SERVICE_CLOSED};
+			}
+
+
+			if !bytes_equal(batch.expected_frontier, session.provider.accepted_frontier) {
+				return false, .{}, .{code = .BASE_MISMATCH, scope = .FRONTIER};
+			}
+
+
+			if !prepared {
+				#if TEST_HOOKS {
+					if session.faults.retry_failed_source_provider_arrays {
+						continue;
+					}
+				}
+
+
+				return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+			}
+
+
+			continue;
+		}
+
+
+		if !source_provider_states_ready(session, *provider_backing) {
+			prepared := prepare_source_provider_states(session, *provider_backing);
+			current := validate_session(session, handle);
+			#if TEST_HOOKS {
+				if !current && session.faults.allow_stale_source_provider_states {
+					current = session;
+				}
+			}
+
+			if !current {
+				return false, .{}, stale(.SESSION);
+			}
+
+
+			if session.lifecycle != .OPEN {
+				return false, .{}, .{code = .SERVICE_CLOSED};
+			}
+
+
+			if !bytes_equal(batch.expected_frontier, session.provider.accepted_frontier) {
+				return false, .{}, .{code = .BASE_MISMATCH, scope = .FRONTIER};
+			}
+
+
+			if !prepared {
+				#if TEST_HOOKS {
+					if session.faults.retry_failed_source_provider_states {
+						continue;
+					}
+				}
+
+
+				return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+			}
+
+
+			continue;
+		}
+
+
+		if !source_provider_revisions_ready(session, *provider_backing) {
+			prepared := prepare_source_provider_revisions(session, *provider_backing);
+			if !validate_session(session, handle) {
+				return false, .{}, stale(.SESSION);
+			}
+
+
+			if session.lifecycle != .OPEN {
+				return false, .{}, .{code = .SERVICE_CLOSED};
+			}
+
+
+			if !bytes_equal(batch.expected_frontier, session.provider.accepted_frontier) {
+				return false, .{}, .{code = .BASE_MISMATCH, scope = .FRONTIER};
+			}
+
+
+			if !prepared {
+				return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+			}
+
+
+			continue;
+		}
+
+
+		ok, accepted, error, retry := submit_source_batch_attempt(session, handle, batch, *backing, *provider_backing);
+		if !retry {
+			return ok, accepted, error;
+		}
+	}
+
+	return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+}
+
+prepare_source_ticket_registration :: (session: *Session, handle: Handle(.SESSION), frontier: [] u8) -> (ok: bool, error: Operation_Error) {
+	while !registration_backing_ready(session) {
+		if !validate_session(session, handle) {
+			return false, stale(.SESSION);
+		}
+
+
+		if session.lifecycle != .OPEN {
+			return false, .{code = .SERVICE_CLOSED};
+		}
+
+
+		for Limit_Name.[.LIVE_HANDLES, .IN_FLIGHT_OPERATIONS, .CONCURRENT_ACQUISITIONS] {
+			if session.ledger.live[it] >= session.ledger.limits.values[it] - session.ledger.reserved[it] {
+				return false, limit(it);
+			}
+		}
+
+
+		prepared := prepare_registration_backing(session);
+		current := validate_session(session, handle);
+		#if TEST_HOOKS {
+			if !current && session.faults.allow_stale_source_registration {
+				current = session;
+			}
+		}
+
+		if !current {
+			return false, stale(.SESSION);
+		}
+
+
+		if session.lifecycle != .OPEN {
+			return false, .{code = .SERVICE_CLOSED};
+		}
+
+
+		if !bytes_equal(frontier, session.provider.accepted_frontier) {
+			return false, .{code = .BASE_MISMATCH, scope = .FRONTIER};
+		}
+
+
+		if !prepared {
+			#if TEST_HOOKS {
+				if session.faults.retry_failed_source_registration {
+					continue;
+				}
+			}
+
+
+			return false, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		}
+	}
+
+
+	if !validate_session(session, handle) {
+		return false, stale(.SESSION);
+	}
 
 
 	if session.lifecycle != .OPEN {
-		return false, .{}, .{code = .SERVICE_CLOSED};
+		return false, .{code = .SERVICE_CLOSED};
+	}
+
+
+	if !bytes_equal(frontier, session.provider.accepted_frontier) {
+		return false, .{code = .BASE_MISMATCH, scope = .FRONTIER};
+	}
+
+	for Limit_Name.[.LIVE_HANDLES, .IN_FLIGHT_OPERATIONS, .CONCURRENT_ACQUISITIONS] {
+		if session.ledger.live[it] >= session.ledger.limits.values[it] - session.ledger.reserved[it] {
+			return false, limit(it);
+		}
+	}
+
+
+	return true, .{};
+}
+
+submit_source_batch_attempt :: (
+	session: *Session,
+	handle: Handle(.SESSION),
+	batch: Source_Batch,
+	backing: *Source_Update_Backing,
+	provider_backing: *Source_Provider_Backing
+) -> (ok: bool, accepted: Accepted, error: Operation_Error, retry: bool) {
+	if session.lifecycle != .OPEN {
+		return false, .{}, .{code = .SERVICE_CLOSED}, false;
 	}
 
 
 	taken, missing := take(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS, .CONCURRENT_ACQUISITIONS);
 	if !taken {
-		return false, .{}, limit(missing);
+		return false, .{}, limit(missing), false;
 	}
 
 
-	staged := stage_provider_copy(session.provider);
+	staged := provider_backing.model;
+	stage_provider_copy(session.provider, provider_backing);
+	provider_backing.* = .{};
 	session.active_admissions += 1;
-	unlock(*session.gate);
-	#if TEST_HOOKS {
-		worker_pause(session, .SOURCE_STAGING);
+	ok: bool;
+	frontier: [] u8;
+	allocator := output_allocator();
+	output_ok: bool;
+	output: [] u8;
+	error: Operation_Error;
+	unlock(
+		*session.gate,
+		#code {
+			#if TEST_HOOKS {
+				worker_pause(session, .SOURCE_STAGING);
+			}
+
+			ok, frontier, error = apply_source_batch(staged, batch);
+			if ok {
+				output_ok, output = try_output_bytes(allocator, frontier);
+			} else {
+				staged_error := error;
+				error_ok, copied_error := try_output_operation_error(allocator, staged_error);
+				#if TEST_HOOKS {
+					if !error_ok && session.faults.allow_failed_argument_error {
+						copied_error = .{code = staged_error.code, rule = staged_error.rule, scope = staged_error.scope};
+					}
+				}
+
+				free(staged_error.path.data);
+				error = copied_error;
+			}
+		}
+	);
+
+	defer finish_source_admission(session, staged, *output, *error, allocator);
+
+	if !validate_session(session, handle) {
+		give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
+		return false, .{}, stale(.SESSION), false;
 	}
 
-	ok, frontier, error := apply_source_batch(staged, batch);
-	lock(*session.gate);
-	defer {
-		unlock(*session.gate);
-		release_provider_copy(staged);
-		lock(*session.gate);
-		session.active_admissions -= 1;
-		give(session, .CONCURRENT_ACQUISITIONS);
-		wake_all(*session.changed);
-	}
 
 	if session.lifecycle != .OPEN {
 		give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
-		return false, .{}, .{code = .SERVICE_CLOSED};
+		return false, .{}, .{code = .SERVICE_CLOSED}, false;
 	}
 
 
 	if !bytes_equal(batch.expected_frontier, session.provider.accepted_frontier) {
 		give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
-		return false, .{}, .{code = .BASE_MISMATCH, scope = .FRONTIER};
+		return false, .{}, .{code = .BASE_MISMATCH, scope = .FRONTIER}, false;
 	}
 
 
 	if !ok {
 		give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
-		return false, .{}, error;
+		output_error := error;
+		error = .{};
+		return false, .{}, output_error, false;
 	}
 
 
-	commit_provider_copy(session.provider, staged);
+	#if TEST_HOOKS {
+		output_ok ||= session.faults.allow_failed_submit_output;
+	}
 
-	documents := NewArray(batch.events.count, [] u8);
+	if !output_ok {
+		give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
+		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}}, false;
+	}
+
+	if !registration_backing_ready(session) || !source_operation_backing_ready(session) {
+		give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
+		return false, .{}, .{}, true;
+	}
+
+
+	if session.identities.operation_counter.next == U64_MAX {
+		give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
+		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}}, false;
+	}
+
+
+	ok_token, token := issue_token(*session.identities.operation_counter);
+	assert(ok_token);
+	for 0..7 {
+		backing.identity[backing.identity.count - 8 + it] = xx ((token >> (it * 8)) & 0xFF);
+	}
+
+	documents := backing.documents;
 	for batch.events {
-		documents[it_index] = accepted_document(session, it.document);
+		documents[it_index] = find_document(staged, it.document).document;
 	}
 
 	sort_canonical(documents);
-	operation := new_update_operation(session, frontier, documents);
+	operation := backing.operation;
+	operation.* = .{
+		identity = xx backing.identity,
+		kind = .UPDATE,
+		frontier = frontier,
+		documents = documents,
+	};
+
+	commit_provider_copy(session.provider, staged);
+	array_add(*session.operations, operation);
+	backing.* = .{};
 	supersede_obsolete(session);
 	start_candidate(session, operation);
 	ticket := register(session, .TICKET, .{operation = operation});
 	operation.registrations += 1;
-	return true, .{ticket = ticket, frontier = array_copy(frontier,, output_allocator())}, .{};
+	accepted := Accepted.{ticket = ticket, frontier = output};
+	output = .[];
+	return true, accepted, .{}, false;
 }
 
-request_analysis :: (service: *Service, handle: Handle(.SESSION), request: Analysis_Request) -> bool, Accepted, Operation_Error {
-	call := enter_call(service, handle);
-	defer leave_call(call);
+request_analysis :: (service: *Service, handle: Handle(.SESSION), request: Analysis_Request) -> (ok: bool, accepted: Accepted, error: Operation_Error) {
+	call := use_call(service, handle);
 	session := validate_session(call, handle);
 	if !session {
 		return false, .{}, stale(.SESSION);
@@ -703,7 +1211,7 @@ request_analysis :: (service: *Service, handle: Handle(.SESSION), request: Analy
 
 
 	if !request.documents.count {
-		return false, .{}, invalid(.MISSING, "documents");
+		return false, .{}, export_argument_error(session, handle, .MISSING, "documents");
 	}
 
 
@@ -712,21 +1220,65 @@ request_analysis :: (service: *Service, handle: Handle(.SESSION), request: Analy
 	}
 
 
-	documents := NewArray(request.documents.count, [] u8);
 	for request.documents {
 		state := find_document(session.provider, it);
 		if !state {
-			return false, .{}, invalid_element(.INCONSISTENT_BINDING, "documents", it_index);
+			return false, .{}, export_argument_error(session, handle, .INCONSISTENT_BINDING, "documents", it_index);
 		}
 
 
 		for 0..it_index - 1 {
 			if bytes_equal(request.documents[it], state.document) {
-				return false, .{}, invalid_element(.DUPLICATE, "documents", it_index);
+				return false, .{}, export_argument_error(session, handle, .DUPLICATE, "documents", it_index);
 			}
 		}
 
-		documents[it_index] = state.document;
+	}
+
+	documents := NewArray(request.documents.count, [] u8);
+	for request.documents {
+		documents[it_index] = array_copy(find_document(session.provider, it).document);
+	}
+
+	frontier := array_copy(session.provider.accepted_frontier);
+	allocator := output_allocator();
+	output: [] u8;
+	output_ok: bool;
+	defer finish_analysis_receipt(session, *frontier, *documents, *output, allocator);
+
+	unlock(
+		*session.gate,
+		#code {
+			output_ok, output = try_output_bytes(allocator, frontier);
+		}
+	);
+
+	if !validate_session(session, handle) {
+		return false, .{}, stale(.SESSION);
+	}
+
+
+	if session.lifecycle != .OPEN {
+		return false, .{}, .{code = .SERVICE_CLOSED};
+	}
+
+
+	frontier_matches := bytes_equal(frontier, session.provider.accepted_frontier);
+	#if TEST_HOOKS {
+		frontier_matches ||= session.faults.skip_analysis_frontier_check;
+	}
+
+	if !frontier_matches {
+		return false, .{}, .{code = .BASE_MISMATCH, scope = .FRONTIER};
+	}
+
+
+	#if TEST_HOOKS {
+		output_ok ||= session.faults.allow_failed_analysis_output;
+	}
+
+	if !output_ok {
+		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
 	}
 
 
@@ -737,16 +1289,19 @@ request_analysis :: (service: *Service, handle: Handle(.SESSION), request: Analy
 
 
 	sort_canonical(documents);
-	operation := new_update_operation(session, session.provider.accepted_frontier, documents);
+	operation := new_update_operation(session, frontier, documents);
 	start_candidate(session, operation);
 	ticket := register(session, .TICKET, .{operation = operation});
 	operation.registrations += 1;
-	return true, .{ticket = ticket, frontier = array_copy(operation.frontier,, output_allocator())}, .{};
+	accepted := Accepted.{ticket = ticket, frontier = output};
+	frontier = .[];
+	documents = .[];
+	output = .[];
+	return true, accepted, .{};
 }
 
-observe_ticket :: (service: *Service, handle: Handle(.TICKET)) -> bool, Ticket_Observation, Operation_Error {
-	call := enter_call(service, handle);
-	defer leave_call(call);
+observe_ticket :: (service: *Service, handle: Handle(.TICKET)) -> (ok: bool, observation: Ticket_Observation, error: Operation_Error) {
+	call := use_call(service, handle);
 
 	session, registration := lookup_pinned(call, handle);
 	if !session {
@@ -758,7 +1313,13 @@ observe_ticket :: (service: *Service, handle: Handle(.TICKET)) -> bool, Ticket_O
 
 	operation := registration.operation;
 	if operation.terminal {
-		return true, .{terminal = true, observation = copy_observation(update_observation(operation))}, .{};
+		ok, output, error := export_observation(session, handle, update_observation(operation));
+		if !ok {
+			return false, .{}, error;
+		}
+
+
+		return true, .{terminal = true, observation = output}, .{};
 	}
 
 
@@ -767,8 +1328,20 @@ observe_ticket :: (service: *Service, handle: Handle(.TICKET)) -> bool, Ticket_O
 	}
 
 
-	waiter, error := new_waiter(session, operation);
+	waiter, error, terminal_winner := new_waiter(session, handle, operation);
 	if !waiter.generation {
+		if terminal_winner {
+			_, current := lookup_pinned(session, handle);
+			ok, output, terminal_error := export_observation(session, handle, update_observation(current.operation));
+			if !ok {
+				return false, .{}, terminal_error;
+			}
+
+
+			return true, .{terminal = true, observation = output}, .{};
+		}
+
+
 		return false, .{}, error;
 	}
 
@@ -776,7 +1349,7 @@ observe_ticket :: (service: *Service, handle: Handle(.TICKET)) -> bool, Ticket_O
 	return true, .{waiter = waiter}, .{};
 }
 
-acquire_world :: (service: *Service, selector: World_Selector) -> bool, World_Acquisition, Operation_Error {
+acquire_world :: (service: *Service, selector: World_Selector) -> (ok: bool, acquisition: World_Acquisition, error: Operation_Error) {
 	owner_service := ifx selector.kind == .HEAD
 		then selector.session.owner_service
 		else ifx selector.use_waiter
@@ -787,8 +1360,7 @@ acquire_world :: (service: *Service, selector: World_Selector) -> bool, World_Ac
 		else ifx selector.use_waiter
 			then selector.waiter.owner_token
 			else selector.ticket.owner_token;
-	call := enter_owner(service, owner_service, owner_token);
-	defer leave_call(call);
+	call := use_owner(service, owner_service, owner_token);
 
 	if !call {
 		return
@@ -814,26 +1386,33 @@ acquire_world :: (service: *Service, selector: World_Selector) -> bool, World_Ac
 
 
 		if !bytes_equal(selector.workspace, session.workspace) {
-			return false, .{}, invalid(.INCONSISTENT_BINDING, "workspace");
+			return false, .{}, export_argument_error(session, selector.session, .INCONSISTENT_BINDING, "workspace");
 		}
 
 
 		head := session.head;
 		if head && bytes_equal(head.frontier, selector.expected_frontier) {
-			ok, acquisition, error := acquire_world_handle(session, head);
+			ok, acquisition, error := acquire_world_handle(session, selector.session, head);
 			return ok, acquisition, error;
 		}
 
 
 		for session.operations {
 			if it.kind == .UPDATE && !it.terminal && bytes_equal(it.frontier, selector.expected_frontier) {
-				return true, .{kind = .PENDING, operation_identity = xx array_copy(it.identity.([] u8))}, .{};
+				ok, acquisition, error := export_world_observation(session, selector.session, pending_observation(it));
+				return ok, acquisition, error;
 			}
 		}
 
 
 		if head {
-			return true, .{kind = .UNAVAILABLE, unavailable = .FRONTIER_MISMATCH, published_frontier = array_copy(head.frontier)}, .{};
+			ok, frontier, error := export_bytes(session, selector.session, head.frontier);
+			if !ok {
+				return false, .{}, error;
+			}
+
+
+			return true, .{kind = .UNAVAILABLE, unavailable = .FRONTIER_MISMATCH, published_frontier = frontier}, .{};
 		}
 
 
@@ -866,28 +1445,35 @@ acquire_world :: (service: *Service, selector: World_Selector) -> bool, World_Ac
 
 
 	operation := registration.operation;
-	if observation.kind == .PENDING {
-		return true, .{kind = .PENDING, operation_identity = xx array_copy(operation.identity.([] u8))}, .{};
+	if observation.kind == .PENDING || observation.update.kind != .PUBLISHED {
+		if selector.use_waiter {
+			ok, acquisition, error := export_world_observation(session, selector.waiter, observation);
+			return ok, acquisition, error;
+		}
+
+
+		ok, acquisition, error := export_world_observation(session, selector.ticket, observation);
+		return ok, acquisition, error;
 	}
 
 
-	if observation.update.kind != .PUBLISHED {
-		return true, .{kind = .UNAVAILABLE, unavailable = .UPDATE_TERMINAL, observation = copy_observation(observation)}, .{};
+	if selector.use_waiter {
+		ok, acquisition, error := acquire_world_handle(session, selector.waiter, operation.world);
+		return ok, acquisition, error;
 	}
 
 
-	ok, acquisition, error := acquire_world_handle(session, operation.world);
+	ok, acquisition, error := acquire_world_handle(session, selector.ticket, operation.world);
 	return ok, acquisition, error;
 }
 
-query :: (service: *Service, request: Query_Request) -> bool, Query_Start, Operation_Error {
+query :: (service: *Service, request: Query_Request) -> (ok: bool, started: Query_Start, error: Operation_Error) {
 	if request.version != INTERFACE_VERSION {
 		return false, .{}, .{code = .INVALID_VERSION};
 	}
 
 
-	call := enter_call(service, request.world);
-	defer leave_call(call);
+	call := use_call(service, request.world);
 
 	session, registration := lookup_pinned(call, request.world);
 	if !session {
@@ -910,6 +1496,18 @@ query :: (service: *Service, request: Query_Request) -> bool, Query_Start, Opera
 		}
 	}
 
+	if (
+		member >= 0
+		&& request.kind != .SEMANTIC_QUERY
+		&& request.kind != .COMPILER_EVALUATION
+		&& world.members[member].state == .PRESENT
+		&& (request.kind != .SYNTAX_DIAGNOSTICS || world.syntax[member].diagnostics)
+	) {
+		ok, started, error := start_immediate_result(session, request.world, world, member, request.kind);
+		return ok, started, error;
+	}
+
+
 	// Every query gets its own operation identity, even when it is answered at once or shares a task.
 	ok, identity := issue_operation(*session.identities);
 	if !ok {
@@ -927,7 +1525,8 @@ query :: (service: *Service, request: Query_Request) -> bool, Query_Start, Opera
 			query_kind = request.kind,
 			query = .{kind = .UNAVAILABLE, unavailable = .NOT_CAPTURED},
 		};
-		return true, .{kind = .TERMINAL, observation = copy_observation(uncaptured)}, .{};
+		exported, output, error := export_query_terminal(session, request.world, uncaptured);
+		return exported, output, error;
 	}
 
 
@@ -935,39 +1534,23 @@ query :: (service: *Service, request: Query_Request) -> bool, Query_Start, Opera
 	immediate := query_observation(identity, world, member, request.kind, terminal);
 	if request.kind == .SEMANTIC_QUERY || request.kind == .COMPILER_EVALUATION {
 		immediate.query.unsupported = request.kind;
-		return true, .{kind = .TERMINAL, observation = copy_observation(immediate)}, .{};
+		exported, output, error := export_query_terminal(session, request.world, immediate);
+		return exported, output, error;
 	}
 
 
 	if world.members[member].state != .PRESENT {
 		immediate.query = .{kind = .UNAVAILABLE, unavailable = .SOURCE_ABSENT};
-		return true, .{kind = .TERMINAL, observation = copy_observation(immediate)}, .{};
-	}
-
-
-	if request.kind != .SYNTAX_DIAGNOSTICS || world.syntax[member].diagnostics {
-		taken := take(session, .LIVE_HANDLES);
-		if !taken {
-			return false, .{}, limit(.LIVE_HANDLES);
-		}
-
-
-		result := new_result(session, world, member, request.kind);
-		result.references += 1;
-		return true, .{kind = .AVAILABLE, result = register(session, .RESULT, .{result = result})}, .{};
+		exported, output, error := export_query_terminal(session, request.world, immediate);
+		return exported, output, error;
 	}
 
 
 	// An obsolete world can still serve published results but never starts fresh work.
 	if !bytes_equal(world.frontier, session.provider.accepted_frontier) {
 		immediate.query = .{kind = .CANCELLED, cancellation = .WORLD_SUPERSEDED};
-		return true, .{kind = .TERMINAL, observation = copy_observation(immediate)}, .{};
-	}
-
-
-	taken, missing := take(session, .IN_FLIGHT_OPERATIONS);
-	if !taken {
-		return false, .{}, limit(missing);
+		exported, output, error := export_query_terminal(session, request.world, immediate);
+		return exported, output, error;
 	}
 
 
@@ -978,11 +1561,17 @@ query :: (service: *Service, request: Query_Request) -> bool, Query_Start, Opera
 	operation.member = member;
 	operation.query_kind = request.kind;
 	world.references += 1;
-	waiter, error := new_waiter(session, operation);
+	waiter, error, terminal_winner := new_waiter(session, request.world, operation);
 	if !waiter.generation {
-		world.references -= 1;
+		release_world(session, world);
 		free(operation);
-		give(session, .IN_FLIGHT_OPERATIONS);
+		if terminal_winner {
+			immediate.query = .{kind = .CANCELLED, cancellation = .WORLD_SUPERSEDED};
+			exported, output, terminal_error := export_query_terminal(session, request.world, immediate);
+			return exported, output, terminal_error;
+		}
+
+
 		return false, .{}, error;
 	}
 
@@ -1013,12 +1602,23 @@ query :: (service: *Service, request: Query_Request) -> bool, Query_Start, Opera
 	return true, .{kind = .PENDING, waiter = waiter}, .{};
 }
 
-poll :: (service: *Service, handle: Handle($K)) -> bool, Observation, Operation_Error {
+poll :: (service: *Service, handle: Handle($K)) -> (ok: bool, observation: Observation, error: Operation_Error) {
 	#assert K == .TICKET || K == .WAITER || K == .SHUTDOWN;
-	call := enter_call(service, handle);
-	defer leave_call(call);
+	call := use_call(service, handle);
+	if !call {
+		return false, .{}, stale(K);
+	}
+
+
+	use_owner_memory(call);
 
 	ok, observation, error := poll_pinned(call, handle);
+	if !ok {
+		return false, .{}, error;
+	}
+
+
+	ok, observation, error = export_observation(call, handle, observation);
 	return ok, observation, error;
 }
 
@@ -1033,26 +1633,20 @@ poll_pinned :: (call: *Session, handle: Handle($K)) -> bool, Observation, Operat
 
 	#if K == .TICKET {
 		operation := registration.operation;
-		return true, copy_observation(ifx operation.terminal then update_observation(operation) else pending_observation(operation)), .{};
+		return true, ifx operation.terminal then update_observation(operation) else pending_observation(operation), .{};
 	} else #if K == .WAITER {
-		return true, copy_observation(waiter_observation(session, registration)), .{};
+		return true, waiter_observation(session, registration), .{};
 	} else {
-		return true, copy_observation(shutdown_observation(session)), .{};
+		return true, shutdown_observation(session), .{};
 	}
 }
 
 #scope_export
 
 // Native waits release the state gate atomically; deterministic tests retain the stepped clock.
-wait :: (service: *Service, handle: Handle($K), deadline: Deadline) -> bool, Wait_Observation, Operation_Error {
+wait :: (service: *Service, handle: Handle($K), deadline: Deadline) -> (ok: bool, waited: Wait_Observation, error: Operation_Error) {
 	#assert K == .TICKET || K == .WAITER || K == .SHUTDOWN;
-	session := enter_call(service, handle);
-	defer leave_call(session);
-
-	if session && !bytes_equal(deadline.clock_identity, service.clock_identity) {
-		return false, .{}, invalid(.INCONSISTENT_BINDING, "deadline", "clock_identity");
-	}
-
+	session := use_call(service, handle);
 
 	if !session {
 		return false, .{}, stale(K);
@@ -1061,13 +1655,17 @@ wait :: (service: *Service, handle: Handle($K), deadline: Deadline) -> bool, Wai
 
 	use_owner_memory(session);
 
+	if !bytes_equal(deadline.clock_identity, service.clock_identity) {
+		return false, .{}, export_argument_error(session, handle, .INCONSISTENT_BINDING, "deadline", nested_field = "clock_identity");
+	}
+
+
 	ok, observation, error := poll_pinned(session, handle);
 	while ok && !is_terminal(observation) {
 		if session.threaded {
 			#if TEST_HOOKS {
 				if session.pauses[Test_Boundary.WAIT_ARMING].enabled {
 					pause_locked(session, .WAIT_ARMING);
-					free_observation(*observation,, output_allocator());
 					ok, observation, error = poll_pinned(session, handle);
 					continue;
 				}
@@ -1096,7 +1694,6 @@ wait :: (service: *Service, handle: Handle($K), deadline: Deadline) -> bool, Wai
 			deliver_mailbox(session, mailbox);
 		}
 
-		free_observation(*observation,, output_allocator());
 		ok, observation, error = poll_pinned(session, handle);
 	}
 
@@ -1105,12 +1702,17 @@ wait :: (service: *Service, handle: Handle($K), deadline: Deadline) -> bool, Wai
 	}
 
 
+	ok, observation, error = export_observation(session, handle, observation);
+	if !ok {
+		return false, .{}, error;
+	}
+
+
 	return true, .{timed_out = !is_terminal(observation), observation = observation}, .{};
 }
 
-acquire_result :: (service: *Service, handle: Handle(.WAITER)) -> bool, Result_Acquisition, Operation_Error {
-	call := enter_call(service, handle);
-	defer leave_call(call);
+acquire_result :: (service: *Service, handle: Handle(.WAITER)) -> (ok: bool, acquisition: Result_Acquisition, error: Operation_Error) {
+	call := use_call(service, handle);
 
 	session, registration := lookup_pinned(call, handle);
 	if !session || registration.operation.kind != .QUERY {
@@ -1122,61 +1724,165 @@ acquire_result :: (service: *Service, handle: Handle(.WAITER)) -> bool, Result_A
 
 	observation := waiter_observation(session, registration);
 	if observation.kind == .PENDING {
-		return true, .{kind = .PENDING, observation = copy_observation(observation)}, .{};
+		ok, output, error := export_observation(session, handle, observation);
+		if !ok {
+			return false, .{}, error;
+		}
+
+
+		return true, .{kind = .PENDING, observation = output}, .{};
 	}
 
 
 	if observation.query.kind != .AVAILABLE {
-		return true, .{kind = .TERMINAL, observation = copy_observation(observation)}, .{};
-	}
+		ok, output, error := export_observation(session, handle, observation);
+		if !ok {
+			return false, .{}, error;
+		}
 
 
-	taken := take(session, .LIVE_HANDLES);
-	if !taken {
-		return false, .{}, limit(.LIVE_HANDLES);
+		return true, .{kind = .TERMINAL, observation = output}, .{};
 	}
 
 
 	result := registration.operation.result;
 	result.references += 1;
+	admitted := false;
+	defer {
+		if !admitted {
+			release_result(session, result);
+		}
+	}
+
+	while !registration_backing_ready(session) {
+		if session.ledger.live[Limit_Name.LIVE_HANDLES] >= session.ledger.limits.values[Limit_Name.LIVE_HANDLES] - session.ledger.reserved[Limit_Name.LIVE_HANDLES] {
+			return false, .{}, limit(.LIVE_HANDLES);
+		}
+
+
+		backing_ok := prepare_registration_backing(session);
+		current := lookup_pinned(session, handle);
+		#if TEST_HOOKS {
+			if !current && session.faults.allow_stale_result_registration {
+				current = session;
+			}
+		}
+
+		if !current {
+			return false, .{}, stale(.WAITER);
+		}
+
+
+		if !backing_ok {
+			#if TEST_HOOKS {
+				if session.faults.retry_failed_result_registration {
+					continue;
+				}
+			}
+
+
+			return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		}
+	}
+
+
+	if !take(session, .LIVE_HANDLES) {
+		return false, .{}, limit(.LIVE_HANDLES);
+	}
+
+
+	admitted = true;
 	return true, .{kind = .ACQUIRED, result = register(session, .RESULT, .{result = result})}, .{};
 }
 
-cancel_waiter :: (service: *Service, handle: Handle(.WAITER)) -> bool, Cancel_Outcome, Operation_Error {
-	call := enter_call(service, handle);
-	defer leave_call(call);
+cancel_waiter :: (service: *Service, handle: Handle(.WAITER)) -> (ok: bool, outcome: Cancel_Outcome, error: Operation_Error) {
+	call := use_call(service, handle);
 
-	session, registration := lookup_pinned(call, handle);
-	if !session {
+	if !call {
 		return false, .{}, stale(.WAITER);
 	}
 
 
-	use_owner_memory(session);
+	use_owner_memory(call);
 
-	if registration.terminal {
-		return true, .{already_terminal = true, observation = copy_observation(registration.observation)}, .{};
+	while true {
+		session, registration := lookup_pinned(call, handle);
+		if !session {
+			return false, .{}, stale(.WAITER);
+		}
+
+
+		if registration.terminal {
+			ok, output, error := export_observation(session, handle, registration.observation);
+			if !ok {
+				return false, .{}, error;
+			}
+
+
+			return true, .{already_terminal = true, observation = output}, .{};
+		}
+
+
+		operation := registration.operation;
+		observation: Observation;
+		if operation.kind == .QUERY {
+			observation = query_observation(
+				operation.identity,
+				operation.world,
+				operation.member,
+				operation.query_kind,
+				.{kind = .CANCELLED, cancellation = .CALLER}
+			);
+		} else {
+			observation = pending_observation(operation);
+			observation.kind = .UPDATE;
+			observation.provider_frontier = operation.frontier;
+			observation.documents = operation.documents;
+			observation.update = .{kind = .CANCELLED, cancellation = .CALLER};
+		}
+
+		#if TEST_HOOKS {
+			if session.faults.cancel_before_output {
+				if operation.kind == .QUERY {
+					finish_query(session, operation, observation.query);
+				} else {
+					resolve_waiter(session, operation, handle.slot, observation);
+				}
+			}
+		}
+
+		ok, output, error := export_observation(session, handle, observation);
+		if !ok {
+			return false, .{}, error;
+		}
+
+
+		registration = session.registrations[handle.slot];
+		if registration.terminal {
+			unlock(
+				*session.gate,
+				#code {
+					free_observation(*output,, output_allocator());
+				}
+			);
+
+			continue;
+		}
+
+
+		operation = registration.operation;
+		if operation.kind == .QUERY {
+			finish_query(session, operation, output.query);
+		} else {
+			resolve_waiter(session, operation, handle.slot, output);
+		}
+
+		return true, .{observation = output}, .{};
 	}
-
-
-	operation := registration.operation;
-	if operation.kind == .QUERY {
-		finish_query(session, operation, .{kind = .CANCELLED, cancellation = .CALLER});
-	} else {
-		observation := pending_observation(operation);
-		observation.kind = .UPDATE;
-		observation.provider_frontier = operation.frontier;
-		observation.documents = operation.documents;
-		observation.update = .{kind = .CANCELLED, cancellation = .CALLER};
-		resolve_waiter(session, operation, handle.slot, observation);
-	}
-
-	return true, .{observation = copy_observation(registration.observation)}, .{};
 }
 
-drain_completions :: (service: *Service, handle: Handle(.SESSION), maximum: u64) -> bool, [] Completion_Record, Operation_Error {
-	call := enter_call(service, handle);
-	defer leave_call(call);
+drain_completions :: (service: *Service, handle: Handle(.SESSION), maximum: u64) -> (ok: bool, records: [] Completion_Record, error: Operation_Error) {
+	call := use_call(service, handle);
 
 	session := validate_session(call, handle);
 	if !session {
@@ -1187,12 +1893,11 @@ drain_completions :: (service: *Service, handle: Handle(.SESSION), maximum: u64)
 	use_owner_memory(session);
 
 	if maximum > xx session.ledger.limits.values[Limit_Name.ELEMENTS_PER_LIST] {
-		return false, .[], invalid(.OUT_OF_RANGE, "maximum");
+		return false, .[], export_argument_error(session, handle, .OUT_OF_RANGE, "maximum");
 	}
 
 
-	records: [..] Completion_Record;
-	kept: [..] Slot_Reference;
+	snapshots: [..] Completion_Record;
 	for session.completions {
 		registration := live_registration(session, it);
 		if !registration || registration.delivered {
@@ -1200,37 +1905,107 @@ drain_completions :: (service: *Service, handle: Handle(.SESSION), maximum: u64)
 		}
 
 
-		if records.count < xx maximum {
-			array_add(
-				*records,
-				.{
-					registration = .{
-						session = session.identities.session,
-						slot = it.slot,
-						generation = it.generation,
-						owner_service = service,
-						owner_token = session.registry.owner_token
-					},
-					observation = copy_observation(registration.observation),
+		if snapshots.count == xx maximum {
+			break;
+		}
+
+
+		array_add(
+			*snapshots,
+			.{
+				registration = .{
+					session = session.identities.session,
+					slot = it.slot,
+					generation = it.generation,
+					owner_service = service,
+					owner_token = session.registry.owner_token,
+				},
+				observation = owned_observation(registration.observation),
+			}
+		);
+	}
+
+	allocator := output_allocator();
+	records: [] Completion_Record;
+	discarded: [..] Observation;
+	returned := false;
+	defer {
+		release_drain_copies(session, snapshots, discarded, ifx returned then .[] else records, allocator);
+	}
+
+	ok: bool;
+	unlock(
+		*session.gate,
+		#code {
+			ok, records = try_output_records(allocator, snapshots);
+		}
+	);
+
+	if !validate_session(session, handle) {
+		return false, .[], stale(.SESSION);
+	}
+
+
+	if !ok {
+		#if TEST_HOOKS {
+			if session.faults.consume_failed_drain {
+				for snapshots {
+					registration := live_registration(session, .{slot = it.registration.slot, generation = it.registration.generation});
+					if registration && !registration.delivered {
+						registration.delivered = true;
+						give(session, .COMPLETION_RECORDS);
+					}
 				}
-				,, output_allocator()
-			);
-			registration.delivered = true;
-			give(session, .COMPLETION_RECORDS);
-		} else {
-			array_add(*kept, it);
+			}
+		}
+
+		return false, .[], .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	}
+
+	count := 0;
+	for snapshots {
+		reference := Slot_Reference.{slot = it.registration.slot, generation = it.registration.generation};
+		registration := live_registration(session, reference);
+		if !registration || registration.delivered {
+			#if TEST_HOOKS {
+				if session.faults.allow_stale_drain_output {
+					records[count] = records[it_index];
+					count += 1;
+					continue;
+				}
+			}
+
+
+			array_add(*discarded, records[it_index].observation);
+			continue;
+		}
+
+		records[count] = records[it_index];
+		count += 1;
+		registration.delivered = true;
+		give(session, .COMPLETION_RECORDS);
+	}
+
+	for session.completions {
+		registration := live_registration(session, it);
+		if !registration || registration.delivered {
+			remove it;
 		}
 	}
 
-	array_free(session.completions);
-	session.completions = kept;
+	if !count {
+		records.count = 0;
+		return true, .[], .{};
+	}
+
+	records.count = count;
+	returned = true;
 	return true, records, .{};
 }
 
-retain :: (service: *Service, handle: Handle($K)) -> bool, Handle(K), Operation_Error {
+retain :: (service: *Service, handle: Handle($K)) -> (ok: bool, retained: Handle(K), error: Operation_Error) {
 	#assert K == .WORLD || K == .RESULT;
-	call := enter_call(service, handle);
-	defer leave_call(call);
+	call := use_call(service, handle);
 
 	session, registration := lookup_pinned(call, handle);
 	if !session {
@@ -1239,6 +2014,32 @@ retain :: (service: *Service, handle: Handle($K)) -> bool, Handle(K), Operation_
 
 
 	use_owner_memory(session);
+
+	while !registration_backing_ready(session) {
+		if session.ledger.live[Limit_Name.LIVE_HANDLES] >= session.ledger.limits.values[Limit_Name.LIVE_HANDLES] - session.ledger.reserved[Limit_Name.LIVE_HANDLES] {
+			return false, .{}, limit(.LIVE_HANDLES);
+		}
+
+
+		backing_ok := prepare_registration_backing(session);
+		session, registration = lookup_pinned(call, handle);
+		#if TEST_HOOKS {
+			if !session && call.faults.allow_stale_retain_registration {
+				session = call;
+				registration = session.registrations[handle.slot];
+			}
+		}
+
+		if !session {
+			return false, .{}, stale(K);
+		}
+
+
+		if !backing_ok {
+			return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		}
+	}
+
 
 	if !take(session, .LIVE_HANDLES) {
 		return false, .{}, limit(.LIVE_HANDLES);
@@ -1255,8 +2056,7 @@ retain :: (service: *Service, handle: Handle($K)) -> bool, Handle(K), Operation_
 }
 
 release :: (service: *Service, handle: Handle($K)) -> bool, Operation_Error {
-	call := enter_call(service, handle);
-	defer leave_call(call);
+	call := use_call(service, handle);
 
 	session, registration := lookup_pinned(call, handle);
 	if !session {
@@ -1330,9 +2130,8 @@ release :: (service: *Service, handle: Handle($K)) -> bool, Operation_Error {
 	return true, .{};
 }
 
-request_shutdown :: (service: *Service, handle: Handle(.SESSION)) -> bool, Handle(.SHUTDOWN), Operation_Error {
-	call := enter_call(service, handle);
-	defer leave_call(call);
+request_shutdown :: (service: *Service, handle: Handle(.SESSION)) -> (ok: bool, shutdown: Handle(.SHUTDOWN), error: Operation_Error) {
+	call := use_call(service, handle);
 
 	session := validate_session(call, handle);
 	if !session {
@@ -1343,6 +2142,34 @@ request_shutdown :: (service: *Service, handle: Handle(.SESSION)) -> bool, Handl
 	use_owner_memory(session);
 
 	if session.shutdown {
+		while !registration_backing_ready(session) {
+			if (
+				session.ledger.live[Limit_Name.LIVE_HANDLES] >= session.ledger.limits.values[Limit_Name.LIVE_HANDLES]
+					- session.ledger.reserved[Limit_Name.LIVE_HANDLES]
+			) {
+				return false, .{}, limit(.LIVE_HANDLES);
+			}
+
+
+			backing_ok := prepare_registration_backing(session);
+			session = validate_session(call, handle);
+			#if TEST_HOOKS {
+				if !session && call.faults.allow_stale_shutdown_registration {
+					session = call;
+				}
+			}
+
+			if !session {
+				return false, .{}, stale(.SESSION);
+			}
+
+
+			if !backing_ok {
+				return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+			}
+		}
+
+
 		if !take(session, .LIVE_HANDLES) {
 			return false, .{}, limit(.LIVE_HANDLES);
 		}
@@ -1361,14 +2188,41 @@ request_shutdown :: (service: *Service, handle: Handle(.SESSION)) -> bool, Handl
 	}
 
 
+	identity_ok: bool;
+	identity: Operation_ID;
+	#if TEST_HOOKS {
+		if session.faults.allocate_shutdown_backing {
+			identity_ok, identity = issue_operation(*session.identities);
+		} else {
+			identity_ok, identity = issue_shutdown_identity(session);
+		}
+	} else {
+		identity_ok, identity = issue_shutdown_identity(session);
+	}
+
+	if !identity_ok {
+		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	}
+
+
 	commit_reserved(*session.ledger, .LIVE_HANDLES, 1);
-	_, identity := issue_operation(*session.identities);
 	operation := session.shutdown_control;
 	operation.identity = identity;
 	operation.kind = .SHUTDOWN;
 	operation.registrations = 1;
 	session.shutdown = operation;
-	shutdown_handle := register(session, .SHUTDOWN, .{operation = operation});
+	shutdown_handle := session.shutdown_registration;
+	#if TEST_HOOKS {
+		if session.faults.allocate_shutdown_backing {
+			shutdown_handle = register(session, .SHUTDOWN, .{operation = operation});
+		} else {
+			session.registry.slots[shutdown_handle.slot].live = true;
+			session.registrations[shutdown_handle.slot].* = .{kind = .SHUTDOWN, operation = operation};
+		}
+	} else {
+		session.registry.slots[shutdown_handle.slot].live = true;
+		session.registrations[shutdown_handle.slot].* = .{kind = .SHUTDOWN, operation = operation};
+	}
 
 	session.lifecycle = .QUIESCING;
 	for session.operations {
@@ -1395,8 +2249,7 @@ request_shutdown :: (service: *Service, handle: Handle(.SESSION)) -> bool, Handl
 }
 
 read_world :: (service: *Service, handle: Handle(.WORLD)) -> bool, *World, Operation_Error {
-	call := enter_call(service, handle);
-	defer leave_call(call);
+	call := use_call(service, handle);
 
 	session, registration := lookup_pinned(call, handle);
 	if !session {
@@ -1407,9 +2260,8 @@ read_world :: (service: *Service, handle: Handle(.WORLD)) -> bool, *World, Opera
 	return true, registration.world, .{};
 }
 
-read_result :: (service: *Service, handle: Handle(.RESULT)) -> bool, Result_Description, Operation_Error {
-	call := enter_call(service, handle);
-	defer leave_call(call);
+read_result :: (service: *Service, handle: Handle(.RESULT)) -> (ok: bool, description: Result_Description, error: Operation_Error) {
+	call := use_call(service, handle);
 
 	session, registration := lookup_pinned(call, handle);
 	if !session {
@@ -1446,8 +2298,7 @@ read_result :: (service: *Service, handle: Handle(.RESULT)) -> bool, Result_Desc
 }
 
 read_source :: (service: *Service, handle: Handle(.RESULT), start_byte: u64, end_byte: u64) -> bool, [] u8, Operation_Error {
-	call := enter_call(service, handle);
-	defer leave_call(call);
+	call := use_call(service, handle);
 
 	session, registration := lookup_pinned(call, handle);
 	if !session {
@@ -1455,9 +2306,11 @@ read_source :: (service: *Service, handle: Handle(.RESULT), start_byte: u64, end
 	}
 
 
+	use_owner_memory(session);
+
 	bytes := registration.result.world.members[registration.result.member].source.bytes;
 	if start_byte > end_byte || end_byte > xx bytes.count {
-		return false, .[], invalid(.OUT_OF_RANGE, "end_byte");
+		return false, .[], export_argument_error(session, handle, .OUT_OF_RANGE, "end_byte");
 	}
 
 
@@ -1466,9 +2319,19 @@ read_source :: (service: *Service, handle: Handle(.RESULT), start_byte: u64, end
 
 // The three resolvers borrow from the result's protected syntax backing, whatever the query kind.
 resolve_node :: (service: *Service, handle: Handle(.RESULT), node_id: u64) -> bool, *Node_Record, Operation_Error {
-	ok, snapshot, error := result_snapshot(service, handle);
-	if !ok || node_id >= xx snapshot.nodes.count {
-		return false, null, ifx ok then invalid(.OUT_OF_RANGE, "node_id") else error;
+	call := use_call(service, handle);
+	session, registration := lookup_pinned(call, handle);
+	if !session {
+		return false, null, stale(.RESULT);
+	}
+
+
+	use_owner_memory(session);
+
+	result := registration.result;
+	snapshot := result.world.syntax[result.member].snapshot;
+	if node_id >= xx snapshot.nodes.count {
+		return false, null, export_argument_error(session, handle, .OUT_OF_RANGE, "node_id");
 	}
 
 
@@ -1476,9 +2339,19 @@ resolve_node :: (service: *Service, handle: Handle(.RESULT), node_id: u64) -> bo
 }
 
 resolve_token :: (service: *Service, handle: Handle(.RESULT), token_id: u64) -> bool, *Token_Record, Operation_Error {
-	ok, snapshot, error := result_snapshot(service, handle);
-	if !ok || token_id >= xx snapshot.tokens.count {
-		return false, null, ifx ok then invalid(.OUT_OF_RANGE, "token_id") else error;
+	call := use_call(service, handle);
+	session, registration := lookup_pinned(call, handle);
+	if !session {
+		return false, null, stale(.RESULT);
+	}
+
+
+	use_owner_memory(session);
+
+	result := registration.result;
+	snapshot := result.world.syntax[result.member].snapshot;
+	if token_id >= xx snapshot.tokens.count {
+		return false, null, export_argument_error(session, handle, .OUT_OF_RANGE, "token_id");
 	}
 
 
@@ -1486,9 +2359,19 @@ resolve_token :: (service: *Service, handle: Handle(.RESULT), token_id: u64) -> 
 }
 
 resolve_recovery :: (service: *Service, handle: Handle(.RESULT), recovery_id: u64) -> bool, *Recovery_Observation, Operation_Error {
-	ok, snapshot, error := result_snapshot(service, handle);
-	if !ok || recovery_id >= xx snapshot.recoveries.count {
-		return false, null, ifx ok then invalid(.OUT_OF_RANGE, "recovery_id") else error;
+	call := use_call(service, handle);
+	session, registration := lookup_pinned(call, handle);
+	if !session {
+		return false, null, stale(.RESULT);
+	}
+
+
+	use_owner_memory(session);
+
+	result := registration.result;
+	snapshot := result.world.syntax[result.member].snapshot;
+	if recovery_id >= xx snapshot.recoveries.count {
+		return false, null, export_argument_error(session, handle, .OUT_OF_RANGE, "recovery_id");
 	}
 
 
@@ -1545,24 +2428,33 @@ Delivery :: enum u8 {
 
 
 		pause.enabled = false;
-		unlock(*session.gate);
-		signal(*pause.arrived);
-		wait_for(*pause.proceed);
-		lock(*session.gate);
+		unlock(
+			*session.gate,
+			#code {
+				signal(*pause.arrived);
+				wait_for(*pause.proceed);
+			}
+		);
 	}
 
 	worker_pause :: (session: *Session, boundary: Test_Boundary) {
 		if session.threaded {
-			lock(*session.gate);
-			pause_locked(session, boundary);
-			unlock(*session.gate);
+			lock(
+				*session.gate,
+				#code {
+					pause_locked(session, boundary);
+				}
+			);
 		}
 	}
 
 	arm_pause :: (session: *Session, boundary: Test_Boundary) {
-		lock(*session.gate);
-		session.pauses[boundary].enabled = true;
-		unlock(*session.gate);
+		lock(
+			*session.gate,
+			#code {
+				session.pauses[boundary].enabled = true;
+			}
+		);
 	}
 
 	await_pause :: (session: *Session, boundary: Test_Boundary) -> bool {
@@ -1575,18 +2467,70 @@ Delivery :: enum u8 {
 
 	// Each switch removes one safeguard, so a test can show that its control detects the loss.
 	Test_Faults :: struct {
+		allow_failed_terminal_query: bool;
+		allow_stale_terminal_query: bool;
+		allow_failed_argument_error: bool;
+		allow_stale_argument_error: bool;
+		allow_failed_analysis_output: bool;
+		skip_analysis_frontier_check: bool;
+		allow_failed_submit_output: bool;
+		allow_stale_byte_export: bool;
+		allow_retired_description: bool;
+		cancel_before_output: bool;
+		consume_failed_drain: bool;
+		allow_stale_drain_output: bool;
 		optional_first: bool;
 		skip_running_stop: bool;
 		skip_publication_frontier_check: bool;
 		keep_unconsumed_work: bool;
 		shutdown_from_ordinary_capacity: bool;
+		allocate_shutdown_backing: bool;
+		registration_allocation_hook: (size: s64, data: *void) -> bool;
+		registration_allocation_data: *void;
+		allow_stale_retain_registration: bool;
+		allow_stale_shutdown_registration: bool;
+		allow_failed_waiter_backing: bool;
+		allow_stale_waiter_source: bool;
+		allow_stale_world_registration: bool;
+		retry_failed_world_registration: bool;
+		allow_stale_result_registration: bool;
+		retry_failed_result_registration: bool;
+		allow_stale_immediate_result: bool;
+		retry_failed_immediate_result: bool;
+		allow_stale_source_registration: bool;
+		retry_failed_source_registration: bool;
+		source_update_allocation_hook: (size: s64, data: *void) -> bool;
+		source_update_allocation_data: *void;
+		retry_failed_source_update: bool;
+		source_operation_allocation_hook: (size: s64, data: *void) -> bool;
+		source_operation_allocation_data: *void;
+		source_operation_cleanup_hook: (size: s64, data: *void) -> bool;
+		retry_failed_source_operation: bool;
+		allow_stale_source_operation: bool;
+		source_provider_allocation_hook: (size: s64, data: *void) -> bool;
+		source_provider_allocation_data: *void;
+		retry_failed_source_provider: bool;
+		allow_stale_source_provider: bool;
+		source_provider_arrays_allocation_hook: (size: s64, data: *void) -> bool;
+		source_provider_arrays_allocation_data: *void;
+		source_provider_arrays_cleanup_hook: (size: s64, data: *void) -> bool;
+		source_provider_arrays_cleanup_data: *void;
+		retry_failed_source_provider_arrays: bool;
+		allow_stale_source_provider_arrays: bool;
+		source_provider_states_allocation_hook: (size: s64, data: *void) -> bool;
+		source_provider_states_allocation_data: *void;
+		source_provider_states_cleanup_hook: (size: s64, data: *void) -> bool;
+		source_provider_states_cleanup_data: *void;
+		retry_failed_source_provider_states: bool;
+		allow_stale_source_provider_states: bool;
+		source_provider_revisions_allocation_hook: (size: s64, data: *void) -> bool;
+		source_provider_revisions_allocation_data: *void;
 		// Fails conversion of this member in its candidate's parse task.
 		fail_parse_document: [] u8;
 	}
 
 	session_of :: (service: *Service, handle: Handle(.SESSION)) -> *Session {
-		call := enter_call(service, handle);
-		defer leave_call(call);
+		call := use_call(service, handle);
 
 		return validate_session(call, handle);
 	}
@@ -1598,24 +2542,29 @@ Delivery :: enum u8 {
 
 	executor_deliver :: (session: *Session, mailbox: *Mailbox) -> Delivery {
 		push_allocator(owner_allocator(session));
-		if session.threaded {
-			lock(*session.gate);
-		}
-
-		delivery := deliver_mailbox(session, mailbox);
-		if session.threaded {
-			unlock(*session.gate);
-		}
+		delivery: Delivery;
+		lock(
+			*session.gate,
+			#code {
+				delivery = deliver_mailbox(session, mailbox);
+			},
+			enabled = session.threaded
+		);
 
 		cleanup_owned(session);
 		return delivery;
 	}
 
 	last_mailbox :: (session: *Session) -> *Mailbox {
-		lock(*session.gate);
-		defer unlock(*session.gate);
+		mailbox: *Mailbox;
+		lock(
+			*session.gate,
+			#code {
+				mailbox = session.mailboxes[session.mailboxes.count - 1];
+			}
+		);
 
-		return session.mailboxes[session.mailboxes.count - 1];
+		return mailbox;
 	}
 
 	// Dispatches and delivers until the required FIFO is empty; returns the number of tasks run.
@@ -1890,8 +2839,7 @@ owned_observation :: (observation: Observation) -> Observation {
 }
 
 result_snapshot :: (service: *Service, handle: Handle(.RESULT)) -> bool, *Syntax_Snapshot, Operation_Error {
-	call := enter_call(service, handle);
-	defer leave_call(call);
+	call := use_call(service, handle);
 
 	session, registration := lookup_pinned(call, handle);
 	if !session {
@@ -1999,8 +2947,9 @@ register :: (session: *Session, $kind: Handle_Kind, registration: Registration) 
 	return handle;
 }
 
-describe :: (session: *Session) -> Session_Description {
-	push_allocator(output_allocator());
+describe :: (session: *Session, allocator: Allocator = .{}) -> Session_Description {
+	push_allocator(ifx allocator.proc then allocator else output_allocator());
+
 	documents := tracked_documents(session.provider);
 	tracked := NewArray(documents.count, Tracked_Document);
 	for documents {
@@ -2266,17 +3215,83 @@ finish_query :: (session: *Session, operation: *Operation, outcome: Query_Termin
 	}
 }
 
-new_waiter :: (session: *Session, operation: *Operation) -> Handle(.WAITER), Operation_Error {
-	taken, missing := take(session, .LIVE_HANDLES, .PENDING_REGISTRATIONS, .COMPLETION_RECORDS);
+new_waiter :: (session: *Session, source: Handle($K), operation: *Operation) -> (waiter: Handle(.WAITER), error: Operation_Error, terminal_winner: bool) {
+	#assert K == .TICKET || K == .WORLD;
+	while !registration_backing_ready(session) || operation.waiters.count >= operation.waiters.allocated {
+		#if K == .WORLD {
+			name := Limit_Name.IN_FLIGHT_OPERATIONS;
+			if session.ledger.live[name] >= session.ledger.limits.values[name] - session.ledger.reserved[name] {
+				return .{}, limit(name), false;
+			}
+		}
+
+
+		for Limit_Name.[.LIVE_HANDLES, .PENDING_REGISTRATIONS, .COMPLETION_RECORDS] {
+			if session.ledger.live[it] >= session.ledger.limits.values[it] - session.ledger.reserved[it] {
+				return .{}, limit(it), false;
+			}
+		}
+
+
+		backing_ok := ifx registration_backing_ready(session)
+			then prepare_waiter_backing(session, source, operation)
+			else prepare_registration_backing(session);
+
+		current, registration := lookup_waiter_source(session, source);
+		if !current {
+			return .{}, stale(K), false;
+		}
+
+
+		#if K == .TICKET {
+			operation = registration.operation;
+			if operation.terminal {
+				return .{}, .{}, true;
+			}
+		}
+
+
+		if session.lifecycle != .OPEN {
+			return .{}, .{code = .SERVICE_CLOSED}, false;
+		}
+
+
+		#if K == .WORLD {
+			if !bytes_equal(operation.world.frontier, session.provider.accepted_frontier) {
+				return .{}, .{}, true;
+			}
+		}
+
+		if !backing_ok {
+			#if TEST_HOOKS {
+				if session.faults.allow_failed_waiter_backing {
+					continue;
+				}
+			}
+
+
+			return .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}}, false;
+		}
+	}
+
+
+	taken: bool;
+	missing: Limit_Name;
+	#if K == .WORLD {
+		taken, missing = take(session, .IN_FLIGHT_OPERATIONS, .LIVE_HANDLES, .PENDING_REGISTRATIONS, .COMPLETION_RECORDS);
+	} else {
+		taken, missing = take(session, .LIVE_HANDLES, .PENDING_REGISTRATIONS, .COMPLETION_RECORDS);
+	}
+
 	if !taken {
-		return .{}, limit(missing);
+		return .{}, limit(missing), false;
 	}
 
 
 	handle := register(session, .WAITER, .{operation = operation});
 	array_add(*operation.waiters, .{slot = handle.slot, generation = handle.generation});
 	operation.registrations += 1;
-	return handle, .{};
+	return handle, .{}, false;
 }
 
 detach_waiter :: (session: *Session, operation: *Operation, slot: u64) {
@@ -2361,13 +3376,54 @@ shutdown_observation :: (session: *Session) -> Observation {
 	};
 }
 
-acquire_world_handle :: (session: *Session, world: *World) -> bool, World_Acquisition, Operation_Error {
+acquire_world_handle :: (session: *Session, source: Handle($K), world: *World) -> bool, World_Acquisition, Operation_Error {
+	#assert K == .SESSION || K == .TICKET || K == .WAITER;
+	world.references += 1;
+	admitted := false;
+	defer {
+		if !admitted {
+			release_world(session, world);
+		}
+	}
+
+	while !registration_backing_ready(session) {
+		if session.ledger.live[Limit_Name.LIVE_HANDLES] >= session.ledger.limits.values[Limit_Name.LIVE_HANDLES] - session.ledger.reserved[Limit_Name.LIVE_HANDLES] {
+			return false, .{}, limit(.LIVE_HANDLES);
+		}
+
+
+		backing_ok := prepare_registration_backing(session);
+		current, registration := lookup_pinned(session, source);
+		#if TEST_HOOKS {
+			if !current && session.faults.allow_stale_world_registration {
+				current = session;
+			}
+		}
+
+		if !current {
+			return false, .{}, stale(K);
+		}
+
+
+		if !backing_ok {
+			#if TEST_HOOKS {
+				if session.faults.retry_failed_world_registration {
+					continue;
+				}
+			}
+
+
+			return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		}
+	}
+
+
 	if !take(session, .LIVE_HANDLES) {
 		return false, .{}, limit(.LIVE_HANDLES);
 	}
 
 
-	world.references += 1;
+	admitted = true;
 	return true, .{kind = .ACQUIRED, world = register(session, .WORLD, .{world = world})}, .{};
 }
 
@@ -2384,6 +3440,113 @@ install_head :: (session: *Session, world: *World) {
 	}
 
 	session.head = world;
+}
+
+start_immediate_result :: (session: *Session, source: Handle(.WORLD), world: *World, member: s64, kind: Query_Kind) -> (ok: bool, started: Query_Start, error: Operation_Error) {
+	world.references += 1;
+	admitted := false;
+	defer {
+		if !admitted {
+			release_world(session, world);
+		}
+	}
+
+	backing: Immediate_Result_Backing;
+	error := Operation_Error.{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	while true {
+		current := lookup_pinned(session, source);
+		#if TEST_HOOKS {
+			if !current && session.faults.allow_stale_immediate_result {
+				current = session;
+			}
+		}
+
+		if !current {
+			error = stale(.WORLD);
+			break;
+		}
+
+
+		if session.lifecycle != .OPEN {
+			error = .{code = .SERVICE_CLOSED};
+			break;
+		}
+
+
+		if session.ledger.live[Limit_Name.LIVE_HANDLES] >= session.ledger.limits.values[Limit_Name.LIVE_HANDLES] - session.ledger.reserved[Limit_Name.LIVE_HANDLES] {
+			error = limit(.LIVE_HANDLES);
+			break;
+		}
+
+
+		if session.identities.operation_counter.next == U64_MAX || session.identities.result_counter.next == U64_MAX {
+			break;
+		}
+
+
+		if !registration_backing_ready(session) {
+			prepared := prepare_registration_backing(session);
+			if !prepared {
+				#if TEST_HOOKS {
+					if session.faults.retry_failed_immediate_result {
+						continue;
+					}
+				}
+
+
+				break;
+			}
+
+
+			continue;
+		}
+
+
+		if !backing.result {
+			prepared := prepare_immediate_result_backing(session, *backing);
+			if !prepared {
+				#if TEST_HOOKS {
+					if session.faults.retry_failed_immediate_result {
+						finish_immediate_result_backing(session, *backing);
+						continue;
+					}
+				}
+
+
+				break;
+			}
+
+
+			continue;
+		}
+
+		operation_ok, operation_token := issue_token(*session.identities.operation_counter);
+		result_ok, result_token := issue_token(*session.identities.result_counter);
+		assert(operation_ok && result_ok);
+		assert(take(session, .LIVE_HANDLES));
+		for 0..7 {
+			backing.identity[backing.identity.count - 8 + it] = xx ((result_token >> (it * 8)) & 0xFF);
+		}
+
+		backing.result.* = .{
+			identity = xx backing.identity,
+			world = world,
+			member = member,
+			kind = kind,
+			references = 1,
+		};
+
+		admitted = true;
+		return true, .{kind = .AVAILABLE, result = register(session, .RESULT, .{result = backing.result})}, .{};
+	}
+
+	finish_immediate_result_backing(session, *backing);
+	if !lookup_pinned(session, source) {
+		return false, .{}, stale(.WORLD);
+	}
+
+
+	return false, .{}, error;
 }
 
 new_result :: (session: *Session, world: *World, member: s64, kind: Query_Kind) -> *Query_Result {

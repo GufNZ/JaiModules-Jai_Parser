@@ -29,7 +29,7 @@ encode_epoch_file :: (authority_namespace: [] u8, epoch: u64) -> string {
 }
 
 // Strict: the exact schema line, the matching uppercase-hex namespace and a canonical decimal epoch, each LF-terminated, nothing else.
-decode_epoch_file :: (text: string, authority_namespace: [] u8) -> Epoch_Failure, u64 {
+decode_epoch_file :: (text: string, authority_namespace: [] u8) -> (failure: Epoch_Failure, epoch: u64) {
 	lines := split(text, "\n",, temp);
 	if lines.count != 4 || lines[3] != "" || lines[0] != EPOCH_FILE_SCHEMA {
 		return .MALFORMED_FILE, 0;
@@ -70,7 +70,7 @@ decode_epoch_file :: (text: string, authority_namespace: [] u8) -> Epoch_Failure
 }
 
 // Reserves a fresh epoch greater than both the last recorded one and `floor` (the highest writer epoch in any readable store head).
-reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0) -> bool, u64, Epoch_Failure {
+reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0) -> (ok: bool, epoch: u64, failure: Epoch_Failure) {
 	#if !EPOCH_ISSUER_SUPPORTED {
 		return false, 0, .UNSUPPORTED_PLATFORM;
 	} else {
@@ -203,7 +203,7 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 	ERROR_SHARING_VIOLATION :: 0x20;
 
 	// Share mode 0 is the exclusive lock; closing the handle releases it.
-	acquire_epoch_lock :: (path: string) -> Epoch_Failure, HANDLE {
+	acquire_epoch_lock :: (path: string) -> (failure: Epoch_Failure, lock: HANDLE) {
 		attempts := EPOCH_LOCK_ATTEMPTS;
 		share: u32 = 0;
 		#if TEST_HOOKS {
@@ -259,7 +259,7 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 	}
 
 	// A missing file reads as empty; anything over the bound or unreadable is an error rather than a truncated read.
-	read_small_file :: (path: string) -> Epoch_Failure, string {
+	read_small_file :: (path: string) -> (failure: Epoch_Failure, contents: string) {
 		handle := CreateFileW(utf8_to_wide(path,, temp), FILE_GENERIC_READ, FILE_SHARE_READ, null, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null);
 		if handle == INVALID_HANDLE_VALUE {
 			return ifx GetLastError() == ERROR_FILE_NOT_FOUND then .NONE else .IO_ERROR, "";
@@ -307,7 +307,7 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 	EPOCH_FILE_MODE :: S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
 
 	// `flock` excludes other open descriptions, including threads of this process; `O_CLOEXEC` keeps children from inheriting the lock.
-	acquire_epoch_lock :: (path: string) -> Epoch_Failure, s32 {
+	acquire_epoch_lock :: (path: string) -> (failure: Epoch_Failure, descriptor: s32) {
 		fd := open(temp_c_string(path), O_RDWR | O_CREAT | O_CLOEXEC, EPOCH_FILE_MODE);
 		if fd < 0 {
 			return .IO_ERROR, -1;
@@ -378,7 +378,7 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 	}
 
 	// A missing file reads as empty; anything over the bound or unreadable is an error rather than a truncated read.
-	read_small_file :: (path: string) -> Epoch_Failure, string {
+	read_small_file :: (path: string) -> (failure: Epoch_Failure, contents: string) {
 		fd := open(temp_c_string(path), O_RDONLY | O_CLOEXEC);
 		if fd < 0 {
 			return ifx errno() == ENOENT then .NONE else .IO_ERROR, "";

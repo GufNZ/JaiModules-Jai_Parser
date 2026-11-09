@@ -370,7 +370,7 @@ admit_context :: (identity: [] u8, descriptor: [] u8) -> Context_Failure, Admitt
 }
 
 // Parser, lexer and adapter source digests; called at compile time, including from a cross-compiling build's host.
-build_source_digests :: () -> [16] u8, [16] u8, [16] u8 {
+build_source_digests :: () -> (parser_digest: [16] u8, lexer_digest: [16] u8, adapter_digest: [16] u8) {
 	return
 		source_digest(.["../module.jai", "../parser.jai", "../resolution.jai"]),
 		source_digest(.["../lexer.jai"]),

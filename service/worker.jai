@@ -1,5 +1,50 @@
 #scope_module
 
+use_call :: (service: *Service, handle: Handle($K)) -> *Session #expand {
+	session := enter_call(service, handle);
+	`defer leave_call(session);
+
+	return session;
+}
+
+use_owner :: (service: *Service, owner_service: *void, owner_token: u64) -> *Session #expand {
+	session := enter_owner(service, owner_service, owner_token);
+	`defer leave_call(session);
+
+	return session;
+}
+
+lock :: (mutex: *Mutex, body: Code, enabled := true) #expand {
+	if enabled {
+		lock(mutex);
+	}
+
+	defer {
+		if enabled {
+			unlock(mutex);
+		}
+	}
+
+	#insert body;
+}
+
+unlock :: (mutex: *Mutex, body: Code) #expand {
+	unlock(mutex);
+	defer lock(mutex);
+
+	#insert body;
+}
+
+#scope_export
+
+#if TEST_HOOKS {
+	with_lock :: (mutex: *Mutex, body: Code, enabled := true) #expand {
+		lock(mutex, body, enabled);
+	}
+}
+
+#scope_module
+
 require_task :: (session: *Session, task: *Task) {
 	if task.phase != .READY || !task.optional {
 		return;
@@ -33,19 +78,24 @@ enter_owner :: (service: *Service, owner_service: *void, owner_token: u64) -> *S
 	}
 
 
-	lock(*service.directory);
 	session: *Session;
-	for service.sessions {
-		if it.registry.owner_token == owner_token {
-			session = it;
-			break;
-		}
-	}
-	if session {
-		session.call_pins += 1;
-	}
+	lock(
+		*service.directory,
+		#code {
+			for service.sessions {
+				if it.registry.owner_token == owner_token {
+					session = it;
+					break;
+				}
+			}
 
-	unlock(*service.directory);
+
+			if session {
+				session.call_pins += 1;
+			}
+		}
+	);
+
 	if session {
 		lock(*session.gate);
 	}
@@ -64,21 +114,34 @@ leave_call :: (session: *Session) {
 	unlock(*session.gate);
 	cleanup_owned(session);
 	service := session.service;
-	lock(*service.directory);
-	session.call_pins -= 1;
-	session.directory_retiring ||= retiring;
-	reclaim := session.directory_retiring && !session.call_pins;
-	if reclaim {
-		for service.sessions {
-			if it == session {
-				remove it;
+	reclaim: bool;
+	retired_sessions: [..] *Session;
+	empty_sessions: [..] *Session;
+	lock(
+		*service.directory,
+		#code {
+			session.call_pins -= 1;
+			session.directory_retiring ||= retiring;
+			reclaim = session.directory_retiring && !session.call_pins;
+			if reclaim {
+				for service.sessions {
+					if it == session {
+						remove it;
+					}
+				}
+
+				if !service.sessions.count {
+					retired_sessions = service.sessions;
+					service.sessions = empty_sessions;
+				}
 			}
 		}
-	}
+	);
 
-	unlock(*service.directory);
+	array_free(retired_sessions);
 	if reclaim {
 		push_allocator(owner_allocator(session));
+
 		if session.threaded {
 			thread_is_done(*session.reaper, -1);
 			thread_deinit(*session.reaper);
@@ -106,10 +169,104 @@ wait_changed :: (session: *Session, remaining: u64) {
 	}
 }
 
+admit_directory :: (session: *Session) -> bool {
+	service := session.service;
+	allocator := service.allocator;
+	#if TEST_HOOKS {
+		if service.directory_allocator.proc {
+			allocator = service.directory_allocator;
+		}
+
+		if service.session_owned_directory {
+			allocator = owner_allocator(session);
+		}
+	}
+
+	candidate: [..] *Session;
+	empty: [..] *Session;
+	observed_count: s64;
+	defer array_free(candidate);
+
+	while true {
+		admitted: bool;
+		capacity: s64;
+		retired: [..] *Session;
+		lock(
+			*service.directory,
+			#code {
+				#if TEST_HOOKS {
+					if service.reject_changed_directory && candidate.allocated && service.sessions.count != observed_count {
+						return false;
+					}
+				}
+
+
+				if service.sessions.count == service.sessions.allocated && candidate.allocated > service.sessions.count {
+					candidate.count = service.sessions.count;
+					memcpy(candidate.data, service.sessions.data, candidate.count * size_of(*Session));
+					retired = service.sessions;
+					service.sessions = candidate;
+					candidate = empty;
+				}
+
+				if service.sessions.count < service.sessions.allocated {
+					service.sessions.data[service.sessions.count] = session;
+					service.sessions.count += 1;
+					admitted = true;
+				} else if service.sessions.allocated <= S64_MAX / size_of(*Session) / 2 {
+					capacity = max(8, service.sessions.allocated * 2);
+					observed_count = service.sessions.count;
+				}
+			}
+		);
+
+		array_free(retired);
+		if admitted {
+			return true;
+		}
+
+
+		if !capacity {
+			return false;
+		}
+
+
+		array_free(candidate);
+		candidate = empty;
+		ok, storage := try_output_array(allocator, capacity, *Session);
+		if !ok {
+			#if TEST_HOOKS {
+				if service.retry_failed_directory_allocation {
+					continue;
+				}
+			}
+
+
+			return false;
+		}
+
+
+		candidate.data = storage.data;
+		candidate.allocated = storage.count;
+		candidate.allocator = allocator;
+	}
+
+
+	return false;
+}
+
 start_workers :: (session: *Session) -> bool {
+	#if TEST_HOOKS {
+		if session.service.fail_worker_startup {
+			return false;
+		}
+	}
+
+
 	#if TEST_HOOKS && !REAL_WORKER {
 		return true;
 	}
+
 
 	session.threaded = true;
 	session.compute.data = session;
@@ -117,6 +274,7 @@ start_workers :: (session: *Session) -> bool {
 	if !thread_init(*session.compute, compute_job, name = "Jai syntax worker") {
 		return false;
 	}
+
 
 	if !thread_init(*session.reaper, reaper_job, name = "Jai syntax reaper") {
 		session.lifecycle = .DRAINING;
@@ -126,6 +284,7 @@ start_workers :: (session: *Session) -> bool {
 		return false;
 	}
 
+
 	thread_start(*session.compute);
 	thread_start(*session.reaper);
 	return true;
@@ -134,46 +293,57 @@ start_workers :: (session: *Session) -> bool {
 compute_job :: (thread: *Thread) -> s64 {
 	session := thread.data.(*Session);
 	push_allocator(owner_allocator(session));
-	lock(*session.gate);
-	while session.lifecycle == .OPEN {
-		mailbox := select_task(session);
-		if !mailbox {
-			wait(*session.changed, *session.gate);
-			continue;
+
+	lock(
+		*session.gate,
+		#code {
+			while session.lifecycle == .OPEN {
+				mailbox := select_task(session);
+				if !mailbox {
+					wait(*session.changed, *session.gate);
+					continue;
+				}
+
+
+				unlock(
+					*session.gate,
+					#code {
+						#if TEST_HOOKS {
+							worker_pause(session, .SELECTED);
+						}
+
+						compute_task(session, mailbox);
+						#if TEST_HOOKS {
+							worker_pause(session, .PUBLICATION);
+						}
+					}
+				);
+
+				deliver_mailbox(session, mailbox);
+				wake_all(*session.changed);
+				unlock(
+					*session.gate,
+					#code {
+						cleanup_owned(session);
+						reset_temporary_storage();
+					}
+				);
+			}
 		}
+	);
 
-		unlock(*session.gate);
-		#if TEST_HOOKS {
-			worker_pause(session, .SELECTED);
-		}
-
-		compute_task(session, mailbox);
-		#if TEST_HOOKS {
-			worker_pause(session, .PUBLICATION);
-		}
-
-		lock(*session.gate);
-		deliver_mailbox(session, mailbox);
-		wake_all(*session.changed);
-		unlock(*session.gate);
-		cleanup_owned(session);
-		reset_temporary_storage();
-		lock(*session.gate);
-	}
-
-	unlock(*session.gate);
 	return 0;
 }
 
 stop_requested :: (session: *Session, task: *Task) -> bool {
-	if session.threaded {
-		lock(*session.gate);
-	}
-
-	stopped := task.phase == .STOP_REQUESTED;
-	if session.threaded {
-		unlock(*session.gate);
-	}
+	stopped: bool;
+	lock(
+		*session.gate,
+		#code {
+			stopped = task.phase == .STOP_REQUESTED;
+		},
+		enabled = session.threaded
+	);
 
 	return stopped;
 }
@@ -181,53 +351,71 @@ stop_requested :: (session: *Session, task: *Task) -> bool {
 reaper_job :: (thread: *Thread) -> s64 {
 	session := thread.data.(*Session);
 	push_allocator(owner_allocator(session));
-	lock(*session.gate);
-	while session.lifecycle == .OPEN {
-		wait(*session.changed, *session.gate);
-	}
 
-	unlock(*session.gate);
+	lock(
+		*session.gate,
+		#code {
+			while session.lifecycle == .OPEN {
+				wait(*session.changed, *session.gate);
+			}
+		}
+	);
+
 	thread_is_done(*session.compute, -1);
 	thread_deinit(*session.compute);
-	lock(*session.gate);
-	session.worker_joined = true;
-	while session.active_admissions {
-		wait(*session.changed, *session.gate);
-	}
+	lock(
+		*session.gate,
+		#code {
+			session.worker_joined = true;
+			while session.active_admissions {
+				wait(*session.changed, *session.gate);
+			}
+		}
+	);
 
-	unlock(*session.gate);
 	cleanup_owned(session);
-	lock(*session.gate);
-	while session.cleanup_pins {
-		wait(*session.changed, *session.gate);
-	}
+	lock(
+		*session.gate,
+		#code {
+			while session.cleanup_pins {
+				wait(*session.changed, *session.gate);
+			}
 
-	check_stopped(session);
-	wake_all(*session.changed);
-	unlock(*session.gate);
+			check_stopped(session);
+			wake_all(*session.changed);
+		}
+	);
+
 	return 0;
 }
 
 cleanup_owned :: (session: *Session) {
 	push_allocator(owner_allocator(session));
-	lock(*session.gate);
-	worlds := session.retired_worlds;
-	outputs := session.retired_outputs;
-	sources := session.retired_sources;
-	if !worlds.count && !outputs.count && !sources.count {
-		check_stopped(session);
-		unlock(*session.gate);
-		return;
-	}
+	worlds: [..] *World;
+	outputs: [..] Retired_Output;
+	sources: [..] *Source_Backing;
+	lock(
+		*session.gate,
+		#code {
+			worlds = session.retired_worlds;
+			outputs = session.retired_outputs;
+			sources = session.retired_sources;
+			if !worlds.count && !outputs.count && !sources.count {
+				check_stopped(session);
+				return;
+			}
 
-	empty_worlds: [..] *World;
-	empty_outputs: [..] Retired_Output;
-	empty_sources: [..] *Source_Backing;
-	session.retired_worlds = empty_worlds;
-	session.retired_outputs = empty_outputs;
-	session.retired_sources = empty_sources;
-	session.cleanup_pins += 1;
-	unlock(*session.gate);
+
+			empty_worlds: [..] *World;
+			empty_outputs: [..] Retired_Output;
+			empty_sources: [..] *Source_Backing;
+			session.retired_worlds = empty_worlds;
+			session.retired_outputs = empty_outputs;
+			session.retired_sources = empty_sources;
+			session.cleanup_pins += 1;
+		}
+	);
+
 	#if TEST_HOOKS {
 		worker_pause(session, .CLEANUP);
 	}
@@ -268,21 +456,74 @@ cleanup_owned :: (session: *Session) {
 	array_free(worlds);
 	array_free(outputs);
 	array_free(sources);
-	lock(*session.gate);
-	session.cleanup_pins -= 1;
-	check_stopped(session);
-	wake_all(*session.changed);
-	unlock(*session.gate);
+	lock(
+		*session.gate,
+		#code {
+			session.cleanup_pins -= 1;
+			check_stopped(session);
+			wake_all(*session.changed);
+		}
+	);
 }
 
-stage_provider_copy :: (model: *Provider_Model) -> *Provider_Model {
-	staged := New(Provider_Model);
+finish_analysis_receipt :: (
+	session: *Session,
+	frontier: *[] u8,
+	documents: *[] [] u8,
+	output: *[] u8,
+	allocator: Allocator
+) {
+	unlock(
+		*session.gate,
+		#code {
+			free(output.data,, allocator);
+			output.* = .[];
+			for documents.* {
+				free(it.data);
+			}
+
+			free(documents.data);
+			documents.* = .[];
+			free(frontier.data);
+			frontier.* = .[];
+		}
+	);
+}
+
+finish_source_admission :: (
+	session: *Session,
+	staged: *Provider_Model,
+	output: *[] u8,
+	error: *Operation_Error,
+	allocator: Allocator
+) {
+	unlock(
+		*session.gate,
+		#code {
+			free(output.data,, allocator);
+			output.* = .[];
+			free(error.path.data,, allocator);
+			free(error.document.data,, allocator);
+			error.* = .{};
+			release_provider_copy(staged);
+		}
+	);
+
+	session.active_admissions -= 1;
+	give(session, .CONCURRENT_ACQUISITIONS);
+	wake_all(*session.changed);
+}
+
+stage_provider_copy :: (model: *Provider_Model, backing: *Source_Provider_Backing) {
+	staged := backing.model;
 	staged.* = model.*;
 	documents: [..] *Document_State;
+	documents.data = backing.documents.data;
+	documents.allocated = backing.documents.count;
 	for model.documents {
-		copy := New(Document_State);
+		copy := backing.documents[it_index];
+		revisions := copy.used_revisions;
 		copy.* = it.*;
-		revisions: [..] [] u8;
 		array_add(*revisions, ..it.used_revisions);
 		copy.used_revisions = revisions;
 		if copy.disk.source {
@@ -298,11 +539,12 @@ stage_provider_copy :: (model: *Provider_Model) -> *Provider_Model {
 
 	staged.documents = documents;
 	contexts: [..] Admitted_Context;
+	contexts.data = backing.contexts.data;
+	contexts.allocated = backing.contexts.count;
 	array_add(*contexts, ..model.contexts);
 	staged.contexts = contexts;
 	storage: [..] *Pool;
 	staged.batch_storage = storage;
-	return staged;
 }
 
 commit_provider_copy :: (model: *Provider_Model, staged: *Provider_Model) {

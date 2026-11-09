@@ -1,9 +1,9 @@
 const vscode = require("vscode");
-const path = require("path");
 
 const HEADING = /^(#{1,6})\s/;
 const LIST_ITEM = /^([ \t]*)(?:[-*+]|\d+[.)])\s/;
 const OPEN_TASK = /^[ \t]*(?:[-*+]|\d+[.)])\s+\[ \]/;
+const NOT_YET_TASK = /^[ \t]*(?:[-*+]|\d+[.)])\s+\[_\]/;
 const FENCE = /^[ \t]*(```|~~~)/;
 
 function indentWidth(whitespace) {
@@ -85,8 +85,16 @@ function openTaskLines(document) {
 			}
 		}
 
-		if (OPEN_TASK.test(text)) {
-			candidate = { indent, line };
+		const isOpenTask = OPEN_TASK.test(text);
+		const isNotYetTask = NOT_YET_TASK.test(text);
+		if (isOpenTask || isNotYetTask) {
+			if (isOpenTask) {
+				candidate = { indent, line };
+			}
+
+			if (isNotYetTask) {
+				result.add(line);
+			}
 
 			for (const h of headings) {
 				result.add(h.line);
@@ -147,6 +155,17 @@ function nextOpenLeafTask() {
 	moveCursorToTask(editor, next === undefined ? leaves[0] : next);
 }
 
+// Patterns without a slash match the file name in any folder, as in .gitignore.
+function matchesFoldOnSavePatterns(document) {
+	const patterns = vscode.workspace.getConfiguration("todoFolding").get("foldOnSavePatterns", []);
+	return patterns.some(
+		(pattern) => vscode.languages.match(
+			{ pattern: pattern.includes("/") ? pattern : `**/${pattern}` },
+			document
+		)
+	);
+}
+
 function activate(context) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand("todoFolding.showOpenTasks", showOpenTasks),
@@ -156,8 +175,8 @@ function activate(context) {
 				const editor = vscode.window.activeTextEditor;
 				if (
 					editor && editor.document === document
-					&& path.basename(document.fileName).toLowerCase() === "todo.md"
 					&& vscode.workspace.getConfiguration("todoFolding").get("foldOnSave")
+					&& matchesFoldOnSavePatterns(document)
 				) {
 					showOpenTasks();
 				}
