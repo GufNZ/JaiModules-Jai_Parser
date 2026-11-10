@@ -25,7 +25,7 @@ main :: () {
 	test_paths();
 	test_descriptor_layout();
 	test_admission_controls();
-	print("Service context PASS.\n");
+	print("Service context \e[92mPASS\e[0m.\n");
 }
 
 test_schema_tuples :: () {
@@ -40,7 +40,7 @@ test_schema_tuples :: () {
 	ok, single := Service.configuration_id(.[implemented]);
 	assert(ok);
 	duplicate_ok := Service.configuration_id(.[implemented, implemented]);
-	assert(!duplicate_ok, "A duplicated tuple is not a set.");
+	assert(!duplicate_ok, "\e[91mA duplicated tuple is not a set.\e[0m");
 	empty_ok := Service.configuration_id(.[]);
 	assert(!empty_ok);
 
@@ -51,7 +51,7 @@ test_schema_tuples :: () {
 		field := ((*changed).(*u8) + it.offset_in_bytes).(*string);
 		field.* = tprint("%1x", field.*);
 		changed_ok := Service.configuration_id(.[changed]);
-		assert(!changed_ok, "A tuple with a changed % was admitted.", it.name);
+		assert(!changed_ok, "\e[91mA tuple with a changed % was admitted.\e[0m", it.name);
 	}
 
 	// The tuple value is a record of eleven ASCII values in field order.
@@ -60,7 +60,7 @@ test_schema_tuples :: () {
 	assert(record_ok && record.tag.(string) == "record" && record.fields.count == 12);
 	ascii_ok, last := Service.parse_key(record.fields[11], 1);
 	assert(ascii_ok && last.tag.(string) == "ascii" && last.fields[0].(string) == Service.DIAGNOSTIC_PROFILE);
-	print("Schema tuples PASS\n");
+	print("Schema tuples \e[92mPASS\e[0m\n");
 }
 
 test_paths :: () {
@@ -76,8 +76,8 @@ test_paths :: () {
 	invalid_ok := Service.windows_path_value("a\xFFb");
 	posix_nul_ok := Service.posix_path_value("a\0b");
 	posix_ok, posix := Service.posix_path_value("/tmp/\xFF");
-	assert(!empty_ok && !nul_ok && !invalid_ok && !posix_nul_ok && posix_ok && posix.code_units.count == 6, "POSIX bytes are kept without decoding.");
-	print("Path values PASS\n");
+	assert(!empty_ok && !nul_ok && !invalid_ok && !posix_nul_ok && posix_ok && posix.code_units.count == 6, "\e[91mPOSIX bytes are kept without decoding.\e[0m");
+	print("Path values \e[92mPASS\e[0m\n");
 }
 
 paths :: (filename := "D:/project/main.jai", directory := "D:/project", base := "D:/project") -> Service.Context_Paths {
@@ -102,13 +102,13 @@ test_descriptor_layout :: () {
 	values: [FIELDS.count] [..] [] u8;
 	for FIELDS {
 		field_ok, field := Service.parse_key(root.fields[it_index], 16);
-		assert(field_ok && field.tag.(string) == it, "Field % is %.", it_index, field.tag.(string));
+		assert(field_ok && field.tag.(string) == it, "\e[91mField % is %.\e[0m", it_index, field.tag.(string));
 		values[it_index] = field.fields;
 	}
 
 	producer := values[0];
 	assert(producer.count == 6 && producer[0].(string) == "jai-parser-service" && producer[1].count == 16 && producer[3].count == 16 && producer[4].count == 16);
-	assert(Service.bytes_equal(producer[5], Service.syntax_adapter_descriptor()), "The producer binds the adapter's capability descriptor.");
+	assert(Service.bytes_equal(producer[5], Service.syntax_adapter_descriptor()), "\e[91mThe producer binds the adapter's capability descriptor.\e[0m");
 
 	// Build identities are digests of the exact compiled sources, recomputed here from the files.
 	digest_of :: (files: [] string) -> [16] u8 {
@@ -125,7 +125,7 @@ test_descriptor_layout :: () {
 
 	parser_digest := digest_of(.["../module.jai", "../parser.jai", "../resolution.jai"]);
 	lexer_digest := digest_of(.["../lexer.jai"]);
-	assert(Service.bytes_equal(producer[1], parser_digest) && Service.bytes_equal(producer[3], lexer_digest), "Build digests match the sources on disk.");
+	assert(Service.bytes_equal(producer[1], parser_digest) && Service.bytes_equal(producer[3], lexer_digest), "\e[91mBuild digests match the sources on disk.\e[0m");
 
 	sdk_ok, sdk := Service.parse_key(producer[2], 2);
 	assert(sdk_ok && sdk.tag.(string) == "compiler-sdk" && begins_with(sdk.fields[0].(string), "beta ") && sdk.fields[1].count == 16);
@@ -154,7 +154,7 @@ test_descriptor_layout :: () {
 	posix_ok, posix := Service.syntax_context_descriptor(posix_paths);
 	assert(alias_ok && base_ok && posix_ok);
 	for ([] u8).[alias, base, posix] {
-		assert(!Service.bytes_equal(Service.context_id(it), identity), "Variant % shares the original identity.", it_index);
+		assert(!Service.bytes_equal(Service.context_id(it), identity), "\e[91mVariant % shares the original identity.\e[0m", it_index);
 		variant_failure := Service.admit_context(Service.context_id(it), it);
 		assert(variant_failure == .NONE);
 	}
@@ -162,8 +162,8 @@ test_descriptor_layout :: () {
 	invalid_paths := paths();
 	invalid_paths.visible_directory.code_units.count -= 1;
 	invalid_ok := Service.syntax_context_descriptor(invalid_paths);
-	assert(!invalid_ok, "An odd UTF-16 byte count is rejected.");
-	print("Descriptor layout PASS\n");
+	assert(!invalid_ok, "\e[91mAn odd UTF-16 byte count is rejected.\e[0m");
+	print("Descriptor layout \e[92mPASS\e[0m\n");
 }
 
 // Rebuilds the descriptor with field `index` replaced by `K(name, values)`.
@@ -182,7 +182,7 @@ field_values :: (descriptor: [] u8, index: s64) -> [..] [] u8 {
 
 expect :: (descriptor: [] u8, failure: Service.Context_Failure, what: string) {
 	actual := Service.admit_context(Service.context_id(descriptor), descriptor);
-	assert(actual == failure, "%: expected %, got %.", what, failure, actual);
+	assert(actual == failure, "\e[91m%: expected %, got %.\e[0m", what, failure, actual);
 }
 
 test_admission_controls :: () {
@@ -260,6 +260,6 @@ test_admission_controls :: () {
 	mismatch := array_copy(identity);
 	mismatch[mismatch.count - 1] ^= 1;
 	failure := Service.admit_context(mismatch, descriptor);
-	assert(failure == .IDENTITY_MISMATCH, "A forged identity is rejected.");
-	print("Admission controls PASS\n");
+	assert(failure == .IDENTITY_MISMATCH, "\e[91mA forged identity is rejected.\e[0m");
+	print("Admission controls \e[92mPASS\e[0m\n");
 }

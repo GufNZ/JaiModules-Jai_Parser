@@ -74,7 +74,7 @@ main :: () {
 		bytes: s64;
 		for path: files {
 			source, ok := read_entire_file(path);
-			assert(ok, "Unable to read %.", path);
+			assert(ok, "\e[91mUnable to read %.\e[0m", path);
 			bytes += source.count;
 			check_owned_parse(source, path);
 			free(source);
@@ -85,7 +85,7 @@ main :: () {
 	}
 
 	report_route_coverage();
-	print("Service snapshot PASS.\n");
+	print("Service snapshot \e[92mPASS\e[0m.\n");
 }
 
 inventory_files :: (directory: string, recursive: bool) -> [..] string {
@@ -127,19 +127,19 @@ check_owned_parse :: (text: string, temporary_path: string) {
 	check_snapshot(*owned.parsed, *fresh);
 
 	fault, snapshot := Service.project_snapshot(owned);
-	assert(fault.failure == .NONE, "Snapshot of % failed: % at %[%].", path, fault.failure, fault.record, fault.index);
+	assert(fault.failure == .NONE, "\e[91mSnapshot of % failed: % at %[%].\e[0m", path, fault.failure, fault.record, fault.index);
 	assert(snapshot.source.data == owned.source.data && snapshot.root == snapshot.node_projection.root && snapshot.tokens.data == snapshot.token_projection.tokens.data);
 	matched, reason := token_projection_matches(snapshot.token_projection, *fresh);
-	assert(matched, "Projection of % differs: %.", path, reason);
+	assert(matched, "\e[91mProjection of % differs: %.\e[0m", path, reason);
 	valid, problem := node_projection_invariants(snapshot.node_projection);
-	assert(valid, "Node projection of % violates an invariant: %.", path, problem);
+	assert(valid, "\e[91mNode projection of % violates an invariant: %.\e[0m", path, problem);
 	node_coverage.projected += 1;
 	tally_routes(snapshot.node_projection);
 	for snapshot.recoveries {
 		producer := owned.parsed.recovery_records[it_index];
-		assert((it.owner == .NONE) == !producer.owner && it.cursor == producer.cursor && it.discarded == producer.discarded, "Recovery % of % ownership.", it_index, path);
+		assert((it.owner == .NONE) == !producer.owner && it.cursor == producer.cursor && it.discarded == producer.discarded, "\e[91mRecovery % of % ownership.\e[0m", it_index, path);
 		if it.owner == .NODE {
-			assert(snapshot.nodes[it.owner_node_id].token_span.first == producer.owner.first_token.(s64), "Recovery % of % maps to the wrong node.", it_index, path);
+			assert(snapshot.nodes[it.owner_node_id].token_span.first == producer.owner.first_token.(s64), "\e[91mRecovery % of % maps to the wrong node.\e[0m", it_index, path);
 		}
 
 		node_coverage.unpublished += (it.owner == .UNPUBLISHED && !it.discarded).(s64);
@@ -147,18 +147,18 @@ check_owned_parse :: (text: string, temporary_path: string) {
 	}
 
 	index_fault, index := Service.project_declaration_index(snapshot);
-	assert(index_fault.failure == .NONE, "Index of % failed: % at %[%].", path, index_fault.failure, index_fault.record, index_fault.index);
+	assert(index_fault.failure == .NONE, "\e[91mIndex of % failed: % at %[%].\e[0m", path, index_fault.failure, index_fault.record, index_fault.index);
 	index_valid, index_problem := declaration_index_invariants(index, snapshot);
-	assert(index_valid, "Index of % violates an invariant: %.", path, index_problem);
+	assert(index_valid, "\e[91mIndex of % violates an invariant: %.\e[0m", path, index_problem);
 	node_coverage.entries += index.entries.count;
 	node_coverage.partial += (index.coverage.kind == .PARTIAL_SYNTAX_TRAVERSAL).(s64);
 	Service.release_declaration_index(index);
 	Service.release_snapshot(snapshot);
 
 	diagnostics_fault, diagnostics := Service.project_diagnostics(owned);
-	assert(diagnostics_fault.failure == .NONE, "Diagnostics of % failed: % at %[%].", path, diagnostics_fault.failure, diagnostics_fault.record, diagnostics_fault.index);
+	assert(diagnostics_fault.failure == .NONE, "\e[91mDiagnostics of % failed: % at %[%].\e[0m", path, diagnostics_fault.failure, diagnostics_fault.record, diagnostics_fault.index);
 	diagnostics_matched, diagnostics_reason := diagnostics_match(diagnostics, *fresh);
-	assert(diagnostics_matched, "Diagnostics of % differ: %.", path, diagnostics_reason);
+	assert(diagnostics_matched, "\e[91mDiagnostics of % differ: %.\e[0m", path, diagnostics_reason);
 	Service.release_diagnostics_projection(diagnostics);
 
 	Parser.release_parser_tree(*fresh);
@@ -345,7 +345,7 @@ test_token_tags :: () {
 	assert(Service.TOKEN_TAG_NAMES.count == 77);
 	for a, i: Service.TOKEN_TAG_NAMES {
 		for b, j: Service.TOKEN_TAG_NAMES {
-			assert(i == j || a != b, "Duplicate token tag %.", a);
+			assert(i == j || a != b, "\e[91mDuplicate token tag %.\e[0m", a);
 		}
 	}
 
@@ -359,7 +359,7 @@ test_token_tags :: () {
 
 
 		ok, tag := Service.token_tag(xx value);
-		assert(ok && tag.kind == .NAMED && tag.name == name, "Token % maps to %.", name, tag);
+		assert(ok && tag.kind == .NAMED && tag.name == name, "\e[91mToken % maps to %.\e[0m", name, tag);
 	}
 
 	Byte :: (value: u8) -> Service.Token_Tag {
@@ -372,7 +372,7 @@ test_token_tags :: () {
 
 	check :: (type: Parser.Token_Type, expected: Service.Token_Tag) {
 		ok, tag := Service.token_tag(type);
-		assert(ok && tag == expected, "Token type % maps to %, expected %.", type.(s64), tag, expected);
+		assert(ok && tag == expected, "\e[91mToken type % maps to %, expected %.\e[0m", type.(s64), tag, expected);
 	}
 
 	check(.BITWISE_XOR, Byte(94));
@@ -389,7 +389,7 @@ test_token_tags :: () {
 
 	for value: s16.[-1, 278, 289, 400, 499, 500, 501, 503, 1000] {
 		ok := Service.token_tag(xx value);
-		assert(!ok, "Unregistered producer value % mapped.", value);
+		assert(!ok, "\e[91mUnregistered producer value % mapped.\e[0m", value);
 	}
 }
 
@@ -410,7 +410,7 @@ test_token_values :: () {
 			}
 		}
 
-		assert(false, "No token spelled %.", spelling);
+		assert(false, "\e[91mNo token spelled %.\e[0m", spelling);
 		return .{};
 	}
 
@@ -435,7 +435,7 @@ test_token_values :: () {
 		}
 	}
 
-	assert(notes.count == 2 && notes[0] == "quoted note" && notes[1] == "plain", "Notes: %", notes);
+	assert(notes.count == 2 && notes[0] == "quoted note" && notes[1] == "plain", "\e[91mNotes: %\e[0m", notes);
 
 	last := projection.tokens[projection.tokens.count - 1];
 	assert(last.tag.name == "END_OF_INPUT" && last.origin.start == SOURCE.count && last.origin.end == SOURCE.count && last.value.kind == .NO_VALUE);
@@ -463,7 +463,7 @@ test_projection_negative_controls :: () {
 		owned := Service.own_parse(SOURCE, "negative.jai");
 		mutate(*owned.parsed);
 		fault, projection := Service.project_tokens(owned);
-		assert(fault.failure == expected && !projection, "Expected %, got %.", expected, fault.failure);
+		assert(fault.failure == expected && !projection, "\e[91mExpected %, got %.\e[0m", expected, fault.failure);
 		Service.release_owned_syntax(owned);
 	}
 
@@ -506,13 +506,13 @@ test_projection_negative_controls :: () {
 	assert(matched);
 	projection.tokens[2].coordinates.c1 += 1;
 	matched = token_projection_matches(projection, *fresh);
-	assert(!matched, "Comparator missed an altered coordinate.");
+	assert(!matched, "\e[91mComparator missed an altered coordinate.\e[0m");
 	projection.tokens[2].coordinates.c1 -= 1;
 	projection.tokens[4].value.bytes.count -= 1;
 	matched = token_projection_matches(projection, *fresh);
-	assert(!matched, "Comparator missed an altered value.");
+	assert(!matched, "\e[91mComparator missed an altered value.\e[0m");
 
-	print("Token projection tags, values and negative controls PASS\n");
+	print("Token projection tags, values and negative controls \e[92mPASS\e[0m\n");
 }
 
 #import "Sort";
@@ -625,7 +625,7 @@ test_snapshot_and_diagnostics :: () {
 		// The parser reports expected-expression holes at end of input, then inserts the missing `;`.
 		inserted := 0;
 		for diagnostics.records {
-			assert(it.primary_origin.span.start == SOURCE.count && it.primary_origin.span.end == SOURCE.count, "Every diagnostic here anchors at end of input.");
+			assert(it.primary_origin.span.start == SOURCE.count && it.primary_origin.span.end == SOURCE.count, "\e[91mEvery diagnostic here anchors at end of input.\e[0m");
 			if it.parser_observation.recovery_action == .INSERT_MISSING_TOKEN {
 				inserted += 1;
 				assert(it.primary_origin.kind == .INSERTED && it.primary_origin.expected_token == it.parser_observation.expected_token);
@@ -649,7 +649,7 @@ test_snapshot_and_diagnostics :: () {
 
 		first := diagnostics.records[0];
 		assert(first.code == .EXPECTED_EXPRESSION && first.primary_origin.kind == .SOURCE);
-		assert(first.primary_origin.span.start == 5 && first.primary_origin.span.end == 5, "An expected expression anchors zero-width at the `;`, got %.", first.primary_origin.span);
+		assert(first.primary_origin.span.start == 5 && first.primary_origin.span.end == 5, "\e[91mAn expected expression anchors zero-width at the `;`, got %.\e[0m", first.primary_origin.span);
 	}
 
 	{
@@ -669,7 +669,7 @@ test_snapshot_and_diagnostics :: () {
 			}
 		}
 
-		assert(lexer_errors >= 1, "Expected a lexer error.");
+		assert(lexer_errors >= 1, "\e[91mExpected a lexer error.\e[0m");
 	}
 
 	{
@@ -678,11 +678,11 @@ test_snapshot_and_diagnostics :: () {
 
 		owned.parsed.root = null;
 		fault, snapshot := Service.project_snapshot(owned);
-		assert(fault.failure == .NONE && snapshot.root == -1 && !snapshot.nodes.count && snapshot.tokens.count == owned.parsed.tokens.count, "A rootless parse keeps its tokens with root -1.");
+		assert(fault.failure == .NONE && snapshot.root == -1 && !snapshot.nodes.count && snapshot.tokens.count == owned.parsed.tokens.count, "\e[91mA rootless parse keeps its tokens with root -1.\e[0m");
 		Service.release_snapshot(snapshot);
 	}
 
-	print("Snapshot envelope and diagnostics vectors PASS\n");
+	print("Snapshot envelope and diagnostics vectors \e[92mPASS\e[0m\n");
 }
 
 // Each injected defect fails the envelope or diagnostics conversion with its own reason, or degrades an origin to unlocated.
@@ -694,7 +694,7 @@ test_snapshot_and_diagnostics_controls :: () {
 		declaration := owned.parsed.root.(*Parser.Parser_Block).statements[0].(*Parser.Parser_Declaration);
 		declaration.expression.(*Parser.Parser_Binary_Operator).flags = xx 0x80;
 		fault, snapshot := Service.project_snapshot(owned);
-		assert(fault.failure == .UNKNOWN_SOURCE_FLAGS && !snapshot, "A node failure fails the whole envelope.");
+		assert(fault.failure == .UNKNOWN_SOURCE_FLAGS && !snapshot, "\e[91mA node failure fails the whole envelope.\e[0m");
 	}
 
 	{
@@ -738,14 +738,14 @@ test_snapshot_and_diagnostics_controls :: () {
 
 		for diagnostics.records {
 			if it.parser_observation.recovery_action == .INSERT_MISSING_TOKEN && it_index == duplicate.diagnostic_index {
-				assert(it.primary_origin.kind == .UNLOCATED && it.primary_origin.reason == .RECOVERED_LOCATION_UNAVAILABLE, "Ambiguous correlation is unlocated, not guessed.");
+				assert(it.primary_origin.kind == .UNLOCATED && it.primary_origin.reason == .RECOVERED_LOCATION_UNAVAILABLE, "\e[91mAmbiguous correlation is unlocated, not guessed.\e[0m");
 			}
 		}
 	}
 
 	assert(!Service.is_valid_utf8(xx "\xC0\x80") && !Service.is_valid_utf8(xx "\xED\xA0\x80") && !Service.is_valid_utf8(xx "\xF4\x90\x80\x80") && !Service.is_valid_utf8(xx "\xE2\x82"));
 	assert(Service.is_valid_utf8(xx "plain \xC3\xA9 \xE2\x82\xAC \xF0\x9F\x98\x80"));
-	print("Snapshot envelope and diagnostics controls PASS\n");
+	print("Snapshot envelope and diagnostics controls \e[92mPASS\e[0m\n");
 }
 
 // Independent shape checks: dense preorder IDs, each non-root node owned exactly once by an earlier record, helpers likewise.
@@ -954,16 +954,16 @@ get_field :: (fields: [] Service.Field_Observation, names: .. string) -> Service
 	}
 
 
-	assert(false, "No field %.", names);
+	assert(false, "\e[91mNo field %.\e[0m", names);
 	return .{};
 }
 
 project_source_nodes :: (source: string) -> *Service.Owned_Syntax, *Service.Node_Projection {
 	owned := Service.own_parse(source, "vector.jai");
 	fault, projection := Service.project_nodes(owned);
-	assert(fault.failure == .NONE, "Node projection of '%' failed: % (%).", source, fault.failure, fault.record);
+	assert(fault.failure == .NONE, "\e[91mNode projection of '%' failed: % (%).\e[0m", source, fault.failure, fault.record);
 	valid, problem := node_projection_invariants(projection);
-	assert(valid, "Invariant: %", problem);
+	assert(valid, "\e[91mInvariant: %\e[0m", problem);
 	tally_routes(projection);
 	return owned, projection;
 }
@@ -984,7 +984,7 @@ test_node_vectors :: () {
 		defer Service.release_owned_syntax(owned);
 		defer Service.release_node_projection(projection);
 
-		assert(kinds(projection) == "BLOCK DECLARATION BINARY_OPERATOR IDENT LITERAL ", "Kinds: %", kinds(projection));
+		assert(kinds(projection) == "BLOCK DECLARATION BINARY_OPERATOR IDENT LITERAL ", "\e[91mKinds: %\e[0m", kinds(projection));
 		nodes := projection.nodes;
 		statements := get_field(nodes[0].fields, "statements");
 		assert(statements.kind == .LIST && statements.elements.count == 1 && statements.elements[0].signed == 1);
@@ -1009,7 +1009,7 @@ test_node_vectors :: () {
 
 		assert(
 			kinds(projection) == "BLOCK COMPOUND_DECLARATION COMMA_SEPARATED_ARGUMENTS IDENT IDENT DECLARATION PROCEDURE_CALL IDENT IDENT IDENT IDENT ",
-			"Kinds: %",
+			"\e[91mKinds: %\e[0m",
 			kinds(projection)
 		);
 		nodes := projection.nodes;
@@ -1049,7 +1049,7 @@ test_node_vectors :: () {
 				}
 			}
 
-			assert(false, "No % #%.", kind, occurrence);
+			assert(false, "\e[91mNo % #%.\e[0m", kind, occurrence);
 			return null;
 		}
 
@@ -1058,7 +1058,7 @@ test_node_vectors :: () {
 		array := find(projection, "TYPE_INSTANTIATION", 1);
 		dimension := get_field(array.fields, "array_dimension").signed;
 		element := get_field(array.fields, "array_element_type").signed;
-		assert(dimension > 0 && element > dimension, "Fixed arrays visit the dimension before the element.");
+		assert(dimension > 0 && element > dimension, "\e[91mFixed arrays visit the dimension before the element.\e[0m");
 		null_count: s64;
 		for projection.nodes {
 			if it.kind == "LITERAL" && get_field(it.fields, "value_type").name == "POINTER" {
@@ -1070,11 +1070,11 @@ test_node_vectors :: () {
 		assert(null_count == 1);
 
 		prefix := find(projection, "CAST");
-		assert(get_field(prefix.fields, "target_type").signed < get_field(prefix.fields, "expression").signed, "Prefix casts visit the target first.");
+		assert(get_field(prefix.fields, "target_type").signed < get_field(prefix.fields, "expression").signed, "\e[91mPrefix casts visit the target first.\e[0m");
 		auto := find(projection, "CAST", 1);
 		assert(get_field(auto.fields, "target_type").kind == .INACTIVE && get_field(auto.fields, "cast_flags").names[0] == "IS_AUTO");
 		postfix := find(projection, "CAST", 2);
-		assert(get_field(postfix.fields, "expression").signed < get_field(postfix.fields, "target_type").signed, "Postfix casts visit the expression first.");
+		assert(get_field(postfix.fields, "expression").signed < get_field(postfix.fields, "target_type").signed, "\e[91mPostfix casts visit the expression first.\e[0m");
 
 		assert(get_field(find(projection, "TYPE_QUERY").fields, "query_kind").name == "SIZE_OF");
 		assert(get_field(find(projection, "EXPRESSION_QUERY").fields, "query_kind").name == "TYPE_OF");
@@ -1108,15 +1108,15 @@ test_node_vectors :: () {
 		for projection.nodes {
 			if it.kind == "BINARY_OPERATOR" || it.kind == "UNARY_OPERATOR" {
 				operator_field := get_field(it.fields, "operator_type");
-				assert(operator_field.kind == .OPERATOR && operator_field.tag.kind == .NAMED, "Operator % is not named.", operator_field.tag);
+				assert(operator_field.kind == .OPERATOR && operator_field.tag.kind == .NAMED, "\e[91mOperator % is not named.\e[0m", operator_field.tag);
 				array_add(*names, operator_field.tag.name,, temp);
 			}
 		}
 
-		assert(names.count == 4 && names[0] == "IS_EQUAL" && names[1] == "ARRAY_SUBSCRIPT" && names[2] == "POSTFIX_DEREFERENCE" && names[3] == "LESS_OR_EQUAL", "Operators: %", names);
+		assert(names.count == 4 && names[0] == "IS_EQUAL" && names[1] == "ARRAY_SUBSCRIPT" && names[2] == "POSTFIX_DEREFERENCE" && names[3] == "LESS_OR_EQUAL", "\e[91mOperators: %\e[0m", names);
 	}
 
-	print("Node projection authored vectors PASS\n");
+	print("Node projection authored vectors \e[92mPASS\e[0m\n");
 }
 
 // Each injected producer defect fails node conversion with its own reason.
@@ -1127,7 +1127,7 @@ test_node_negative_controls :: () {
 
 		mutate(*owned.parsed);
 		fault, projection := Service.project_nodes(owned);
-		assert(fault.failure == expected && !projection, "Expected %, got % (%).", expected, fault.failure, fault.record);
+		assert(fault.failure == expected && !projection, "\e[91mExpected %, got % (%).\e[0m", expected, fault.failure, fault.record);
 	}
 
 	binary_of :: (parsed: *Parser.Parsed_Source) -> *Parser.Parser_Binary_Operator {
@@ -1265,7 +1265,7 @@ test_node_negative_controls :: () {
 	}
 
 	valid := node_projection_invariants(projection);
-	assert(!valid, "Invariant checker missed a repeated owning reference.");
+	assert(!valid, "\e[91mInvariant checker missed a repeated owning reference.\e[0m");
 	for * binary_fields {
 		if it.path[0].name == "right" {
 			it.value.signed = 4;
@@ -1276,9 +1276,9 @@ test_node_negative_controls :: () {
 	assert(valid);
 	binary_fields[0], binary_fields[1] = binary_fields[1], binary_fields[0];
 	valid = node_projection_invariants(projection);
-	assert(!valid, "Invariant checker missed out-of-order fields.");
+	assert(!valid, "\e[91mInvariant checker missed out-of-order fields.\e[0m");
 
-	print("Node projection negative controls PASS\n");
+	print("Node projection negative controls \e[92mPASS\e[0m\n");
 }
 
 find_node :: (projection: *Service.Node_Projection, kind: string, occurrence := 0) -> *Service.Node_Record {
@@ -1294,7 +1294,7 @@ find_node :: (projection: *Service.Node_Projection, kind: string, occurrence := 
 		}
 	}
 
-	assert(false, "No % #%.", kind, occurrence);
+	assert(false, "\e[91mNo % #%.\e[0m", kind, occurrence);
 	return null;
 }
 
@@ -1333,10 +1333,10 @@ END
 		arguments := get_field(header.fields, "arguments").elements;
 		usings := get_field(header.fields, "parameter_usings").elements;
 		assert(arguments.count == 3 && usings.count == 1);
-		assert(usings[0].signed > arguments[0].signed && usings[0].signed < arguments[1].signed, "A parameter using precedes its argument.");
+		assert(usings[0].signed > arguments[0].signed && usings[0].signed < arguments[1].signed, "\e[91mA parameter using precedes its argument.\e[0m");
 		using_record := *projection.nodes[usings[0].signed];
 		using_target := get_field(using_record.fields, "expression");
-		assert(using_target.relationship == .ALIAS && using_target.signed == arguments[1].signed, "The using expression is an alias to its argument.");
+		assert(using_target.relationship == .ALIAS && using_target.signed == arguments[1].signed, "\e[91mThe using expression is an alias to its argument.\e[0m");
 		assert(get_field(header.fields, "returns").elements.count == 1);
 		body := get_field(header.fields, "body_or_null").signed;
 		assert(projection.nodes[body].kind == "PROCEDURE_BODY");
@@ -1350,7 +1350,7 @@ END
 
 		loop := find_node(projection, "FOR");
 		loop_flags := get_field(loop.fields, "for_flags");
-		assert(has_flag(loop_flags, "REVERSE") && has_flag(loop_flags, "POINTER") && loop_flags.names[0] == "POINTER", "Flags: %", loop_flags.names);
+		assert(has_flag(loop_flags, "REVERSE") && has_flag(loop_flags, "POINTER") && loop_flags.names[0] == "POINTER", "\e[91mFlags: %\e[0m", loop_flags.names);
 		it_name := get_field(loop.fields, "ident_it").signed;
 		index_name := get_field(loop.fields, "ident_it_index").signed;
 		iteration := get_field(loop.fields, "iteration_expression").signed;
@@ -1391,7 +1391,7 @@ END
 		aggregate := find_node(projection, "STRUCT");
 		assert(has_flag(get_field(aggregate.fields, "textual_flags"), "NO_PADDING"));
 		parameters := get_field(aggregate.fields, "arguments_block").signed;
-		assert(parameters > 0 && parameters < get_field(aggregate.fields, "block").signed, "Struct parameters precede the body.");
+		assert(parameters > 0 && parameters < get_field(aggregate.fields, "block").signed, "\e[91mStruct parameters precede the body.\e[0m");
 		assert(get_field(projection.nodes[parameters].fields, "block_type").name == "STRUCT_ARGUMENTS");
 		union_record := find_node(projection, "STRUCT", 1);
 		assert(has_flag(get_field(union_record.fields, "textual_flags"), "UNION") && get_field(union_record.fields, "arguments_block").signed == -1);
@@ -1409,7 +1409,7 @@ END
 		assert(get_field(push.fields, "to_push").signed < get_field(push.fields, "block").signed);
 	}
 
-	print("Statement and procedure vectors PASS\n");
+	print("Statement and procedure vectors \e[92mPASS\e[0m\n");
 }
 
 // Authored expectations for directive payloads, the import-callee association and the arrow-run body alias.
@@ -1425,7 +1425,7 @@ test_directive_vectors :: () {
 		call_id := get_field(import_record.fields, "module_parameters_call").signed;
 		assert(call_id > node_id(import_record) && get_field(import_record.fields, "program_parameters_call").signed == -1);
 		callee := get_field(projection.nodes[call_id].fields, "procedure_expression");
-		assert(callee.relationship == .ALIAS && callee.signed == node_id(import_record), "An import parameter call's callee is an alias to its import.");
+		assert(callee.relationship == .ALIAS && callee.signed == node_id(import_record), "\e[91mAn import parameter call's callee is an alias to its import.\e[0m");
 		assert(get_field(projection.nodes[call_id].fields, "arguments_unsorted").elements.count == 1);
 		assert(get_field(find_node(projection, "DIRECTIVE_LOAD").fields, "short_name").bytes.(string) == "other.jai");
 		library := find_node(projection, "DIRECTIVE_LIBRARY");
@@ -1444,7 +1444,7 @@ test_directive_vectors :: () {
 		body := get_field(projection.nodes[header].fields, "body_or_null").signed;
 		block := get_field(projection.nodes[body].fields, "block").signed;
 		expression := get_field(run.fields, "expression");
-		assert(expression.relationship == .ALIAS && expression.signed == block, "An arrow run's expression is an alias to its header's body block.");
+		assert(expression.relationship == .ALIAS && expression.signed == block, "\e[91mAn arrow run's expression is an alias to its header's body block.\e[0m");
 	}
 
 	{
@@ -1477,13 +1477,13 @@ test_directive_vectors :: () {
 			dimension := get_field(it.fields, "array_dimension").signed;
 			assert(dimension > 0 && get_field(it.fields, "array_element_type").signed > dimension && get_field(it.fields, "type_valued_expression").kind == .INACTIVE);
 			first := owned.parsed.tokens[it.token_span.first].type;
-			assert(first == #char "(", "The fixed-array wrapper should start at the parenthesis.");
+			assert(first == #char "(", "\e[91mThe fixed-array wrapper should start at the parenthesis.\e[0m");
 		}
 
-		assert(arrays == 1, "Fixed arrays: %", arrays);
+		assert(arrays == 1, "\e[91mFixed arrays: %\e[0m", arrays);
 	}
 
-	print("Directive vectors PASS\n");
+	print("Directive vectors \e[92mPASS\e[0m\n");
 }
 
 // Routes no other vector or W1/W2 file reaches: rarely used directives, using filters, import forms, `---` and assembly arms.
@@ -1518,7 +1518,7 @@ test_route_vectors :: () {
 	defer Service.release_owned_syntax(owned);
 	defer Service.release_node_projection(projection);
 
-	assert(!owned.parsed.diagnostics.count, "Route vectors should parse cleanly; first diagnostic: %.", ifx owned.parsed.diagnostics.count then owned.parsed.diagnostics[0].message);
+	assert(!owned.parsed.diagnostics.count, "\e[91mRoute vectors should parse cleanly; first diagnostic: %.\e[0m", ifx owned.parsed.diagnostics.count then owned.parsed.diagnostics[0].message);
 	for string.["PLACEHOLDER", "DIRECTIVE_WILDCARD", "DIRECTIVE_EXISTS", "DIRECTIVE_PROCEDURE_NAME", "DIRECTIVE_BYTES", "DIRECTIVE_POKE_NAME", "DIRECTIVE_THROUGH"] {
 		find_node(projection, it);
 	}
@@ -1555,11 +1555,11 @@ test_route_vectors :: () {
 		defer Service.release_node_projection(projection);
 
 		for projection.nodes {
-			assert(it.kind == plain.nodes[it_index].kind && it.fields.count == plain.nodes[it_index].fields.count, "Node % changed with a populated backreference.", it_index);
+			assert(it.kind == plain.nodes[it_index].kind && it.fields.count == plain.nodes[it_index].fields.count, "\e[91mNode % changed with a populated backreference.\e[0m", it_index);
 		}
 	}
 
-	print("Route vectors PASS\n");
+	print("Route vectors \e[92mPASS\e[0m\n");
 }
 
 // Source flags that only rare modifiers set.
@@ -1584,8 +1584,8 @@ test_flag_vectors :: () {
 	defer Service.release_owned_syntax(owned);
 	defer Service.release_node_projection(projection);
 
-	assert(!owned.parsed.diagnostics.count, "Flag vectors should parse cleanly; first diagnostic: %.", ifx owned.parsed.diagnostics.count then owned.parsed.diagnostics[0].message);
-	print("Flag vectors PASS\n");
+	assert(!owned.parsed.diagnostics.count, "\e[91mFlag vectors should parse cleanly; first diagnostic: %.\e[0m", ifx owned.parsed.diagnostics.count then owned.parsed.diagnostics[0].message);
+	print("Flag vectors \e[92mPASS\e[0m\n");
 }
 
 ASSEMBLY_SOURCE :: #string END
@@ -1611,7 +1611,7 @@ test_assembly_vectors :: () {
 	statement_ids := get_field(assembly.fields, "statements").elements;
 	assert(statement_ids.count == 5);
 	helper :: (projection: *Service.Node_Projection, value: Service.Field_Value) -> *Service.Helper_Record {
-		assert(value.kind == .HELPER && value.signed >= 0, "Expected a helper, got %.", value.kind);
+		assert(value.kind == .HELPER && value.signed >= 0, "\e[91mExpected a helper, got %.\e[0m", value.kind);
 		return *projection.helpers[value.signed];
 	}
 
@@ -1640,7 +1640,7 @@ test_assembly_vectors :: () {
 	base_value := helper(projection, get_field(memory.fields, "base"));
 	index_value := helper(projection, get_field(memory.fields, "index"));
 	scale_value := helper(projection, get_field(memory.fields, "scale"));
-	assert(get_field(memory.fields, "displacement").kind == .INACTIVE, "An unused displacement slot is inactive.");
+	assert(get_field(memory.fields, "displacement").kind == .INACTIVE, "\e[91mAn unused displacement slot is inactive.\e[0m");
 	base_node := get_field(base_value.fields, "expression").signed;
 	index_node := get_field(index_value.fields, "expression").signed;
 	assert(base_node > 0 && index_node > base_node && get_field(scale_value.fields, "expression").signed > index_node);
@@ -1653,7 +1653,7 @@ test_assembly_vectors :: () {
 	bang := helper(projection, get_field(helper(projection, operands[1]).fields, "modifiers").elements[0]);
 	assert(get_field(bang.fields, "kind").name == "BANG_Z" && get_field(bang.fields, "argument").kind == .INACTIVE);
 
-	print("Assembly vectors PASS\n");
+	print("Assembly vectors \e[92mPASS\e[0m\n");
 }
 
 // Independent declaration-index checks: owners recomputed from the snapshot's fields, containers derived upwards, visibility from list order,
@@ -2065,11 +2065,11 @@ declaration_index_invariants :: (index: *Service.Declaration_Index, snapshot: *S
 project_source_index :: (source: string) -> *Service.Owned_Syntax, *Service.Syntax_Snapshot, *Service.Declaration_Index {
 	owned := Service.own_parse(source, "index.jai");
 	fault, snapshot := Service.project_snapshot(owned);
-	assert(fault.failure == .NONE, "Snapshot of '%' failed: %.", source, fault.failure);
+	assert(fault.failure == .NONE, "\e[91mSnapshot of '%' failed: %.\e[0m", source, fault.failure);
 	index_fault, index := Service.project_declaration_index(snapshot);
-	assert(index_fault.failure == .NONE, "Index of '%' failed: % at %[%].", source, index_fault.failure, index_fault.record, index_fault.index);
+	assert(index_fault.failure == .NONE, "\e[91mIndex of '%' failed: % at %[%].\e[0m", source, index_fault.failure, index_fault.record, index_fault.index);
 	valid, problem := declaration_index_invariants(index, snapshot);
-	assert(valid, "Index invariant for '%': %", source, problem);
+	assert(valid, "\e[91mIndex invariant for '%': %\e[0m", source, problem);
 	tally_routes(snapshot.node_projection);
 	return owned, snapshot, index;
 }
@@ -2132,10 +2132,10 @@ test_declaration_index_vectors :: () {
 	check :: (source: string, expected: string, expected_regions := "") {
 		owned, snapshot, index := project_source_index(source);
 		summary := index_summary(index);
-		assert(summary == expected, "Index of '%':\n  got      %\n  expected %", source, summary, expected);
+		assert(summary == expected, "\e[91mIndex of '%':\n  got      %\n  expected %\e[0m", source, summary, expected);
 		regions := region_summary(index);
-		assert(regions == expected_regions, "Regions of '%': got '%', expected '%'.", source, regions, expected_regions);
-		assert(index.coverage.kind == .COMPLETE_SYNTAX_TRAVERSAL, "'%' should be complete.", source);
+		assert(regions == expected_regions, "\e[91mRegions of '%': got '%', expected '%'.\e[0m", source, regions, expected_regions);
+		assert(index.coverage.kind == .COMPLETE_SYNTAX_TRAVERSAL, "\e[91m'%' should be complete.\e[0m", source);
 		release_source_index(owned, snapshot, index);
 	}
 
@@ -2184,7 +2184,7 @@ END
 	{
 		owned, snapshot, index := project_source_index("long\\  _name :: 1;");
 		name := index.entries[0].name;
-		assert(name.spelling_bytes.(string) == "long\\  _name" && name.producer_name_bytes.(string) == "long_name", "Identifier continuations stay in the spelling only.");
+		assert(name.spelling_bytes.(string) == "long\\  _name" && name.producer_name_bytes.(string) == "long_name", "\e[91mIdentifier continuations stay in the spelling only.\e[0m");
 		release_source_index(owned, snapshot, index);
 	}
 
@@ -2214,7 +2214,7 @@ END
 
 		assert(basis(index, 0).statement_list_node_id == then_block && basis(index, 0).preceding_directive_node_id == node_id(find_node(projection, "DIRECTIVE_SCOPE", 0)));
 		assert(basis(index, 1).statement_list_node_id == else_block && basis(index, 1).preceding_directive_node_id == node_id(find_node(projection, "DIRECTIVE_SCOPE", 1)));
-		assert(basis(index, 2).statement_list_node_id == 0 && basis(index, 2).preceding_directive_node_id == -1, "A parent declaration after the branches has no direct directive.");
+		assert(basis(index, 2).statement_list_node_id == 0 && basis(index, 2).preceding_directive_node_id == -1, "\e[91mA parent declaration after the branches has no direct directive.\e[0m");
 		release_source_index(owned, snapshot, index);
 	}
 
@@ -2229,10 +2229,10 @@ END
 		named := index.entries[0].program_export_syntax;
 		assert(named && text(named.marker_origin.span) == "#program_export" && named.name_argument);
 		assert(named.name_argument.value_bytes.(string) == "name" && text(named.name_argument.origin.span) == "\"name\"");
-		assert(index.entries[1].program_export_syntax && !index.entries[1].program_export_syntax.name_argument, "A bare marker has no name argument.");
+		assert(index.entries[1].program_export_syntax && !index.entries[1].program_export_syntax.name_argument, "\e[91mA bare marker has no name argument.\e[0m");
 		empty := index.entries[2].program_export_syntax;
-		assert(empty && empty.name_argument && !empty.name_argument.value_bytes.count, "An explicit empty name is present.");
-		assert(index.entries[3].program_export_syntax && index.entries[3].program_export_syntax == index.entries[4].program_export_syntax, "Compound bindings share one occurrence.");
+		assert(empty && empty.name_argument && !empty.name_argument.value_bytes.count, "\e[91mAn explicit empty name is present.\e[0m");
+		assert(index.entries[3].program_export_syntax && index.entries[3].program_export_syntax == index.entries[4].program_export_syntax, "\e[91mCompound bindings share one occurrence.\e[0m");
 		assert(!index.entries[5].program_export_syntax);
 		release_source_index(owned, snapshot, index);
 	}
@@ -2246,8 +2246,8 @@ END
 		}
 
 		got := builder_to_string(*builder,, temp);
-		assert(got == expected, "Recovery statuses of '%': got %, expected %.", source, got, expected);
-		assert(index.coverage.kind == .COMPLETE_SYNTAX_TRAVERSAL, "Attributed recovery keeps '%' complete.", source);
+		assert(got == expected, "\e[91mRecovery statuses of '%': got %, expected %.\e[0m", source, got, expected);
+		assert(index.coverage.kind == .COMPLETE_SYNTAX_TRAVERSAL, "\e[91mAttributed recovery keeps '%' complete.\e[0m", source);
 		release_source_index(owned, snapshot, index);
 	}
 
@@ -2275,7 +2275,7 @@ END
 		release_source_index(owned, snapshot, index);
 	}
 
-	print("Declaration index vectors PASS\n");
+	print("Declaration index vectors \e[92mPASS\e[0m\n");
 }
 
 // Recorded evidence that disagrees with the token stream fails conversion; missing correlations degrade to explicit partial records.
@@ -2302,7 +2302,7 @@ test_declaration_index_controls :: () {
 		modifier_token := get_field(first.fields, "modifier_token").signed;
 		snapshot.tokens[modifier_token].tag = .{kind = .BYTE_CHAR, byte = #char "="};
 		fault, index := Service.project_declaration_index(snapshot);
-		assert(fault.failure == .CONFLICTING_EVIDENCE && !index, "A modifier token that does not match its modifier fails conversion.");
+		assert(fault.failure == .CONFLICTING_EVIDENCE && !index, "\e[91mA modifier token that does not match its modifier fails conversion.\e[0m");
 		release_source_index(owned, snapshot, null);
 	}
 
@@ -2311,7 +2311,7 @@ test_declaration_index_controls :: () {
 		compound := find_node(snapshot.node_projection, "COMPOUND_DECLARATION");
 		set_signed(compound, "operator_token", get_field(compound.fields, "operator_token").signed + 1);
 		fault, index := Service.project_declaration_index(snapshot);
-		assert(fault.failure == .CONFLICTING_EVIDENCE && !index, "A shared operator token that is not `:` fails conversion.");
+		assert(fault.failure == .CONFLICTING_EVIDENCE && !index, "\e[91mA shared operator token that is not `:` fails conversion.\e[0m");
 		release_source_index(owned, snapshot, null);
 	}
 
@@ -2320,7 +2320,7 @@ test_declaration_index_controls :: () {
 		statements := get_field(snapshot.nodes[0].fields, "statements").elements;
 		statements[1].signed = statements[0].signed;
 		fault, index := Service.project_declaration_index(snapshot);
-		assert(fault.failure == .INVALID_REFERENCE && !index, "A node with two owners fails conversion.");
+		assert(fault.failure == .INVALID_REFERENCE && !index, "\e[91mA node with two owners fails conversion.\e[0m");
 		release_source_index(owned, snapshot, null);
 	}
 
@@ -2336,7 +2336,7 @@ test_declaration_index_controls :: () {
 		fault, index := Service.project_declaration_index(snapshot);
 		assert(fault.failure == .NONE);
 		name := index.entries[0].name;
-		assert(name.kind == .UNMAPPED && name.producer_name_bytes.(string) == "zz" && name.reason.code == .UNMAPPED_NAME, "A producer name that its token does not spell is unmapped, not guessed.");
+		assert(name.kind == .UNMAPPED && name.producer_name_bytes.(string) == "zz" && name.reason.code == .UNMAPPED_NAME, "\e[91mA producer name that its token does not spell is unmapped, not guessed.\e[0m");
 		assert(index.coverage.kind == .PARTIAL_SYNTAX_TRAVERSAL && index.coverage.reasons[0].subject.local_node_id == xx node_id(declaration));
 		valid, problem := declaration_index_invariants(index, snapshot);
 		assert(valid, problem);
@@ -2356,7 +2356,7 @@ test_declaration_index_controls :: () {
 		assert(fault.failure == .NONE && !index.entries[0].program_export_syntax);
 		assert(
 			index.coverage.reasons.count == 1 && index.coverage.reasons[0].code == .UNCORRELATED_METADATA && index.coverage.reasons[0].impacts == .METADATA,
-			"A marker without its flag is uncorrelated metadata."
+			"\e[91mA marker without its flag is uncorrelated metadata.\e[0m"
 		);
 		release_source_index(owned, snapshot, index);
 	}
@@ -2366,7 +2366,7 @@ test_declaration_index_controls :: () {
 		member := find_node(snapshot.node_projection, "IDENT");
 		snapshot.tokens[member.token_span.one_past_last].tag = .{kind = .BYTE_CHAR, byte = #char ","};
 		fault, index := Service.project_declaration_index(snapshot);
-		assert(fault.failure == .NONE && index.entries.count == 1, "Without `IDENT ;` evidence no member entry is guessed.");
+		assert(fault.failure == .NONE && index.entries.count == 1, "\e[91mWithout `IDENT ;` evidence no member entry is guessed.\e[0m");
 		reason := index.coverage.reasons[0];
 		assert(reason.code == .UNCLASSIFIED_ROUTE && reason.impacts == (.DECLARATION_SET | .NAMES) && reason.subject.local_node_id == xx node_id(member));
 		release_source_index(owned, snapshot, index);
@@ -2379,7 +2379,7 @@ test_declaration_index_controls :: () {
 		fault, index := Service.project_declaration_index(snapshot);
 		assert(fault.failure == .NONE && index.coverage.reasons.count == 1 && index.coverage.reasons[0].subject.kind == .DOCUMENT);
 		for index.entries {
-			assert(it.recovery_status.kind == .UNCLASSIFIED, "An event without a published owner leaves every entry unclassified.");
+			assert(it.recovery_status.kind == .UNCLASSIFIED, "\e[91mAn event without a published owner leaves every entry unclassified.\e[0m");
 		}
 
 		release_source_index(owned, snapshot, index);
@@ -2400,7 +2400,7 @@ test_declaration_index_controls :: () {
 			got[it_index] = it.recovery_status.kind;
 		}
 
-		assert(got[0] == .RECOVERED && got[1] == .PARSED && got[2] == .UNCLASSIFIED && got[3] == .PARSED, "Statuses %.", got);
+		assert(got[0] == .RECOVERED && got[1] == .PARSED && got[2] == .UNCLASSIFIED && got[3] == .PARSED, "\e[91mStatuses %.\e[0m", got);
 		assert(index.coverage.kind == .PARTIAL_SYNTAX_TRAVERSAL && index.coverage.reasons[0].subject.local_node_id == xx node_id(target));
 		valid, problem := declaration_index_invariants(index, snapshot);
 		assert(valid, problem);
@@ -2412,7 +2412,7 @@ test_declaration_index_controls :: () {
 		owned, snapshot, index := project_source_index("Outer :: struct { #scope_file x: int; } a, b := 1, 2;");
 		forged :: (index: *Service.Declaration_Index, snapshot: *Service.Syntax_Snapshot, what: string) {
 			valid := declaration_index_invariants(index, snapshot);
-			assert(!valid, "The invariant checker accepted a forged %.", what);
+			assert(!valid, "\e[91mThe invariant checker accepted a forged %.\e[0m", what);
 		}
 
 		entry := *index.entries[1];
@@ -2435,7 +2435,7 @@ test_declaration_index_controls :: () {
 		release_source_index(owned, snapshot, index);
 	}
 
-	print("Declaration index controls PASS\n");
+	print("Declaration index controls \e[92mPASS\e[0m\n");
 }
 
 // The descriptor's exact feature order and closed method tags, decoded through the bounded key parser.
@@ -2448,14 +2448,14 @@ test_syntax_adapter_descriptor :: () {
 	assert(key.fields[0].(string) == "jai-cache-syntax-adapter/1" && key.fields[1].(string) == Service.SYNTAX_REGISTRY_BINDING);
 	for FEATURES {
 		feature_ok, feature := Service.parse_key(key.fields[it_index + 2], 2);
-		assert(feature_ok && feature.tag.(string) == it && feature.fields.count == 2, "Feature % is out of order or malformed.", it);
+		assert(feature_ok && feature.tag.(string) == it && feature.fields.count == 2, "\e[91mFeature % is out of order or malformed.\e[0m", it);
 		method := feature.fields[0].(string);
 		schema := feature.fields[1].(string);
-		assert(array_find(METHODS, method) && (method == "UNAVAILABLE") == !schema.count, "Feature % has method % and schema '%'.", it, method, schema);
+		assert(array_find(METHODS, method) && (method == "UNAVAILABLE") == !schema.count, "\e[91mFeature % has method % and schema '%'.\e[0m", it, method, schema);
 	}
 
-	assert(Service.bytes_equal(descriptor, Service.syntax_adapter_descriptor()), "The descriptor is deterministic.");
-	print("Syntax adapter descriptor PASS\n");
+	assert(Service.bytes_equal(descriptor, Service.syntax_adapter_descriptor()), "\e[91mThe descriptor is deterministic.\e[0m");
+	print("Syntax adapter descriptor \e[92mPASS\e[0m\n");
 }
 
 #import "Hash_Table";
@@ -2602,7 +2602,7 @@ report_route_coverage :: () {
 		"enum:Code_Literal.value_type=TYPE_INFO"
 	];
 	for missing {
-		assert(array_find(COMPILER_ONLY, it), "Registered route % has neither a vector nor a recorded disposition.", it);
+		assert(array_find(COMPILER_ONLY, it), "\e[91mRegistered route % has neither a vector nor a recorded disposition.\e[0m", it);
 	}
 
 	// Flags no parser builder function sets: the first group is in the projection's closed source-flag domains, the rest are compiler-only.
@@ -2649,7 +2649,7 @@ report_route_coverage :: () {
 		for info.names {
 			name := tprint("%.%", domain.domain, it);
 			if !table_find_pointer(*route_counts, tprint("flag:%", name)) {
-				assert(array_find(UNPRODUCED_FLAGS, name), "Source flag % has neither a vector nor a recorded disposition.", name);
+				assert(array_find(UNPRODUCED_FLAGS, name), "\e[91mSource flag % has neither a vector nor a recorded disposition.\e[0m", name);
 			}
 		}
 	}

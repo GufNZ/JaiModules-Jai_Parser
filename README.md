@@ -2,6 +2,19 @@
 
 ## Tests
 
+Run the standalone test drivers, lexer/parser corpus checks and bounded differential suite with full compiler and test output:
+
+```bash
+bash modules/Jai_Parser/examples/run_all_tests.sh
+```
+
+This command assumes the Jai distribution root; the script itself works from any directory when given its correct path.
+It requires `jai` on `PATH` (or `JAI=/path/to/jai.exe`), runs both x64 and optimised LLVM by default, and also builds native-worker traces on each backend.
+Use `x64` or `llvm` to select one backend, or `--dry-run` to list commands without running them.
+Ordinary failures are collected while later tests continue; the final exit status is nonzero if any configuration fails.
+The differential runner's self-tests and bounded `--all` mode run once with their existing worker settings; child compiler/runtime logs are replayed afterward because that runner currently captures them.
+Benchmarks and exploratory experiments are not included.
+
 Run these from `modules/Jai_Parser/examples` with `jai <file>.jai -x64 && ./<file>.exe`.
 
 - `layout_test.jai` checks default lexer layout compatibility and focused token, trivia, here-string, and keyword behaviour across import options.
@@ -603,14 +616,23 @@ Select a section by number or exact, quoted name.
 Fixture ranges are inclusive and supported only for batchable sections.
 Selecting `"Runtime checks"` compiles and executes that section automatically.
 
-- `--workers` accepts 1..4 (default 2); use `--workers 1` for serial scheduling.
+- `--workers` accepts 1..4 (default 4); use `--workers 1` for serial scheduling.
 - `--batch-size` accepts 1..16 (default 16) for the nine batchable sections; other sections run whole.
 Worker count and batch size are the normal memory controls.
 - `--memory-mib` defaults to 2048: a 2 GiB commit safety limit per process tree.
 Hitting the cap is a failure, not a successful batch boundary.
 - `--timeout` defaults to 30 seconds per compile/runtime phase or idle admission wait, not per full suite.
+- `--redraw-ms` defaults to 100 and accepts 0 for unthrottled live progress updates.
 - `--reserve-mib` defaults to 2048 for physical/commit headroom.
 Low headroom can reduce concurrency.
+
+On a Windows VT console or Cygwin/MSYS PTY, interactive output stays within one row per worker slot plus a coloured summary row.
+The summary shows the last launched category's completed/selected fixture count, overall completed/total fixtures, completed/total jobs and launched jobs.
+At exit, the worker rows disappear and only the final summary remains.
+Progress, completed diagnostics and status messages update those rows instead of appending to scrollback; full diagnostics remain in the raw logs.
+Redirected output or consoles without VT support receive plain completed lines without transient progress or ANSI escapes.
+Logs are tailed incrementally in bounded chunks; final output is drained after stopping job trees on failure, timeout or cancellation.
+Raw log bytes are preserved independently of display truncation.
 
 The first failure or Ctrl+C stops scheduling and terminates active worker trees.
 Exit codes are 0 for success, 1 for test or runner failures, 64 for invalid arguments, 75 for insufficient headroom, 124 for timeouts, and 130 for cancellation.

@@ -939,7 +939,14 @@ submit_source_batch :: (service: *Service, handle: Handle(.SESSION), batch: Sour
 
 		if !source_provider_revisions_ready(session, *provider_backing) {
 			prepared := prepare_source_provider_revisions(session, *provider_backing);
-			if !validate_session(session, handle) {
+			current := validate_session(session, handle);
+			#if TEST_HOOKS {
+				if !current && session.faults.allow_stale_source_provider_revisions {
+					current = session;
+				}
+			}
+
+			if !current {
 				return false, .{}, stale(.SESSION);
 			}
 
@@ -955,6 +962,13 @@ submit_source_batch :: (service: *Service, handle: Handle(.SESSION), batch: Sour
 
 
 			if !prepared {
+				#if TEST_HOOKS {
+					if session.faults.retry_failed_source_provider_revisions {
+						continue;
+					}
+				}
+
+
 				return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
 			}
 
@@ -1070,6 +1084,10 @@ submit_source_batch_attempt :: (
 
 
 	staged := provider_backing.model;
+	transfer_count := session.provider.batch_storage.count;
+	need_transfer := transfer_count >= session.provider.batch_storage.allocated;
+	transfer: [..] *Pool;
+	transfer.allocator = owner_allocator(session);
 	stage_provider_copy(session.provider, provider_backing);
 	provider_backing.* = .{};
 	session.active_admissions += 1;
@@ -1086,7 +1104,110 @@ submit_source_batch_attempt :: (
 				worker_pause(session, .SOURCE_STAGING);
 			}
 
-			ok, frontier, error = apply_source_batch(staged, batch);
+			pool_allocator := owner_allocator(session);
+			#if TEST_HOOKS {
+				pool_allocator = .{proc = source_batch_pool_allocate, data = session};
+			}
+
+			storage := try_source_batch_pool(pool_allocator);
+			#if TEST_HOOKS {
+				if !storage && session.faults.retry_failed_source_batch_pool {
+					storage = try_source_batch_pool(pool_allocator);
+				}
+			}
+
+			if storage {
+				storage_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					storage_allocator = .{proc = source_batch_storage_allocate, data = session};
+				}
+
+				state_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					state_allocator = .{proc = source_batch_state_allocate, data = session};
+				}
+
+				revision_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					revision_allocator = .{proc = source_batch_revisions_allocate, data = session};
+				}
+
+				source_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					source_allocator = .{proc = source_batch_source_allocate, data = session};
+				}
+
+				source_bytes_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					source_bytes_allocator = .{proc = source_batch_source_bytes_allocate, data = session};
+				}
+
+				source_identity_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					source_identity_allocator = .{proc = source_batch_source_identity_allocate, data = session};
+				}
+
+				edit_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					edit_allocator = .{proc = source_batch_edit_allocate, data = session};
+				}
+
+				state_list_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					state_list_allocator = .{proc = source_batch_state_list_allocate, data = session};
+				}
+
+				reference_list_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					reference_list_allocator = .{proc = source_batch_reference_list_allocate, data = session};
+				}
+
+				context_list_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					context_list_allocator = .{proc = source_batch_context_list_allocate, data = session};
+				}
+
+				path_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					path_allocator = .{proc = source_batch_path_allocate, data = session};
+				}
+
+				ok, frontier, error = apply_source_batch_with_storage(
+					staged,
+					batch,
+					storage,
+					storage_allocator,
+					state_allocator,
+					revision_allocator,
+					source_allocator,
+					source_bytes_allocator,
+					source_identity_allocator,
+					edit_allocator,
+					state_list_allocator,
+					reference_list_allocator,
+					context_list_allocator,
+					path_allocator
+				);
+
+				if ok && need_transfer {
+					if transfer_count > S64_MAX / 2 - 1 {
+						ok = false;
+					} else {
+						capacity := max(8, (transfer_count + 1) * 2);
+						prepared, candidate := try_output_array(storage_allocator, capacity, *Pool);
+						ok = prepared;
+						transfer.data = candidate.data;
+						transfer.allocated = candidate.count;
+					}
+
+					if !ok {
+						error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+					}
+				}
+			} else {
+				error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+			}
+
 			if ok {
 				output_ok, output = try_output_bytes(allocator, frontier);
 			} else {
@@ -1104,9 +1225,16 @@ submit_source_batch_attempt :: (
 		}
 	);
 
-	defer finish_source_admission(session, staged, *output, *error, allocator);
+	defer finish_source_admission(session, staged, *transfer, *output, *error, allocator);
 
-	if !validate_session(session, handle) {
+	current := validate_session(session, handle);
+	#if TEST_HOOKS {
+		if !current && session.faults.allow_stale_source_batch_pool {
+			current = session;
+		}
+	}
+
+	if !current {
 		give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
 		return false, .{}, stale(.SESSION), false;
 	}
@@ -1114,11 +1242,25 @@ submit_source_batch_attempt :: (
 
 	if session.lifecycle != .OPEN {
 		give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
+		#if TEST_HOOKS {
+			if session.faults.prefer_failed_source_batch_storage && !ok {
+				output_error := error;
+				error = .{};
+				return false, .{}, output_error, false;
+			}
+		}
+
+
 		return false, .{}, .{code = .SERVICE_CLOSED}, false;
 	}
 
 
-	if !bytes_equal(batch.expected_frontier, session.provider.accepted_frontier) {
+	frontier_current := bytes_equal(batch.expected_frontier, session.provider.accepted_frontier);
+	#if TEST_HOOKS {
+		frontier_current ||= session.faults.allow_stale_source_batch_storage;
+	}
+
+	if !frontier_current {
 		give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
 		return false, .{}, .{code = .BASE_MISMATCH, scope = .FRONTIER}, false;
 	}
@@ -1126,6 +1268,13 @@ submit_source_batch_attempt :: (
 
 	if !ok {
 		give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
+		#if TEST_HOOKS {
+			if session.faults.retry_failed_source_batch_storage && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED {
+				return false, .{}, .{}, true;
+			}
+		}
+
+
 		output_error := error;
 		error = .{};
 		return false, .{}, output_error, false;
@@ -1173,7 +1322,7 @@ submit_source_batch_attempt :: (
 		documents = documents,
 	};
 
-	commit_provider_copy(session.provider, staged);
+	commit_provider_copy(session.provider, staged, *transfer);
 	array_add(*session.operations, operation);
 	backing.* = .{};
 	supersede_obsolete(session);
@@ -2067,7 +2216,12 @@ release :: (service: *Service, handle: Handle($K)) -> bool, Operation_Error {
 	use_owner_memory(session);
 
 	#if K == .SESSION {
-		if session.lifecycle != .STOPPED {
+		stopped := session.lifecycle == .STOPPED;
+		#if TEST_HOOKS {
+			stopped ||= session.faults.allow_active_session_release;
+		}
+
+		if !stopped {
 			return false, .{code = .ACTIVE_SESSION};
 		}
 
@@ -2485,6 +2639,7 @@ Delivery :: enum u8 {
 		keep_unconsumed_work: bool;
 		shutdown_from_ordinary_capacity: bool;
 		allocate_shutdown_backing: bool;
+		allow_active_session_release: bool;
 		registration_allocation_hook: (size: s64, data: *void) -> bool;
 		registration_allocation_data: *void;
 		allow_stale_retain_registration: bool;
@@ -2525,6 +2680,40 @@ Delivery :: enum u8 {
 		allow_stale_source_provider_states: bool;
 		source_provider_revisions_allocation_hook: (size: s64, data: *void) -> bool;
 		source_provider_revisions_allocation_data: *void;
+		source_provider_revisions_cleanup_hook: (size: s64, data: *void) -> bool;
+		source_provider_revisions_cleanup_data: *void;
+		retry_failed_source_provider_revisions: bool;
+		allow_stale_source_provider_revisions: bool;
+		source_batch_pool_allocation_hook: (size: s64, data: *void) -> bool;
+		source_batch_state_allocation_hook: (size: s64, data: *void) -> bool;
+		source_batch_source_allocation_hook: (size: s64, data: *void) -> bool;
+		source_batch_source_bytes_allocation_hook: (size: s64, data: *void) -> bool;
+		source_batch_source_identity_allocation_hook: (size: s64, data: *void) -> bool;
+		source_batch_edit_allocation_hook: (size: s64, data: *void) -> bool;
+		source_batch_state_list_allocation_hook: (size: s64, data: *void) -> bool;
+		source_batch_reference_list_allocation_hook: (size: s64, data: *void) -> bool;
+		source_batch_context_list_allocation_hook: (size: s64, data: *void) -> bool;
+		source_batch_path_allocation_hook: (size: s64, data: *void) -> bool;
+		source_batch_revisions_allocation_hook: (size: s64, data: *void) -> bool;
+		source_batch_storage_allocation_hook: (size: s64, data: *void) -> bool;
+		source_batch_storage_allocation_data: *void;
+		allow_stale_source_batch_storage: bool;
+		retry_failed_source_batch_storage: bool;
+		prefer_failed_source_batch_storage: bool;
+		source_batch_pool_allocation_data: *void;
+		source_batch_state_allocation_data: *void;
+		source_batch_source_allocation_data: *void;
+		source_batch_source_bytes_allocation_data: *void;
+		source_batch_source_identity_allocation_data: *void;
+		source_batch_edit_allocation_data: *void;
+		source_batch_state_list_allocation_data: *void;
+		source_batch_reference_list_allocation_data: *void;
+		source_batch_context_list_allocation_data: *void;
+		source_batch_path_allocation_data: *void;
+		source_batch_revisions_allocation_data: *void;
+		retry_failed_source_batch_pool: bool;
+		allow_stale_source_batch_pool: bool;
+		retain_source_batch_reference: *Source_Backing;
 		// Fails conversion of this member in its candidate's parse task.
 		fail_parse_document: [] u8;
 	}

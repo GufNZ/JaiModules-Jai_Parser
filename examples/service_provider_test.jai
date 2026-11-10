@@ -16,7 +16,7 @@ main :: () {
 	test_reset_restore();
 	test_contexts_and_bindings();
 	test_capabilities_and_limits();
-	print("Service provider PASS.\n");
+	print("Service provider \e[92mPASS\e[0m.\n");
 }
 
 descriptor :: () -> Service.Provider_Adapter_Descriptor {
@@ -116,9 +116,9 @@ submit :: (model: *Service.Provider_Model, contexts: [] Service.Context_Registra
 
 // A rejected batch leaves the frontier and the named document's revision exactly as they were.
 expect_rejected :: (model: *Service.Provider_Model, ok: bool, error: Service.Operation_Error, code: Service.Operation_Error_Code, frontier: [] u8, what: string) {
-	assert(!ok, "%: accepted.", what);
-	assert(error.code == code, "%: expected %, got %.", what, code, error.code);
-	assert(Service.bytes_equal(model.accepted_frontier, frontier), "%: the frontier moved.", what);
+	assert(!ok, "\e[91m%: accepted.\e[0m", what);
+	assert(error.code == code, "\e[91m%: expected %, got %.\e[0m", what, code, error.code);
+	assert(Service.bytes_equal(model.accepted_frontier, frontier), "\e[91m%: the frontier moved.\e[0m", what);
 }
 
 selected_text :: (model: *Service.Provider_Model, document: [] u8) -> string, Service.Selected_Document {
@@ -144,10 +144,10 @@ test_descriptor :: () {
 	controls[4].lease_capabilities.kind = .IMMUTABLE_RETAIN_RELEASE;
 	for controls {
 		failure := Service.validate_provider_descriptor(it);
-		assert(failure == expected[it_index], "Control %: expected %, got %.", it_index, expected[it_index], failure);
+		assert(failure == expected[it_index], "\e[91mControl %: expected %, got %.\e[0m", it_index, expected[it_index], failure);
 	}
 
-	print("Provider descriptor PASS\n");
+	print("Provider descriptor \e[92mPASS\e[0m\n");
 }
 
 test_overlay_chain :: () {
@@ -158,7 +158,7 @@ test_overlay_chain :: () {
 	main_doc := doc("main");
 	initial := model.accepted_frontier;
 	ok, error := submit(model, .[context_a], set_overlay(main_doc, .{}, context_a.identity, "abc", rev(model, main_doc, "1")));
-	assert(ok, "SET_OVERLAY failed: %.", error);
+	assert(ok, "\e[91mSET_OVERLAY failed: %.\e[0m", error);
 	assert(!Service.bytes_equal(model.accepted_frontier, initial));
 
 	// V7: a capture that retained the old backing keeps its exact bytes after the overlay is replaced.
@@ -181,7 +181,7 @@ test_overlay_chain :: () {
 		resulting_provider_revision = rev(model, main_doc, "2"),
 	};
 	ok, error = submit(model, .[], edit);
-	assert(ok, "EDIT_OVERLAY failed: %.", error);
+	assert(ok, "\e[91mEDIT_OVERLAY failed: %.\e[0m", error);
 	text = selected_text(model, main_doc);
 	assert(text == "XYc");
 	assert(retained.bytes.(string) == "abc" && Service.bytes_equal(retained.revision, Service.source_revision_of(xx "abc")));
@@ -234,7 +234,7 @@ test_overlay_chain :: () {
 	text = selected_text(model, main_doc);
 	state := Service.find_document(model, main_doc);
 	assert(text == "XYc" && Service.bytes_equal(state.provider_revision, rev(model, main_doc, "2")));
-	print("Overlay chain PASS\n");
+	print("Overlay chain \e[92mPASS\e[0m\n");
 }
 
 // V5: one invalid member rejects every member, including an otherwise valid new document.
@@ -254,7 +254,7 @@ test_atomic_batch :: () {
 	ok, error = submit(model, .[], valid, invalid);
 	expect_rejected(model, ok, error, .BASE_MISMATCH, frontier, "untracked expectation for a tracked document");
 	assert(error.scope == .DOCUMENT && Service.bytes_equal(error.document, first));
-	assert(!Service.find_document(model, second), "The valid member was committed.");
+	assert(!Service.find_document(model, second), "\e[91mThe valid member was committed.\e[0m");
 
 	ok, error = submit(model, .[], valid, valid);
 	expect_rejected(model, ok, error, .INVALID_ARGUMENT, frontier, "duplicate document");
@@ -278,7 +278,7 @@ test_atomic_batch :: () {
 	memset(third_revision.data, 0, third_revision.count);
 	state := Service.find_document(model, doc("third"));
 	assert(state && Service.bytes_equal(state.provider_revision, rev(model, doc("third"), "1")) && Service.bytes_equal(state.binding.document, doc("third")));
-	print("Atomic batches PASS\n");
+	print("Atomic batches \e[92mPASS\e[0m\n");
 }
 
 // T3: a save acknowledgement for an older overlay installation records the disk branch and preserves the newer overlay.
@@ -304,7 +304,7 @@ test_save_race :: () {
 		resulting_provider_revision = rev(model, main_doc, "3"),
 	};
 	ok, error = submit(model, .[], save);
-	assert(ok, "ACK_SAVE failed: %.", error);
+	assert(ok, "\e[91mACK_SAVE failed: %.\e[0m", error);
 	text, selected := selected_text(model, main_doc);
 	state := Service.find_document(model, main_doc);
 	assert(text == "C" && selected.selection == .OVERLAY && state.disk.kind == .PRESENT && state.disk.source.bytes.(string) == "B");
@@ -320,7 +320,7 @@ test_save_race :: () {
 	save.disk = present("C", context_a.identity);
 	save.written_source_revision = Service.source_revision_of(xx "C");
 	ok, error = submit(model, .[], save);
-	assert(ok, "ACK_SAVE failed: %.", error);
+	assert(ok, "\e[91mACK_SAVE failed: %.\e[0m", error);
 	text, selected = selected_text(model, main_doc);
 	assert(text == "C" && selected.selection == .DISK && selected.provenance != null);
 
@@ -331,7 +331,7 @@ test_save_race :: () {
 	ok, error = submit(model, .[], save);
 	expect_rejected(model, ok, error, .INVALID_ARGUMENT, frontier, "absent save");
 	assert(error.rule == .WRONG_KIND);
-	print("Save race PASS\n");
+	print("Save race \e[92mPASS\e[0m\n");
 }
 
 // T4: reset to disk and restore a recovery candidate need a matching host confirmation.
@@ -371,7 +371,7 @@ test_reset_restore :: () {
 
 	reset.host_confirmation.action = .RESET;
 	ok, error = submit(model, .[], reset);
-	assert(ok, "RESET_OVERLAY failed: %.", error);
+	assert(ok, "\e[91mRESET_OVERLAY failed: %.\e[0m", error);
 	text, selected := selected_text(model, main_doc);
 	assert(text == "disk" && selected.selection == .DISK);
 
@@ -399,10 +399,10 @@ test_reset_restore :: () {
 
 	restore.recovery_candidate = xx "candidate";
 	ok, error = submit(model, .[], restore);
-	assert(ok, "RESTORE_OVERLAY failed: %.", error);
+	assert(ok, "\e[91mRESTORE_OVERLAY failed: %.\e[0m", error);
 	text, selected = selected_text(model, main_doc);
 	assert(text == "unsaved" && selected.selection == .RESTORED_OVERLAY);
-	print("Reset and restore PASS\n");
+	print("Reset and restore \e[92mPASS\e[0m\n");
 }
 
 test_contexts_and_bindings :: () {
@@ -496,10 +496,10 @@ test_contexts_and_bindings :: () {
 
 	observe.source_context = context_a.identity;
 	ok, error = submit(model, .[context_b], observe);
-	assert(ok, "OBSERVE_DISK failed: %.", error);
+	assert(ok, "\e[91mOBSERVE_DISK failed: %.\e[0m", error);
 	state := Service.find_document(model, main_doc);
 	assert(Service.bytes_equal(state.disk.syntax_context, context_b.identity) && Service.bytes_equal(state.overlay.syntax_context, context_a.identity));
-	print("Contexts and bindings PASS\n");
+	print("Contexts and bindings \e[92mPASS\e[0m\n");
 }
 
 test_capabilities_and_limits :: () {
@@ -564,8 +564,8 @@ test_capabilities_and_limits :: () {
 	absent := observe;
 	absent.disk = .{kind = .ABSENT, provider_revision = observe.resulting_provider_revision, syntax_context = context_a.identity, provenance = provenance()};
 	ok, error = submit(model, .[context_a], absent);
-	assert(ok, "Absent observation failed: %.", error);
+	assert(ok, "\e[91mAbsent observation failed: %.\e[0m", error);
 	_, selected := selected_text(model, main_doc);
 	assert(selected.kind == .ABSENT && selected.selection == .DISK && !selected.source);
-	print("Capabilities and limits PASS\n");
+	print("Capabilities and limits \e[92mPASS\e[0m\n");
 }

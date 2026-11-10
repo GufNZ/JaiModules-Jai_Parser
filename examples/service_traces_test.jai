@@ -40,7 +40,7 @@ main :: () {
 	trace_v6();
 	trace_v7();
 	trace_v8();
-	print("Service traces PASS.\n");
+	print("Service traces \e[92mPASS\e[0m.\n");
 }
 
 Trace :: struct {
@@ -73,7 +73,7 @@ reopen :: (trace: *Trace) {
 	minima.values[Service.Limit_Name.LIVE_HANDLES] = 2;
 	minima.values[Service.Limit_Name.IN_FLIGHT_OPERATIONS] = 1;
 	failure, host, error := Service.open_harness_host(trace.root, ceilings, minima);
-	assert(failure == .NONE, "%: host failed to open: % %.", trace.name, failure, error);
+	assert(failure == .NONE, "\e[91m%: host failed to open: % %.\e[0m", trace.name, failure, error);
 	trace.host = host;
 	trace.session = Service.session_of(host.service, host.session);
 }
@@ -89,7 +89,7 @@ finish :: (trace: *Trace) {
 				name := it_index.(Service.Limit_Name);
 				live_expected := ifx name == .LIVE_HANDLES then 1;
 				reserved_expected := ifx !stopped && (name == .LIVE_HANDLES || name == .IN_FLIGHT_OPERATIONS) then 1;
-				assert(it == live_expected && ledger.reserved[it_index] == reserved_expected, "%: ledger % holds % live, % reserved.", trace.name, name, it, ledger.reserved[it_index]);
+				assert(it == live_expected && ledger.reserved[it_index] == reserved_expected, "\e[91m%: ledger % holds % live, % reserved.\e[0m", trace.name, name, it, ledger.reserved[it_index]);
 			}
 		}
 	);
@@ -97,9 +97,9 @@ finish :: (trace: *Trace) {
 	service := trace.host.service;
 	handle := trace.host.session;
 	closed, error := Service.close_harness_host(trace.host);
-	assert(closed, "%: close failed: %.", trace.name, error);
-	assert(!Service.session_of(service, handle), "%: the session survived its final release.", trace.name);
-	print("% PASS\n", trace.name);
+	assert(closed, "\e[91m%: close failed: %.\e[0m", trace.name, error);
+	assert(!Service.session_of(service, handle), "\e[91m%: the session survived its final release.\e[0m", trace.name);
+	print("% \e[92mPASS\e[0m\n", trace.name);
 }
 
 write :: (trace: *Trace, relative: string, text: string) {
@@ -108,13 +108,13 @@ write :: (trace: *Trace, relative: string, text: string) {
 
 submit :: (batch: *Service.Host_Batch) -> Service.Handle(.TICKET), [] u8 {
 	ok, accepted, error := Service.submit_batch(batch);
-	assert(ok, "Submit failed: %.", error);
+	assert(ok, "\e[91mSubmit failed: %.\e[0m", error);
 	return accepted.ticket, accepted.frontier;
 }
 
 reject :: (batch: *Service.Host_Batch, code: Service.Operation_Error_Code) -> Service.Operation_Error {
 	ok, _, error := Service.submit_batch(batch);
-	assert(!ok && error.code == code, "Expected %, got % (accepted %).", code, error.code, ok);
+	assert(!ok && error.code == code, "\e[91mExpected %, got % (accepted %).\e[0m", code, error.code, ok);
 	return error;
 }
 
@@ -126,7 +126,7 @@ await :: (trace: *Trace, ticket: Service.Handle(.TICKET)) -> Service.Observation
 
 world_of :: (trace: *Trace, ticket: Service.Handle(.TICKET)) -> Service.Handle(.WORLD) {
 	observation := await(trace, ticket);
-	assert(observation.update.kind == .PUBLISHED, "%: update ended %.", trace.name, observation.update.kind);
+	assert(observation.update.kind == .PUBLISHED, "\e[91m%: update ended %.\e[0m", trace.name, observation.update.kind);
 	ok, acquisition := Service.acquire_world(trace.host.service, .{kind = .PUBLISHED_UPDATE, ticket = ticket});
 	assert(ok && acquisition.kind == .ACQUIRED);
 	return acquisition.world;
@@ -134,14 +134,14 @@ world_of :: (trace: *Trace, ticket: Service.Handle(.TICKET)) -> Service.Handle(.
 
 query :: (trace: *Trace, world: Service.Handle(.WORLD), relative: string, kind: Service.Query_Kind) -> Service.Query_Start {
 	ok, start := Service.query(trace.host.service, .{version = Service.INTERFACE_VERSION, world = world, document = Service.harness_document(trace.host, relative), kind = kind});
-	assert(ok, "Query failed.");
+	assert(ok, "\e[91mQuery failed.\e[0m");
 	return start;
 }
 
 // Independent oracle: the published snapshot equals a fresh parse of the authored bytes under the same filename.
 expect_text :: (trace: *Trace, world: Service.Handle(.WORLD), relative: string, text: string) {
 	start := query(trace, world, relative, .SYNTAX_SNAPSHOT);
-	assert(start.kind == .AVAILABLE, "%: % is not available.", trace.name, relative);
+	assert(start.kind == .AVAILABLE, "\e[91m%: % is not available.\e[0m", trace.name, relative);
 	expect_result(trace, start.result, relative, text);
 	release(trace, start.result);
 }
@@ -152,12 +152,12 @@ expect_result :: (trace: *Trace, result: Service.Handle(.RESULT), relative: stri
 	fresh := Parser.parse_file(copy_string(text), tprint("%/%", trace.root, relative), resolve_identifiers = false);
 	check_snapshot(*description.backing.owner.parsed, *fresh);
 	status := description.diagnostics_status;
-	assert(xx (status.error_count + status.warning_count) == fresh.diagnostics.count, "%: diagnostic summary disagrees with the fresh parse.", trace.name);
+	assert(xx (status.error_count + status.warning_count) == fresh.diagnostics.count, "\e[91m%: diagnostic summary disagrees with the fresh parse.\e[0m", trace.name);
 }
 
 release :: (trace: *Trace, handle: Service.Handle($K)) {
 	ok, error := Service.release(trace.host.service, handle);
-	assert(ok, "Release failed: %.", error);
+	assert(ok, "\e[91mRelease failed: %.\e[0m", error);
 }
 
 selection :: (trace: *Trace, relative: string) -> Service.Tracked_Document {
@@ -169,7 +169,7 @@ selection :: (trace: *Trace, relative: string) -> Service.Tracked_Document {
 	}
 
 
-	assert(false, "% is not tracked.", relative);
+	assert(false, "\e[91m% is not tracked.\e[0m", relative);
 	return .{};
 }
 
@@ -242,7 +242,7 @@ trace_t2 :: () {
 	error = reject(*invalid, .INVALID_ARGUMENT);
 	assert(error.rule == .OUT_OF_RANGE);
 
-	assert(Service.bytes_equal(frontier(*trace), before), "A rejected batch advanced the frontier.");
+	assert(Service.bytes_equal(frontier(*trace), before), "\e[91mA rejected batch advanced the frontier.\e[0m");
 	assert(Service.bytes_equal(selection(*trace, "a.jai").overlay_source_revision, Service.source_revision_of(xx "b :: 2;")));
 	expect_text(*trace, world_b, "a.jai", "b :: 2;");
 
@@ -272,14 +272,14 @@ trace_t3 :: () {
 	ticket_c := overlay(*trace, "a.jai", "b :: 2;");
 	await(*trace, ticket_c);
 	installation_c := selection(*trace, "a.jai").overlay_installation_revision;
-	assert(!Service.bytes_equal(installation_b, installation_c), "Equal bytes reused the installation stamp.");
+	assert(!Service.bytes_equal(installation_b, installation_c), "\e[91mEqual bytes reused the installation stamp.\e[0m");
 
 	batch := Service.begin_batch(trace.host);
 	assert(Service.ack_save(*batch, "a.jai", installation_b));
 	ticket_save := submit(*batch);
 	world := world_of(*trace, ticket_save);
 	state := selection(*trace, "a.jai");
-	assert(state.selection == .OVERLAY && Service.bytes_equal(state.overlay_installation_revision, installation_c), "The late acknowledgement discarded C.");
+	assert(state.selection == .OVERLAY && Service.bytes_equal(state.overlay_installation_revision, installation_c), "\e[91mThe late acknowledgement discarded C.\e[0m");
 	assert(Service.bytes_equal(state.disk_source_revision, Service.source_revision_of(xx "b :: 2;")));
 	expect_text(*trace, world, "a.jai", "b :: 2;");
 
@@ -318,7 +318,7 @@ trace_t4 :: () {
 	ticket_restart := disk(*trace, "a.jai");
 	world_restart := world_of(*trace, ticket_restart);
 	expect_text(*trace, world_restart, "a.jai", "a :: 1;");
-	assert(!selection(*trace, "a.jai").has_overlay, "The discarded overlay came back after restart.");
+	assert(!selection(*trace, "a.jai").has_overlay, "\e[91mThe discarded overlay came back after restart.\e[0m");
 
 	batch = Service.begin_batch(trace.host);
 	assert(Service.restore_overlay(*batch, "a.jai", "b :: 2;", xx "recovered-b"));
@@ -355,9 +355,9 @@ trace_t5 :: () {
 	assert(!stale_ok && stale_error.code == .INVALID_HANDLE);
 
 	reused := query(*trace, world_b, "a.jai", .SYNTAX_SNAPSHOT);
-	assert(reused.result.slot == leased.result.slot && reused.result.generation == leased.result.generation + 1, "The freed slot was not reused with a new generation.");
+	assert(reused.result.slot == leased.result.slot && reused.result.generation == leased.result.generation + 1, "\e[91mThe freed slot was not reused with a new generation.\e[0m");
 	stale_ok = Service.read_result(trace.host.service, leased.result);
-	assert(!stale_ok, "A stale handle reached the reused slot.");
+	assert(!stale_ok, "\e[91mA stale handle reached the reused slot.\e[0m");
 
 	release(*trace, reused.result);
 	release(*trace, world_b);
@@ -395,7 +395,7 @@ trace_t6 :: () {
 	} else {
 		assert(trace.session.ready.count == 1);
 		mailbox := Service.executor_dispatch(trace.session);
-		assert(!Service.executor_dispatch(trace.session), "Equivalent queries dispatched twice.");
+		assert(!Service.executor_dispatch(trace.session), "\e[91mEquivalent queries dispatched twice.\e[0m");
 		assert(Service.executor_deliver(trace.session, mailbox) == .PUBLISHED);
 		assert(Service.executor_deliver(trace.session, mailbox) == .REJECTED);
 	}
@@ -406,7 +406,7 @@ trace_t6 :: () {
 	fresh := Parser.parse_file(copy_string(text), tprint("%/a.jai", trace.root), resolve_identifiers = false);
 	assert(description.diagnostics.records.count == fresh.diagnostics.count && fresh.diagnostics.count > 0);
 	_, late := Service.acquire_result(trace.host.service, first.waiter);
-	assert(late.kind == .TERMINAL, "The cancelled waiter received a payload.");
+	assert(late.kind == .TERMINAL, "\e[91mThe cancelled waiter received a payload.\e[0m");
 
 	release(*trace, survivor.result);
 	for Service.Handle(.WAITER).[first.waiter, second.waiter] {
@@ -449,7 +449,7 @@ trace_t7 :: () {
 	ticket_c := overlay(*trace, "a.jai", "c :: 3;");
 	for queries {
 		_, observation := Service.poll(trace.host.service, it.waiter);
-		assert(observation.query.cancellation == .WORLD_SUPERSEDED, "A pending B query waiter survived.");
+		assert(observation.query.cancellation == .WORLD_SUPERSEDED, "\e[91mA pending B query waiter survived.\e[0m");
 	}
 
 	for update_waiters {
@@ -460,8 +460,8 @@ trace_t7 :: () {
 	#if REAL_WORKER {
 		Service.resume_pause(trace.session, .PUBLICATION);
 	} else {
-		assert(Service.executor_deliver(trace.session, running) == .DISCARDED, "B published a late result.");
-		assert(trace.session.ready.count == 1, "Superseded work was reissued.");
+		assert(Service.executor_deliver(trace.session, running) == .DISCARDED, "\e[91mB published a late result.\e[0m");
+		assert(trace.session.ready.count == 1, "\e[91mSuperseded work was reissued.\e[0m");
 	}
 	expect_text(*trace, world_b, "a.jai", "b :: 1;");
 	world_c := world_of(*trace, ticket_c);
@@ -500,7 +500,7 @@ trace_t8 :: () {
 		assert(start.kind == .TERMINAL && start.observation.query.kind == .UNSUPPORTED && start.observation.query.unsupported == it);
 	}
 
-	assert(trace.session.tasks.count == tasks && !trace.session.ready.count, "An unsupported request created work.");
+	assert(trace.session.tasks.count == tasks && !trace.session.ready.count, "\e[91mAn unsupported request created work.\e[0m");
 	expect_text(*trace, world, "a.jai", "a :: #run 1 + 1;");
 	release(*trace, world);
 	release(*trace, ticket);
@@ -574,7 +574,7 @@ trace_v3 :: () {
 	ticket_two := disk(*trace, "b.jai");
 	await(*trace, ticket_two);
 	late := query(*trace, world_one, "b.jai", .SYNTAX_SNAPSHOT);
-	assert(late.kind == .TERMINAL && late.observation.query.unavailable == .NOT_CAPTURED, "Later bytes were attached to the old world.");
+	assert(late.kind == .TERMINAL && late.observation.query.unavailable == .NOT_CAPTURED, "\e[91mLater bytes were attached to the old world.\e[0m");
 
 	members := ([] u8).[Service.harness_document(trace.host, "a.jai"), Service.harness_document(trace.host, "b.jai")];
 	ok, _, error := Service.request_analysis(trace.host.service, trace.host.session, .{version = Service.INTERFACE_VERSION, expected_frontier = first_frontier, documents = members});
@@ -609,7 +609,7 @@ trace_v4 :: () {
 	ticket := submit(*batch);
 	world := world_of(*trace, ticket);
 	_, described := Service.read_world(trace.host.service, world);
-	assert(described.consistency.kind == .IMMUTABLE_CAPTURE, "Sequential reads were labelled coherent.");
+	assert(described.consistency.kind == .IMMUTABLE_CAPTURE, "\e[91mSequential reads were labelled coherent.\e[0m");
 	expect_text(*trace, world, "a.jai", "a :: 1;");
 	expect_text(*trace, world, "b.jai", "b :: 2;");
 	release(*trace, world);
@@ -637,7 +637,7 @@ trace_v5 :: () {
 	reject(*batch, .UNSUPPORTED_EVENT);
 
 	_, description := Service.describe_session(trace.host.service, trace.host.session);
-	assert(Service.bytes_equal(description.accepted_frontier, before) && description.tracked_document_states.count == 1, "A rejected batch committed a member.");
+	assert(Service.bytes_equal(description.accepted_frontier, before) && description.tracked_document_states.count == 1, "\e[91mA rejected batch committed a member.\e[0m");
 
 	batch = Service.begin_batch(trace.host);
 	assert(Service.set_overlay(*batch, "new.jai", "n :: 1;"));
@@ -668,8 +668,8 @@ trace_v6 :: () {
 	ticket, accepted_frontier := submit(*batch);
 	observation := await(*trace, ticket);
 	assert(observation.update.kind == .FAILED && observation.update.failure.stage == .CONVERSION);
-	assert(trace.session.head == old_head && !Service.bytes_equal(old_head.frontier, accepted_frontier), "A mixed or failed world became the head.");
-	assert(Service.bytes_equal(selection(*trace, "b.jai").overlay_source_revision, Service.source_revision_of(xx "b :: 2;")), "Failed analysis rolled back accepted source.");
+	assert(trace.session.head == old_head && !Service.bytes_equal(old_head.frontier, accepted_frontier), "\e[91mA mixed or failed world became the head.\e[0m");
+	assert(Service.bytes_equal(selection(*trace, "b.jai").overlay_source_revision, Service.source_revision_of(xx "b :: 2;")), "\e[91mFailed analysis rolled back accepted source.\e[0m");
 
 	// Retrying analysis needs no replayed edit.
 	trace.session.faults.fail_parse_document = .[];
@@ -732,7 +732,7 @@ trace_v8 :: () {
 	ok, shutdown := Service.request_shutdown(trace.host.service, trace.host.session);
 	assert(ok);
 	_, draining := Service.poll(trace.host.service, shutdown);
-	assert(draining.kind == .PENDING && draining.phase == .DRAINING, "Shutdown stopped before its producer returned.");
+	assert(draining.kind == .PENDING && draining.phase == .DRAINING, "\e[91mShutdown stopped before its producer returned.\e[0m");
 	#if REAL_WORKER {
 		Service.resume_pause(trace.session, .PARSED);
 		_, waited := Service.wait(trace.host.service, shutdown, .{clock_identity = trace.host.service.clock_identity, nanoseconds = FOREVER});
@@ -747,7 +747,7 @@ trace_v8 :: () {
 	_, observation := Service.poll(trace.host.service, ticket);
 	assert(observation.update.kind == .CANCELLED && observation.update.cancellation == .SHUTDOWN);
 	contents := read_entire_file(tprint("%/a.jai", trace.root));
-	assert(contents == "a :: 1;", "Source was written.");
+	assert(contents == "a :: 1;", "\e[91mSource was written.\e[0m");
 
 	release(*trace, shutdown);
 	release(*trace, ticket);

@@ -493,6 +493,7 @@ finish_analysis_receipt :: (
 finish_source_admission :: (
 	session: *Session,
 	staged: *Provider_Model,
+	transfer: *[..] *Pool,
 	output: *[] u8,
 	error: *Operation_Error,
 	allocator: Allocator
@@ -505,7 +506,16 @@ finish_source_admission :: (
 			free(error.path.data,, allocator);
 			free(error.document.data,, allocator);
 			error.* = .{};
+			#if TEST_HOOKS {
+				retained_source := session.faults.retain_source_batch_reference;
+				if retained_source {
+					session.faults.retain_source_batch_reference = null;
+					retain_source(retained_source);
+				}
+			}
+
 			release_provider_copy(staged);
+			array_free(transfer.*);
 		}
 	);
 
@@ -547,15 +557,20 @@ stage_provider_copy :: (model: *Provider_Model, backing: *Source_Provider_Backin
 	staged.batch_storage = storage;
 }
 
-commit_provider_copy :: (model: *Provider_Model, staged: *Provider_Model) {
+commit_provider_copy :: (model: *Provider_Model, staged: *Provider_Model, transfer: *[..] *Pool) {
+	if model.batch_storage.count + staged.batch_storage.count > model.batch_storage.allocated {
+		assert(transfer.allocated >= model.batch_storage.count + staged.batch_storage.count);
+		memcpy(transfer.data, model.batch_storage.data, model.batch_storage.count * size_of(*Pool));
+		transfer.count = model.batch_storage.count;
+		model.batch_storage, transfer.* = transfer.*, model.batch_storage;
+	}
+
 	model.documents, staged.documents = staged.documents, model.documents;
 	model.contexts, staged.contexts = staged.contexts, model.contexts;
 	model.frontier_counter = staged.frontier_counter;
 	model.accepted_frontier = staged.accepted_frontier;
 	array_add(*model.batch_storage, ..staged.batch_storage);
-	array_free(staged.batch_storage);
-	storage: [..] *Pool;
-	staged.batch_storage = storage;
+	staged.batch_storage.count = 0;
 }
 
 release_provider_copy :: (staged: *Provider_Model) {

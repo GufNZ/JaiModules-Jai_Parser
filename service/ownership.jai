@@ -190,6 +190,260 @@ prepare_shutdown_backing :: (session: *Session) -> bool {
 	return true;
 }
 
+try_source_batch_pool :: (allocator: Allocator = context.allocator) -> *Pool {
+	ok, storage := try_output_array(allocator, 1, Pool);
+	if !ok {
+		return null;
+	}
+
+
+	storage.data.* = .{};
+	return storage.data;
+}
+
+try_source_batch_references :: (event_count: s64, allocator: Allocator = context.allocator) -> bool, [..] [] u8 {
+	result: [..] [] u8;
+	if event_count < 0 || event_count > S64_MAX / 2 {
+		return false, result;
+	}
+
+
+	ok, storage := try_output_array(allocator, event_count * 2, [] u8);
+	if !ok {
+		return false, result;
+	}
+
+
+	result.data = storage.data;
+	result.allocated = storage.count;
+	result.allocator = allocator;
+	return true, result;
+}
+
+try_source_batch_revisions :: (existing: *Document_State, allocator: Allocator = context.allocator) -> bool, [..] [] u8 {
+	result: [..] [] u8;
+	count := ifx existing
+		then existing.used_revisions.count
+		else 0;
+	if count == S64_MAX {
+		return false, result;
+	}
+
+
+	ok, storage := try_output_array(allocator, count + 1, [] u8);
+	if !ok {
+		return false, result;
+	}
+
+
+	result.data = storage.data;
+	result.count = count;
+	result.allocated = storage.count;
+	result.allocator = allocator;
+	if existing {
+		memcpy(result.data, existing.used_revisions.data, count * size_of([] u8));
+	}
+
+	return true, result;
+}
+
+try_source_batch_storage :: (model: *Provider_Model, allocator: Allocator = context.allocator) -> bool {
+	if model.batch_storage.count < model.batch_storage.allocated {
+		return true;
+	}
+
+
+	if model.batch_storage.count > S64_MAX / 2 {
+		return false;
+	}
+
+
+	capacity := max(8, model.batch_storage.count * 2);
+	ok, storage := try_output_array(allocator, capacity, *Pool);
+	if !ok {
+		return false;
+	}
+
+
+	previous := model.batch_storage;
+	memcpy(storage.data, previous.data, previous.count * size_of(*Pool));
+	model.batch_storage.data = storage.data;
+	model.batch_storage.allocated = storage.count;
+	model.batch_storage.allocator = allocator;
+	array_free(previous);
+	return true;
+}
+
+#if TEST_HOOKS {
+	source_batch_revisions_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_revisions_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_revisions_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+
+	source_batch_path_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_path_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_path_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+
+	source_batch_context_list_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_context_list_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_context_list_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+
+	source_batch_reference_list_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_reference_list_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_reference_list_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+
+	source_batch_state_list_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_state_list_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_state_list_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+
+	source_batch_edit_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_edit_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_edit_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+
+	source_batch_source_identity_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_source_identity_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_source_identity_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+
+	source_batch_source_bytes_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_source_bytes_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_source_bytes_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+
+	source_batch_source_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_source_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_source_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+
+	source_batch_state_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_state_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_state_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+
+	source_batch_storage_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_storage_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_storage_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+
+	source_batch_pool_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_pool_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_pool_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+}
+
 Source_Provider_Backing :: struct {
 	model: *Provider_Model;
 	documents: [] *Document_State;
@@ -350,6 +604,11 @@ source_provider_revisions_ready :: (session: *Session, backing: *Source_Provider
 			hook := session.faults.source_provider_revisions_allocation_hook;
 			if hook && !hook(size, session.faults.source_provider_revisions_allocation_data) {
 				return null;
+			}
+		} else if mode == .FREE && old_memory {
+			hook := session.faults.source_provider_revisions_cleanup_hook;
+			if hook {
+				hook(size, session.faults.source_provider_revisions_cleanup_data);
 			}
 		}
 
@@ -1456,13 +1715,13 @@ owned_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *
 
 
 	result: *Owned_Allocation;
+	old: *Owned_Allocation;
 	lock(
 		*heap.gate,
 		#code {
-			old: *Owned_Allocation;
 			if old_memory {
 				old = (old_memory.(*u8) - size_of(Owned_Allocation)).(*Owned_Allocation);
-				assert(old.heap == heap, "Released an allocation through the wrong owner.");
+				assert(old.heap == heap, "\e[91Released an allocation through the wrong owner.\e[0m");
 			}
 
 			if mode != .FREE {
@@ -1507,11 +1766,13 @@ owned_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *
 					atomic_add(*heap.service.owned_allocations, -1);
 					atomic_add(*heap.service.owned_bytes, -old.size);
 				}
-
-				heap.delegate.proc(.FREE, 0, old.size + size_of(Owned_Allocation), old, heap.delegate.data);
 			}
 		}
 	);
+
+	if old {
+		heap.delegate.proc(.FREE, 0, old.size + size_of(Owned_Allocation), old, heap.delegate.data);
+	}
 
 	return ifx result then result.(*u8) + size_of(Owned_Allocation);
 }

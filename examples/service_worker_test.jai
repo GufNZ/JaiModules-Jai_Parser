@@ -1,12 +1,20 @@
 #import "Basic";
+#import "Compiler";
 #import "File";
 #import "File_Utilities";
 #import "Hash_Table";
+#import "Pool";
 #import "Thread"(LOAD_THREAD_GROUP = false);
 
 Service :: #import "Jai_Parser/service"(TEST_HOOKS = true, REAL_WORKER = true);
 
 FOREVER :: 0xFFFF_FFFF_FFFF_FFFF;
+
+BATCH_POOL_ONLY :: #run -> bool {
+	arguments := get_build_options().compile_time_command_line;
+	assert(!arguments.count || arguments.count == 1 && arguments[0] == "batch-pool");
+	return !!arguments.count;
+}
 
 Allocation_Ledger :: struct {
 	gate: Mutex;
@@ -16,6 +24,7 @@ Allocation_Ledger :: struct {
 	allocation_attempts: s64;
 	reject_allocations: bool;
 	directory_retirement: *Directory_Retirement;
+	pool_cleanup: *Pool_Cleanup_Probe;
 }
 
 allocation_ledger: Allocation_Ledger;
@@ -27,6 +36,7 @@ spy_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *vo
 	}
 
 
+	pool_cleanup: *Pool_Cleanup_Probe;
 	if mode == .FREE {
 		retirement: *Directory_Retirement;
 		Service.with_lock(
@@ -35,6 +45,11 @@ spy_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *vo
 				if ledger.directory_retirement && ledger.directory_retirement.memory == old_memory {
 					retirement = ledger.directory_retirement;
 					ledger.directory_retirement = null;
+				}
+				if ledger.pool_cleanup && ledger.pool_cleanup.memory == old_memory {
+					assert(table_contains(*ledger.sizes, old_memory));
+					pool_cleanup = ledger.pool_cleanup;
+					ledger.pool_cleanup = null;
 				}
 			}
 		);
@@ -50,7 +65,35 @@ spy_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *vo
 				assert(thread_init(*thread, directory_retirement_job));
 				thread_start(*thread);
 				retirement.gate_progress = thread_is_done(*thread, 10_000);
-				assert(retirement.gate_progress, "Directory backing was freed while its gate was held.");
+				assert(retirement.gate_progress, "\e[91mDirectory backing was freed while its gate was held.\e[0m");
+				thread_deinit(*thread);
+			}
+		}
+
+		if pool_cleanup && !pool_cleanup.suppress_callback {
+			push_allocator(context.default_allocator);
+
+			heap := old_memory.(*Service.Owned_Allocation).heap;
+			if pool_cleanup.hold_heap_gate {
+				lock(*heap.gate);
+			}
+
+			thread := Thread.{data = pool_cleanup};
+			if pool_cleanup.direct {
+				pool_cleanup_job(*thread);
+				pool_cleanup.gate_progress = true;
+			} else {
+				assert(thread_init(*thread, pool_cleanup_job));
+				thread_start(*thread);
+				if pool_cleanup.hold_heap_gate {
+					assert(wait_for(*pool_cleanup.heap_entered, 10_000) == .SUCCESS);
+					pool_cleanup.heap_blocked = !thread_is_done(*thread, 100);
+					unlock(*heap.gate);
+					assert(pool_cleanup.heap_blocked, "\e[91mHeld heap-gate cleanup control was not detected.\e[0m");
+				}
+
+				pool_cleanup.gate_progress = thread_is_done(*thread, 10_000);
+				assert(pool_cleanup.gate_progress, "\e[91mPool-root free blocked session-gate progress.\e[0m");
 				thread_deinit(*thread);
 			}
 		}
@@ -71,10 +114,19 @@ spy_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *vo
 			push_allocator(ledger.delegate);
 
 			result = ledger.delegate.proc(mode, size, old_size, old_memory, ledger.delegate.data);
+			if ledger.pool_cleanup && ledger.pool_cleanup.allocation_pending {
+				assert(mode == .ALLOCATE && size == ledger.pool_cleanup.allocation_size + size_of(Service.Owned_Allocation) && result);
+				ledger.pool_cleanup.memory = result;
+				ledger.pool_cleanup.allocation_pending = false;
+			}
+
 			if old_memory && (mode == .FREE || mode == .RESIZE && result) {
 				found, previous_size := table_remove(*ledger.sizes, old_memory);
-				assert(found, "An allocation was freed twice or by the wrong owner.");
+				assert(found, "\e[91mAn allocation was freed twice or by the wrong owner.\e[0m");
 				ledger.live_bytes -= previous_size;
+				if pool_cleanup {
+					pool_cleanup.frees += 1;
+				}
 			}
 
 			if result && (mode == .ALLOCATE || mode == .RESIZE) {
@@ -92,7 +144,7 @@ assert_no_owned_allocations :: () {
 	Service.with_lock(
 		*allocation_ledger.gate,
 		#code {
-			assert(!allocation_ledger.live_bytes && !allocation_ledger.sizes.count, "Independent allocation ledger retained % bytes.", allocation_ledger.live_bytes);
+			assert(!allocation_ledger.live_bytes && !allocation_ledger.sizes.count, "\e[91mIndependent allocation ledger retained % bytes.\e[0m", allocation_ledger.live_bytes);
 		}
 	);
 }
@@ -151,7 +203,7 @@ submit :: (fixture: Fixture, text: string) -> Service.Handle(.TICKET) {
 	batch := Service.begin_batch(fixture.host);
 	assert(Service.set_overlay(*batch, "a.jai", text));
 	ok, accepted, error := Service.submit_batch(*batch);
-	assert(ok, "Submission failed: %.", error);
+	assert(ok, "\e[91mSubmission failed: %.\e[0m", error);
 	return accepted.ticket;
 }
 
@@ -160,7 +212,7 @@ await :: (fixture: Fixture, handle: Service.Handle($K)) -> Service.Observation {
 		clock_identity = fixture.host.service.clock_identity,
 		nanoseconds = FOREVER,
 	});
-	assert(ok && !waited.timed_out, "Wait failed: %.", error);
+	assert(ok && !waited.timed_out, "\e[91mWait failed: %.\e[0m", error);
 	return waited.observation;
 }
 
@@ -189,13 +241,13 @@ query :: (fixture: Fixture, world: Service.Handle(.WORLD), kind: Service.Query_K
 
 release :: (fixture: Fixture, handle: Service.Handle($K)) {
 	ok, error := Service.release(fixture.host.service, handle);
-	assert(ok, "Release failed: %.", error);
+	assert(ok, "\e[91mRelease failed: %.\e[0m", error);
 }
 
 close :: (fixture: Fixture) {
 	assert(Service.close_harness_host(fixture.host));
 	assert(!Service.session_of(fixture.host.service, fixture.host.session));
-	assert(!fixture.host.service.owned_allocations && !fixture.host.service.owned_bytes, "Final release retained session allocations.");
+	assert(!fixture.host.service.owned_allocations && !fixture.host.service.owned_bytes, "\e[91mFinal release retained session allocations.\e[0m");
 	assert_no_owned_allocations();
 }
 
@@ -220,7 +272,7 @@ start_wait :: (thread: *Thread, waiting: *Waiting) {
 }
 
 join :: (thread: *Thread) {
-	assert(thread_is_done(thread, 10_000), "A concurrent call did not finish.");
+	assert(thread_is_done(thread, 10_000), "\e[91mA concurrent call did not finish.\e[0m");
 	thread_deinit(thread);
 }
 
@@ -249,7 +301,7 @@ test_provider_stall_and_shutdown :: () {
 	started := query(fixture, world, .SYNTAX_DIAGNOSTICS);
 	assert(started.kind == .PENDING);
 	observation := await(fixture, started.waiter);
-	assert(observation.query.kind == .AVAILABLE, "Held source acquisition blocked unrelated compute.");
+	assert(observation.query.kind == .AVAILABLE, "\e[91mHeld source acquisition blocked unrelated compute.\e[0m");
 	Service.free_observation(*observation);
 	_, shutdown := Service.request_shutdown(fixture.host.service, fixture.host.session);
 	_, waited := Service.wait(
@@ -273,7 +325,7 @@ test_provider_stall_and_shutdown :: () {
 	release(fixture, ticket);
 	release(fixture, shutdown);
 	close(fixture);
-	print("X6/X7/X8 held provider/independent compute/revalidation PASS\n");
+	print("X6/X7/X8 held provider/independent compute/revalidation \e[92mPASS\e[0m\n");
 }
 
 test_cleanup_pin :: () {
@@ -311,7 +363,7 @@ test_cleanup_pin :: () {
 	release(fixture, new_world);
 	release(fixture, new_ticket);
 	close(fixture);
-	print("X8 cleanup pin prevents premature stopped PASS\n");
+	print("X8 cleanup pin prevents premature stopped \e[92mPASS\e[0m\n");
 }
 
 analysis :: (fixture: Fixture, relative: string) -> Service.Handle(.TICKET) {
@@ -347,7 +399,7 @@ demote_for_test :: (fixture: Fixture, ticket: Service.Handle(.TICKET)) {
 			}
 
 
-			assert(false, "No queued task was available for the optional scheduling control.");
+			assert(false, "\e[91mNo queued task was available for the optional scheduling control.\e[0m");
 		}
 	);
 }
@@ -389,7 +441,7 @@ test_optional_fifo :: () {
 			mailbox := Service.last_mailbox(fixture.session);
 			correct_order &&= Service.bytes_equal(mailbox.task.world.members[0].document, Service.harness_document(fixture.host, it));
 			if mode == 1 && it_index == 3 {
-				assert(!mailbox.task.optional, "A shared optional prerequisite was not promoted.");
+				assert(!mailbox.task.optional, "\e[91mA shared optional prerequisite was not promoted.\e[0m");
 			}
 
 			if it_index < 3 {
@@ -402,7 +454,7 @@ test_optional_fifo :: () {
 			}
 		}
 
-		assert(correct_order == (mode != 2), "Optional priority control was not detected.");
+		assert(correct_order == (mode != 2), "\e[91mOptional priority control was not detected.\e[0m");
 		for Service.Handle(.TICKET).[first, second, third, optional] {
 			observation := await(fixture, it);
 			assert(observation.update.kind == .PUBLISHED);
@@ -419,7 +471,7 @@ test_optional_fifo :: () {
 		close(fixture);
 	}
 
-	print("X6 optional fallback/promotion/priority negative control PASS\n");
+	print("X6 optional fallback/promotion/priority negative control \e[92mPASS\e[0m\n");
 }
 
 test_required_fifo :: () {
@@ -443,7 +495,7 @@ test_required_fifo :: () {
 
 	for string.["a.jai", "b.jai", "c.jai"] {
 		mailbox := Service.last_mailbox(fixture.session);
-		assert(Service.bytes_equal(mailbox.task.world.members[0].document, Service.harness_document(fixture.host, it)), "Later required work overtook the FIFO.");
+		assert(Service.bytes_equal(mailbox.task.world.members[0].document, Service.harness_document(fixture.host, it)), "\e[91mLater required work overtook the FIFO.\e[0m");
 		if it_index < 2 {
 			Service.arm_pause(fixture.session, .SELECTED);
 		}
@@ -467,7 +519,7 @@ test_required_fifo :: () {
 
 	release(fixture, world);
 	close(fixture);
-	print("X6 required FIFO/shared later demand PASS\n");
+	print("X6 required FIFO/shared later demand \e[92mPASS\e[0m\n");
 }
 
 dispatch_world: Service.Handle(.WORLD);
@@ -518,7 +570,7 @@ test_reentrant_dispatch :: () {
 	release(fixture, attached.waiter);
 	release(fixture, ticket);
 	close(fixture);
-	print("X4 reentrant query/cancel/release/shutdown/dispatch PASS\n");
+	print("X4 reentrant query/cancel/release/shutdown/dispatch \e[92mPASS\e[0m\n");
 }
 
 test_pressure_and_reserved_shutdown :: () {
@@ -531,7 +583,7 @@ test_pressure_and_reserved_shutdown :: () {
 	assert(!ok && error.admission.limit == .LIVE_HANDLES);
 	fixture.session.faults.shutdown_from_ordinary_capacity = true;
 	ok, _, error = Service.request_shutdown(fixture.host.service, fixture.host.session);
-	assert(!ok && error.admission.limit == .LIVE_HANDLES, "Shutdown reservation negative control was not detected.");
+	assert(!ok && error.admission.limit == .LIVE_HANDLES, "\e[91mShutdown reservation negative control was not detected.\e[0m");
 	fixture.session.faults.shutdown_from_ordinary_capacity = false;
 	_, shutdown := Service.request_shutdown(fixture.host.service, fixture.host.session);
 	Service.resume_pause(fixture.session, .SELECTED);
@@ -549,7 +601,7 @@ test_pressure_and_reserved_shutdown :: () {
 	release(fixture, ticket);
 	release(fixture, shutdown);
 	close(fixture);
-	print("X5 delayed drain/full capacity/reservation negative control PASS\n");
+	print("X5 delayed drain/full capacity/reservation negative control \e[92mPASS\e[0m\n");
 }
 
 test_registration_and_wait :: () {
@@ -599,14 +651,14 @@ test_registration_and_wait :: () {
 		tampered := result.result;
 		tampered.session = xx "foreign session".([] u8);
 		valid := Service.read_result(fixture.host.service, tampered);
-		assert(!valid, "Inline routing bypassed the live handle's session binding.");
+		assert(!valid, "\e[91mInline routing byPASSed the live handle's session binding.\e[0m");
 		release(fixture, result.result);
 		release(fixture, world);
 		release(fixture, ticket);
 		close(fixture);
 	}
 
-	print("X1 registration/wait orderings PASS\n");
+	print("X1 registration/wait orderings \e[92mPASS\e[0m\n");
 }
 
 test_cancel_and_completion :: () {
@@ -652,7 +704,7 @@ test_cancel_and_completion :: () {
 		close(fixture);
 	}
 
-	print("X2 caller/completion orderings PASS\n");
+	print("X2 caller/completion orderings \e[92mPASS\e[0m\n");
 }
 
 test_retirement_while_waiting :: () {
@@ -681,7 +733,7 @@ test_retirement_while_waiting :: () {
 	close(fixture);
 	ok, _, error := Service.poll(fixture.host.service, attached.waiter);
 	assert(!ok && error.code == .INVALID_HANDLE);
-	print("X3 retirement/reuse/stale lookup PASS\n");
+	print("X3 retirement/reuse/stale lookup \e[92mPASS\e[0m\n");
 }
 
 test_shutdown_deadline_and_owners :: () {
@@ -713,11 +765,11 @@ test_shutdown_deadline_and_owners :: () {
 		assert(waited.timed_out && waited.observation.phase == .DRAINING);
 		Service.free_observation(*waited.observation);
 		batch := Service.begin_batch(fixture.host);
-		assert(Service.set_overlay(*batch, "a.jai", "forbidden :: 3;"));
+		assert(Service.set_overlay(*batch, "\e[91a.jai\e[0m", "forbidden :: 3;"));
 		accepted, _, error := Service.submit_batch(*batch);
 		assert(!accepted && error.code == .SERVICE_CLOSED);
 		Service.resume_pause(fixture.session, boundary);
-		assert(thread_is_done(*fixture.session.reaper, 10_000), "Shutdown depended on host polling.");
+		assert(thread_is_done(*fixture.session.reaper, 10_000), "\e[91mShutdown depended on host polling.\e[0m");
 		observation := await(fixture, shutdown);
 		assert(observation.kind == .SHUTDOWN);
 		Service.free_observation(*observation);
@@ -735,7 +787,7 @@ test_shutdown_deadline_and_owners :: () {
 		assert_no_owned_allocations();
 	}
 
-	print("X7/X8 shutdown/deadline/surviving owner PASS\n");
+	print("X7/X8 shutdown/deadline/surviving owner \e[92mPASS\e[0m\n");
 }
 
 Drain_Fixture :: struct {
@@ -829,10 +881,12 @@ Output_Action :: enum {
 	REPLACE_HELD_SOURCE;
 	CHECK_PRIVATE_OPEN;
 	REJECT_ACTIVE_RELEASE;
+	CHECK_STAGING_SHUTDOWN;
 	TAKE_ANALYSIS_CAPACITY;
 	FILL_REGISTRATION_CAPACITY;
 	FILL_OPERATION_CAPACITY;
 	GROW_PROVIDER_CLONE_COUNTS;
+	GROW_PROVIDER_REVISION_COUNTS;
 	FILL_SHUTDOWN_CAPACITY;
 	COMPLETE_SHUTDOWN;
 	TAKE_RETAIN_CAPACITY;
@@ -861,6 +915,7 @@ Output_Interleaving :: struct {
 	surviving_result: Service.Handle(.RESULT);
 	coordinator_case: Coordinator_Argument_Case;
 	coordinator_shutdown: Service.Handle(.SHUTDOWN);
+	active_source_retirement: bool;
 	retirement_ticket: Service.Handle(.TICKET);
 	retirement_waiter: Service.Handle(.WAITER);
 	retirement_world: Service.Handle(.WORLD);
@@ -1034,10 +1089,15 @@ output_interleaving_job :: (thread: *Thread) -> s64 {
 		case .RETIRE_AND_REUSE_SESSION;
 			ok, shutdown := Service.request_shutdown(fixture.host.service, fixture.host.session);
 			assert(ok);
-			Service.resume_pause(fixture.session, .PUBLICATION);
-			observation := await(fixture, shutdown);
-			Service.free_observation(*observation);
-			release(fixture, shutdown);
+			if job.active_source_retirement {
+				job.coordinator_shutdown = shutdown;
+			} else {
+				Service.resume_pause(fixture.session, .PUBLICATION);
+				observation := await(fixture, shutdown);
+				Service.free_observation(*observation);
+				release(fixture, shutdown);
+			}
+
 			job.ok = Service.release(fixture.host.service, fixture.host.session);
 			if job.ok && job.action == .RETIRE_AND_REUSE_SESSION {
 				retained, replacement := Service.retain(fixture.host.service, job.drain.world);
@@ -1112,6 +1172,32 @@ output_interleaving_job :: (thread: *Thread) -> s64 {
 			released, error := Service.release(fixture.host.service, fixture.host.session);
 			job.ok = !released && error.code == .ACTIVE_SESSION;
 
+		case .CHECK_STAGING_SHUTDOWN;
+			released, error := Service.release(fixture.host.service, fixture.host.session);
+			assert(!released && error.code == .ACTIVE_SESSION);
+			ok, shutdown := Service.request_shutdown(fixture.host.service, fixture.host.session);
+			assert(ok);
+			wait_ok, waited := Service.wait(
+				fixture.host.service,
+				shutdown,
+				.{
+					clock_identity = fixture.host.service.clock_identity,
+					nanoseconds = 0,
+				}
+			);
+
+			assert(wait_ok && waited.timed_out && waited.observation.phase == .DRAINING);
+			Service.free_observation(*waited.observation);
+			released, error = Service.release(fixture.host.service, fixture.host.session);
+			assert(!released && error.code == .ACTIVE_SESSION);
+			described, description := Service.describe_session(fixture.host.service, fixture.host.session);
+			assert(described && Service.bytes_equal(description.session_identity.([] u8), fixture.host.session_identity.([] u8)));
+			Service.free_description(*description);
+			read_ok := Service.read_world(fixture.host.service, job.drain.world);
+			assert(read_ok);
+			release(fixture, shutdown);
+			job.ok = true;
+
 		case .TAKE_ANALYSIS_CAPACITY;
 			_, description := Service.describe_session(fixture.host.service, fixture.host.session);
 			ok, accepted := Service.request_analysis(
@@ -1142,6 +1228,17 @@ output_interleaving_job :: (thread: *Thread) -> s64 {
 					push_allocator(Service.owner_allocator(fixture.session));
 					array_add(*fixture.session.provider.documents, fixture.session.provider.documents[0]);
 					array_add(*fixture.session.provider.contexts, fixture.session.provider.contexts[0]);
+				}
+			);
+
+			job.ok = true;
+
+		case .GROW_PROVIDER_REVISION_COUNTS;
+			Service.with_lock(
+				*fixture.session.gate,
+				#code {
+					push_allocator(Service.owner_allocator(fixture.session));
+					array_add(*fixture.session.provider.documents[0].used_revisions, fixture.session.provider.documents[0].used_revisions[0]);
 				}
 			);
 
@@ -1296,6 +1393,9 @@ Output_Probe :: struct {
 	job: Output_Interleaving;
 	gate_progress: bool;
 	registration_probe: *Registration_Probe;
+	source_document: [] u8;
+	source_references: [2] s64;
+	source_active_admissions: [2] s64;
 }
 
 output_probe_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
@@ -1316,13 +1416,27 @@ output_probe_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_me
 				assert(thread_init(*thread, output_interleaving_job));
 				thread_start(*thread);
 				probe.gate_progress = thread_is_done(*thread, 10_000);
-				assert(probe.gate_progress, "A caller allocator ran while the service state gate was held.");
+				assert(probe.gate_progress, "\e[91mA caller allocator ran while the service state gate was held.\e[0m");
 				thread_deinit(*thread);
 			}
 
 			if probe.registration_probe {
 				probe.registration_probe.running = false;
 			}
+		}
+
+		if probe.source_document.count {
+			session := probe.job.drain.fixture.session;
+			Service.with_lock(
+				*session.gate,
+				#code {
+					state := Service.find_document(session.provider, probe.source_document);
+					assert(state && state.has_overlay && state.overlay.source);
+					assert(probe.allocations <= probe.source_references.count);
+					probe.source_references[probe.allocations - 1] = state.overlay.source.references;
+					probe.source_active_admissions[probe.allocations - 1] = session.active_admissions;
+				}
+			);
 		}
 
 		if probe.allocations == probe.fail_at {
@@ -1341,7 +1455,7 @@ open_output_probe :: (probe: *Output_Probe) -> Allocator {
 }
 
 close_output_probe :: (probe: *Output_Probe) {
-	assert(!probe.backing.live_bytes && !probe.backing.sizes.count, "A failed or retired caller copy leaked.");
+	assert(!probe.backing.live_bytes && !probe.backing.sizes.count, "\e[91mA failed or retired caller copy leaked.\e[0m");
 	deinit(*probe.backing.sizes);
 	destroy(*probe.backing.gate);
 }
@@ -1373,7 +1487,7 @@ test_drain_allocation_failures :: () {
 		Service.with_lock(
 			*drain.fixture.session.gate,
 			#code {
-				assert(drain.fixture.session.ledger.live[Service.Limit_Name.COMPLETION_RECORDS] == 2, "A failed drain consumed reserved completions.");
+				assert(drain.fixture.session.ledger.live[Service.Limit_Name.COMPLETION_RECORDS] == 2, "\e[91mA failed drain consumed reserved completions.\e[0m");
 			}
 		);
 
@@ -1384,12 +1498,12 @@ test_drain_allocation_failures :: () {
 		}
 
 		fail_at += 1;
-		assert(fail_at < 100, "Output failure injection did not reach a successful drain.");
+		assert(fail_at < 100, "\e[91mOutput failure injection did not reach a successful drain.\e[0m");
 	}
 
 	close_output_probe(*probe);
 	finish_drain(drain);
-	print("X5 every caller-output allocation failure preserves readiness PASS\n");
+	print("X5 every caller-output allocation failure preserves readiness \e[92mPASS\e[0m\n");
 }
 
 test_drain_output_interleavings :: (direct := false) {
@@ -1433,7 +1547,7 @@ test_drain_output_interleavings :: (direct := false) {
 		finish_drain(drain, first_released = action == .RELEASE_WAITER, session_released = action == .RELEASE_SESSION);
 	}
 
-	print("X3/X5 off-gate caller allocation/reuse/concurrent drain/session retirement (direct = %) PASS\n", direct);
+	print("X3/X5 off-gate caller allocation/reuse/concurrent drain/session retirement (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 test_observer_output_failures :: () {
@@ -1486,7 +1600,7 @@ test_observer_output_failures :: () {
 		finish_drain(drain);
 	}
 
-	print("X1 every poll/wait output allocation failure preserves terminal state PASS\n");
+	print("X1 every poll/wait output allocation failure preserves terminal state \e[92mPASS\e[0m\n");
 }
 
 test_observer_output_retirement :: (direct := false) {
@@ -1519,7 +1633,7 @@ test_observer_output_retirement :: (direct := false) {
 		finish_drain(drain, first_released = true);
 	}
 
-	print("X3 poll/wait caller allocation permits retirement and reuse (direct = %) PASS\n", direct);
+	print("X3 poll/wait caller allocation permits retirement and reuse (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 test_drain_output_negative_controls :: () {
@@ -1537,7 +1651,7 @@ test_drain_output_negative_controls :: () {
 		}
 	);
 
-	assert(!readiness_intact, "Premature drain-consumption control was not detected.");
+	assert(!readiness_intact, "\e[91mPremature drain-consumption control was not detected.\e[0m");
 	close_output_probe(*probe);
 	finish_drain(drain);
 
@@ -1551,12 +1665,12 @@ test_drain_output_negative_controls :: () {
 		retired_delivered ||= it.registration.slot == drain.first.slot && it.registration.generation == drain.first.generation;
 	}
 
-	assert(ok && retired_delivered, "Stale-generation drain control was not detected.");
+	assert(ok && retired_delivered, "\e[91mStale-generation drain control was not detected.\e[0m");
 	free_records(records, allocator);
 	release(drain.fixture, probe.job.replacement);
 	close_output_probe(*probe);
 	finish_drain(drain, first_released = true);
-	print("X3/X5 premature consumption and stale-output negative controls PASS\n");
+	print("X3/X5 premature consumption and stale-output negative controls \e[92mPASS\e[0m\n");
 }
 
 Output_Read :: enum {
@@ -1636,7 +1750,7 @@ read_fixture_output :: (drain: Drain_Fixture, kind: Output_Read, allocator: Allo
 
 	ok, acquired, error := Service.acquire_result(drain.fixture.host.service, drain.first,, allocator);
 	if ok {
-		assert(!acquired.result.generation, "An observational acquisition created a payload handle.");
+		assert(!acquired.result.generation, "\e[91mAn observational acquisition created a payload handle.\e[0m");
 		if kind == .PENDING_RESULT {
 			assert(acquired.kind == .PENDING && acquired.observation.kind == .PENDING);
 		} else {
@@ -1681,7 +1795,7 @@ test_acquisition_output_failures :: () {
 			assert(!probe.backing.live_bytes && !probe.backing.sizes.count);
 			if kind == .QUERY_CANCELLATION || kind == .UPDATE_CANCELLATION {
 				_, pending := Service.poll(drain.fixture.host.service, drain.first);
-				assert(pending.kind == .PENDING, "Failed output allocation committed cancellation.");
+				assert(pending.kind == .PENDING, "\e[91mFailed output allocation committed cancellation.\e[0m");
 				Service.free_observation(*pending);
 			}
 
@@ -1694,7 +1808,7 @@ test_acquisition_output_failures :: () {
 		finish_drain(drain, held = kind != .TERMINAL_TICKET);
 	}
 
-	print("X1/X5 acquisition/ticket/cancellation allocation failures preserve state PASS\n");
+	print("X1/X5 acquisition/ticket/cancellation allocation failures preserve state \e[92mPASS\e[0m\n");
 }
 
 test_acquisition_output_retirement :: (direct := false) {
@@ -1738,7 +1852,7 @@ test_acquisition_output_retirement :: (direct := false) {
 		);
 	}
 
-	print("X3 acquisition/ticket/cancellation output retirement and reuse (direct = %) PASS\n", direct);
+	print("X3 acquisition/ticket/cancellation output retirement and reuse (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 test_cancellation_output_winners :: (direct := false) {
@@ -1787,14 +1901,14 @@ test_cancellation_output_winners :: (direct := false) {
 			}
 
 			_, records := Service.drain_completions(drain.fixture.host.service, drain.fixture.host.session, 8);
-			assert(records.count == 2, "Cancellation staging duplicated or lost a terminal completion.");
+			assert(records.count == 2, "\e[91mCancellation staging duplicated or lost a terminal completion.\e[0m");
 			assert(records[0].registration.slot != records[1].registration.slot);
 			free_records(records);
 			finish_drain(drain, held = action == .REQUEST_SHUTDOWN);
 		}
 	}
 
-	print("X2 cancellation output completion/cancel/shutdown winners (direct = %) PASS\n", direct);
+	print("X2 cancellation output completion/cancel/shutdown winners (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 test_cancellation_output_negative_control :: () {
@@ -1807,13 +1921,13 @@ test_cancellation_output_negative_control :: () {
 		assert(!ok && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
 		Service.free_observation(*cancelled.observation,, allocator);
 		_, observation := Service.poll(drain.fixture.host.service, drain.first);
-		assert(observation.kind != .PENDING, "Premature cancellation negative control was not detected.");
+		assert(observation.kind != .PENDING, "\e[91mPremature cancellation negative control was not detected.\e[0m");
 		Service.free_observation(*observation);
 		close_output_probe(*probe);
 		finish_drain(drain, held = true);
 	}
 
-	print("X5 cancellation-before-copy negative control PASS\n");
+	print("X5 cancellation-before-copy negative control \e[92mPASS\e[0m\n");
 }
 
 test_cancellation_retry_output_failures :: (direct := false) {
@@ -1866,7 +1980,7 @@ test_cancellation_retry_output_failures :: (direct := false) {
 		}
 	}
 
-	print("X2/X5 cancellation completion-winner retry allocation failures (direct = %) PASS\n", direct);
+	print("X2/X5 cancellation completion-winner retry allocation failures (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 prepared_description :: () -> Drain_Fixture {
@@ -1887,7 +2001,7 @@ prepared_description :: () -> Drain_Fixture {
 
 assert_description_bytes :: (copy: [] u8, expected: [] u8) {
 	assert(Service.bytes_equal(copy, expected));
-	assert(!copy.count || copy.data != expected.data, "Description exports alias another owner's bytes.");
+	assert(!copy.count || copy.data != expected.data, "\e[91mDescription exports alias another owner's bytes.\e[0m");
 }
 
 assert_description_copy :: (copy: Service.Session_Description, expected: Service.Session_Description) {
@@ -1965,7 +2079,7 @@ test_description_output_failures :: () {
 	Service.free_description(*expected);
 	close_output_probe(*probe);
 	finish_drain(drain);
-	print("X5 every description allocation failure and deep-copy isolation PASS\n");
+	print("X5 every description allocation failure and deep-copy isolation \e[92mPASS\e[0m\n");
 }
 
 test_description_output_interleavings :: (direct := false) {
@@ -2009,7 +2123,7 @@ test_description_output_interleavings :: (direct := false) {
 		finish_drain(drain, session_released = action == .RELEASE_SESSION);
 	}
 
-	print("X3/X5 description snapshot/frontier/shutdown/retirement (direct = %) PASS\n", direct);
+	print("X3/X5 description snapshot/frontier/shutdown/retirement (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 test_description_retirement_negative_control :: () {
@@ -2026,12 +2140,12 @@ test_description_retirement_negative_control :: () {
 
 	allocator := open_output_probe(*probe);
 	ok, description := Service.describe_session(drain.fixture.host.service, drain.fixture.host.session,, allocator);
-	assert(probe.gate_progress && probe.job.ok && ok, "Retired-description negative control was not detected.");
+	assert(probe.gate_progress && probe.job.ok && ok, "\e[91mRetired-description negative control was not detected.\e[0m");
 	assert(!Service.session_of(drain.fixture.host.service, drain.fixture.host.session));
 	Service.free_description(*description,, allocator);
 	close_output_probe(*probe);
 	finish_drain(drain, session_released = true);
-	print("X3 retired-description revalidation negative control PASS\n");
+	print("X3 retired-description revalidation negative control \e[92mPASS\e[0m\n");
 }
 
 open_output_options :: () -> Service.Session_Options {
@@ -2104,7 +2218,7 @@ test_directory_backing :: () {
 		first_retires_early := it;
 		fixture := open("X3-directory-backing");
 		service := fixture.host.service;
-		assert(directory_service_owned(service), "The shared directory backing belongs to a session heap.");
+		assert(directory_service_owned(service), "\e[91mThe shared directory backing belongs to a session heap.\e[0m");
 		capacity := service.sessions.allocated;
 		extra: [..] Service.Handle(.SESSION);
 		ok, survivor := Service.open_session(service, open_output_options());
@@ -2156,14 +2270,14 @@ test_directory_backing :: () {
 
 		service.session_owned_directory = true;
 		control_ok, control := Service.open_session(service, open_output_options());
-		assert(control_ok && !directory_service_owned(service), "Session-owned directory negative control was not detected.");
+		assert(control_ok && !directory_service_owned(service), "\e[91mSession-owned directory negative control was not detected.\e[0m");
 		Service.free_description(*control.description);
 		close_output_session(service, control.session);
 		assert(!service.sessions.data && !service.owned_allocations && !service.owned_bytes);
 		assert_no_owned_allocations();
 	}
 
-	print("X3 shared directory growth/retirement/reopen and owner negative control PASS\n");
+	print("X3 shared directory growth/retirement/reopen and owner negative control \e[92mPASS\e[0m\n");
 }
 
 test_directory_retirement_reentry :: (direct := false, negative_control := false) {
@@ -2203,10 +2317,10 @@ test_directory_retirement_reentry :: (direct := false, negative_control := false
 			}
 		);
 
-		assert(detected && !retirement.gate_progress && !retirement.reopened.generation, "Wrong-owner directory free negative control was not detected.");
+		assert(detected && !retirement.gate_progress && !retirement.reopened.generation, "\e[91mWrong-owner directory free negative control was not detected.\e[0m");
 		assert(!service.sessions.data && !service.owned_allocations && !service.owned_bytes);
 		assert_no_owned_allocations();
-		print("X3 wrong-owner directory free negative control (direct = %) PASS\n", direct);
+		print("X3 wrong-owner directory free negative control (direct = %) \e[92mPASS\e[0m\n", direct);
 		return;
 	}
 
@@ -2219,7 +2333,7 @@ test_directory_retirement_reentry :: (direct := false, negative_control := false
 	close_output_session(service, retirement.reopened);
 	assert(!service.sessions.data && !service.owned_allocations && !service.owned_bytes);
 	assert_no_owned_allocations();
-	print("X3 directory retirement permits reopen before backing free (direct = %) PASS\n", direct);
+	print("X3 directory retirement permits reopen before backing free (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 Directory_Allocation :: struct {
@@ -2260,7 +2374,7 @@ directory_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memor
 				assert(thread_init(*thread, directory_allocation_job));
 				thread_start(*thread);
 				probe.gate_progress = thread_is_done(*thread, 10_000);
-				assert(probe.gate_progress, "Directory backing allocation held its gate.");
+				assert(probe.gate_progress, "\e[91mDirectory backing allocation held its gate.\e[0m");
 				thread_deinit(*thread);
 			}
 		}
@@ -2275,7 +2389,7 @@ directory_allocation_job :: (thread: *Thread) -> s64 {
 	Service.with_lock(
 		*probe.service.directory,
 		#code {
-			assert(probe.service.sessions.count == probe.expected_count, "The allocating session was published before admission.");
+			assert(probe.service.sessions.count == probe.expected_count, "\e[91mThe allocating session was published before admission.\e[0m");
 		}
 	);
 
@@ -2331,7 +2445,7 @@ test_directory_allocation_interleavings :: (direct := false) {
 			service.reject_changed_directory = negative_control;
 			ok, opened, error := Service.open_session(service, open_output_options());
 			assert(probe.gate_progress && !probe.armed && !probe.failures);
-			assert(ok != negative_control, "Changed-directory rejection negative control was not detected.");
+			assert(ok != negative_control, "\e[91mChanged-directory rejection negative control was not detected.\e[0m");
 			if ok {
 				Service.free_description(*opened.description);
 			} else {
@@ -2378,7 +2492,7 @@ test_directory_allocation_interleavings :: (direct := false) {
 		}
 	}
 
-	print("X3 directory allocation/retry/concurrent open/retirement and negative controls (direct = %) PASS\n", direct);
+	print("X3 directory allocation/retry/concurrent open/retirement and negative controls (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 test_directory_allocation_failures :: () {
@@ -2414,7 +2528,7 @@ test_directory_allocation_failures :: () {
 			caller_allocator := Allocator.{proc = spy_allocate, data = *caller};
 			ok, opened, error := Service.open_session(service, open_output_options(),, caller_allocator);
 			rejected := !ok && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED;
-			assert(probe.failures == 1 && rejected != negative_control, "Directory allocation failure/admission negative control was not detected.");
+			assert(probe.failures == 1 && rejected != negative_control, "\e[91mDirectory allocation failure/admission negative control was not detected.\e[0m");
 			assert(service.incarnation.session_counter.next == next_identity + 1);
 			if ok {
 				Service.free_description(*opened.description,, caller_allocator);
@@ -2425,7 +2539,7 @@ test_directory_allocation_failures :: () {
 			}
 
 			assert(service.owned_bytes == owned_bytes && service.owned_allocations == owned_allocations);
-			assert(!caller.live_bytes && !caller.sizes.count, "Rejected directory admission leaked caller output.");
+			assert(!caller.live_bytes && !caller.sizes.count, "\e[91mRejected directory admission leaked caller output.\e[0m");
 			deinit(*caller.sizes);
 			destroy(*caller.gate);
 			service.retry_failed_directory_allocation = false;
@@ -2446,7 +2560,7 @@ test_directory_allocation_failures :: () {
 		}
 	}
 
-	print("X3 directory allocation failure/private worker cleanup/admission negative control PASS\n");
+	print("X3 directory allocation failure/private worker cleanup/admission negative control \e[92mPASS\e[0m\n");
 }
 
 receipt_source_batch :: (batch: Service.Host_Batch) -> Service.Source_Batch {
@@ -2459,30 +2573,94 @@ receipt_source_batch :: (batch: Service.Host_Batch) -> Service.Source_Batch {
 	};
 }
 
-test_source_registration_failures :: (update := false, list := false, provider := false, arrays := false, states := false, revisions := false) {
+test_source_registration_failures :: (
+	update := false,
+	list := false,
+	provider := false,
+	arrays := false,
+	states := false,
+	revisions := false,
+	pool := false,
+	batch_states := false,
+	batch_revisions := false,
+	batch_pair := false,
+	batch_sources := false,
+	batch_source_bytes := false,
+	batch_source_identities := false,
+	batch_edits := false,
+	batch_state_list := false,
+	batch_reference_list := false,
+	batch_context_list := false,
+	batch_paths := false,
+	path_error := false,
+	edit_pair := false,
+	empty_source := false,
+	event_kind: Service.Event_Kind = .SET_OVERLAY
+) {
+	assert(event_kind == .SET_OVERLAY || (batch_sources || batch_source_bytes || batch_source_identities || batch_edits || batch_reference_list || batch_paths) && !batch_pair && (!empty_source || batch_edits));
+	assert(!path_error || batch_paths && event_kind == .OBSERVE_DISK);
+	assert(!batch_edits || event_kind == .EDIT_OVERLAY);
+	assert(!edit_pair || batch_edits && !empty_source);
+	assert(!empty_source || (batch_source_bytes || batch_source_identities || batch_edits) && !batch_pair);
+	assert(!batch_pair || batch_states || batch_revisions || batch_sources || batch_source_bytes || batch_source_identities || batch_state_list || batch_reference_list || batch_context_list || batch_paths);
 	for Retain_Backing_Case.[.ARRAYS, .OBJECT, .REUSE] {
 		scenario := it;
-		allocation_count := ifx arrays
-			then 2
-			else ifx list || provider || states || revisions
-				then 1
-				else ifx update || scenario == .ARRAYS
-					then 3
-					else ifx scenario == .OBJECT
-						then 1
-						else 0;
+		allocation_count := ifx batch_paths
+			then ifx path_error
+				then 2
+				else 1
+			else ifx batch_context_list
+				then ifx batch_pair
+					then 1
+					else 0
+				else ifx empty_source && (batch_source_bytes || batch_edits)
+					then 0
+					else ifx batch_edits
+						then ifx edit_pair
+							then 2
+							else 1
+						else ifx batch_state_list || batch_reference_list
+							then 1
+							else ifx arrays
+								then 2
+								else ifx batch_states || batch_revisions || batch_sources || batch_source_bytes || batch_source_identities
+									then ifx batch_pair
+										then 2
+										else 1
+									else ifx list || provider || states || revisions || pool
+										then 1
+										else ifx update || scenario == .ARRAYS
+											then 3
+											else ifx scenario == .OBJECT
+												then 1
+												else 0;
 
 		for 1..allocation_count + 1 {
 			fail_at := it;
 			test := prepared_retain(.WORLD, scenario);
 			fixture := test.drain.fixture;
 			batch := Service.begin_batch(fixture.host);
-			assert(Service.set_overlay(*batch, "a.jai", "answer :: 77;"));
+			submitted := ifx empty_source then "" else "answer :: 77;";
+			expected_world := submitted;
+			assert(Service.set_overlay(*batch, "a.jai", submitted));
+			if batch_pair {
+				assert(Service.set_overlay(*batch, "added.jai", "second :: 2;"));
+			}
+
+			edits: [2] Service.Range_Edit;
+			disk_revision: [] u8;
+			if event_kind == .OBSERVE_DISK {
+				disk_revision = Service.source_revision_of(xx submitted);
+			}
+
 			before: Service.Resource_Ledger;
 			identities: Service.Session_Identities;
 			slots: [] Service.Registration_Slot;
 			free_count: s64;
 			operations: s64;
+			documents: s64;
+			source: *Service.Source_Backing;
+			source_references: s64;
 			probe := Registration_Probe.{fail_at = fail_at};
 			output_probe := Output_Probe.{};
 			allocator := open_output_probe(*output_probe);
@@ -2494,7 +2672,85 @@ test_source_registration_failures :: (update := false, list := false, provider :
 					slots = array_copy(fixture.session.registry.slots);
 					free_count = fixture.session.registry.free_slots.count;
 					operations = fixture.session.operations.count;
-					if revisions {
+					documents = fixture.session.provider.documents.count;
+					source = Service.selected_document(Service.find_document(fixture.session.provider, batch.events[0].document)).source;
+					assert(!!source);
+					source_references = source.references;
+					event := *batch.events[0];
+					event.kind = event_kind;
+					if event_kind == {
+						case .EDIT_OVERLAY;
+							event.base_source_revision = source.revision;
+							first := ifx edit_pair
+								then "x :: 1;"
+								else submitted;
+							edits[0] = .{
+								end_byte = xx source.bytes.count,
+								replacement = xx first,
+							};
+
+							edits[1] = .{
+								end_byte = xx first.count,
+								replacement = xx submitted,
+							};
+
+							event.edits = edits;
+							event.edits.count = ifx edit_pair
+								then 2
+								else 1;
+
+						case .OBSERVE_DISK;
+							expected_world = source.bytes.(string);
+							event.disk = .{
+								kind = .PRESENT,
+								source = event.source,
+								source_revision = disk_revision,
+								syntax_context = event.source_context,
+								provenance = .{
+									provider_identity = fixture.session.provider.provider_namespace,
+									observation_token = xx "source-construction-test",
+								},
+							};
+					}
+
+					if path_error {
+						event.disk.syntax_context = xx "unknown-context";
+					}
+
+					if batch_paths {
+						fixture.session.faults.source_batch_path_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_path_allocation_data = *probe;
+					} else if batch_context_list {
+						fixture.session.faults.source_batch_context_list_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_context_list_allocation_data = *probe;
+					} else if batch_reference_list {
+						fixture.session.faults.source_batch_reference_list_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_reference_list_allocation_data = *probe;
+					} else if batch_state_list {
+						fixture.session.faults.source_batch_state_list_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_state_list_allocation_data = *probe;
+					} else if batch_edits {
+						fixture.session.faults.source_batch_edit_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_edit_allocation_data = *probe;
+					} else if batch_source_identities {
+						fixture.session.faults.source_batch_source_identity_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_source_identity_allocation_data = *probe;
+					} else if batch_source_bytes {
+						fixture.session.faults.source_batch_source_bytes_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_source_bytes_allocation_data = *probe;
+					} else if batch_sources {
+						fixture.session.faults.source_batch_source_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_source_allocation_data = *probe;
+					} else if batch_revisions {
+						fixture.session.faults.source_batch_revisions_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_revisions_allocation_data = *probe;
+					} else if batch_states {
+						fixture.session.faults.source_batch_state_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_state_allocation_data = *probe;
+					} else if pool {
+						fixture.session.faults.source_batch_pool_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_pool_allocation_data = *probe;
+					} else if revisions {
 						fixture.session.faults.source_provider_revisions_allocation_hook = registration_allocation_probe;
 						fixture.session.faults.source_provider_revisions_allocation_data = *probe;
 					} else if states {
@@ -2545,12 +2801,47 @@ test_source_registration_failures :: (update := false, list := false, provider :
 					fixture.session.faults.source_provider_states_allocation_data = null;
 					fixture.session.faults.source_provider_revisions_allocation_hook = null;
 					fixture.session.faults.source_provider_revisions_allocation_data = null;
+					fixture.session.faults.source_batch_pool_allocation_hook = null;
+					fixture.session.faults.source_batch_pool_allocation_data = null;
+					fixture.session.faults.source_batch_state_allocation_hook = null;
+					fixture.session.faults.source_batch_state_allocation_data = null;
+					fixture.session.faults.source_batch_revisions_allocation_hook = null;
+					fixture.session.faults.source_batch_revisions_allocation_data = null;
+					fixture.session.faults.source_batch_source_allocation_hook = null;
+					fixture.session.faults.source_batch_source_allocation_data = null;
+					fixture.session.faults.source_batch_source_bytes_allocation_hook = null;
+					fixture.session.faults.source_batch_source_bytes_allocation_data = null;
+					fixture.session.faults.source_batch_source_identity_allocation_hook = null;
+					fixture.session.faults.source_batch_source_identity_allocation_data = null;
+					fixture.session.faults.source_batch_edit_allocation_hook = null;
+					fixture.session.faults.source_batch_edit_allocation_data = null;
+					fixture.session.faults.source_batch_state_list_allocation_hook = null;
+					fixture.session.faults.source_batch_state_list_allocation_data = null;
+					fixture.session.faults.source_batch_reference_list_allocation_hook = null;
+					fixture.session.faults.source_batch_reference_list_allocation_data = null;
+					fixture.session.faults.source_batch_context_list_allocation_hook = null;
+					fixture.session.faults.source_batch_context_list_allocation_data = null;
+					fixture.session.faults.source_batch_path_allocation_hook = null;
+					fixture.session.faults.source_batch_path_allocation_data = null;
 					assert(!fixture.session.active_admissions);
-					if fail_at <= allocation_count {
+					if fail_at <= allocation_count || path_error {
 						assert(!ok && !accepted.ticket.owner_token && !accepted.frontier.count);
-						assert(error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
-						assert(!output_probe.allocations);
+						if fail_at <= allocation_count {
+							assert(error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+							assert(!error.path.count && !output_probe.allocations);
+						} else {
+							assert(error.code == .INVALID_ARGUMENT && error.rule == .INCONSISTENT_BINDING && output_probe.allocations == 1);
+							assert(error.path.count == 4);
+							assert(error.path[0].kind == .FIELD && error.path[0].name == "events");
+							assert(error.path[1].kind == .ELEMENT && !error.path[1].index);
+							assert(error.path[2].kind == .FIELD && error.path[2].name == "disk");
+							assert(error.path[3].kind == .FIELD && error.path[3].name == "context");
+						}
+
 						assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, batch.description.accepted_frontier));
+						assert(fixture.session.provider.documents.count == documents);
+						assert(Service.selected_document(Service.find_document(fixture.session.provider, batch.events[0].document)).source == source);
+						assert(source.references == source_references);
 						assert(fixture.session.operations.count == operations && fixture.session.registry.slots.count == slots.count && fixture.session.registry.free_slots.count == free_count);
 						for slots {
 							current := fixture.session.registry.slots[it_index];
@@ -2567,6 +2858,18 @@ test_source_registration_failures :: (update := false, list := false, provider :
 						assert(ok && accepted.ticket.owner_token && output_probe.allocations == 1);
 						assert(Service.handle_is_live(*fixture.session.registry, accepted.ticket));
 						assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, accepted.frontier));
+						if event_kind == .OBSERVE_DISK {
+							state := Service.find_document(fixture.session.provider, batch.events[0].document);
+							assert(state.disk.source && Service.bytes_equal(state.disk.source.bytes, xx submitted));
+						}
+
+						if batch_pair {
+							assert(fixture.session.provider.documents.count == documents + 1);
+							added := Service.find_document(fixture.session.provider, batch.events[1].document);
+							assert(!!added);
+							assert(Service.bytes_equal(Service.selected_document(added).source.bytes, xx "second :: 2;"));
+						}
+
 						assert(fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + 1);
 						if scenario == .REUSE {
 							assert(accepted.ticket.slot < xx slots.count && accepted.ticket.generation == slots[accepted.ticket.slot].generation + 1);
@@ -2594,27 +2897,1202 @@ test_source_registration_failures :: (update := false, list := false, provider :
 				Service.free_observation(*observation);
 				acquired := world_of(fixture, accepted.ticket);
 				world_ok, description := Service.read_world(fixture.host.service, acquired);
-				assert(world_ok && Service.bytes_equal(description.members[0].source.bytes, xx "answer :: 77;"));
+				assert(world_ok && Service.bytes_equal(description.members[0].source.bytes, xx expected_world));
 				release(fixture, acquired);
 				release(fixture, accepted.ticket);
 			}
 
 			free(accepted.frontier.data,, allocator);
+			free(error.path.data,, allocator);
 			close_output_probe(*output_probe);
+			free(disk_revision.data);
 			free(slots.data);
 			finish_retain(test);
 		}
 	}
 
 	print(
-		"X5 source ticket/update/list/provider backing array/object/reuse failures/provider commit/charges/generations/canonical identities (update = %, list = %, provider = %, arrays = %, states = %, revisions = %) PASS\n",
+		"X5 source ticket/update/list/provider backing array/object/reuse failures/provider commit/charges/generations/canonical identities (update = %, list = %, provider = %, arrays = %, states = %, revisions = %, pool = %, batch states = %, batch revisions = %, batch pair = %, batch sources = %, batch source bytes = %, batch source identities = %, batch edits = %, batch state list = %, batch reference list = %, batch context list = %, batch paths = %, path error = %, edit pair = %, empty source = %, event = %) \e[92mPASS\e[0m\n",
 		update,
 		list,
 		provider,
 		arrays,
 		states,
-		revisions
+		revisions,
+		pool,
+		batch_states,
+		batch_revisions,
+		batch_pair,
+		batch_sources,
+		batch_source_bytes,
+		batch_source_identities,
+		batch_edits,
+		batch_state_list,
+		batch_reference_list,
+		batch_context_list,
+		batch_paths,
+		path_error,
+		edit_pair,
+		empty_source,
+		event_kind
 	);
+}
+
+test_source_batch_source_event_failures :: () {
+	for Service.Event_Kind.[.EDIT_OVERLAY, .OBSERVE_DISK] {
+		test_source_registration_failures(batch_sources = true, event_kind = it);
+		test_source_registration_failures(batch_source_bytes = true, event_kind = it);
+		test_source_registration_failures(batch_source_identities = true, event_kind = it);
+	}
+
+	print("X5 checked source construction edit/disk rejection routes \e[92mPASS\e[0m\n");
+}
+
+test_source_batch_edit_failures :: () {
+	maximum :: 0x7FFFFFFFFFFFFFFF;
+	ok, size := Service.try_source_edit_size(maximum, 1, 1, maximum);
+	assert(ok && size == maximum);
+	ok, size = Service.try_source_edit_size(maximum, 0, 1, maximum);
+	assert(!ok && !size);
+	ok, size = Service.try_source_edit_size(12, 12, 0, 0);
+	assert(ok && !size);
+	ok, size = Service.try_source_edit_size(12, 3, 5, 14);
+	assert(ok && size == 14);
+	ok, size = Service.try_source_edit_size(12, 3, 5, 13);
+	assert(!ok && !size);
+	ok, size = Service.try_source_edit_size(12, 12, maximum, 12);
+	assert(!ok && !size);
+	ok, size = Service.try_source_edit_size(12, 13, 0, maximum);
+	assert(!ok && !size);
+	ok, size = Service.try_source_edit_size(12, 0, -1, maximum);
+	assert(!ok && !size);
+
+	test_source_registration_failures(batch_edits = true, event_kind = .EDIT_OVERLAY);
+	test_source_registration_failures(batch_edits = true, edit_pair = true, event_kind = .EDIT_OVERLAY);
+	test_source_registration_failures(batch_edits = true, empty_source = true, event_kind = .EDIT_OVERLAY);
+	print("X5 checked edit intermediate backing/size limits/overflow/empty result \e[92mPASS\e[0m\n");
+}
+
+test_source_batch_reference_storage :: () {
+	probe := Output_Probe.{fail_at = 1};
+	allocator := open_output_probe(*probe);
+	maximum :: 0x7FFFFFFFFFFFFFFF;
+	for s64.[-1, maximum, maximum / 2 + 1, maximum / 2] {
+		ok, storage := Service.try_source_batch_references(it, allocator);
+		assert(!ok && !storage.count && !storage.allocated && !probe.allocations);
+	}
+
+	empty_ok, empty := Service.try_source_batch_references(0, allocator);
+	assert(empty_ok && !empty.count && !empty.allocated && !probe.allocations);
+	array_free(empty);
+	rejected, rejected_storage := Service.try_source_batch_references(1, allocator);
+	assert(!rejected && !rejected_storage.count && !rejected_storage.allocated && probe.allocations == 1);
+	probe.fail_at = 0;
+	ok, storage := Service.try_source_batch_references(2, allocator);
+	assert(ok && !storage.count && storage.allocated == 4 && probe.allocations == 2);
+	for 0..3 {
+		array_add(*storage, "known-context".([] u8));
+	}
+
+	assert(storage.count == 4 && probe.allocations == 2);
+	array_free(storage);
+	close_output_probe(*probe);
+	test_source_registration_failures(batch_reference_list = true);
+	test_source_registration_failures(batch_reference_list = true, batch_pair = true);
+	test_source_registration_failures(batch_reference_list = true, event_kind = .OBSERVE_DISK);
+	print("X5 checked batch context-reference capacity/overflow/rejection/disk capacity \e[92mPASS\e[0m\n");
+}
+
+test_source_batch_pool_defaults :: () {
+	probe := Output_Probe.{fail_at = 1};
+	allocator := open_output_probe(*probe);
+	rejected := Service.try_source_batch_pool(allocator);
+	assert(!rejected && probe.allocations == 1 && !probe.backing.live_bytes);
+	probe.fail_at = 0;
+	storage := Service.try_source_batch_pool(allocator);
+	assert(storage && probe.allocations == 2);
+	defaults: type_of(storage.*);
+	assert(storage.memblock_size == defaults.memblock_size);
+	assert(storage.oversized_size == defaults.oversized_size);
+	assert(storage.alignment == defaults.alignment);
+	assert(!storage.current_memblock && !storage.block_allocator.proc);
+	free(storage,, allocator);
+	close_output_probe(*probe);
+	print("X5 checked batch Pool object/defaults/rejection/cleanup \e[92mPASS\e[0m\n");
+}
+
+test_source_batch_revision_storage :: () {
+	probe := Output_Probe.{fail_at = 1};
+	allocator := open_output_probe(*probe);
+	ok, revisions := Service.try_source_batch_revisions(null, allocator);
+	assert(!ok && !revisions.data && !probe.backing.live_bytes);
+	probe.fail_at = 0;
+	ok, revisions = Service.try_source_batch_revisions(null, allocator);
+	assert(ok && !revisions.count && revisions.allocated == 1);
+	array_add(*revisions, xx "first");
+	assert(probe.allocations == 2);
+	array_free(revisions);
+	state: Service.Document_State;
+	array_add(*state.used_revisions, xx "first");
+	array_add(*state.used_revisions, xx "second");
+	previous := state.used_revisions;
+	probe.fail_at = 3;
+	ok, revisions = Service.try_source_batch_revisions(*state, allocator);
+	assert(!ok && !revisions.data && state.used_revisions.data == previous.data && state.used_revisions.count == previous.count);
+	probe.fail_at = 0;
+	ok, revisions = Service.try_source_batch_revisions(*state, allocator);
+	assert(ok && revisions.count == previous.count && revisions.allocated == previous.count + 1 && revisions.data != previous.data);
+	for previous {
+		assert(revisions[it_index].data == it.data && revisions[it_index].count == it.count);
+	}
+
+	array_add(*revisions, xx "third");
+	assert(probe.allocations == 4 && state.used_revisions.count == previous.count);
+	array_free(revisions);
+	array_free(state.used_revisions);
+	MAX_COUNT :: 0x7FFFFFFFFFFFFFFF;
+	overflow: Service.Document_State;
+	overflow.used_revisions.count = MAX_COUNT;
+	ok, revisions = Service.try_source_batch_revisions(*overflow, allocator);
+	assert(!ok && !revisions.data && probe.allocations == 4);
+	overflow.used_revisions.count = MAX_COUNT / size_of([] u8);
+	ok, revisions = Service.try_source_batch_revisions(*overflow, allocator);
+	assert(!ok && !revisions.data && probe.allocations == 4);
+	close_output_probe(*probe);
+	print("X5 checked batch revision storage/empty/copy/rejection/allocation-free append \e[92mPASS\e[0m\n");
+}
+
+test_source_batch_storage_growth :: () {
+	model: Service.Provider_Model;
+	sentinel: Pool;
+	probe := Output_Probe.{fail_at = 1};
+	allocator := open_output_probe(*probe);
+	assert(!Service.try_source_batch_storage(*model, allocator));
+	assert(!model.batch_storage.data && !model.batch_storage.count && !model.batch_storage.allocated);
+	probe.fail_at = 0;
+	assert(Service.try_source_batch_storage(*model, allocator));
+	capacity := model.batch_storage.allocated;
+	for 0..capacity - 1 {
+		array_add(*model.batch_storage, *sentinel);
+	}
+
+	previous := model.batch_storage;
+	probe.fail_at = 3;
+	assert(!Service.try_source_batch_storage(*model, allocator));
+	assert(model.batch_storage.data == previous.data && model.batch_storage.count == capacity && model.batch_storage.allocated == capacity);
+	assert(model.batch_storage[capacity - 1] == *sentinel);
+	probe.fail_at = 0;
+	assert(Service.try_source_batch_storage(*model, allocator));
+	assert(model.batch_storage.count == capacity && model.batch_storage.allocated > capacity && probe.allocations == 4);
+	for model.batch_storage {
+		assert(it == *sentinel);
+	}
+
+	assert(Service.try_source_batch_storage(*model, allocator) && probe.allocations == 4);
+	array_free(model.batch_storage);
+	close_output_probe(*probe);
+	print("X5 checked batch pool-list empty/full growth/rejection/pointer preservation/retry \e[92mPASS\e[0m\n");
+}
+
+test_source_batch_storage_admission :: (
+	direct := false,
+	replace := false,
+	negative_control := false,
+	shutdown := false,
+	receipt_retry := false,
+	list := false,
+	retry_rejection := false,
+	retire := false,
+	batch_states := false,
+	batch_revisions := false,
+	shutdown_guard := false
+) {
+	construction := batch_states || batch_revisions;
+	allocations_per_attempt := ifx construction then 1 else 2;
+	assert(!batch_states || !batch_revisions);
+	assert(!shutdown_guard || shutdown);
+	assert(!negative_control || replace || shutdown || retire);
+	assert(!shutdown || !replace);
+	assert(!retire || !replace && !shutdown && !receipt_retry && !retry_rejection);
+	assert(!list || receipt_retry);
+	assert(!receipt_retry || !replace && !shutdown);
+	assert(!retry_rejection || !replace && !shutdown);
+	for 0..(ifx receipt_retry then allocations_per_attempt * 2 + 1 else allocations_per_attempt + 1) {
+		fail_at := it;
+		if (
+			replace && fail_at && (!construction || negative_control)
+			|| (shutdown || retire) && fail_at < allocations_per_attempt && fail_at
+		) {
+			continue;
+		}
+
+
+		if shutdown && negative_control && fail_at != allocations_per_attempt {
+			continue;
+		}
+
+
+		if retry_rejection && (fail_at < (ifx receipt_retry then allocations_per_attempt + 1 else 1) || fail_at > (ifx receipt_retry then allocations_per_attempt * 2 else allocations_per_attempt)) {
+			continue;
+		}
+
+
+		test := prepared_retain(.WORLD, .ARRAYS);
+		fixture := test.drain.fixture;
+		while !construction {
+			full: bool;
+			count: s64;
+			Service.with_lock(
+				*fixture.session.gate,
+				#code {
+					count = fixture.session.provider.batch_storage.count;
+					full = count == fixture.session.provider.batch_storage.allocated;
+				}
+			);
+
+			if full {
+				break;
+			}
+
+
+			ticket := submit(fixture, tprint("answer :: %;", 100 + count));
+			observation := await(fixture, ticket);
+			assert(observation.update.kind == .PUBLISHED);
+			Service.free_observation(*observation);
+			release(fixture, ticket);
+		}
+
+		batch := Service.begin_batch(fixture.host);
+		assert(Service.set_overlay(*batch, "a.jai", "answer :: 77;"));
+		probe := Registration_Probe.{
+			fail_at = fail_at,
+			job_at = allocations_per_attempt,
+			direct = direct,
+			track_source = replace || shutdown || retire,
+			job = .{
+				drain = test.drain,
+				action = ifx replace
+					then .REPLACE_SOURCE
+					else ifx shutdown
+						then ifx shutdown_guard
+							then .CHECK_STAGING_SHUTDOWN
+							else .REQUEST_SHUTDOWN
+						else ifx retire
+							then .RETIRE_AND_REUSE_SESSION
+							else .NONE,
+				active_source_retirement = retire,
+			},
+		};
+
+		output_probe := Output_Probe.{
+			direct = direct,
+			job = .{
+				drain = test.drain,
+				action = ifx receipt_retry
+					then ifx list
+						then .FILL_OPERATION_CAPACITY
+						else .FILL_REGISTRATION_CAPACITY
+					else .NONE,
+			},
+		};
+
+		allocator := open_output_probe(*output_probe);
+		before: Service.Resource_Ledger;
+		storage: [..] *Pool;
+		identities: Service.Session_Identities;
+		Service.with_lock(
+			*fixture.session.gate,
+			#code {
+				before = fixture.session.ledger;
+				storage = fixture.session.provider.batch_storage;
+				identities = fixture.session.identities;
+				if batch_revisions {
+					fixture.session.faults.source_batch_revisions_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_revisions_allocation_data = *probe;
+				} else if batch_states {
+					fixture.session.faults.source_batch_state_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_state_allocation_data = *probe;
+				} else {
+					fixture.session.faults.source_batch_storage_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_storage_allocation_data = *probe;
+				}
+
+				fixture.session.faults.allow_stale_source_batch_storage = negative_control && replace;
+				fixture.session.faults.retry_failed_source_batch_storage = retry_rejection;
+				fixture.session.faults.prefer_failed_source_batch_storage = negative_control && shutdown;
+				fixture.session.faults.allow_active_session_release = retire;
+				fixture.session.faults.allow_stale_source_batch_pool = negative_control && retire;
+			}
+		);
+
+		ok, accepted, error := Service.submit_source_batch(
+			fixture.host.service,
+			fixture.host.session,
+			receipt_source_batch(batch)
+			,, allocator
+		);
+
+		allocation_count := allocations_per_attempt * (ifx receipt_retry then 2 else 1);
+		expected_success := (!replace && !shutdown && !retire && (!fail_at || fail_at > allocation_count)) || negative_control && replace || retry_rejection;
+		assert(ok == expected_success, "\e[91mBatch pool-list allocation/revalidation oracle failed.\e[0m");
+		expected_allocations := ifx retry_rejection
+			then fail_at + allocations_per_attempt
+			else ifx fail_at && fail_at <= allocation_count
+				then fail_at
+				else allocation_count;
+		assert(probe.allocations == expected_allocations);
+		if receipt_retry && (!fail_at || fail_at > allocations_per_attempt) {
+			assert(output_probe.gate_progress && output_probe.job.ok);
+			assert(output_probe.allocations == (ifx ok then 2 else 1));
+		}
+
+		if replace || shutdown || retire {
+			assert(probe.gate_progress && probe.job.ok && probe.source_active_admissions == 1);
+		}
+
+		Service.with_lock(
+			*fixture.session.gate,
+			#code {
+				fixture.session.faults.source_batch_storage_allocation_hook = null;
+				fixture.session.faults.source_batch_storage_allocation_data = null;
+				fixture.session.faults.source_batch_state_allocation_hook = null;
+				fixture.session.faults.source_batch_state_allocation_data = null;
+				fixture.session.faults.source_batch_revisions_allocation_hook = null;
+				fixture.session.faults.source_batch_revisions_allocation_data = null;
+				fixture.session.faults.allow_stale_source_batch_storage = false;
+				fixture.session.faults.retry_failed_source_batch_storage = false;
+				fixture.session.faults.prefer_failed_source_batch_storage = false;
+				fixture.session.faults.allow_active_session_release = false;
+				fixture.session.faults.allow_stale_source_batch_pool = false;
+				assert(!fixture.session.active_admissions);
+				assert(
+					fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES]
+					== before.live[Service.Limit_Name.LIVE_HANDLES] + output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + xx ok + xx retire
+				);
+				assert(fixture.session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
+				if !ok && !replace {
+					assert(fixture.session.provider.batch_storage.data == storage.data && fixture.session.provider.batch_storage.count == storage.count);
+					assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, batch.description.accepted_frontier));
+					assert(fixture.session.identities.operation_counter.next == identities.operation_counter.next + xx (shutdown || retire) + xx output_probe.job.competing_tickets.count);
+					if !shutdown && !retire {
+						assert(fixture.session.ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] == before.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS]);
+					}
+				}
+
+				if replace {
+					state := Service.find_document(fixture.session.provider, Service.harness_document(fixture.host, "a.jai"));
+					assert(state && state.has_overlay && Service.bytes_equal(state.overlay.source.bytes, xx (ifx negative_control then "answer :: 77;" else "answer :: 99;")));
+				}
+			}
+		);
+
+		if ok {
+			observation := await(fixture, accepted.ticket);
+			assert(observation.update.kind == .PUBLISHED);
+			Service.free_observation(*observation);
+			world := world_of(fixture, accepted.ticket);
+			read_ok, description := Service.read_world(fixture.host.service, world);
+			assert(read_ok && description.members.count == 1 && Service.bytes_equal(description.members[0].source.bytes, xx "answer :: 77;"));
+			release(fixture, world);
+			release(fixture, accepted.ticket);
+		} else {
+			assert(!accepted.ticket.owner_token && !accepted.frontier.count);
+			if retire {
+				if negative_control {
+					assert(error.code == .SERVICE_CLOSED, "\e[91mTransfer stale-session control was not detected.\e[0m");
+				} else {
+					assert(error.code == .INVALID_HANDLE && error.handle_kind == .SESSION);
+				}
+			} else if shutdown {
+				if negative_control {
+					assert(error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED, "\e[91mTransfer shutdown precedence control was not detected.\e[0m");
+				} else {
+					assert(error.code == .SERVICE_CLOSED);
+				}
+			} else if replace {
+				assert(error.code == .BASE_MISMATCH && error.scope == .FRONTIER);
+			} else {
+				assert(error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+			}
+		}
+
+		assert(Service.read_world(fixture.host.service, test.drain.world));
+		if retire {
+			observation := await(fixture, probe.job.coordinator_shutdown);
+			assert(observation.kind == .SHUTDOWN);
+			Service.free_observation(*observation);
+			release(fixture, probe.job.coordinator_shutdown);
+			assert(Service.read_world(fixture.host.service, probe.job.replacement_world));
+			release(fixture, probe.job.replacement_world);
+		}
+
+		for output_probe.job.competing_worlds {
+			assert(Service.read_world(fixture.host.service, it));
+			release(fixture, it);
+		}
+
+		array_free(output_probe.job.competing_worlds);
+		for output_probe.job.competing_tickets {
+			release(fixture, it);
+		}
+
+		array_free(output_probe.job.competing_tickets);
+		free(accepted.frontier.data,, allocator);
+		free(error.path.data,, allocator);
+		free(error.document.data,, allocator);
+		close_output_probe(*output_probe);
+		if retire {
+			for test.held {
+				release(fixture, it);
+			}
+
+			array_free(test.held);
+			release(fixture, test.source);
+			finish_drain(test.drain, session_released = true);
+		} else {
+			finish_retain(test);
+		}
+	}
+
+	print(
+		"X5 checked batch transfer/construction allocation rejection/frontier reentry (direct = %, replace = %, negative control = %, shutdown = %, receipt retry = %, list = %, rejection control = %, retire = %, batch states = %, batch revisions = %, shutdown guard = %) \e[92mPASS\e[0m\n",
+		direct,
+		replace,
+		negative_control,
+		shutdown,
+		receipt_retry,
+		list,
+		retry_rejection,
+		retire,
+		batch_states,
+		batch_revisions,
+		shutdown_guard
+	);
+}
+
+test_source_batch_construction_reference_rollback :: () {
+	for bool.[false, true] {
+		revisions := it;
+		for bool.[false, true] {
+			direct := it;
+			for bool.[false, true] {
+				reference_control := it;
+				for 0..2 {
+					test_source_registration_receipt_retry(
+						direct = direct,
+						list = it == 1,
+						reject_receipt = it == 2,
+						reference_control = reference_control,
+						batch_states = !revisions,
+						batch_revisions = revisions
+					);
+				}
+			}
+		}
+	}
+
+	print("X5 state/revision retained-sentinel source-reference rollback/controls \e[92mPASS\e[0m\n");
+}
+
+test_source_batch_construction_receipt_retry :: (revisions := false) {
+	test_source_batch_storage_admission(
+		retry_rejection = true,
+		batch_states = !revisions,
+		batch_revisions = revisions
+	);
+
+	for bool.[false, true] {
+		direct := it;
+		for bool.[false, true] {
+			list := it;
+			for bool.[false, true] {
+				test_source_batch_storage_admission(
+					direct = direct,
+					receipt_retry = true,
+					list = list,
+					retry_rejection = it,
+					batch_states = !revisions,
+					batch_revisions = revisions
+				);
+			}
+		}
+	}
+}
+
+test_source_batch_construction_callbacks :: (revisions := false) {
+	for bool.[false, true] {
+		direct := it;
+		for Output_Action.[.REPLACE_SOURCE, .REQUEST_SHUTDOWN, .CHECK_STAGING_SHUTDOWN, .RETIRE_AND_REUSE_SESSION] {
+			action := it;
+			for bool.[false, true] {
+				test_source_batch_storage_admission(
+					direct = direct,
+					replace = action == .REPLACE_SOURCE,
+					shutdown = action == .REQUEST_SHUTDOWN || action == .CHECK_STAGING_SHUTDOWN,
+					retire = action == .RETIRE_AND_REUSE_SESSION,
+					negative_control = it,
+					batch_states = !revisions,
+					batch_revisions = revisions,
+					shutdown_guard = action == .CHECK_STAGING_SHUTDOWN
+				);
+			}
+		}
+	}
+}
+
+Pool_Cleanup_Probe :: struct {
+	fixture: Fixture;
+	world: Service.Handle(.WORLD);
+	memory: *void;
+	allocation_pending: bool;
+	allocation_size: s64 = size_of(Pool);
+	capture_at: s64;
+	allocations: s64;
+	callbacks: s64;
+	frees: s64;
+	direct: bool;
+	suppress_callback: bool;
+	gate_progress: bool;
+	readable: bool;
+	allocate: bool;
+	allocated: bool;
+	mutate: bool;
+	mutated: bool;
+	hold_heap_gate: bool;
+	heap_blocked: bool;
+	heap_entered: Semaphore;
+	active_admissions: s64;
+	ledger: Service.Resource_Ledger;
+	job: Output_Interleaving;
+}
+
+Storage_Cleanup_Case :: enum {
+	PRIVATE_LIST;
+	DISCARDED_TRANSFER;
+	REPLACED_LIST;
+}
+
+storage_cleanup_allocation_probe :: (size: s64, data: *void) -> bool {
+	probe := data.(*Pool_Cleanup_Probe);
+	Service.with_lock(
+		*allocation_ledger.gate,
+		#code {
+			probe.allocations += 1;
+			if probe.allocations == probe.capture_at {
+				assert(!allocation_ledger.pool_cleanup && !probe.memory);
+				probe.allocation_size = size;
+				probe.allocation_pending = true;
+				allocation_ledger.pool_cleanup = probe;
+			}
+		}
+	);
+
+	return true;
+}
+
+test_source_batch_storage_cleanup :: (
+	direct := false,
+	negative_control := false,
+	action: Output_Action = .NONE
+) {
+	assert(action == .NONE || action == .CHECK_STAGING_SHUTDOWN || action == .RETIRE_AND_REUSE_SESSION);
+	active_lifecycle := action != .NONE && !negative_control;
+	retired := active_lifecycle && action == .RETIRE_AND_REUSE_SESSION;
+	for Storage_Cleanup_Case.[.PRIVATE_LIST, .DISCARDED_TRANSFER, .REPLACED_LIST] {
+		scenario := it;
+		test := prepared_retain(.WORLD, .ARRAYS);
+		fixture := test.drain.fixture;
+		while true {
+			full: bool;
+			count: s64;
+			Service.with_lock(
+				*fixture.session.gate,
+				#code {
+					count = fixture.session.provider.batch_storage.count;
+					full = count == fixture.session.provider.batch_storage.allocated;
+				}
+			);
+
+			if full {
+				break;
+			}
+
+
+			ticket := submit(fixture, tprint("answer :: %;", 100 + count));
+			observation := await(fixture, ticket);
+			assert(observation.update.kind == .PUBLISHED);
+			Service.free_observation(*observation);
+			release(fixture, ticket);
+		}
+
+		batch := Service.begin_batch(fixture.host);
+		assert(Service.set_overlay(*batch, "a.jai", "answer :: 77;"));
+		probe := Pool_Cleanup_Probe.{
+			fixture = fixture,
+			world = test.drain.world,
+			direct = direct,
+			suppress_callback = negative_control,
+			allocate = true,
+			mutate = true,
+			capture_at = ifx scenario == .PRIVATE_LIST
+				then 1
+				else ifx scenario == .DISCARDED_TRANSFER
+					then 2
+					else 0,
+			job = .{
+				drain = test.drain,
+				action = action,
+				active_source_retirement = retired,
+			},
+		};
+
+		if scenario == .REPLACED_LIST {
+			Service.with_lock(
+				*fixture.session.gate,
+				#code {
+					probe.memory = fixture.session.provider.batch_storage.data.(*u8) - size_of(Service.Owned_Allocation);
+				}
+			);
+
+			Service.with_lock(
+				*allocation_ledger.gate,
+				#code {
+					assert(!allocation_ledger.pool_cleanup && table_contains(*allocation_ledger.sizes, probe.memory));
+					allocation_ledger.pool_cleanup = *probe;
+				}
+			);
+		}
+
+		output_probe := Output_Probe.{fail_at = ifx scenario == .DISCARDED_TRANSFER then 1 else 0};
+		allocator := open_output_probe(*output_probe);
+		before: Service.Resource_Ledger;
+		Service.with_lock(
+			*fixture.session.gate,
+			#code {
+				before = fixture.session.ledger;
+				fixture.session.faults.source_batch_storage_allocation_hook = storage_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_storage_allocation_data = *probe;
+				fixture.session.faults.allow_active_session_release = retired;
+			}
+		);
+
+		ok, accepted, error := Service.submit_source_batch(
+			fixture.host.service,
+			fixture.host.session,
+			receipt_source_batch(batch)
+			,, allocator
+		);
+
+		assert(ok == (scenario != .DISCARDED_TRANSFER));
+		assert(probe.allocations == 2 && probe.memory && !probe.allocation_pending);
+		assert(probe.job.ok == active_lifecycle);
+		if negative_control {
+			assert(!probe.callbacks && !probe.gate_progress && !probe.allocated && !probe.mutated);
+		} else {
+			assert(probe.callbacks == 1 && probe.gate_progress && probe.readable && probe.allocated && probe.mutated);
+			assert(probe.active_admissions == 1);
+			assert(probe.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + xx ok);
+			assert(probe.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] + 1);
+		}
+
+		Service.with_lock(
+			*allocation_ledger.gate,
+			#code {
+				assert(probe.frees == 1 && !allocation_ledger.pool_cleanup);
+			}
+		);
+
+		Service.with_lock(
+			*fixture.session.gate,
+			#code {
+				fixture.session.faults.source_batch_storage_allocation_hook = null;
+				fixture.session.faults.source_batch_storage_allocation_data = null;
+				fixture.session.faults.allow_active_session_release = false;
+				assert(!fixture.session.active_admissions);
+				assert(fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + xx ok + xx retired);
+				assert(fixture.session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
+				if active_lifecycle {
+					assert(fixture.session.lifecycle != .OPEN);
+				}
+
+				if !ok {
+					assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, batch.description.accepted_frontier));
+					if !active_lifecycle {
+						assert(fixture.session.ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] == before.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS]);
+					}
+				}
+			}
+		);
+
+		if ok {
+			observation := await(fixture, accepted.ticket);
+			assert(observation.update.kind == .PUBLISHED || active_lifecycle && observation.update.kind == .CANCELLED && observation.update.cancellation == .SHUTDOWN);
+			if observation.update.kind == .PUBLISHED {
+				world := world_of(fixture, accepted.ticket);
+				read_ok, description := Service.read_world(fixture.host.service, world);
+				assert(read_ok && description.members.count == 1 && Service.bytes_equal(description.members[0].source.bytes, xx "answer :: 77;"));
+				release(fixture, world);
+			}
+
+			Service.free_observation(*observation);
+			release(fixture, accepted.ticket);
+		} else {
+			assert(!accepted.ticket.owner_token && !accepted.frontier.count && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+		}
+
+		assert(Service.read_world(fixture.host.service, test.drain.world));
+		if retired {
+			observation := await(fixture, probe.job.coordinator_shutdown);
+			assert(observation.kind == .SHUTDOWN);
+			Service.free_observation(*observation);
+			release(fixture, probe.job.coordinator_shutdown);
+			assert(Service.read_world(fixture.host.service, probe.job.replacement_world));
+			release(fixture, probe.job.replacement_world);
+		}
+
+		free(accepted.frontier.data,, allocator);
+		free(error.path.data,, allocator);
+		free(error.document.data,, allocator);
+		close_output_probe(*output_probe);
+		if retired {
+			for test.held {
+				release(fixture, it);
+			}
+
+			array_free(test.held);
+			release(fixture, test.source);
+			finish_drain(test.drain, session_released = true);
+		} else {
+			finish_retain(test);
+		}
+	}
+
+	print(
+		"X5 actual transfer-list private/discard/replacement frees/allocating reentry (direct = %, negative control = %, action = %) \e[92mPASS\e[0m\n",
+		direct,
+		negative_control,
+		action
+	);
+}
+
+pool_cleanup_allocation_probe :: (size: s64, data: *void) -> bool {
+	probe := data.(*Pool_Cleanup_Probe);
+	assert(size == size_of(Pool));
+	Service.with_lock(
+		*allocation_ledger.gate,
+		#code {
+			probe.allocations += 1;
+			if !probe.memory {
+				assert(!allocation_ledger.pool_cleanup);
+				probe.allocation_pending = true;
+				allocation_ledger.pool_cleanup = probe;
+			}
+		}
+	);
+
+	return true;
+}
+
+pool_cleanup_job :: (thread: *Thread) -> s64 {
+	probe := thread.data.(*Pool_Cleanup_Probe);
+	Service.with_lock(
+		*probe.fixture.session.gate,
+		#code {
+			probe.active_admissions = probe.fixture.session.active_admissions;
+			probe.ledger = probe.fixture.session.ledger;
+		}
+	);
+
+	probe.readable = Service.read_world(probe.fixture.host.service, probe.world);
+	if probe.hold_heap_gate {
+		signal(*probe.heap_entered);
+	}
+
+	if probe.allocate {
+		allocator := Service.owner_allocator(probe.fixture.session);
+		storage := Service.try_source_batch_pool(allocator);
+		assert(!!storage);
+		free(storage,, allocator);
+		probe.allocated = true;
+	}
+
+	if probe.mutate {
+		retained, handle := Service.retain(probe.fixture.host.service, probe.world);
+		assert(retained);
+		probe.mutated = Service.release(probe.fixture.host.service, handle);
+		assert(probe.mutated);
+	}
+
+	if probe.job.action != .NONE {
+		job_thread := Thread.{data = *probe.job};
+		output_interleaving_job(*job_thread);
+	}
+
+	probe.callbacks += 1;
+	return 0;
+}
+
+test_source_batch_pool_cleanup :: (
+	direct := false,
+	retry := false,
+	negative_control := false,
+	list := false,
+	validation := false,
+	allocate := false,
+	mutate := false,
+	hold_heap_gate := false,
+	batch_states := false,
+	batch_revisions := false,
+	new_document := false,
+	action: Output_Action = .NONE
+) {
+	assert(action == .NONE || (batch_states || batch_revisions) && (action == .CHECK_STAGING_SHUTDOWN || action == .RETIRE_AND_REUSE_SESSION));
+	active_lifecycle := action != .NONE && !negative_control;
+	retired := active_lifecycle && action == .RETIRE_AND_REUSE_SESSION;
+	pre_decision := batch_states && !new_document || validation;
+	assert(!batch_states || !batch_revisions);
+	assert(!new_document || batch_states);
+	assert(!list || retry);
+	assert(!validation || !retry);
+	assert(!hold_heap_gate || allocate && !direct && !negative_control);
+	test := prepared_retain(.WORLD, .ARRAYS);
+	fixture := test.drain.fixture;
+	batch := Service.begin_batch(fixture.host);
+	filename := ifx new_document then "added.jai" else "a.jai";
+	assert(Service.set_overlay(*batch, filename, "answer :: 77;"));
+	source := receipt_source_batch(batch);
+	if validation {
+		prepare_provider_error(*source, .DUPLICATE_EVENT, .{}, .[]);
+	}
+
+	probe := Pool_Cleanup_Probe.{
+		fixture = fixture,
+		world = test.drain.world,
+		direct = direct,
+		suppress_callback = negative_control,
+		allocate = allocate,
+		mutate = mutate,
+		hold_heap_gate = hold_heap_gate,
+		capture_at = 1,
+		job = .{
+			drain = test.drain,
+			action = action,
+			active_source_retirement = retired,
+		},
+	};
+
+	if hold_heap_gate {
+		init(*probe.heap_entered);
+	}
+
+	output_probe := Output_Probe.{
+		fail_at = ifx retry || validation
+			then 0
+			else 1,
+		direct = direct,
+		job = .{
+			drain = test.drain,
+			action = ifx retry && !(active_lifecycle && pre_decision)
+				then ifx list
+					then .FILL_OPERATION_CAPACITY
+					else .FILL_REGISTRATION_CAPACITY
+				else .NONE,
+		},
+	};
+
+	allocator := open_output_probe(*output_probe);
+	before: Service.Resource_Ledger;
+	Service.with_lock(
+		*fixture.session.gate,
+		#code {
+			before = fixture.session.ledger;
+			fixture.session.faults.allow_active_session_release = retired;
+			if batch_revisions {
+				fixture.session.faults.source_batch_revisions_allocation_hook = storage_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_revisions_allocation_data = *probe;
+			} else if batch_states {
+				fixture.session.faults.source_batch_state_allocation_hook = storage_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_state_allocation_data = *probe;
+			} else {
+				fixture.session.faults.source_batch_pool_allocation_hook = pool_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_pool_allocation_data = *probe;
+			}
+		}
+	);
+
+	ok, accepted, error := Service.submit_source_batch(
+		fixture.host.service,
+		fixture.host.session,
+		source
+		,, allocator
+	);
+
+	assert(probe.memory && !probe.allocation_pending);
+	assert(probe.allocations == (ifx retry && !active_lifecycle then 2 else 1));
+	assert(probe.job.ok == active_lifecycle);
+	if negative_control {
+		assert(!probe.callbacks && !probe.gate_progress, "\e[91mMissing pool-root free callback negative control was not detected.\e[0m");
+		assert(!probe.allocated && !probe.mutated);
+	} else {
+		assert(probe.callbacks == 1 && probe.gate_progress && probe.readable && probe.active_admissions == 1);
+		assert(probe.allocated == allocate);
+		assert(probe.mutated == mutate && probe.heap_blocked == hold_heap_gate);
+		assert(probe.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] + 1);
+		callback_handles := ifx batch_states && !new_document
+			then 1
+			else output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + xx validation;
+		assert(probe.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + callback_handles);
+	}
+
+	Service.with_lock(
+		*allocation_ledger.gate,
+		#code {
+			assert(probe.frees == 1 && !allocation_ledger.pool_cleanup);
+		}
+	);
+
+	Service.with_lock(
+		*fixture.session.gate,
+		#code {
+			fixture.session.faults.source_batch_pool_allocation_hook = null;
+			fixture.session.faults.source_batch_pool_allocation_data = null;
+			fixture.session.faults.source_batch_state_allocation_hook = null;
+			fixture.session.faults.source_batch_state_allocation_data = null;
+			fixture.session.faults.source_batch_revisions_allocation_hook = null;
+			fixture.session.faults.source_batch_revisions_allocation_data = null;
+			fixture.session.faults.allow_active_session_release = false;
+			assert(!fixture.session.active_admissions);
+			assert(fixture.session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
+			assert(
+				fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES]
+				== before.live[Service.Limit_Name.LIVE_HANDLES] + output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + xx ok + xx retired
+			);
+			if !ok {
+				assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, batch.description.accepted_frontier));
+				if !active_lifecycle {
+					assert(fixture.session.ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] == before.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS]);
+				}
+			}
+
+			if new_document {
+				added := Service.find_document(fixture.session.provider, batch.events[0].document);
+				assert(!!added == ok);
+				if added {
+					assert(Service.bytes_equal(Service.selected_document(added).source.bytes, xx "answer :: 77;"));
+				}
+			}
+		}
+	);
+
+	if retry && !active_lifecycle {
+		assert(ok && output_probe.gate_progress && output_probe.job.ok && output_probe.allocations == 2);
+		observation := await(fixture, accepted.ticket);
+		assert(observation.update.kind == .PUBLISHED);
+		Service.free_observation(*observation);
+		if batch_states || batch_revisions {
+			world := world_of(fixture, accepted.ticket);
+			read_ok, description := Service.read_world(fixture.host.service, world);
+			assert(read_ok && description.members.count == 1);
+			if !new_document {
+				assert(Service.bytes_equal(description.members[0].source.bytes, xx "answer :: 77;"));
+			}
+
+			release(fixture, world);
+		}
+
+		release(fixture, accepted.ticket);
+	} else if active_lifecycle && (pre_decision || retry) {
+		assert(!ok && !accepted.ticket.owner_token && !accepted.frontier.count);
+		if retired {
+			assert(error.code == .INVALID_HANDLE && error.handle_kind == .SESSION);
+		} else {
+			assert(error.code == .SERVICE_CLOSED);
+		}
+
+		if retry {
+			assert(output_probe.allocations == 1);
+			assert(output_probe.job.ok == !pre_decision);
+		}
+	} else if validation {
+		assert(!ok && !accepted.ticket.owner_token && !accepted.frontier.count);
+		assert_provider_error(error, .DUPLICATE_EVENT, .[]);
+	} else {
+		assert(!ok && !accepted.ticket.owner_token && !accepted.frontier.count && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+	}
+
+	if validation {
+		free_provider_error_batch(source, .DUPLICATE_EVENT);
+	}
+
+	assert(Service.read_world(fixture.host.service, test.drain.world));
+	if retired {
+		observation := await(fixture, probe.job.coordinator_shutdown);
+		assert(observation.kind == .SHUTDOWN);
+		Service.free_observation(*observation);
+		release(fixture, probe.job.coordinator_shutdown);
+		assert(Service.read_world(fixture.host.service, probe.job.replacement_world));
+		release(fixture, probe.job.replacement_world);
+	}
+
+	free(accepted.frontier.data,, allocator);
+	for output_probe.job.competing_worlds {
+		read_ok := Service.read_world(fixture.host.service, it);
+		assert(read_ok);
+		release(fixture, it);
+	}
+
+	array_free(output_probe.job.competing_worlds);
+	for output_probe.job.competing_tickets {
+		release(fixture, it);
+	}
+
+	array_free(output_probe.job.competing_tickets);
+	free(error.path.data,, allocator);
+	free(error.document.data,, allocator);
+	close_output_probe(*output_probe);
+	if hold_heap_gate {
+		destroy(*probe.heap_entered);
+	}
+
+	if retired {
+		for test.held {
+			release(fixture, it);
+		}
+
+		array_free(test.held);
+		release(fixture, test.source);
+		finish_drain(test.drain, session_released = true);
+	} else {
+		finish_retain(test);
+	}
+
+	print(
+		"X5 actual root/construction free/gate progress/private charges (direct = %, retry = %, negative control = %, list = %, validation = %, allocate = %, mutate = %, held heap = %, batch states = %, batch revisions = %, new document = %, action = %) \e[92mPASS\e[0m\n",
+		direct,
+		retry,
+		negative_control,
+		list,
+		validation,
+		allocate,
+		mutate,
+		hold_heap_gate,
+		batch_states,
+		batch_revisions,
+		new_document,
+		action
+	);
+}
+
+test_source_batch_state_cleanup_lifecycle :: (revisions := false) {
+	for bool.[false, true] {
+		new_document := it;
+		if revisions && new_document {
+			continue;
+		}
+
+
+		for 0..3 {
+			retry := it == 1 || it == 2;
+			list := it == 2;
+			validation := it == 3;
+			for bool.[false, true] {
+				direct := it;
+				for Output_Action.[.CHECK_STAGING_SHUTDOWN, .RETIRE_AND_REUSE_SESSION] {
+					action := it;
+					for bool.[false, true] {
+						test_source_batch_pool_cleanup(
+							direct = direct,
+							retry = retry,
+							list = list,
+							validation = validation,
+							allocate = true,
+							mutate = true,
+							negative_control = it,
+							batch_states = !revisions,
+							batch_revisions = revisions,
+							new_document = new_document,
+							action = action
+						);
+					}
+				}
+			}
+		}
+	}
+}
+
+test_source_batch_construction_cleanup :: (revisions := false, new_document := false) {
+	assert(!new_document || !revisions);
+	for 0..3 {
+		retry := it == 1 || it == 2;
+		list := it == 2;
+		validation := it == 3;
+		for bool.[false, true] {
+			direct := it;
+			for bool.[false, true] {
+				test_source_batch_pool_cleanup(
+					direct = direct,
+					retry = retry,
+					list = list,
+					validation = validation,
+					allocate = true,
+					mutate = true,
+					negative_control = it,
+					batch_states = !revisions,
+					batch_revisions = revisions,
+					new_document = new_document
+				);
+			}
+		}
+
+		test_source_batch_pool_cleanup(
+			retry = retry,
+			list = list,
+			validation = validation,
+			allocate = true,
+			mutate = true,
+			hold_heap_gate = true,
+			batch_states = !revisions,
+			batch_revisions = revisions,
+			new_document = new_document
+		);
+	}
+}
+
+test_source_batch_pool_cleanup_reentry :: () {
+	for 0..3 {
+		retry := it == 1 || it == 2;
+		list := it == 2;
+		validation := it == 3;
+		for bool.[false, true] {
+			test_source_batch_pool_cleanup(
+				direct = it,
+				retry = retry,
+				list = list,
+				validation = validation,
+				allocate = true,
+				mutate = true
+			);
+
+			test_source_batch_pool_cleanup(
+				direct = it,
+				retry = retry,
+				negative_control = true,
+				list = list,
+				validation = validation,
+				allocate = true,
+				mutate = true
+			);
+		}
+
+		test_source_batch_pool_cleanup(
+			retry = retry,
+			list = list,
+			validation = validation,
+			allocate = true,
+			mutate = true,
+			hold_heap_gate = true
+		);
+	}
 }
 
 test_source_registration_quota :: () {
@@ -2639,6 +4117,10 @@ test_source_registration_quota :: () {
 				fixture.session.faults.source_provider_arrays_allocation_data = *probe;
 				fixture.session.faults.source_provider_states_allocation_hook = registration_allocation_probe;
 				fixture.session.faults.source_provider_states_allocation_data = *probe;
+				fixture.session.faults.source_provider_revisions_allocation_hook = registration_allocation_probe;
+				fixture.session.faults.source_provider_revisions_allocation_data = *probe;
+				fixture.session.faults.source_batch_pool_allocation_hook = registration_allocation_probe;
+				fixture.session.faults.source_batch_pool_allocation_data = *probe;
 			}
 		);
 
@@ -2663,13 +4145,17 @@ test_source_registration_quota :: () {
 				fixture.session.faults.source_provider_arrays_allocation_data = null;
 				fixture.session.faults.source_provider_states_allocation_hook = null;
 				fixture.session.faults.source_provider_states_allocation_data = null;
+				fixture.session.faults.source_provider_revisions_allocation_hook = null;
+				fixture.session.faults.source_provider_revisions_allocation_data = null;
+				fixture.session.faults.source_batch_pool_allocation_hook = null;
+				fixture.session.faults.source_batch_pool_allocation_data = null;
 			}
 		);
 
 		finish_retain(test);
 	}
 
-	print("X5 source ticket full handle/operation/acquisition quota/no backing allocation/no provider commit PASS\n");
+	print("X5 source ticket full handle/operation/acquisition quota/no backing allocation/no provider commit \e[92mPASS\e[0m\n");
 }
 
 test_source_registration_interleavings :: (
@@ -2682,8 +4168,12 @@ test_source_registration_interleavings :: (
 	provider := false,
 	arrays := false,
 	states := false,
-	multiple := false
+	revisions := false,
+	multiple := false,
+	pool := false,
+	pool_retirement := false
 ) {
+	assert(!pool_retirement || pool);
 	for Output_Action.[
 		.OTHER_DRAIN,
 		.REQUEST_SHUTDOWN,
@@ -2695,25 +4185,52 @@ test_source_registration_interleavings :: (
 		.RETIRE_RETAIN_OWNER,
 		.ISSUE_COMPETING_RESULT,
 		.EXHAUST_OPERATION_COUNTER,
+		.REJECT_ACTIVE_RELEASE,
+		.CHECK_STAGING_SHUTDOWN,
 	] {
 		action := it;
-		if !update && !list && !provider && !arrays && !states && (action == .ISSUE_COMPETING_RESULT || action == .EXHAUST_OPERATION_COUNTER) {
+		if pool_retirement && action != .RETIRE_AND_REUSE_SESSION {
 			continue;
 		}
 
 
-		if !list && !update && !provider && !arrays && !states && action == .FILL_OPERATION_CAPACITY {
+		if !pool && (action == .REJECT_ACTIVE_RELEASE || action == .CHECK_STAGING_SHUTDOWN) {
 			continue;
 		}
 
 
-		if negative_control && action != .RETIRE_AND_REUSE_SESSION {
+		if pool && !pool_retirement && (action == .RETIRE_AND_REUSE_SESSION || action == .RETIRE_RETAIN_OWNER || action == .TAKE_RETAIN_CAPACITY) {
 			continue;
 		}
 
 
-		for 0..6 {
+		if !update && !list && !provider && !arrays && !states && !revisions && !pool && (action == .ISSUE_COMPETING_RESULT || action == .EXHAUST_OPERATION_COUNTER) {
+			continue;
+		}
+
+
+		if !list && !update && !provider && !arrays && !states && !revisions && !pool && action == .FILL_OPERATION_CAPACITY {
+			continue;
+		}
+
+
+		if (
+			negative_control && (ifx pool && !pool_retirement
+				then action != .FILL_REGISTRATION_CAPACITY && action != .FILL_OPERATION_CAPACITY
+				else action != .RETIRE_AND_REUSE_SESSION
+			)
+		) {
+			continue;
+		}
+
+
+		for 0..(ifx pool then 3 else 6) {
 			fail_at := it;
+			if pool && !pool_retirement && negative_control && fail_at != 2 {
+				continue;
+			}
+
+
 			if cleanup && fail_at {
 				continue;
 			}
@@ -2726,7 +4243,7 @@ test_source_registration_interleavings :: (
 
 			test := prepared_retain(.WORLD, .ARRAYS);
 			fixture := test.drain.fixture;
-			if states && (cleanup || multiple) {
+			if (states || revisions) && (cleanup || multiple) {
 				extra := Service.begin_batch(fixture.host);
 				assert(Service.set_overlay(*extra, "b.jai", "second :: 2;"));
 				added_ok, added := Service.submit_batch(*extra);
@@ -2745,7 +4262,11 @@ test_source_registration_interleavings :: (
 				job_at = job_at,
 				direct = direct,
 				track_source = true,
-				job = .{drain = test.drain, action = action},
+				job = .{
+					drain = test.drain,
+					action = action,
+					active_source_retirement = pool_retirement,
+				},
 			};
 			allocation_failure := Registration_Probe.{fail_at = 2, guard = *probe};
 
@@ -2759,7 +4280,23 @@ test_source_registration_interleavings :: (
 				*fixture.session.gate,
 				#code {
 					operation_counter = fixture.session.identities.operation_counter;
-					if states {
+					if pool {
+						fixture.session.faults.source_batch_pool_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_pool_allocation_data = *probe;
+						fixture.session.faults.retry_failed_source_batch_pool = negative_control && !pool_retirement;
+						fixture.session.faults.allow_active_session_release = pool_retirement;
+						fixture.session.faults.allow_stale_source_batch_pool = negative_control && pool_retirement;
+					} else if revisions {
+						fixture.session.faults.allow_stale_source_provider_revisions = negative_control;
+						fixture.session.faults.source_provider_revisions_allocation_hook = registration_allocation_probe;
+						if cleanup {
+							fixture.session.faults.source_provider_revisions_allocation_data = *allocation_failure;
+							fixture.session.faults.source_provider_revisions_cleanup_hook = registration_allocation_probe;
+							fixture.session.faults.source_provider_revisions_cleanup_data = *probe;
+						} else {
+							fixture.session.faults.source_provider_revisions_allocation_data = *probe;
+						}
+					} else if states {
 						fixture.session.faults.allow_stale_source_provider_states = negative_control;
 						fixture.session.faults.source_provider_states_allocation_hook = registration_allocation_probe;
 						if cleanup {
@@ -2799,28 +4336,33 @@ test_source_registration_interleavings :: (
 						fixture.session.faults.registration_allocation_hook = registration_allocation_probe;
 						fixture.session.faults.registration_allocation_data = *probe;
 					}
-					fixture.session.faults.allow_stale_source_registration = negative_control;
+					fixture.session.faults.allow_stale_source_registration = negative_control && !pool;
 				}
 			);
 
 			ok, accepted, error := Service.submit_source_batch(fixture.host.service, fixture.host.session, receipt_source_batch(batch));
 			assert(probe.gate_progress && probe.job.ok && probe.allocations);
-			if (arrays || states) && cleanup {
+			if (arrays || states || revisions) && cleanup {
 				assert(allocation_failure.allocations == 2);
 			}
 
-			assert(!probe.source_active_admissions);
+			assert(probe.source_active_admissions == (ifx pool then 1 else 0));
 			retired := action == .RETIRE_AND_REUSE_SESSION || action == .RETIRE_RETAIN_OWNER;
-			if negative_control {
-				assert(!ok && error.code == .SERVICE_CLOSED, "Skipped source-session revalidation negative control was not detected.");
+			if pool && !pool_retirement && negative_control {
+				assert(ok && accepted.ticket.owner_token && accepted.frontier.count && probe.allocations == 3, "\e[91mFailed pool-root retry admission negative control was not detected.\e[0m");
+			} else if negative_control {
+				assert(!ok && error.code == .SERVICE_CLOSED, "\e[91mSkipped source-session revalidation negative control was not detected.\e[0m");
 			} else if retired {
 				assert(!ok && !accepted.ticket.owner_token && error.code == .INVALID_HANDLE && error.handle_kind == .SESSION);
-			} else if action == .REQUEST_SHUTDOWN {
+			} else if action == .REQUEST_SHUTDOWN || action == .CHECK_STAGING_SHUTDOWN {
 				assert(!ok && error.code == .SERVICE_CLOSED);
 			} else if action == .REPLACE_SOURCE {
 				assert(!ok && error.code == .BASE_MISMATCH && error.scope == .FRONTIER);
-			} else if (fail_at && fail_at <= probe.allocations) || ((arrays || states) && cleanup) {
+			} else if fail_at && fail_at <= probe.allocations || (arrays || states || revisions) && cleanup {
 				assert(!ok && !accepted.ticket.owner_token && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+				if pool && fail_at == 2 {
+					assert(probe.allocations == 2 && !accepted.frontier.count);
+				}
 			} else if action == .TAKE_RETAIN_CAPACITY {
 				assert(!ok && error.code == .ADMISSION_DENIED && error.admission.kind == .LIMIT && error.admission.limit == .LIVE_HANDLES);
 			} else if action == .EXHAUST_OPERATION_COUNTER {
@@ -2829,9 +4371,9 @@ test_source_registration_interleavings :: (
 				assert(ok && accepted.ticket.owner_token && accepted.frontier.count);
 				if action == .FILL_REGISTRATION_CAPACITY {
 					assert(
-						probe.allocations == (ifx arrays || (states && multiple)
+						probe.allocations == (ifx pool || arrays || ((states || revisions) && multiple)
 							then 2
-							else ifx list || provider || states
+							else ifx list || provider || states || revisions
 								then 1
 								else ifx update
 									then 3
@@ -2842,15 +4384,15 @@ test_source_registration_interleavings :: (
 
 				if action == .FILL_OPERATION_CAPACITY {
 					assert(
-						probe.allocations == (ifx arrays || (states && multiple)
+						probe.allocations == (ifx pool || arrays || (states || revisions) && multiple
 							then 2
-							else ifx provider || states
+							else ifx provider || states || revisions
 								then 1
 								else ifx list
 									then 2
 									else 3
 						),
-						"Operation list callbacks: %, cleanup = %, direct = %, fail = %",
+						"\e[91mOperation list callbacks: %, cleanup = %, direct = %, fail = %\e[0m",
 						probe.allocations,
 						cleanup,
 						direct,
@@ -2860,13 +4402,17 @@ test_source_registration_interleavings :: (
 			}
 
 			if action == .RETIRE_RETAIN_OWNER {
-				allocation_count := ifx arrays || (states && multiple)
+				allocation_count := ifx revisions
 					then ifx cleanup
 						then 1
-						else 2
-					else ifx list || provider || states
-						then 1
-						else 3;
+						else job_at
+					else ifx arrays || (states && multiple)
+						then ifx cleanup
+							then 1
+							else 2
+						else ifx list || provider || states
+							then 1
+							else 3;
 				assert(probe.allocations == (ifx fail_at && fail_at <= allocation_count then fail_at else allocation_count));
 			} else {
 				Service.with_lock(
@@ -2893,10 +4439,23 @@ test_source_registration_interleavings :: (
 						fixture.session.faults.source_provider_states_cleanup_hook = null;
 						fixture.session.faults.source_provider_states_cleanup_data = null;
 						fixture.session.faults.allow_stale_source_provider_states = false;
+						fixture.session.faults.source_provider_revisions_allocation_hook = null;
+						fixture.session.faults.source_provider_revisions_allocation_data = null;
+						fixture.session.faults.source_provider_revisions_cleanup_hook = null;
+						fixture.session.faults.source_provider_revisions_cleanup_data = null;
+						fixture.session.faults.allow_stale_source_provider_revisions = false;
+						fixture.session.faults.source_batch_pool_allocation_hook = null;
+						fixture.session.faults.source_batch_pool_allocation_data = null;
+						fixture.session.faults.retry_failed_source_batch_pool = false;
+						fixture.session.faults.allow_active_session_release = false;
+						fixture.session.faults.allow_stale_source_batch_pool = false;
 						fixture.session.faults.allow_stale_source_registration = false;
 						assert(!fixture.session.active_admissions);
-						assert(fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == probe.waiter_ledger.live[Service.Limit_Name.LIVE_HANDLES] + xx ok);
-						assert(fixture.session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == probe.waiter_ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
+						private_charge: s64 = ifx pool
+							then 1
+							else 0;
+						assert(fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == probe.waiter_ledger.live[Service.Limit_Name.LIVE_HANDLES] - private_charge + xx ok);
+						assert(fixture.session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == probe.waiter_ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] - private_charge);
 						if !ok {
 							assert(fixture.session.identities.operation_counter.next == probe.callback_identities.operation_counter.next);
 							assert(fixture.session.identities.world_counter.next == probe.callback_identities.world_counter.next);
@@ -2914,7 +4473,7 @@ test_source_registration_interleavings :: (
 			}
 
 			if ok {
-				if update || list || provider || arrays || states {
+				if update || list || provider || arrays || states || revisions || pool {
 					polled, receipt := Service.poll(fixture.host.service, accepted.ticket);
 					assert(polled);
 					token_bytes := Service.little_endian(probe.callback_identities.operation_counter.next, 8);
@@ -2929,6 +4488,13 @@ test_source_registration_interleavings :: (
 				assert(observation.update.kind == .PUBLISHED);
 				Service.free_observation(*observation);
 				release(fixture, accepted.ticket);
+			}
+
+			if probe.job.coordinator_shutdown.owner_token {
+				observation := await(fixture, probe.job.coordinator_shutdown);
+				assert(observation.kind == .SHUTDOWN);
+				Service.free_observation(*observation);
+				release(fixture, probe.job.coordinator_shutdown);
 			}
 
 			free(accepted.frontier.data);
@@ -2975,7 +4541,7 @@ test_source_registration_interleavings :: (
 	}
 
 	print(
-		"X3/X5 source ticket/update/list/provider backing/frontier/shutdown/quota/capacity retry/counters/session reuse/owner retirement (direct = %, negative control = %, update = %, callback = %, list = %, cleanup = %, provider = %, arrays = %, states = %, multiple = %) PASS\n",
+		"X3/X5 source ticket/update/list/provider backing/frontier/shutdown/quota/capacity retry/counters/session reuse/owner retirement (direct = %, negative control = %, update = %, callback = %, list = %, cleanup = %, provider = %, arrays = %, states = %, revisions = %, multiple = %, pool = %, pool retirement = %) \e[92mPASS\e[0m\n",
 		direct,
 		negative_control,
 		update,
@@ -2985,53 +4551,155 @@ test_source_registration_interleavings :: (
 		provider,
 		arrays,
 		states,
-		multiple
+		revisions,
+		multiple,
+		pool,
+		pool_retirement
 	);
 }
 
-test_source_registration_receipt_retry :: (direct := false, list := false, provider := false, arrays := false, states := false) {
-	for 0..6 {
+test_source_registration_receipt_retry :: (
+	direct := false,
+	list := false,
+	provider := false,
+	arrays := false,
+	states := false,
+	revisions := false,
+	reject_receipt := false,
+	pool := false,
+	reference_control := false,
+	transfer := false,
+	batch_states := false,
+	batch_revisions := false
+) {
+	construction := batch_states || batch_revisions;
+	track_references := revisions || pool || transfer || construction;
+	assert(!batch_states || !batch_revisions);
+	assert(!construction || !pool && !transfer && !provider && !arrays && !states && !revisions);
+	assert(!reference_control || pool || transfer || construction);
+	assert(!transfer || !pool && !revisions && !states && !arrays && !provider);
+	for 0..(ifx transfer then 5 else ifx pool || construction then 3 else 6) {
 		fail_at := it;
+		if (reject_receipt || reference_control) && fail_at {
+			continue;
+		}
+
+
 		test := prepared_retain(.WORLD, .ARRAYS);
 		fixture := test.drain.fixture;
+		sentinel_world: Service.Handle(.WORLD);
+		source_document: [] u8;
+		if track_references {
+			extra := Service.begin_batch(fixture.host);
+			assert(Service.set_overlay(*extra, "b.jai", "second :: 2;"));
+			added_ok, added := Service.submit_batch(*extra);
+			assert(added_ok);
+			sentinel_world = world_of(fixture, added.ticket);
+			source_document = Service.harness_document(fixture.host, "b.jai").([] u8);
+			release(fixture, added.ticket);
+			free(added.frontier.data);
+		}
+
+		if transfer {
+			while true {
+				full: bool;
+				count: s64;
+				Service.with_lock(
+					*fixture.session.gate,
+					#code {
+						count = fixture.session.provider.batch_storage.count;
+						full = count == fixture.session.provider.batch_storage.allocated;
+					}
+				);
+
+				if full {
+					break;
+				}
+
+
+				ticket := submit(fixture, tprint("answer :: %;", 100 + count));
+				observation := await(fixture, ticket);
+				assert(observation.update.kind == .PUBLISHED);
+				Service.free_observation(*observation);
+				release(fixture, ticket);
+			}
+		}
+
 		batch := Service.begin_batch(fixture.host);
 		assert(Service.set_overlay(*batch, "a.jai", "answer :: 77;"));
 		probe := Registration_Probe.{
 			fail_at = fail_at,
-			job_at = ifx arrays
+			job_at = ifx transfer
 				then 3
-				else ifx list || provider || states
+				else ifx pool || construction
 					then 2
-					else 4,
+					else ifx arrays || revisions
+						then 3
+						else ifx list || provider || states
+							then 2
+							else 4,
 			direct = direct,
 			track_source = true,
+			source_document = source_document,
 			job = .{drain = test.drain, action = .OTHER_DRAIN},
 		};
 
 		output_probe := Output_Probe.{
+			fail_at = ifx reject_receipt
+				then 1
+				else 0,
 			direct = direct,
 			job = .{
 				drain = test.drain,
-				action = ifx list
-					then .FILL_OPERATION_CAPACITY
-					else .FILL_REGISTRATION_CAPACITY
+				action = ifx reject_receipt
+					then .NONE
+					else ifx list
+						then .FILL_OPERATION_CAPACITY
+						else .FILL_REGISTRATION_CAPACITY
 			},
 			registration_probe = *probe,
+			source_document = source_document,
 		};
 
 		allocator := open_output_probe(*output_probe);
 		before: Service.Resource_Ledger;
 		identities: Service.Session_Identities;
+		source_references: s64;
 		Service.with_lock(
 			*fixture.session.gate,
 			#code {
 				before = fixture.session.ledger;
 				identities = fixture.session.identities;
+				if track_references {
+					state := Service.find_document(fixture.session.provider, source_document);
+					assert(state && state.has_overlay && state.overlay.source);
+					source_references = state.overlay.source.references;
+					if reference_control {
+						assert(source_references >= 2);
+						fixture.session.faults.retain_source_batch_reference = state.overlay.source;
+					}
+				}
+
 				if list {
 					fixture.session.operations.allocated = fixture.session.operations.count;
 				}
 
-				if states {
+				if batch_states {
+					fixture.session.faults.source_batch_state_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_state_allocation_data = *probe;
+				} else if batch_revisions {
+					fixture.session.faults.source_batch_revisions_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_revisions_allocation_data = *probe;
+				} else if transfer {
+					fixture.session.faults.source_batch_storage_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_storage_allocation_data = *probe;
+				} else if pool {
+					fixture.session.faults.source_batch_pool_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_pool_allocation_data = *probe;
+				} else if revisions {
+					fixture.session.faults.source_provider_revisions_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_provider_revisions_allocation_data = *probe;
+				} else if states {
 					fixture.session.faults.source_provider_states_allocation_hook = registration_allocation_probe;
 					fixture.session.faults.source_provider_states_allocation_data = *probe;
 				} else if arrays {
@@ -3057,26 +4725,48 @@ test_source_registration_receipt_retry :: (direct := false, list := false, provi
 			,, allocator
 		);
 
-		initial_allocations := ifx arrays
+		initial_allocations := ifx transfer
 			then 2
-			else ifx list || provider || states
+			else ifx pool || construction
 				then 1
-				else 3;
+				else ifx arrays || revisions
+					then 2
+					else ifx list || provider || states
+						then 1
+						else 3;
 		if fail_at && fail_at <= initial_allocations {
 			assert(!ok && probe.allocations == fail_at && !output_probe.allocations);
+		} else if reject_receipt {
+			assert(!ok && probe.allocations == initial_allocations && output_probe.allocations == 1);
+			assert(!probe.gate_progress && !output_probe.gate_progress);
+			assert(output_probe.source_references[0] == source_references + 1);
+			assert(output_probe.source_active_admissions[0] == 1);
 		} else {
 			assert(output_probe.gate_progress && output_probe.job.ok);
-			assert(probe.gate_progress && probe.job.ok && !probe.source_active_admissions);
-			assert(probe.waiter_ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
-			assert(probe.waiter_ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] == before.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS]);
-			assert(probe.waiter_ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count);
+			assert(probe.gate_progress && probe.job.ok && probe.source_active_admissions == (ifx pool || transfer || construction then 1 else 0));
+			private_charge: s64 = ifx pool || transfer || construction then 1 else 0;
+			if track_references {
+				assert(probe.source_references == source_references + private_charge + xx reference_control);
+				for 0..output_probe.allocations - 1 {
+					assert(output_probe.source_references[it] == source_references + 1 + xx (reference_control && it > 0));
+					assert(output_probe.source_active_admissions[it] == 1);
+				}
+			}
+
+			assert(probe.waiter_ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] + private_charge);
+			assert(probe.waiter_ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] == before.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] + private_charge);
+			assert(probe.waiter_ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + private_charge);
 			assert(probe.callback_identities.operation_counter.next == identities.operation_counter.next + xx output_probe.job.competing_tickets.count);
 			assert(output_probe.allocations == (ifx ok then 2 else 1));
-			total_allocations := ifx arrays
+			total_allocations := ifx transfer
 				then 4
-				else ifx list || provider || states
+				else ifx pool || construction
 					then 2
-					else 6;
+					else ifx arrays || revisions
+						then 4
+						else ifx list || provider || states
+							then 2
+							else 6;
 			assert(probe.allocations == (ifx fail_at && fail_at <= total_allocations then fail_at else total_allocations));
 		}
 
@@ -3084,6 +4774,7 @@ test_source_registration_receipt_retry :: (direct := false, list := false, provi
 			assert(!accepted.ticket.owner_token && !accepted.frontier.count && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
 		}
 
+		control_reference: *Service.Source_Backing;
 		Service.with_lock(
 			*fixture.session.gate,
 			#code {
@@ -3097,8 +4788,30 @@ test_source_registration_receipt_retry :: (direct := false, list := false, provi
 				fixture.session.faults.source_provider_arrays_allocation_data = null;
 				fixture.session.faults.source_provider_states_allocation_hook = null;
 				fixture.session.faults.source_provider_states_allocation_data = null;
+				fixture.session.faults.source_provider_revisions_allocation_hook = null;
+				fixture.session.faults.source_provider_revisions_allocation_data = null;
+				fixture.session.faults.source_batch_pool_allocation_hook = null;
+				fixture.session.faults.source_batch_pool_allocation_data = null;
+				fixture.session.faults.source_batch_storage_allocation_hook = null;
+				fixture.session.faults.source_batch_storage_allocation_data = null;
+				fixture.session.faults.source_batch_state_allocation_hook = null;
+				fixture.session.faults.source_batch_state_allocation_data = null;
+				fixture.session.faults.source_batch_revisions_allocation_hook = null;
+				fixture.session.faults.source_batch_revisions_allocation_data = null;
 				assert(!fixture.session.active_admissions);
+				assert(fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + xx ok);
+				assert(fixture.session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
+				if track_references {
+					state := Service.find_document(fixture.session.provider, source_document);
+					assert(state && state.overlay.source.references == source_references + xx reference_control, "\e[91mSource-reference rollback oracle did not distinguish the retained-reference control.\e[0m");
+					if reference_control {
+						assert(!fixture.session.faults.retain_source_batch_reference);
+						control_reference = state.overlay.source;
+					}
+				}
+
 				if !ok {
+					assert(fixture.session.ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] == before.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS]);
 					assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, batch.description.accepted_frontier));
 					assert(fixture.session.identities.operation_counter.next == identities.operation_counter.next + xx output_probe.job.competing_tickets.count);
 					expected_world_counter := ifx probe.gate_progress
@@ -3110,10 +4823,24 @@ test_source_registration_receipt_retry :: (direct := false, list := false, provi
 			}
 		);
 
+		if control_reference {
+			push_allocator(Service.owner_allocator(fixture.session));
+			Service.release_source(control_reference);
+			assert(control_reference.references == source_references);
+		}
+
 		if ok {
 			observation := await(fixture, accepted.ticket);
 			assert(observation.update.kind == .PUBLISHED);
 			Service.free_observation(*observation);
+			if track_references {
+				published := world_of(fixture, accepted.ticket);
+				read_ok, description := Service.read_world(fixture.host.service, published);
+				assert(read_ok && description.members.count == 1);
+				assert(Service.bytes_equal(description.members[0].source.bytes, xx "answer :: 77;"));
+				release(fixture, published);
+			}
+
 			release(fixture, accepted.ticket);
 		}
 
@@ -3135,32 +4862,68 @@ test_source_registration_receipt_retry :: (direct := false, list := false, provi
 		array_free(output_probe.job.competing_tickets);
 		free_records(probe.job.records);
 		close_output_probe(*output_probe);
+		if track_references {
+			read_ok, description := Service.read_world(fixture.host.service, sentinel_world);
+			assert(read_ok && description.members.count == 1);
+			assert(Service.bytes_equal(description.members[0].source.bytes, xx "second :: 2;"));
+			release(fixture, sentinel_world);
+		}
+
 		finish_retain(test);
 	}
 
 	print(
-		"X3/X5 source receipt capacity race/private attempt cleanup/released charges/checked retry/provider atomicity (direct = %, list = %, provider = %, arrays = %, states = %) PASS\n",
+		"X3/X5 source receipt capacity race/private attempt cleanup/released charges/checked retry/provider atomicity (direct = %, list = %, provider = %, arrays = %, states = %, revisions = %, reject receipt = %, pool = %, reference control = %, transfer = %) \e[92mPASS\e[0m\n",
 		direct,
 		list,
 		provider,
 		arrays,
-		states
+		states,
+		revisions,
+		reject_receipt,
+		pool,
+		reference_control,
+		transfer
 	);
 }
 
-test_source_registration_failure_control :: (update := false, list := false, provider := false, arrays := false, states := false) {
-	allocation_count := ifx arrays then 2 else ifx list || provider || states then 1 else 3;
+test_source_registration_failure_control :: (update := false, list := false, provider := false, arrays := false, states := false, revisions := false, pool := false) {
+	allocation_count := ifx arrays || revisions
+		then 2
+		else ifx list || provider || states || pool
+			then 1
+			else 3;
 	for 1..allocation_count {
 		fail_at := it;
 		test := prepared_retain(.WORLD, .ARRAYS);
 		fixture := test.drain.fixture;
+		if revisions {
+			extra := Service.begin_batch(fixture.host);
+			assert(Service.set_overlay(*extra, "b.jai", "second :: 2;"));
+			added_ok, added := Service.submit_batch(*extra);
+			assert(added_ok);
+			observation := await(fixture, added.ticket);
+			assert(observation.update.kind == .PUBLISHED);
+			Service.free_observation(*observation);
+			release(fixture, added.ticket);
+			free(added.frontier.data);
+		}
+
 		batch := Service.begin_batch(fixture.host);
 		assert(Service.set_overlay(*batch, "a.jai", "answer :: 77;"));
 		probe := Registration_Probe.{fail_at = fail_at};
 		Service.with_lock(
 			*fixture.session.gate,
 			#code {
-				if states {
+				if pool {
+					fixture.session.faults.source_batch_pool_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_pool_allocation_data = *probe;
+					fixture.session.faults.retry_failed_source_batch_pool = true;
+				} else if revisions {
+					fixture.session.faults.source_provider_revisions_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_provider_revisions_allocation_data = *probe;
+					fixture.session.faults.retry_failed_source_provider_revisions = true;
+				} else if states {
 					fixture.session.faults.source_provider_states_allocation_hook = registration_allocation_probe;
 					fixture.session.faults.source_provider_states_allocation_data = *probe;
 					fixture.session.faults.retry_failed_source_provider_states = true;
@@ -3190,7 +4953,7 @@ test_source_registration_failure_control :: (update := false, list := false, pro
 		);
 
 		ok, accepted := Service.submit_source_batch(fixture.host.service, fixture.host.session, receipt_source_batch(batch));
-		assert(ok && accepted.ticket.owner_token && probe.allocations == fail_at + allocation_count, "Failed source backing admission negative control was not detected.");
+		assert(ok && accepted.ticket.owner_token && probe.allocations == fail_at + allocation_count, "\e[91mFailed source backing admission negative control was not detected.\e[0m");
 		Service.with_lock(
 			*fixture.session.gate,
 			#code {
@@ -3212,6 +4975,12 @@ test_source_registration_failure_control :: (update := false, list := false, pro
 				fixture.session.faults.source_provider_states_allocation_hook = null;
 				fixture.session.faults.source_provider_states_allocation_data = null;
 				fixture.session.faults.retry_failed_source_provider_states = false;
+				fixture.session.faults.source_provider_revisions_allocation_hook = null;
+				fixture.session.faults.source_provider_revisions_allocation_data = null;
+				fixture.session.faults.retry_failed_source_provider_revisions = false;
+				fixture.session.faults.source_batch_pool_allocation_hook = null;
+				fixture.session.faults.source_batch_pool_allocation_data = null;
+				fixture.session.faults.retry_failed_source_batch_pool = false;
 			}
 		);
 
@@ -3224,12 +4993,14 @@ test_source_registration_failure_control :: (update := false, list := false, pro
 	}
 
 	print(
-		"X5 source ticket/update/list/provider failed-backing provider-admission negative controls (update = %, list = %, provider = %, arrays = %, states = %) PASS\n",
+		"X5 source ticket/update/list/provider failed-backing provider-admission negative controls (update = %, list = %, provider = %, arrays = %, states = %, revisions = %, pool = %) \e[92mPASS\e[0m\n",
 		update,
 		list,
 		provider,
 		arrays,
-		states
+		states,
+		revisions,
+		pool
 	);
 }
 
@@ -3332,11 +5103,194 @@ test_source_provider_arrays_refresh :: (direct := false, empty := false, states 
 
 	finish_retain(test);
 	print(
-		"X5 provider clone backing stale-count refresh/prefix preservation/trim/empty allocation-free/cleanup (direct = %, empty = %, states = %) PASS\n",
+		"X5 provider clone backing stale-count refresh/prefix preservation/trim/empty allocation-free/cleanup (direct = %, empty = %, states = %) \e[92mPASS\e[0m\n",
 		direct,
 		empty,
 		states
 	);
+}
+
+test_source_provider_revisions_refresh :: (direct := false, surplus := false) {
+	test := prepared_retain(.WORLD, .REUSE);
+	fixture := test.drain.fixture;
+	if surplus {
+		extra := Service.begin_batch(fixture.host);
+		assert(Service.set_overlay(*extra, "b.jai", "second :: 2;"));
+		added_ok, added := Service.submit_batch(*extra);
+		assert(added_ok);
+		observation := await(fixture, added.ticket);
+		assert(observation.update.kind == .PUBLISHED);
+		Service.free_observation(*observation);
+		release(fixture, added.ticket);
+		free(added.frontier.data);
+	}
+
+	allocation_probe := Registration_Probe.{
+		direct = direct,
+		job = .{drain = test.drain, action = .GROW_PROVIDER_REVISION_COUNTS},
+	};
+	cleanup_probe := Registration_Probe.{
+		direct = direct,
+		job = .{drain = test.drain, action = .GROW_PROVIDER_REVISION_COUNTS},
+	};
+	backing: Service.Source_Provider_Backing;
+	Service.with_lock(
+		*fixture.session.gate,
+		#code {
+			push_allocator(Service.owner_allocator(fixture.session));
+			before := fixture.session.ledger;
+			identities := fixture.session.identities;
+			documents_count := fixture.session.provider.documents.count;
+			extra_allocations := surplus.(s64);
+			assert(documents_count == 1 + extra_allocations);
+			revisions_count := fixture.session.provider.documents[0].used_revisions.count;
+			source_references := fixture.session.provider.documents[0].overlay.source.references;
+			assert(!!revisions_count);
+			arrays_ready := Service.prepare_source_provider_arrays(fixture.session, *backing);
+			states_ready := Service.prepare_source_provider_states(fixture.session, *backing);
+			assert(arrays_ready && states_ready && backing.states_count == documents_count);
+			prefix := backing.documents[0];
+			fixture.session.faults.source_provider_revisions_allocation_hook = registration_allocation_probe;
+			fixture.session.faults.source_provider_revisions_allocation_data = *allocation_probe;
+			fixture.session.faults.source_provider_revisions_cleanup_hook = registration_allocation_probe;
+			fixture.session.faults.source_provider_revisions_cleanup_data = *cleanup_probe;
+
+			prepared := Service.prepare_source_provider_revisions(fixture.session, *backing);
+			assert(prepared && allocation_probe.allocations == 1 && cleanup_probe.allocations == 1);
+			assert(allocation_probe.gate_progress && allocation_probe.job.ok && cleanup_probe.gate_progress && cleanup_probe.job.ok);
+			assert(fixture.session.provider.documents[0].used_revisions.count == revisions_count + 2);
+			assert(backing.documents[0] == prefix && !prefix.used_revisions.data && !prefix.used_revisions.allocated);
+			assert(!Service.source_provider_revisions_ready(fixture.session, *backing));
+			refreshed := Service.prepare_source_provider_revisions(fixture.session, *backing);
+			if surplus {
+				second_ready := Service.prepare_source_provider_revisions(fixture.session, *backing);
+				assert(second_ready && backing.documents[1].used_revisions.allocated);
+				assert(!backing.documents[1].used_revisions.count && !backing.documents[1].disk.source && !backing.documents[1].overlay.source);
+			}
+
+			assert(refreshed && Service.source_provider_revisions_ready(fixture.session, *backing));
+			assert(allocation_probe.allocations == 2 + extra_allocations && cleanup_probe.allocations == 1);
+			assert(prefix.used_revisions.allocated == revisions_count + 2);
+
+			old_storage := prefix.used_revisions.data;
+			array_add(*fixture.session.provider.documents[0].used_revisions, fixture.session.provider.documents[0].used_revisions[0]);
+			cleanup_probe.allocations = 0;
+			cleanup_probe.gate_progress = false;
+			cleanup_probe.job.ok = false;
+			replaced := Service.prepare_source_provider_revisions(fixture.session, *backing);
+			assert(replaced && allocation_probe.allocations == 3 + extra_allocations && cleanup_probe.allocations == 1);
+			assert(cleanup_probe.gate_progress && cleanup_probe.job.ok);
+			assert(backing.documents[0] == prefix && prefix.used_revisions.data != old_storage);
+			assert(prefix.used_revisions.allocated == revisions_count + 3);
+			assert(!Service.source_provider_revisions_ready(fixture.session, *backing));
+			ready := Service.prepare_source_provider_revisions(fixture.session, *backing);
+			assert(ready && Service.source_provider_revisions_ready(fixture.session, *backing));
+			assert(allocation_probe.allocations == 4 + extra_allocations && cleanup_probe.allocations == 2);
+			assert(prefix.used_revisions.allocated == revisions_count + 4);
+			assert(!prefix.used_revisions.count && !prefix.disk.source && !prefix.overlay.source);
+			assert(fixture.session.provider.documents[0].overlay.source.references == source_references);
+			if surplus {
+				retained_storage := prefix.used_revisions.data;
+				fixture.session.provider.documents.count = 1;
+				cleanup_probe.allocations = 0;
+				cleanup_probe.gate_progress = false;
+				cleanup_probe.job.ok = false;
+				trimmed := Service.prepare_source_provider_states(fixture.session, *backing);
+				assert(trimmed && Service.source_provider_states_ready(fixture.session, *backing));
+				assert(backing.states_count == 1 && backing.documents[0] == prefix && !backing.documents[1]);
+				assert(prefix.used_revisions.data == retained_storage && prefix.used_revisions.allocated == revisions_count + 4);
+				assert(cleanup_probe.allocations == 1 && cleanup_probe.gate_progress && cleanup_probe.job.ok);
+				assert(allocation_probe.allocations == 5 && !Service.source_provider_revisions_ready(fixture.session, *backing));
+				prefix_ready := Service.prepare_source_provider_revisions(fixture.session, *backing);
+				assert(prefix_ready && Service.source_provider_revisions_ready(fixture.session, *backing));
+				assert(allocation_probe.allocations == 6 && cleanup_probe.allocations == 2);
+				assert(prefix.used_revisions.allocated == revisions_count + 5);
+
+				fixture.session.provider.documents.count = documents_count;
+				restored := Service.prepare_source_provider_states(fixture.session, *backing);
+				assert(restored && Service.source_provider_states_ready(fixture.session, *backing));
+				assert(backing.documents[0] == prefix && !backing.documents[1].used_revisions.data);
+				assert(!Service.source_provider_revisions_ready(fixture.session, *backing));
+				second_ready := Service.prepare_source_provider_revisions(fixture.session, *backing);
+				assert(second_ready && Service.source_provider_revisions_ready(fixture.session, *backing));
+				assert(allocation_probe.allocations == 7 && cleanup_probe.allocations == 2);
+				assert(!backing.documents[1].used_revisions.count && !backing.documents[1].disk.source && !backing.documents[1].overlay.source);
+				assert(fixture.session.provider.documents[0].overlay.source.references == source_references);
+			}
+
+			fixture.session.provider.documents[0].used_revisions.count = revisions_count;
+			fixture.session.faults.source_provider_revisions_allocation_hook = null;
+			fixture.session.faults.source_provider_revisions_allocation_data = null;
+			Service.finish_source_provider_backing(fixture.session, *backing);
+			assert(cleanup_probe.allocations == 3 + extra_allocations);
+			fixture.session.faults.source_provider_revisions_cleanup_hook = null;
+			fixture.session.faults.source_provider_revisions_cleanup_data = null;
+			assert(!backing.states_count && !backing.documents.count && !backing.contexts.count);
+			assert(!fixture.session.active_admissions);
+			for before.live {
+				assert(fixture.session.ledger.live[it_index] == it && fixture.session.ledger.reserved[it_index] == before.reserved[it_index]);
+			}
+
+			assert(fixture.session.identities.operation_counter.next == identities.operation_counter.next);
+			assert(fixture.session.identities.world_counter.next == identities.world_counter.next);
+			assert(fixture.session.identities.result_counter.next == identities.result_counter.next);
+		}
+	);
+
+	finish_retain(test);
+	print("X5 provider revision current counts/stale discard/replacement/surplus/cleanup reentry/no source retains (direct = %, surplus = %) \e[92mPASS\e[0m\n", direct, surplus);
+}
+
+test_source_provider_revisions_empty :: (empty_provider := false) {
+	test := prepared_retain(.WORLD, .REUSE);
+	fixture := test.drain.fixture;
+	probe := Registration_Probe.{fail_at = 1};
+	backing: Service.Source_Provider_Backing;
+	Service.with_lock(
+		*fixture.session.gate,
+		#code {
+			before := fixture.session.ledger;
+			identities := fixture.session.identities;
+			assert(fixture.session.provider.documents.count == 1);
+			revisions_count := fixture.session.provider.documents[0].used_revisions.count;
+			assert(!!revisions_count);
+			fixture.session.faults.source_provider_revisions_allocation_hook = registration_allocation_probe;
+			fixture.session.faults.source_provider_revisions_allocation_data = *probe;
+			if empty_provider {
+				fixture.session.provider.documents.count = 0;
+			} else {
+				fixture.session.provider.documents[0].used_revisions.count = 0;
+			}
+
+			arrays_ready := Service.prepare_source_provider_arrays(fixture.session, *backing);
+			states_ready := Service.prepare_source_provider_states(fixture.session, *backing);
+			assert(arrays_ready && states_ready && Service.source_provider_revisions_ready(fixture.session, *backing));
+			prepared := Service.prepare_source_provider_revisions(fixture.session, *backing);
+			assert(prepared && Service.source_provider_revisions_ready(fixture.session, *backing));
+			assert(!probe.allocations);
+			for 0..backing.states_count - 1 {
+				assert(!backing.documents[it].used_revisions.data && !backing.documents[it].used_revisions.allocated);
+			}
+
+			fixture.session.provider.documents.count = 1;
+			fixture.session.provider.documents[0].used_revisions.count = revisions_count;
+			fixture.session.faults.source_provider_revisions_allocation_hook = null;
+			fixture.session.faults.source_provider_revisions_allocation_data = null;
+			Service.finish_source_provider_backing(fixture.session, *backing);
+			assert(!backing.states_count && !backing.documents.count && !backing.contexts.count);
+			assert(!fixture.session.active_admissions);
+			for before.live {
+				assert(fixture.session.ledger.live[it_index] == it && fixture.session.ledger.reserved[it_index] == before.reserved[it_index]);
+			}
+
+			assert(fixture.session.identities.operation_counter.next == identities.operation_counter.next);
+			assert(fixture.session.identities.world_counter.next == identities.world_counter.next);
+			assert(fixture.session.identities.result_counter.next == identities.result_counter.next);
+		}
+	);
+
+	finish_retain(test);
+	print("X5 provider revision empty backing/no allocation/charges/counters/cleanup (empty provider = %) \e[92mPASS\e[0m\n", empty_provider);
 }
 
 test_source_update_counter :: (last_token := false, late := false, direct := false) {
@@ -3427,7 +5381,7 @@ test_source_update_counter :: (last_token := false, late := false, direct := fal
 	close_output_probe(*output_probe);
 	finish_retain(test);
 	print(
-		"X5 source update initial/receipt-late counter exhaustion/final-token identity/no wrap/provider atomicity (last token = %, late = %, direct = %) PASS\n",
+		"X5 source update initial/receipt-late counter exhaustion/final-token identity/no wrap/provider atomicity (last token = %, late = %, direct = %) \e[92mPASS\e[0m\n",
 		last_token,
 		late,
 		direct
@@ -3491,7 +5445,7 @@ test_source_receipt_failures :: () {
 				#code {
 					assert(!Service.bytes_equal(fixture.session.provider.accepted_frontier, source_batch.expected_frontier));
 					if negative_control {
-						assert(!accepted.frontier.count, "Source commit-before-copy negative control was not detected.");
+						assert(!accepted.frontier.count, "\e[91mSource commit-before-copy negative control was not detected.\e[0m");
 					} else {
 						assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, accepted.frontier));
 						assert(fixture.session.provider.accepted_frontier.data != accepted.frontier.data);
@@ -3515,7 +5469,7 @@ test_source_receipt_failures :: () {
 		close(fixture);
 	}
 
-	print("X5 source receipt allocation failure/atomic admission/copy isolation/negative control PASS\n");
+	print("X5 source receipt allocation failure/atomic admission/copy isolation/negative control \e[92mPASS\e[0m\n");
 }
 
 test_source_receipt_interleavings :: (direct := false) {
@@ -3568,7 +5522,7 @@ test_source_receipt_interleavings :: (direct := false) {
 		}
 	}
 
-	print("X3/X5 source receipt frontier/shutdown/release/drain/failure interleavings (direct = %) PASS\n", direct);
+	print("X3/X5 source receipt frontier/shutdown/release/drain/failure interleavings (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 test_analysis_receipt_failures :: () {
@@ -3638,7 +5592,7 @@ test_analysis_receipt_failures :: () {
 					operation := fixture.session.registrations[accepted.ticket.slot].operation;
 					assert(Service.bytes_equal(operation.frontier, request.expected_frontier));
 					if negative_control {
-						assert(!accepted.frontier.count, "Analysis admit-before-copy negative control was not detected.");
+						assert(!accepted.frontier.count, "\e[91mAnalysis admit-before-copy negative control was not detected.\e[0m");
 					} else {
 						assert(Service.bytes_equal(operation.frontier, accepted.frontier));
 						assert(operation.frontier.data != accepted.frontier.data);
@@ -3664,7 +5618,7 @@ test_analysis_receipt_failures :: () {
 		close(fixture);
 	}
 
-	print("X5 analysis receipt allocation failure/atomic admission/copy isolation/negative control PASS\n");
+	print("X5 analysis receipt allocation failure/atomic admission/copy isolation/negative control \e[92mPASS\e[0m\n");
 }
 
 test_analysis_receipt_interleavings :: (direct := false, negative_control := false) {
@@ -3720,7 +5674,7 @@ test_analysis_receipt_interleavings :: (direct := false, negative_control := fal
 
 			assert(probe.gate_progress && probe.job.ok && probe.allocations == 1);
 			if negative_control {
-				assert(ok && Service.bytes_equal(accepted.frontier, request.expected_frontier), "Stale analysis frontier negative control was not detected.");
+				assert(ok && Service.bytes_equal(accepted.frontier, request.expected_frontier), "\e[91mStale analysis frontier negative control was not detected.\e[0m");
 			} else if action == .REPLACE_SOURCE {
 				assert(!ok && error.code == .BASE_MISMATCH && error.scope == .FRONTIER);
 			} else if action == .STOP_AND_RELEASE_SESSION {
@@ -3762,7 +5716,7 @@ test_analysis_receipt_interleavings :: (direct := false, negative_control := fal
 		}
 	}
 
-	print("X3/X5 analysis receipt frontier/shutdown/retirement/capacity/completion interleavings (direct = %, negative control = %) PASS\n", direct, negative_control);
+	print("X3/X5 analysis receipt frontier/shutdown/retirement/capacity/completion interleavings (direct = %, negative control = %) \e[92mPASS\e[0m\n", direct, negative_control);
 }
 
 assert_analysis_argument_path :: (error: Service.Operation_Error, rule: Service.Argument_Rule) {
@@ -3838,7 +5792,7 @@ test_analysis_argument_failures :: () {
 				);
 
 				if negative_control {
-					assert(error.code == .INVALID_ARGUMENT && !error.path.count, "Failed argument-path allocation negative control was not detected.");
+					assert(error.code == .INVALID_ARGUMENT && !error.path.count, "\e[91mFailed argument-path allocation negative control was not detected.\e[0m");
 					break;
 				}
 
@@ -3879,7 +5833,7 @@ test_analysis_argument_failures :: () {
 		}
 	}
 
-	print("X5 analysis argument-path allocation failures/isolation/no admission/negative control PASS\n");
+	print("X5 analysis argument-path allocation failures/isolation/no admission/negative control \e[92mPASS\e[0m\n");
 }
 
 test_analysis_argument_interleavings :: (direct := false, negative_control := false) {
@@ -3943,7 +5897,7 @@ test_analysis_argument_interleavings :: (direct := false, negative_control := fa
 				assert(!ok && !accepted.ticket.owner_token && !accepted.frontier.count);
 				if negative_control {
 					assert_analysis_argument_path(error, rule);
-					assert(!Service.session_of(fixture.host.service, fixture.host.session), "Stale argument-path negative control was not detected.");
+					assert(!Service.session_of(fixture.host.service, fixture.host.session), "\e[91mStale argument-path negative control was not detected.\e[0m");
 				} else if action == .RETIRE_AND_REUSE_SESSION {
 					assert(error.code == .INVALID_HANDLE && error.handle_kind == .SESSION && !error.path.count);
 				} else if fail_copy {
@@ -3967,7 +5921,7 @@ test_analysis_argument_interleavings :: (direct := false, negative_control := fa
 		}
 	}
 
-	print("X3/X5 analysis argument-path allocation/frontier/shutdown/retirement/reuse (direct = %, negative control = %) PASS\n", direct, negative_control);
+	print("X3/X5 analysis argument-path allocation/frontier/shutdown/retirement/reuse (direct = %, negative control = %) \e[92mPASS\e[0m\n", direct, negative_control);
 }
 
 Terminal_Query_Case :: enum {
@@ -4132,7 +6086,7 @@ test_terminal_query_failures :: (negative_control := false) {
 			);
 
 			if negative_control {
-				assert(ok && output.kind == .TERMINAL && !output.observation.operation_identity.count && probe.allocations == 1, "Failed terminal query copy negative control was not detected.");
+				assert(ok && output.kind == .TERMINAL && !output.observation.operation_identity.count && probe.allocations == 1, "\e[91mFailed terminal query copy negative control was not detected.\e[0m");
 				Service.free_observation(*output.observation,, allocator);
 				break;
 			}
@@ -4174,7 +6128,7 @@ test_terminal_query_failures :: (negative_control := false) {
 		finish_terminal_query(test);
 	}
 
-	print("X5 terminal query every allocation failure/independent observations/no admission (negative control = %) PASS\n", negative_control);
+	print("X5 terminal query every allocation failure/independent observations/no admission (negative control = %) \e[92mPASS\e[0m\n", negative_control);
 }
 
 test_terminal_query_interleavings :: (direct := false, negative_control := false) {
@@ -4224,7 +6178,7 @@ test_terminal_query_interleavings :: (direct := false, negative_control := false
 				assert(probe.gate_progress && probe.job.ok);
 				retired := action == .RELEASE_QUERY_WORLD || action == .RETIRE_QUERY_OWNER;
 				if negative_control {
-					assert(ok, "Stale terminal query negative control was not detected.");
+					assert(ok, "\e[91mStale terminal query negative control was not detected.\e[0m");
 					assert_terminal_query(test, output);
 				} else if retired {
 					assert(!ok && error.code == .INVALID_HANDLE && error.handle_kind == .WORLD);
@@ -4258,7 +6212,7 @@ test_terminal_query_interleavings :: (direct := false, negative_control := false
 		}
 	}
 
-	print("X3/X5 terminal query allocation/frontier/shutdown/world reuse/owner retirement (direct = %, negative control = %) PASS\n", direct, negative_control);
+	print("X3/X5 terminal query allocation/frontier/shutdown/world reuse/owner retirement (direct = %, negative control = %) \e[92mPASS\e[0m\n", direct, negative_control);
 }
 
 Result_Access_Case :: enum {
@@ -4375,7 +6329,7 @@ test_result_argument_failures :: () {
 					);
 
 					if negative_control {
-						assert(error.code == .INVALID_ARGUMENT && !error.path.count, "Failed result argument-path negative control was not detected.");
+						assert(error.code == .INVALID_ARGUMENT && !error.path.count, "\e[91mFailed result argument-path negative control was not detected.\e[0m");
 						break;
 					}
 
@@ -4408,7 +6362,7 @@ test_result_argument_failures :: () {
 		}
 	}
 
-	print("X5 result argument-path allocation failures/all result kinds/borrowed reads/no admission/negative controls PASS\n");
+	print("X5 result argument-path allocation failures/all result kinds/borrowed reads/no admission/negative controls \e[92mPASS\e[0m\n");
 }
 
 test_result_argument_interleavings :: (direct := false, negative_control := false) {
@@ -4460,7 +6414,7 @@ test_result_argument_interleavings :: (direct := false, negative_control := fals
 					if negative_control {
 						assert_result_argument_path(error, scenario);
 						old_ok := Service.read_result(fixture.host.service, started.result);
-						assert(!old_ok, "Stale result argument-path negative control was not detected.");
+						assert(!old_ok, "\e[91mStale result argument-path negative control was not detected.\e[0m");
 					} else if retired {
 						assert(error.code == .INVALID_HANDLE && error.handle_kind == .RESULT && !error.path.count);
 					} else if fail_copy {
@@ -4495,7 +6449,7 @@ test_result_argument_interleavings :: (direct := false, negative_control := fals
 		}
 	}
 
-	print("X3/X5 result argument-path allocation/source/shutdown/result reuse/owner retirement (direct = %, negative control = %) PASS\n", direct, negative_control);
+	print("X3/X5 result argument-path allocation/source/shutdown/result reuse/owner retirement (direct = %, negative control = %) \e[92mPASS\e[0m\n", direct, negative_control);
 }
 
 Coordinator_Argument_Case :: enum {
@@ -4646,7 +6600,7 @@ test_coordinator_argument_failures :: () {
 				);
 
 				if negative_control {
-					assert(error.code == .INVALID_ARGUMENT && !error.path.count, "Failed coordinator argument-path negative control was not detected.");
+					assert(error.code == .INVALID_ARGUMENT && !error.path.count, "\e[91mFailed coordinator argument-path negative control was not detected.\e[0m");
 					break;
 				}
 
@@ -4681,7 +6635,7 @@ test_coordinator_argument_failures :: () {
 		}
 	}
 
-	print("X5 coordinator selector/deadline/maximum diagnostic failures/isolation/no admission/negative controls PASS\n");
+	print("X5 coordinator selector/deadline/maximum diagnostic failures/isolation/no admission/negative controls \e[92mPASS\e[0m\n");
 }
 
 retire_coordinator_argument :: (job: *Output_Interleaving, release_owner: bool) {
@@ -4833,7 +6787,7 @@ test_coordinator_argument_interleavings :: (direct := false, negative_control :=
 		}
 	}
 
-	print("X3/X5 coordinator diagnostic allocation/source/shutdown/handle reuse/owner retirement (direct = %, negative control = %) PASS\n", direct, negative_control);
+	print("X3/X5 coordinator diagnostic allocation/source/shutdown/handle reuse/owner retirement (direct = %, negative control = %) \e[92mPASS\e[0m\n", direct, negative_control);
 }
 
 Retain_Backing_Case :: enum {
@@ -4938,6 +6892,8 @@ Registration_Probe :: struct {
 	waiter_ledger: Service.Resource_Ledger;
 	track_source: bool;
 	source_active_admissions: s64;
+	source_document: [] u8;
+	source_references: s64;
 	track_world: *Service.World;
 	world_references: s64;
 	callback_identities: Service.Session_Identities;
@@ -4965,7 +6921,7 @@ registration_allocation_probe :: (size: s64, data: *void) -> bool {
 			assert(thread_init(*thread, output_interleaving_job));
 			thread_start(*thread);
 			probe.gate_progress = thread_is_done(*thread, 10_000);
-			assert(probe.gate_progress, "Registration backing allocation held the state gate.");
+			assert(probe.gate_progress, "\e[91mRegistration backing allocation held the state gate.\e[0m");
 			thread_deinit(*thread);
 		}
 
@@ -4977,6 +6933,11 @@ registration_allocation_probe :: (size: s64, data: *void) -> bool {
 					probe.waiter_ledger = session.ledger;
 					probe.callback_identities = session.identities;
 					probe.source_active_admissions = session.active_admissions;
+					if probe.source_document.count {
+						state := Service.find_document(session.provider, probe.source_document);
+						assert(state && state.has_overlay && state.overlay.source);
+						probe.source_references = state.overlay.source.references;
+					}
 				}
 			);
 		}
@@ -5126,7 +7087,7 @@ test_retain_backing_failures :: ($K: Service.Handle_Kind, acquisition := false) 
 	}
 
 	print(
-		"X5 registration array/object failure/reuse/generation/charge/reference atomicity (kind = %, result acquisition = %) PASS\n",
+		"X5 registration array/object failure/reuse/generation/charge/reference atomicity (kind = %, result acquisition = %) \e[92mPASS\e[0m\n",
 		K,
 		acquisition
 	);
@@ -5264,7 +7225,7 @@ test_immediate_result_failures :: () {
 		}
 	}
 
-	print("X5 immediate result all kinds/registration/object/identity/reuse failure/ledger/reference/generation/counter/canonical identity atomicity PASS\n");
+	print("X5 immediate result all kinds/registration/object/identity/reuse failure/ledger/reference/generation/counter/canonical identity atomicity \e[92mPASS\e[0m\n");
 }
 
 test_immediate_result_limits :: () {
@@ -5326,7 +7287,7 @@ test_immediate_result_limits :: () {
 		finish_retain(test);
 	}
 
-	print("X5 immediate result handle quota/operation-result counter exhaustion/no allocation/no admission PASS\n");
+	print("X5 immediate result handle quota/operation-result counter exhaustion/no allocation/no admission \e[92mPASS\e[0m\n");
 }
 
 test_immediate_result_interleavings :: (direct := false, negative_control := false) {
@@ -5395,7 +7356,7 @@ test_immediate_result_interleavings :: (direct := false, negative_control := fal
 				if retired && !negative_control {
 					assert(!ok && !started.result.owner_token && error.code == .INVALID_HANDLE && error.handle_kind == .WORLD);
 				} else if negative_control {
-					assert(ok && started.kind == .AVAILABLE, "Stale immediate-world negative control was not detected.");
+					assert(ok && started.kind == .AVAILABLE, "\e[91mStale immediate-world negative control was not detected.\e[0m");
 				} else if fail_at && fail_at <= probe.allocations {
 					assert(!ok && !started.result.owner_token && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
 				} else if action == .REQUEST_SHUTDOWN {
@@ -5499,7 +7460,7 @@ test_immediate_result_interleavings :: (direct := false, negative_control := fal
 	}
 
 	print(
-		"X3/X5 immediate result registration/object/identity callbacks/shutdown/frontier/retry/quota/competing counter/source reuse/last reference/owner retirement (direct = %, negative control = %) PASS\n",
+		"X3/X5 immediate result registration/object/identity callbacks/shutdown/frontier/retry/quota/competing counter/source reuse/last reference/owner retirement (direct = %, negative control = %) \e[92mPASS\e[0m\n",
 		direct,
 		negative_control
 	);
@@ -5525,7 +7486,7 @@ test_immediate_result_failure_control :: () {
 			then 5 + fail_at
 			else fail_at + 2;
 
-		assert(ok && started.kind == .AVAILABLE && probe.allocations == expected_allocations, "Failed immediate result admission negative control was not detected.");
+		assert(ok && started.kind == .AVAILABLE && probe.allocations == expected_allocations, "\e[91mFailed immediate result admission negative control was not detected.\e[0m");
 		Service.with_lock(
 			*fixture.session.gate,
 			#code {
@@ -5539,7 +7500,7 @@ test_immediate_result_failure_control :: () {
 		finish_retain(test);
 	}
 
-	print("X5 immediate result registration/object/identity failed-admission negative controls PASS\n");
+	print("X5 immediate result registration/object/identity failed-admission negative controls \e[92mPASS\e[0m\n");
 }
 
 test_immediate_result_last_token :: () {
@@ -5576,7 +7537,7 @@ test_immediate_result_last_token :: () {
 
 	release(fixture, started.result);
 	finish_retain(test);
-	print("X5 immediate result last-token canonical identity/retired counter/no wrap/no second operation admission PASS\n");
+	print("X5 immediate result last-token canonical identity/retired counter/no wrap/no second operation admission \e[92mPASS\e[0m\n");
 }
 
 test_result_registration_interleavings :: (direct := false, negative_control := false) {
@@ -5634,7 +7595,7 @@ test_result_registration_interleavings :: (direct := false, negative_control := 
 			if retired && !negative_control {
 				assert(!ok && !acquired.result.owner_token && error.code == .INVALID_HANDLE && error.handle_kind == .WAITER);
 			} else if negative_control {
-				assert(ok && acquired.kind == .ACQUIRED, "Stale result-selector negative control was not detected.");
+				assert(ok && acquired.kind == .ACQUIRED, "\e[91mStale result-selector negative control was not detected.\e[0m");
 			} else if fail_at && fail_at <= probe.allocations {
 				assert(!ok && !acquired.result.owner_token && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
 			} else if action == .TAKE_RETAIN_CAPACITY {
@@ -5734,7 +7695,7 @@ test_result_registration_interleavings :: (direct := false, negative_control := 
 	}
 
 	print(
-		"X3/X5 successful result registration shutdown/replacement/retry/quota/waiter reuse/last reference/owner retirement (direct = %, negative control = %) PASS\n",
+		"X3/X5 successful result registration shutdown/replacement/retry/quota/waiter reuse/last reference/owner retirement (direct = %, negative control = %) \e[92mPASS\e[0m\n",
 		direct,
 		negative_control
 	);
@@ -5762,7 +7723,7 @@ test_result_registration_quota_and_control :: (negative_control := false) {
 
 	ok, acquired, error := Service.acquire_result(fixture.host.service, test.drain.first);
 	if negative_control {
-		assert(ok && acquired.kind == .ACQUIRED && probe.allocations == 4, "Failed result registration admission negative control was not detected.");
+		assert(ok && acquired.kind == .ACQUIRED && probe.allocations == 4, "\e[91mFailed result registration admission negative control was not detected.\e[0m");
 	} else {
 		assert(!ok && !acquired.result.owner_token && error.code == .ADMISSION_DENIED && error.admission.kind == .LIMIT && error.admission.limit == .LIVE_HANDLES);
 		assert(!probe.allocations);
@@ -5792,7 +7753,7 @@ test_result_registration_quota_and_control :: (negative_control := false) {
 	}
 
 	finish_retain(test);
-	print("X5 successful result registration quota/failed-admission control (negative control = %) PASS\n", negative_control);
+	print("X5 successful result registration quota/failed-admission control (negative control = %) \e[92mPASS\e[0m\n", negative_control);
 }
 
 test_retain_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, negative_control := false) {
@@ -5873,7 +7834,7 @@ test_retain_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, 
 
 			if action == .RELEASE_QUERY_WORLD {
 				if negative_control {
-					assert(ok, "Stale retained-source negative control was not detected.");
+					assert(ok, "\e[91mStale retained-source negative control was not detected.\e[0m");
 					release(fixture, duplicate);
 				} else {
 					assert(!ok && !duplicate.owner_token && error.code == .INVALID_HANDLE && error.handle_kind == K);
@@ -5920,7 +7881,7 @@ test_retain_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, 
 	}
 
 	print(
-		"X3/X5 retain registration allocation/source/shutdown/drain/reuse/capacity/retirement (kind = %, direct = %, negative control = %) PASS\n",
+		"X3/X5 retain registration allocation/source/shutdown/drain/reuse/capacity/retirement (kind = %, direct = %, negative control = %) \e[92mPASS\e[0m\n",
 		K,
 		direct,
 		negative_control
@@ -6116,7 +8077,7 @@ test_waiter_backing_failures :: ($K: Service.Handle_Kind) {
 		}
 	}
 
-	print("X5 waiter registration/list array/object/reuse failure/ledger/reference/generation atomicity (kind = %) PASS\n", K);
+	print("X5 waiter registration/list array/object/reuse failure/ledger/reference/generation atomicity (kind = %) \e[92mPASS\e[0m\n", K);
 }
 
 test_waiter_backing_quota :: ($K: Service.Handle_Kind) {
@@ -6158,7 +8119,7 @@ test_waiter_backing_quota :: ($K: Service.Handle_Kind) {
 		finish_waiter_admission(test);
 	}
 
-	print("X5 waiter full operation/handle/pending/completion quota/no allocation (kind = %) PASS\n", K);
+	print("X5 waiter full operation/handle/pending/completion quota/no allocation (kind = %) \e[92mPASS\e[0m\n", K);
 }
 
 test_waiter_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, negative_control := false) {
@@ -6225,7 +8186,7 @@ test_waiter_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, 
 				if retired && !negative_control {
 					assert(!ok && !waiter.owner_token && !terminal && error.code == .INVALID_HANDLE && error.handle_kind == K);
 				} else if negative_control {
-					assert(ok && waiter.generation && !terminal, "Stale waiter-source negative control was not detected.");
+					assert(ok && waiter.generation && !terminal, "\e[91mStale waiter-source negative control was not detected.\e[0m");
 				} else if completion_winner {
 					assert(ok && terminal && !waiter.owner_token);
 				} else if action == .REQUEST_SHUTDOWN {
@@ -6246,7 +8207,15 @@ test_waiter_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, 
 				}
 
 				if action == .RETIRE_RETAIN_OWNER {
-					assert(probe.allocations == (ifx job_at == 4 then 4 else ifx fail_at && fail_at <= 3 then fail_at else 3));
+					assert(
+						probe.allocations == (
+							ifx job_at == 4
+								then 4
+								else ifx fail_at && fail_at <= 3
+									then fail_at
+									else 3
+						)
+					);
 				} else {
 					Service.with_lock(
 						*fixture.session.gate,
@@ -6256,7 +8225,7 @@ test_waiter_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, 
 							for Service.Limit_Name.[.LIVE_HANDLES, .PENDING_REGISTRATIONS, .COMPLETION_RECORDS] {
 								assert(
 									fixture.session.ledger.live[it] == probe.waiter_ledger.live[it] + xx !!waiter.owner_token,
-									"Waiter charges changed: kind %, action %, callback %, failure %, limit %, before %, after %.",
+									"\e[91mWaiter charges changed: kind %, action %, callback %, failure %, limit %, before %, after %.\e[0m",
 									K,
 									action,
 									job_at,
@@ -6310,7 +8279,7 @@ test_waiter_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, 
 	}
 
 	print(
-		"X3/X5 waiter registration/list allocation/completion/frontier/quota/retry/source reuse/owner retirement (kind = %, direct = %, negative control = %) PASS\n",
+		"X3/X5 waiter registration/list allocation/completion/frontier/quota/retry/source reuse/owner retirement (kind = %, direct = %, negative control = %) \e[92mPASS\e[0m\n",
 		K,
 		direct,
 		negative_control
@@ -6331,7 +8300,7 @@ test_waiter_failed_backing_control :: ($K: Service.Handle_Kind) {
 	);
 
 	ok, waiter, error, terminal := admit_test_waiter(test);
-	assert(ok && waiter.generation && !terminal && probe.allocations > 4, "Failed waiter backing negative control was not detected.");
+	assert(ok && waiter.generation && !terminal && probe.allocations > 4, "\e[91mFailed waiter backing negative control was not detected.\e[0m");
 	Service.with_lock(
 		*fixture.session.gate,
 		#code {
@@ -6342,7 +8311,7 @@ test_waiter_failed_backing_control :: ($K: Service.Handle_Kind) {
 
 	release(fixture, waiter);
 	finish_waiter_admission(test);
-	print("X5 failed waiter backing admission negative control (kind = %) PASS\n", K);
+	print("X5 failed waiter backing admission negative control (kind = %) \e[92mPASS\e[0m\n", K);
 }
 
 World_Registration_Case :: enum {
@@ -6550,7 +8519,7 @@ test_world_registration_failures :: () {
 		}
 	}
 
-	print("X5 successful world registration selector/array/object/reuse failure/generation/ledger/reference/identity atomicity PASS\n");
+	print("X5 successful world registration selector/array/object/reuse failure/generation/ledger/reference/identity atomicity \e[92mPASS\e[0m\n");
 }
 
 test_world_registration_quota :: () {
@@ -6586,7 +8555,7 @@ test_world_registration_quota :: () {
 		finish_world_registration(test);
 	}
 
-	print("X5 successful world registration full quota/no allocation/no admission PASS\n");
+	print("X5 successful world registration full quota/no allocation/no admission \e[92mPASS\e[0m\n");
 }
 
 test_world_registration_interleavings :: (direct := false, negative_control := false) {
@@ -6671,7 +8640,7 @@ test_world_registration_interleavings :: (direct := false, negative_control := f
 
 					assert(!ok && !acquired.world.owner_token && error.code == .INVALID_HANDLE && error.handle_kind == expected_kind);
 				} else if negative_control {
-					assert(ok && acquired.kind == .ACQUIRED, "Stale world-selector negative control was not detected.");
+					assert(ok && acquired.kind == .ACQUIRED, "\e[91mStale world-selector negative control was not detected.\e[0m");
 				} else if fail_at && fail_at <= probe.allocations {
 					assert(!ok && !acquired.world.owner_token && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
 				} else if action == .TAKE_RETAIN_CAPACITY {
@@ -6699,7 +8668,7 @@ test_world_registration_interleavings :: (direct := false, negative_control := f
 
 								assert(
 									fixture.session.ledger.live[it_index] == it + amount,
-									"World registration live charge changed: scenario %, action %, failure %, limit %, before %, after %.",
+									"\e[91mWorld registration live charge changed: scenario %, action %, failure %, limit %, before %, after %.\e[0m",
 									scenario,
 									action,
 									fail_at,
@@ -6719,7 +8688,7 @@ test_world_registration_interleavings :: (direct := false, negative_control := f
 
 								assert(
 									fixture.session.ledger.reserved[it_index] == expected_reserved,
-									"World registration reservation changed: scenario %, action %, failure %, limit %, before %, after %.",
+									"\e[91mWorld registration reservation changed: scenario %, action %, failure %, limit %, before %, after %.\e[0m",
 									scenario,
 									action,
 									fail_at,
@@ -6786,7 +8755,7 @@ test_world_registration_interleavings :: (direct := false, negative_control := f
 	}
 
 	print(
-		"X3/X5 successful world registration selector/shutdown/head replacement/retry/quota/reuse/last reference/owner retirement (direct = %, negative control = %) PASS\n",
+		"X3/X5 successful world registration selector/shutdown/head replacement/retry/quota/reuse/last reference/owner retirement (direct = %, negative control = %) \e[92mPASS\e[0m\n",
 		direct,
 		negative_control
 	);
@@ -6807,7 +8776,7 @@ test_world_registration_failure_control :: () {
 		);
 
 		ok, acquired := Service.acquire_world(fixture.host.service, test.selector);
-		assert(ok && acquired.kind == .ACQUIRED && probe.allocations == 4, "Failed world registration admission negative control was not detected.");
+		assert(ok && acquired.kind == .ACQUIRED && probe.allocations == 4, "\e[91mFailed world registration admission negative control was not detected.\e[0m");
 		Service.with_lock(
 			*fixture.session.gate,
 			#code {
@@ -6821,7 +8790,7 @@ test_world_registration_failure_control :: () {
 		finish_world_registration(test);
 	}
 
-	print("X5 successful world registration failed-admission negative controls PASS\n");
+	print("X5 successful world registration failed-admission negative controls \e[92mPASS\e[0m\n");
 }
 
 Shutdown_Registration_Fixture :: struct {
@@ -6952,7 +8921,7 @@ test_repeated_shutdown_failures :: () {
 		}
 	}
 
-	print("X5 repeated shutdown array/object failure/reuse/shared identity/counter/ledger/reference atomicity PASS\n");
+	print("X5 repeated shutdown array/object failure/reuse/shared identity/counter/ledger/reference atomicity \e[92mPASS\e[0m\n");
 }
 
 test_repeated_shutdown_quota :: () {
@@ -6988,7 +8957,7 @@ test_repeated_shutdown_quota :: () {
 		finish_shutdown_registration(test);
 	}
 
-	print("X5 repeated shutdown full handle quota/no allocation/no reference mutation PASS\n");
+	print("X5 repeated shutdown full handle quota/no allocation/no reference mutation \e[92mPASS\e[0m\n");
 }
 
 test_repeated_shutdown_interleavings :: (direct := false, negative_control := false) {
@@ -7055,7 +9024,7 @@ test_repeated_shutdown_interleavings :: (direct := false, negative_control := fa
 				if retired && !negative_control {
 					assert(!ok && !duplicate.owner_token && error.code == .INVALID_HANDLE && error.handle_kind == .SESSION);
 				} else if negative_control {
-					assert(ok, "Stale shutdown-session negative control was not detected.");
+					assert(ok, "\e[91mStale shutdown-session negative control was not detected.\e[0m");
 				} else if fail_at && fail_at <= probe.allocations {
 					assert(!ok && !duplicate.owner_token && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
 				} else if action == .TAKE_RETAIN_CAPACITY {
@@ -7126,7 +9095,7 @@ test_repeated_shutdown_interleavings :: (direct := false, negative_control := fa
 	}
 
 	print(
-		"X3/X5 repeated shutdown allocation/drain/stopped/retry/quota/session reuse/owner retirement (direct = %, negative control = %) PASS\n",
+		"X3/X5 repeated shutdown allocation/drain/stopped/retry/quota/session reuse/owner retirement (direct = %, negative control = %) \e[92mPASS\e[0m\n",
 		direct,
 		negative_control
 	);
@@ -7170,7 +9139,7 @@ test_shutdown_reserve_failures :: () {
 	}
 
 	close_output_probe(*probe);
-	print("X5 first-shutdown physical reserve every allocation failure/private cleanup/nonlive slot PASS\n");
+	print("X5 first-shutdown physical reserve every allocation failure/private cleanup/nonlive slot \e[92mPASS\e[0m\n");
 }
 
 test_shutdown_reserved_activation :: (pressure := false, negative_control := false) {
@@ -7235,9 +9204,9 @@ test_shutdown_reserved_activation :: (pressure := false, negative_control := fal
 		}
 	);
 
-	assert(ok, "Reserved shutdown failed: %.", error);
+	assert(ok, "\e[91mReserved shutdown failed: %.\e[0m", error);
 	if negative_control {
-		assert(allocation_count > 0, "Allocating shutdown negative control was not detected.");
+		assert(allocation_count > 0, "\e[91mAllocating shutdown negative control was not detected.\e[0m");
 	} else {
 		assert(!allocation_count && shutdown.slot == reserved_handle.slot && shutdown.generation == reserved_handle.generation);
 		assert(session.registry.slots.count == before_slots && session.registrations.count == before_registrations);
@@ -7264,7 +9233,7 @@ test_shutdown_reserved_activation :: (pressure := false, negative_control := fal
 
 	release(fixture, shutdown);
 	close(fixture);
-	print("X5 first-shutdown no allocation/canonical identity/reserved slot (pressure = %, negative control = %) PASS\n", pressure, negative_control);
+	print("X5 first-shutdown no allocation/canonical identity/reserved slot (pressure = %, negative control = %) \e[92mPASS\e[0m\n", pressure, negative_control);
 }
 
 test_shutdown_identity_exhaustion :: () {
@@ -7306,7 +9275,7 @@ test_shutdown_identity_exhaustion :: () {
 	Service.free_observation(*observation);
 	release(fixture, last);
 	close(fixture);
-	print("X5 first-shutdown identity exhaustion/no mutation/final token canonical encoding PASS\n");
+	print("X5 first-shutdown identity exhaustion/no mutation/final token canonical encoding \e[92mPASS\e[0m\n");
 }
 
 Provider_Error_Case :: enum {
@@ -7549,7 +9518,7 @@ test_provider_error_failures :: () {
 			probe.allocations = 0;
 			control_ok, control, control_error := Service.submit_source_batch(fixture.host.service, fixture.host.session, source_batch,, allocator);
 			assert(!control_ok && !control.ticket.owner_token && probe.allocations == 1);
-			assert(control_error.code == .INVALID_ARGUMENT && !control_error.path.count, "Failed provider diagnostic copy was not detected.");
+			assert(control_error.code == .INVALID_ARGUMENT && !control_error.path.count, "\e[91mFailed provider diagnostic copy was not detected.\e[0m");
 		}
 
 		close_output_probe(*probe);
@@ -7557,7 +9526,7 @@ test_provider_error_failures :: () {
 		finish_drain(drain);
 	}
 
-	print("X5 provider diagnostic every allocation failure/path/document isolation/no admission/negative control PASS\n");
+	print("X5 provider diagnostic every allocation failure/path/document isolation/no admission/negative control \e[92mPASS\e[0m\n");
 }
 
 test_provider_error_interleavings :: (direct := false) {
@@ -7612,7 +9581,7 @@ test_provider_error_interleavings :: (direct := false) {
 		}
 	}
 
-	print("X3/X5 provider diagnostic partial copy/frontier/shutdown/release/drain (direct = %) PASS\n", direct);
+	print("X3/X5 provider diagnostic partial copy/frontier/shutdown/release/drain (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 error_context_registration :: () -> Service.Context_Registration {
@@ -7664,7 +9633,7 @@ test_open_context_failures :: () {
 
 		probe: Output_Probe;
 		allocator := open_output_probe(*probe);
-		for s64.[1, 2] {
+		for 1..2 {
 			probe.fail_at = it;
 			probe.allocations = 0;
 			token := service.incarnation.session_counter.next;
@@ -7696,13 +9665,13 @@ test_open_context_failures :: () {
 		probe.fail_at = 1;
 		control_ok, control, control_error := Service.open_session(service, options,, allocator);
 		assert(!control_ok && !control.session.owner_token && probe.allocations == 1);
-		assert(control_error.code == .INVALID_ARGUMENT && !control_error.path.count, "Failed context diagnostic copy was not detected.");
+		assert(control_error.code == .INVALID_ARGUMENT && !control_error.path.count, "\e[91mFailed context diagnostic copy was not detected.\e[0m");
 		service.allow_failed_open_output = false;
 		close_output_probe(*probe);
 		assert_no_owned_allocations();
 	}
 
-	print("X5 private-open context diagnostic failure/owner lifetime/isolation/negative control PASS\n");
+	print("X5 private-open context diagnostic failure/owner lifetime/isolation/negative control \e[92mPASS\e[0m\n");
 }
 
 test_open_context_interleavings :: (direct := false) {
@@ -7749,7 +9718,7 @@ test_open_context_interleavings :: (direct := false) {
 		}
 	}
 
-	print("X4/X5 private-open context diagnostic allocation/reentry/cleanup (direct = %) PASS\n", direct);
+	print("X4/X5 private-open context diagnostic allocation/reentry/cleanup (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 open_argument_options :: (scenario: s64) -> Service.Session_Options {
@@ -7797,7 +9766,7 @@ test_open_argument_failures :: () {
 	for s64.[0, 1, 2, 3] {
 		scenario := it;
 		options := open_argument_options(scenario);
-		for s64.[1, 2] {
+		for 1..2 {
 			probe.fail_at = it;
 			probe.allocations = 0;
 			ok, opened, error := Service.open_session(service, options,, allocator);
@@ -7828,13 +9797,13 @@ test_open_argument_failures :: () {
 		probe.allocations = 0;
 		control_ok, control, control_error := Service.open_session(service, options,, allocator);
 		assert(!control_ok && !control.session.owner_token && probe.allocations == 1);
-		assert(control_error.code == .INVALID_ARGUMENT && !control_error.path.count, "Failed pre-owner diagnostic copy was not detected.");
+		assert(control_error.code == .INVALID_ARGUMENT && !control_error.path.count, "\e[91mFailed pre-owner diagnostic copy was not detected.\e[0m");
 		service.allow_failed_open_argument = false;
 		service.cached_open_argument_allocator = true;
 		probe.allocations = 0;
 		cached_probe.allocations = 0;
 		cached_ok, cached, cached_error := Service.open_session(service, options,, allocator);
-		assert(!cached_ok && !cached.session.owner_token && !probe.allocations && cached_probe.allocations == 1, "Inherited pre-owner allocator misuse was not detected.");
+		assert(!cached_ok && !cached.session.owner_token && !probe.allocations && cached_probe.allocations == 1, "\e[91mInherited pre-owner allocator misuse was not detected.\e[0m");
 		assert_open_argument_path(cached_error, scenario);
 		free(cached_error.path.data,, cached_allocator);
 		service.cached_open_argument_allocator = false;
@@ -7846,7 +9815,7 @@ test_open_argument_failures :: () {
 	close_output_probe(*cached_probe);
 	close_output_probe(*probe);
 	assert_no_owned_allocations();
-	print("X5 pre-owner open diagnostic failure/isolation/caller allocator/no identity/negative controls PASS\n");
+	print("X5 pre-owner open diagnostic failure/isolation/caller allocator/no identity/negative controls \e[92mPASS\e[0m\n");
 }
 
 test_open_argument_interleavings :: (direct := false) {
@@ -7881,7 +9850,7 @@ test_open_argument_interleavings :: (direct := false) {
 		}
 	}
 
-	print("X4/X5 pre-owner open diagnostic allocation permits reentry without identity issuance (direct = %) PASS\n", direct);
+	print("X4/X5 pre-owner open diagnostic allocation permits reentry without identity issuance (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 test_open_output_failures :: () {
@@ -7925,7 +9894,7 @@ test_open_output_failures :: () {
 		probe.allocations = 0;
 		token := service.incarnation.session_counter.next;
 		ok, opened, error := Service.open_session(service, options,, allocator);
-		assert(service.incarnation.session_counter.next == token + 1, "A failed open reused a session identity.");
+		assert(service.incarnation.session_counter.next == token + 1, "\e[91mA failed open reused a session identity.\e[0m");
 		if ok {
 			assert(fail_at == 6 && probe.allocations == 5);
 			assert(service.sessions.count == 1 && opened.session.generation == 1);
@@ -7960,13 +9929,13 @@ test_open_output_failures :: () {
 	probe.fail_at = 1;
 	probe.allocations = 0;
 	control_ok, control := Service.open_session(control_service, options,, allocator);
-	assert(control_ok && !control.description.session_identity.count && probe.allocations == 1, "Failed-copy admission negative control was not detected.");
+	assert(control_ok && !control.description.session_identity.count && probe.allocations == 1, "\e[91mFailed-copy admission negative control was not detected.\e[0m");
 	Service.free_description(*control.description,, allocator);
 	close_output_session(control_service, control.session);
 	assert(!control_service.sessions.count && !control_service.owned_allocations && !control_service.owned_bytes);
 	assert_no_owned_allocations();
 	close_output_probe(*probe);
-	print("X5 open-session output/startup failure cleanup and admission negative control PASS\n");
+	print("X5 open-session output/startup failure cleanup and admission negative control \e[92mPASS\e[0m\n");
 }
 
 test_open_output_interleavings :: (direct := false) {
@@ -7982,7 +9951,7 @@ test_open_output_interleavings :: (direct := false) {
 
 		allocator := open_output_probe(*probe);
 		ok, opened, error := Service.open_session(drain.fixture.host.service, open_output_options(),, allocator);
-		assert(probe.gate_progress && probe.job.ok, "Open-session output allocation blocked reentry or exposed an unadmitted session.");
+		assert(probe.gate_progress && probe.job.ok, "\e[91mOpen-session output allocation blocked reentry or exposed an unadmitted session.\e[0m");
 		free_records(probe.job.records);
 		if fail_copy {
 			assert(!ok && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
@@ -7998,7 +9967,7 @@ test_open_output_interleavings :: (direct := false) {
 		finish_drain(drain);
 	}
 
-	print("X4/X5 private open-session output allocation permits reentry (direct = %) PASS\n", direct);
+	print("X4/X5 private open-session output allocation permits reentry (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 World_Output :: enum {
@@ -8053,7 +10022,7 @@ world_output_selector :: (drain: Drain_Fixture, kind: World_Output) -> Service.W
 }
 
 free_world_output :: (output: *Service.World_Acquisition, allocator: Allocator = context.allocator) {
-	assert(!output.world.generation, "An observational world acquisition created a world handle.");
+	assert(!output.world.generation, "\e[91mAn observational world acquisition created a world handle.\e[0m");
 	free(output.operation_identity.data,, allocator);
 	free(output.published_frontier.data,, allocator);
 	Service.free_observation(*output.observation,, allocator);
@@ -8116,7 +10085,7 @@ test_world_output_failures :: () {
 		finish_drain(drain, held = true);
 	}
 
-	print("X5 every world-acquisition descriptive allocation failure PASS\n");
+	print("X5 every world-acquisition descriptive allocation failure \e[92mPASS\e[0m\n");
 }
 
 test_world_output_retirement :: (direct := false) {
@@ -8162,7 +10131,7 @@ test_world_output_retirement :: (direct := false) {
 		);
 	}
 
-	print("X3 world-acquisition output retirement/reuse (direct = %) PASS\n", direct);
+	print("X3 world-acquisition output retirement/reuse (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 test_world_output_changes :: (direct := false) {
@@ -8204,7 +10173,7 @@ test_world_output_changes :: (direct := false) {
 		}
 	}
 
-	print("X3 world snapshot survives completion/frontier/shutdown during copy (direct = %) PASS\n", direct);
+	print("X3 world snapshot survives completion/frontier/shutdown during copy (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
 test_world_output_revalidation_control :: () {
@@ -8224,7 +10193,7 @@ test_world_output_revalidation_control :: () {
 
 		allocator := open_output_probe(*probe);
 		ok, output := Service.acquire_world(drain.fixture.host.service, selector,, allocator);
-		assert(probe.gate_progress && probe.job.ok && ok && output.kind == .PENDING, "Stale byte-export negative control was not detected.");
+		assert(probe.gate_progress && probe.job.ok && ok && output.kind == .PENDING, "\e[91mStale byte-export negative control was not detected.\e[0m");
 		free_world_output(*output, allocator);
 		close_output_probe(*probe);
 		free(selector.expected_frontier.data);
@@ -8240,13 +10209,145 @@ test_world_output_revalidation_control :: () {
 		);
 	}
 
-	print("X3 stale world byte-export negative controls PASS\n");
+	print("X3 stale world byte-export negative controls \e[92mPASS\e[0m\n");
 }
 
 main :: () {
 	init(*allocation_ledger.gate);
 	allocation_ledger.delegate = context.default_allocator;
 	Service.service_test_allocator = .{proc = spy_allocate, data = *allocation_ledger};
+	#if BATCH_POOL_ONLY {
+		test_source_batch_pool_defaults();
+		test_source_registration_failures(batch_sources = true);
+		test_source_registration_failures(batch_sources = true, batch_pair = true);
+		test_source_registration_failures(batch_source_bytes = true);
+		test_source_registration_failures(batch_source_bytes = true, batch_pair = true);
+		test_source_registration_failures(batch_source_bytes = true, empty_source = true);
+		test_source_registration_failures(batch_source_identities = true);
+		test_source_registration_failures(batch_source_identities = true, batch_pair = true);
+		test_source_registration_failures(batch_source_identities = true, empty_source = true);
+		test_source_batch_source_event_failures();
+		test_source_batch_edit_failures();
+		test_source_registration_failures(batch_state_list = true);
+		test_source_registration_failures(batch_state_list = true, batch_pair = true);
+		test_source_batch_reference_storage();
+		test_source_registration_failures(batch_context_list = true);
+		test_source_registration_failures(batch_context_list = true, batch_pair = true);
+		test_source_registration_failures(batch_paths = true);
+		test_source_registration_failures(batch_paths = true, batch_pair = true);
+		test_source_registration_failures(batch_paths = true, path_error = true, event_kind = .OBSERVE_DISK);
+		test_source_batch_construction_reference_rollback();
+		test_source_batch_construction_cleanup();
+		test_source_batch_construction_cleanup(new_document = true);
+		test_source_batch_state_cleanup_lifecycle();
+		test_source_batch_state_cleanup_lifecycle(revisions = true);
+		test_source_batch_construction_cleanup(revisions = true);
+		test_source_batch_construction_receipt_retry();
+		test_source_batch_construction_receipt_retry(revisions = true);
+		test_source_batch_construction_callbacks();
+		test_source_batch_construction_callbacks(revisions = true);
+		test_source_registration_failures(batch_states = true);
+		test_source_registration_failures(batch_revisions = true);
+		test_source_registration_failures(batch_states = true, batch_pair = true);
+		test_source_registration_failures(batch_revisions = true, batch_pair = true);
+		test_source_batch_revision_storage();
+		test_source_batch_storage_growth();
+		test_source_batch_storage_admission();
+		test_source_batch_storage_admission(replace = true);
+		test_source_batch_storage_admission(direct = true, replace = true);
+		test_source_batch_storage_admission(replace = true, negative_control = true);
+		test_source_batch_storage_admission(direct = true, replace = true, negative_control = true);
+		test_source_batch_storage_admission(shutdown = true);
+		test_source_batch_storage_admission(direct = true, shutdown = true);
+		test_source_batch_storage_admission(shutdown = true, negative_control = true);
+		test_source_batch_storage_admission(direct = true, shutdown = true, negative_control = true);
+		test_source_batch_storage_admission(retire = true);
+		test_source_batch_storage_admission(direct = true, retire = true);
+		test_source_batch_storage_admission(retire = true, negative_control = true);
+		test_source_batch_storage_admission(direct = true, retire = true, negative_control = true);
+		test_source_batch_storage_admission(retry_rejection = true);
+		test_source_batch_storage_admission(receipt_retry = true);
+		test_source_batch_storage_admission(direct = true, receipt_retry = true);
+		test_source_batch_storage_admission(receipt_retry = true, list = true);
+		test_source_batch_storage_admission(direct = true, receipt_retry = true, list = true);
+		test_source_batch_storage_admission(receipt_retry = true, retry_rejection = true);
+		test_source_batch_storage_admission(direct = true, receipt_retry = true, retry_rejection = true);
+		test_source_batch_storage_admission(receipt_retry = true, list = true, retry_rejection = true);
+		test_source_batch_storage_admission(direct = true, receipt_retry = true, list = true, retry_rejection = true);
+		test_source_batch_pool_cleanup();
+		test_source_batch_pool_cleanup(direct = true);
+		test_source_batch_pool_cleanup(retry = true);
+		test_source_batch_pool_cleanup(direct = true, retry = true);
+		test_source_batch_pool_cleanup(negative_control = true);
+		test_source_batch_pool_cleanup(retry = true, negative_control = true);
+		test_source_batch_pool_cleanup(retry = true, list = true);
+		test_source_batch_pool_cleanup(direct = true, retry = true, list = true);
+		test_source_batch_pool_cleanup(retry = true, negative_control = true, list = true);
+		test_source_batch_pool_cleanup(direct = true, retry = true, negative_control = true, list = true);
+		test_source_batch_pool_cleanup(validation = true);
+		test_source_batch_pool_cleanup(direct = true, validation = true);
+		test_source_batch_pool_cleanup(negative_control = true, validation = true);
+		test_source_batch_pool_cleanup(direct = true, negative_control = true, validation = true);
+		test_source_batch_pool_cleanup(allocate = true);
+		test_source_batch_pool_cleanup(direct = true, allocate = true);
+		test_source_batch_pool_cleanup(negative_control = true, allocate = true);
+		test_source_batch_pool_cleanup(direct = true, negative_control = true, allocate = true);
+		test_source_batch_pool_cleanup_reentry();
+		test_source_batch_storage_cleanup();
+		test_source_batch_storage_cleanup(direct = true);
+		test_source_batch_storage_cleanup(negative_control = true);
+		test_source_batch_storage_cleanup(direct = true, negative_control = true);
+		test_source_batch_storage_cleanup(action = .CHECK_STAGING_SHUTDOWN);
+		test_source_batch_storage_cleanup(direct = true, action = .CHECK_STAGING_SHUTDOWN);
+		test_source_batch_storage_cleanup(negative_control = true, action = .CHECK_STAGING_SHUTDOWN);
+		test_source_batch_storage_cleanup(direct = true, negative_control = true, action = .CHECK_STAGING_SHUTDOWN);
+		test_source_batch_storage_cleanup(action = .RETIRE_AND_REUSE_SESSION);
+		test_source_batch_storage_cleanup(direct = true, action = .RETIRE_AND_REUSE_SESSION);
+		test_source_batch_storage_cleanup(negative_control = true, action = .RETIRE_AND_REUSE_SESSION);
+		test_source_batch_storage_cleanup(direct = true, negative_control = true, action = .RETIRE_AND_REUSE_SESSION);
+		test_source_registration_failures(pool = true);
+		test_source_registration_failure_control(pool = true);
+		test_source_registration_receipt_retry(pool = true);
+		test_source_registration_receipt_retry(direct = true, pool = true);
+		test_source_registration_receipt_retry(list = true, pool = true);
+		test_source_registration_receipt_retry(direct = true, list = true, pool = true);
+		test_source_registration_receipt_retry(reject_receipt = true, pool = true);
+		test_source_registration_receipt_retry(direct = true, reject_receipt = true, pool = true);
+		test_source_registration_receipt_retry(pool = true, reference_control = true);
+		test_source_registration_receipt_retry(direct = true, pool = true, reference_control = true);
+		test_source_registration_receipt_retry(list = true, pool = true, reference_control = true);
+		test_source_registration_receipt_retry(direct = true, list = true, pool = true, reference_control = true);
+		test_source_registration_receipt_retry(reject_receipt = true, pool = true, reference_control = true);
+		test_source_registration_receipt_retry(direct = true, reject_receipt = true, pool = true, reference_control = true);
+		test_source_registration_receipt_retry(transfer = true);
+		test_source_registration_receipt_retry(direct = true, transfer = true);
+		test_source_registration_receipt_retry(list = true, transfer = true);
+		test_source_registration_receipt_retry(direct = true, list = true, transfer = true);
+		test_source_registration_receipt_retry(reject_receipt = true, transfer = true);
+		test_source_registration_receipt_retry(direct = true, reject_receipt = true, transfer = true);
+		test_source_registration_receipt_retry(transfer = true, reference_control = true);
+		test_source_registration_receipt_retry(direct = true, transfer = true, reference_control = true);
+		test_source_registration_receipt_retry(list = true, transfer = true, reference_control = true);
+		test_source_registration_receipt_retry(direct = true, list = true, transfer = true, reference_control = true);
+		test_source_registration_receipt_retry(reject_receipt = true, transfer = true, reference_control = true);
+		test_source_registration_receipt_retry(direct = true, reject_receipt = true, transfer = true, reference_control = true);
+		test_source_registration_quota();
+		test_source_registration_interleavings(pool = true);
+		test_source_registration_interleavings(direct = true, pool = true);
+		test_source_registration_interleavings(negative_control = true, pool = true);
+		test_source_registration_interleavings(direct = true, negative_control = true, pool = true);
+		test_source_registration_interleavings(pool = true, pool_retirement = true);
+		test_source_registration_interleavings(direct = true, pool = true, pool_retirement = true);
+		test_source_registration_interleavings(negative_control = true, pool = true, pool_retirement = true);
+		test_source_registration_interleavings(direct = true, negative_control = true, pool = true, pool_retirement = true);
+		assert_no_owned_allocations();
+		deinit(*allocation_ledger.sizes);
+		destroy(*allocation_ledger.gate);
+		print("Service batch Pool checks .\e[92mPASS\e[0m.\n");
+		return;
+	}
+
+
 	test_registration_and_wait();
 	test_cancel_and_completion();
 	test_retirement_while_waiting();
@@ -8296,11 +10397,140 @@ main :: () {
 	test_source_registration_failures(arrays = true);
 	test_source_registration_failures(states = true);
 	test_source_registration_failures(revisions = true);
+	test_source_registration_failures(pool = true);
+	test_source_registration_failures(batch_states = true);
+	test_source_registration_failures(batch_sources = true);
+	test_source_registration_failures(batch_sources = true, batch_pair = true);
+	test_source_registration_failures(batch_source_bytes = true);
+	test_source_registration_failures(batch_source_bytes = true, batch_pair = true);
+	test_source_registration_failures(batch_source_bytes = true, empty_source = true);
+	test_source_registration_failures(batch_source_identities = true);
+	test_source_registration_failures(batch_source_identities = true, batch_pair = true);
+	test_source_registration_failures(batch_source_identities = true, empty_source = true);
+	test_source_batch_source_event_failures();
+	test_source_batch_edit_failures();
+	test_source_registration_failures(batch_state_list = true);
+	test_source_registration_failures(batch_state_list = true, batch_pair = true);
+	test_source_batch_reference_storage();
+	test_source_registration_failures(batch_context_list = true);
+	test_source_registration_failures(batch_context_list = true, batch_pair = true);
+	test_source_registration_failures(batch_paths = true);
+	test_source_registration_failures(batch_paths = true, batch_pair = true);
+	test_source_registration_failures(batch_paths = true, path_error = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_construction_reference_rollback();
+	test_source_batch_construction_cleanup();
+	test_source_batch_construction_cleanup(new_document = true);
+	test_source_batch_state_cleanup_lifecycle();
+	test_source_batch_state_cleanup_lifecycle(revisions = true);
+	test_source_batch_construction_cleanup(revisions = true);
+	test_source_batch_construction_receipt_retry();
+	test_source_batch_construction_receipt_retry(revisions = true);
+	test_source_batch_construction_callbacks();
+	test_source_batch_construction_callbacks(revisions = true);
+	test_source_registration_failures(batch_revisions = true);
+	test_source_registration_failures(batch_states = true, batch_pair = true);
+	test_source_registration_failures(batch_revisions = true, batch_pair = true);
+	test_source_batch_revision_storage();
+	test_source_registration_failure_control(pool = true);
+	test_source_batch_pool_defaults();
+	test_source_batch_storage_growth();
+	test_source_batch_storage_admission();
+	test_source_batch_storage_admission(replace = true);
+	test_source_batch_storage_admission(direct = true, replace = true);
+	test_source_batch_storage_admission(replace = true, negative_control = true);
+	test_source_batch_storage_admission(direct = true, replace = true, negative_control = true);
+	test_source_batch_storage_admission(shutdown = true);
+	test_source_batch_storage_admission(direct = true, shutdown = true);
+	test_source_batch_storage_admission(shutdown = true, negative_control = true);
+	test_source_batch_storage_admission(direct = true, shutdown = true, negative_control = true);
+	test_source_batch_storage_admission(retire = true);
+	test_source_batch_storage_admission(direct = true, retire = true);
+	test_source_batch_storage_admission(retire = true, negative_control = true);
+	test_source_batch_storage_admission(direct = true, retire = true, negative_control = true);
+	test_source_batch_storage_admission(retry_rejection = true);
+	test_source_batch_storage_admission(receipt_retry = true);
+	test_source_batch_storage_admission(direct = true, receipt_retry = true);
+	test_source_batch_storage_admission(receipt_retry = true, list = true);
+	test_source_batch_storage_admission(direct = true, receipt_retry = true, list = true);
+	test_source_batch_storage_admission(receipt_retry = true, retry_rejection = true);
+	test_source_batch_storage_admission(direct = true, receipt_retry = true, retry_rejection = true);
+	test_source_batch_storage_admission(receipt_retry = true, list = true, retry_rejection = true);
+	test_source_batch_storage_admission(direct = true, receipt_retry = true, list = true, retry_rejection = true);
+	test_source_registration_receipt_retry(pool = true);
+	test_source_registration_receipt_retry(direct = true, pool = true);
+	test_source_registration_receipt_retry(list = true, pool = true);
+	test_source_registration_receipt_retry(direct = true, list = true, pool = true);
+	test_source_registration_receipt_retry(reject_receipt = true, pool = true);
+	test_source_registration_receipt_retry(direct = true, reject_receipt = true, pool = true);
+	test_source_registration_receipt_retry(pool = true, reference_control = true);
+	test_source_registration_receipt_retry(direct = true, pool = true, reference_control = true);
+	test_source_registration_receipt_retry(list = true, pool = true, reference_control = true);
+	test_source_registration_receipt_retry(direct = true, list = true, pool = true, reference_control = true);
+	test_source_registration_receipt_retry(reject_receipt = true, pool = true, reference_control = true);
+	test_source_registration_receipt_retry(direct = true, reject_receipt = true, pool = true, reference_control = true);
+	test_source_registration_receipt_retry(transfer = true);
+	test_source_registration_receipt_retry(direct = true, transfer = true);
+	test_source_registration_receipt_retry(list = true, transfer = true);
+	test_source_registration_receipt_retry(direct = true, list = true, transfer = true);
+	test_source_registration_receipt_retry(reject_receipt = true, transfer = true);
+	test_source_registration_receipt_retry(direct = true, reject_receipt = true, transfer = true);
+	test_source_registration_receipt_retry(transfer = true, reference_control = true);
+	test_source_registration_receipt_retry(direct = true, transfer = true, reference_control = true);
+	test_source_registration_receipt_retry(list = true, transfer = true, reference_control = true);
+	test_source_registration_receipt_retry(direct = true, list = true, transfer = true, reference_control = true);
+	test_source_registration_receipt_retry(reject_receipt = true, transfer = true, reference_control = true);
+	test_source_registration_receipt_retry(direct = true, reject_receipt = true, transfer = true, reference_control = true);
+	test_source_registration_interleavings(pool = true);
+	test_source_batch_pool_cleanup();
+	test_source_batch_pool_cleanup(direct = true);
+	test_source_batch_pool_cleanup(retry = true);
+	test_source_batch_pool_cleanup(direct = true, retry = true);
+	test_source_batch_pool_cleanup(negative_control = true);
+	test_source_batch_pool_cleanup(retry = true, negative_control = true);
+	test_source_batch_pool_cleanup(retry = true, list = true);
+	test_source_batch_pool_cleanup(direct = true, retry = true, list = true);
+	test_source_batch_pool_cleanup(retry = true, negative_control = true, list = true);
+	test_source_batch_pool_cleanup(direct = true, retry = true, negative_control = true, list = true);
+	test_source_batch_pool_cleanup(validation = true);
+	test_source_batch_pool_cleanup(direct = true, validation = true);
+	test_source_batch_pool_cleanup(negative_control = true, validation = true);
+	test_source_batch_pool_cleanup(direct = true, negative_control = true, validation = true);
+	test_source_batch_pool_cleanup(allocate = true);
+	test_source_batch_pool_cleanup(direct = true, allocate = true);
+	test_source_batch_pool_cleanup(negative_control = true, allocate = true);
+	test_source_batch_pool_cleanup(direct = true, negative_control = true, allocate = true);
+	test_source_batch_pool_cleanup_reentry();
+	test_source_batch_storage_cleanup();
+	test_source_batch_storage_cleanup(direct = true);
+	test_source_batch_storage_cleanup(negative_control = true);
+	test_source_batch_storage_cleanup(direct = true, negative_control = true);
+	test_source_batch_storage_cleanup(action = .CHECK_STAGING_SHUTDOWN);
+	test_source_batch_storage_cleanup(direct = true, action = .CHECK_STAGING_SHUTDOWN);
+	test_source_batch_storage_cleanup(negative_control = true, action = .CHECK_STAGING_SHUTDOWN);
+	test_source_batch_storage_cleanup(direct = true, negative_control = true, action = .CHECK_STAGING_SHUTDOWN);
+	test_source_batch_storage_cleanup(action = .RETIRE_AND_REUSE_SESSION);
+	test_source_batch_storage_cleanup(direct = true, action = .RETIRE_AND_REUSE_SESSION);
+	test_source_batch_storage_cleanup(negative_control = true, action = .RETIRE_AND_REUSE_SESSION);
+	test_source_batch_storage_cleanup(direct = true, negative_control = true, action = .RETIRE_AND_REUSE_SESSION);
+	test_source_registration_interleavings(direct = true, pool = true);
+	test_source_registration_interleavings(negative_control = true, pool = true);
+	test_source_registration_interleavings(direct = true, negative_control = true, pool = true);
+	test_source_registration_interleavings(pool = true, pool_retirement = true);
+	test_source_registration_interleavings(direct = true, pool = true, pool_retirement = true);
+	test_source_registration_interleavings(negative_control = true, pool = true, pool_retirement = true);
+	test_source_registration_interleavings(direct = true, negative_control = true, pool = true, pool_retirement = true);
 	test_source_registration_failure_control(states = true);
+	test_source_registration_failure_control(revisions = true);
 	test_source_provider_arrays_refresh(states = true);
 	test_source_provider_arrays_refresh(direct = true, states = true);
 	test_source_provider_arrays_refresh(empty = true, states = true);
-	for s64.[1, 2] {
+	test_source_provider_revisions_empty();
+	test_source_provider_revisions_empty(empty_provider = true);
+	test_source_provider_revisions_refresh();
+	test_source_provider_revisions_refresh(direct = true);
+	test_source_provider_revisions_refresh(surplus = true);
+	test_source_provider_revisions_refresh(direct = true, surplus = true);
+	for 1..2 {
 		test_source_registration_interleavings(states = true, multiple = true, job_at = it);
 		test_source_registration_interleavings(direct = true, states = true, multiple = true, job_at = it);
 		test_source_registration_interleavings(negative_control = true, states = true, multiple = true, job_at = it);
@@ -8315,15 +10545,35 @@ main :: () {
 	test_source_registration_interleavings(direct = true, states = true, cleanup = true);
 	test_source_registration_interleavings(negative_control = true, states = true, cleanup = true);
 	test_source_registration_interleavings(direct = true, negative_control = true, states = true, cleanup = true);
+	for 1..2 {
+		test_source_registration_interleavings(revisions = true, multiple = true, job_at = it);
+		test_source_registration_interleavings(direct = true, revisions = true, multiple = true, job_at = it);
+		test_source_registration_interleavings(negative_control = true, revisions = true, multiple = true, job_at = it);
+		test_source_registration_interleavings(direct = true, negative_control = true, revisions = true, multiple = true, job_at = it);
+	}
+
+	test_source_registration_interleavings(revisions = true);
+	test_source_registration_interleavings(direct = true, revisions = true);
+	test_source_registration_interleavings(negative_control = true, revisions = true);
+	test_source_registration_interleavings(direct = true, negative_control = true, revisions = true);
+	test_source_registration_interleavings(revisions = true, cleanup = true);
+	test_source_registration_interleavings(direct = true, revisions = true, cleanup = true);
+	test_source_registration_interleavings(negative_control = true, revisions = true, cleanup = true);
+	test_source_registration_interleavings(direct = true, negative_control = true, revisions = true, cleanup = true);
 	test_source_registration_receipt_retry(states = true);
 	test_source_registration_receipt_retry(direct = true, states = true);
 	test_source_registration_receipt_retry(list = true, states = true);
 	test_source_registration_receipt_retry(direct = true, list = true, states = true);
+	test_source_registration_receipt_retry(revisions = true);
+	test_source_registration_receipt_retry(direct = true, revisions = true);
+	test_source_registration_receipt_retry(list = true, revisions = true);
+	test_source_registration_receipt_retry(direct = true, list = true, revisions = true);
+	test_source_registration_receipt_retry(revisions = true, reject_receipt = true);
 	test_source_registration_failure_control(arrays = true);
 	test_source_provider_arrays_refresh();
 	test_source_provider_arrays_refresh(direct = true);
 	test_source_provider_arrays_refresh(empty = true);
-	for s64.[1, 2] {
+	for 1..2 {
 		test_source_registration_interleavings(arrays = true, job_at = it);
 		test_source_registration_interleavings(direct = true, arrays = true, job_at = it);
 		test_source_registration_interleavings(negative_control = true, arrays = true, job_at = it);
@@ -8479,5 +10729,5 @@ main :: () {
 	assert_no_owned_allocations();
 	deinit(*allocation_ledger.sizes);
 	destroy(*allocation_ledger.gate);
-	print("Service worker PASS.\n");
+	print("Service worker \e[92mPASS\e[0m.\n");
 }

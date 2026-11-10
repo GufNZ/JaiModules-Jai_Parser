@@ -80,7 +80,7 @@ main :: () {
 	test_simd_identifier_tokens();
 	test_simd_line_comments();
 	test_simd_diagnostics_and_truncations();
-	print("Scalar/SIMD token and comment parity PASS.\n");
+	print("Scalar/SIMD token and comment parity \e[92mPASS\e[0m.\n");
 }
 
 Simd_Diagnostic :: struct {
@@ -119,7 +119,7 @@ test_simd_diagnostics_and_truncations :: () {
 	}
 
 	assert(diagnostics > 0);
-	print("Scalar/SIMD diagnostic and truncation parity PASS: % inputs, % diagnostics.\n", comparisons, diagnostics);
+	print("Scalar/SIMD diagnostic and truncation parity \e[92mPASS\e[0m: % inputs, % diagnostics.\n", comparisons, diagnostics);
 }
 
 assert_simd_lexer_parity :: (input: string) -> s64 {
@@ -352,13 +352,13 @@ test_simd_identifier_masks :: ($width: s64) {
 						actual = Simd.identifier_simd_stop_mask(input.data + offset);
 					}
 
-					assert(actual == expected, "SIMD identifier classification differs at width %, offset %, position %, byte %.", width, offset, position, byte);
+					assert(actual == expected, "\e[91mSIMD identifier classification differs at width %, offset %, position %, byte %.\e[0m", width, offset, position, byte);
 				}
 
 				input[offset + position] = #char "a";
 			}
 		}
-		print("SIMD classifier width % parity PASS.\n", width);
+		print("SIMD classifier width % parity \e[92mPASS\e[0m.\n", width);
 	}
 }
 
@@ -399,7 +399,7 @@ test_keyword_table_completeness :: () {
 		lexer: Extended.Lexer;
 		Extended.set_input_from_string(*lexer, spelling);
 		token := Extended.peek_next_token(*lexer);
-		assert(token.type == expected, "Keyword '%' lexed as %, expected %.", spelling, token.type, expected);
+		assert(token.type == expected, "\e[91mKeyword '%' lexed as %, expected %.\e[0m", spelling, token.type, expected);
 		assert(token.ident_value.name == spelling);
 	}
 }

@@ -19,7 +19,7 @@ main :: () {
 	test_disk_and_overlay(root);
 	test_absence_and_unavailability(root);
 	test_dispatch(root);
-	print("Service host PASS.\n");
+	print("Service host \e[92mPASS\e[0m.\n");
 }
 
 limits :: () -> Service.Limits, Service.Limits {
@@ -37,7 +37,7 @@ limits :: () -> Service.Limits, Service.Limits {
 open :: (root: string) -> *Service.Harness_Host {
 	ceilings, minima := limits();
 	failure, host, error := Service.open_harness_host(root, ceilings, minima);
-	assert(failure == .NONE, "Host failed to open: % %.", failure, error);
+	assert(failure == .NONE, "\e[91mHost failed to open: % %.\e[0m", failure, error);
 	return host;
 }
 
@@ -52,13 +52,13 @@ await :: (host: *Service.Harness_Host, ticket: Service.Handle(.TICKET)) -> Servi
 
 submit :: (batch: *Service.Host_Batch) -> Service.Handle(.TICKET) {
 	ok, accepted, error := Service.submit_batch(batch);
-	assert(ok, "Submit failed: %.", error);
+	assert(ok, "\e[91mSubmit failed: %.\e[0m", error);
 	return accepted.ticket;
 }
 
 world_of :: (host: *Service.Harness_Host, ticket: Service.Handle(.TICKET)) -> Service.Handle(.WORLD) {
 	observation := await(host, ticket);
-	assert(observation.update.kind == .PUBLISHED, "Update ended %.", observation.update.kind);
+	assert(observation.update.kind == .PUBLISHED, "\e[91mUpdate ended %.\e[0m", observation.update.kind);
 	ok, acquisition := Service.acquire_world(host.service, .{kind = .PUBLISHED_UPDATE, ticket = ticket});
 	assert(ok && acquisition.kind == .ACQUIRED);
 	return acquisition.world;
@@ -82,7 +82,7 @@ tracked :: (host: *Service.Harness_Host, relative: string) -> Service.Tracked_Do
 	}
 
 
-	assert(false, "% is not tracked.", relative);
+	assert(false, "\e[91m% is not tracked.\e[0m", relative);
 	return .{};
 }
 
@@ -98,11 +98,11 @@ test_open :: (root: string) {
 	assert(file_exists(tprint("%/%", root, Service.EPOCH_FILE_NAME)));
 
 	for string.["", "/a.jai", "../a.jai", "a/../b.jai", "a//b.jai", "./a.jai", "a\\b.jai", "C:a.jai"] {
-		assert(!Service.valid_relative(it), "Relative path '%' was accepted.", it);
+		assert(!Service.valid_relative(it), "\e[91mRelative path '%' was accepted.\e[0m", it);
 	}
 
 	batch := Service.begin_batch(first);
-	assert(!Service.set_overlay(*batch, "../escape.jai", "x"), "A path outside the root was accepted.");
+	assert(!Service.set_overlay(*batch, "../escape.jai", "x"), "\e[91mA path outside the root was accepted.\e[0m");
 	assert(!batch.events.count);
 
 	for (*Service.Harness_Host).[first, second] {
@@ -110,7 +110,7 @@ test_open :: (root: string) {
 		assert(closed);
 	}
 
-	print("Open PASS\n");
+	print("Open \e[92mPASS\e[0m\n");
 }
 
 // V1/T3/T4 through the host: overlays stay selected over disk changes, saves clear only matching bytes, and reset/restore need confirmations.
@@ -156,7 +156,7 @@ test_disk_and_overlay :: (root: string) {
 	batch = Service.begin_batch(host);
 	assert(Service.ack_save(*batch, "a.jai"));
 	ok, _, error := Service.submit_batch(*batch);
-	assert(!ok && error.code == .INVALID_ARGUMENT, "A save of different bytes was accepted.");
+	assert(!ok && error.code == .INVALID_ARGUMENT, "\e[91mA save of different bytes was accepted.\e[0m");
 	assert(tracked(host, "a.jai").selection == .OVERLAY);
 
 	// T4: reset selects the current disk bytes; restoring the discarded overlay is a separate confirmed event.
@@ -182,7 +182,7 @@ test_disk_and_overlay :: (root: string) {
 
 	closed := Service.close_harness_host(host);
 	assert(closed);
-	print("Disk and overlay PASS\n");
+	print("Disk and overlay \e[92mPASS\e[0m\n");
 }
 
 // A deleted file is confirmed absence with no syntax; an unreadable path is not absence and produces no event.
@@ -205,14 +205,14 @@ test_absence_and_unavailability :: (root: string) {
 
 	make_directory_if_it_does_not_exist(tprint("%/folder.jai", root));
 	batch = Service.begin_batch(host);
-	assert(!Service.observe_disk(*batch, "folder.jai"), "An unreadable path was reported.");
+	assert(!Service.observe_disk(*batch, "folder.jai"), "\e[91mAn unreadable path was reported.\e[0m");
 
 	Service.release(host.service, world);
 	Service.release(host.service, ticket);
 	Service.release(host.service, ticket_absent);
 	closed := Service.close_harness_host(host);
 	assert(closed);
-	print("Absence and unavailability PASS\n");
+	print("Absence and unavailability \e[92mPASS\e[0m\n");
 }
 
 Dispatch_Log :: struct {
@@ -246,9 +246,9 @@ test_dispatch :: (root: string) {
 	// The last ticket publishes; the two earlier ones were superseded at once when the next batch was accepted.
 	await(host, tickets[2]);
 	delivered := Service.dispatch_completions(host, log_completion, batch_size = 1);
-	assert(delivered == 3 && dispatch_log.delivered == 3 && !dispatch_log.nested_returned, "Dispatch was not serial.");
+	assert(delivered == 3 && dispatch_log.delivered == 3 && !dispatch_log.nested_returned, "\e[91mDispatch was not serial.\e[0m");
 	assert(host.dispatch_failures == 1);
-	assert(!Service.dispatch_completions(host, log_completion), "A delivered record was dispatched again.");
+	assert(!Service.dispatch_completions(host, log_completion), "\e[91mA delivered record was dispatched again.\e[0m");
 
 	for waiters {
 		Service.release(host.service, it);
@@ -260,5 +260,5 @@ test_dispatch :: (root: string) {
 
 	closed := Service.close_harness_host(host);
 	assert(closed);
-	print("Dispatch PASS\n");
+	print("Dispatch \e[92mPASS\e[0m\n");
 }

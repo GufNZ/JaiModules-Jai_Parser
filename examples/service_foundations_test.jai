@@ -29,7 +29,7 @@ main :: () {
 	test_limits();
 	test_ledger();
 	test_epoch_issuer(arguments[0]);
-	print("Service foundations PASS.\n");
+	print("Service foundations \e[92mPASS\e[0m.\n");
 }
 
 // Independent oracle: literal byte layout of K(tag, fields), not the production encoder.
@@ -95,7 +95,7 @@ test_value_encodings :: () {
 	assert(ascii_ok && Service.bytes_equal(ascii, expected_key("ascii", "jai-cache-interface/1")));
 	for string.["", "has space", "tab\t", "\x7F", "caf\xC3\xA9"] {
 		ok := Service.v_ascii(it);
-		assert(!ok, "ASCII tag '%' should reject.", it);
+		assert(!ok, "\e[91mASCII tag '%' should reject.\e[0m", it);
 	}
 
 	assert(Service.bytes_equal(Service.v_null(), expected_key("null")));
@@ -123,7 +123,7 @@ test_parse_key :: () {
 
 	for prefix: 0..key.count - 1 {
 		truncated_ok := Service.parse_key(.{count = prefix, data = key.data}, 8);
-		assert(!truncated_ok, "Truncated key of % bytes accepted.", prefix);
+		assert(!truncated_ok, "\e[91mTruncated key of % bytes accepted.\e[0m", prefix);
 	}
 
 	trailing: [..] u8;
@@ -167,7 +167,7 @@ test_digest :: () {
 	for size: sizes {
 		input: [] u8 = .{count = size, data = data.data};
 		one_shot := Service.digest_128(input);
-		assert(one_shot == Service.digest_128(input), "Digest is not deterministic for % bytes.", size);
+		assert(one_shot == Service.digest_128(input), "\e[91mDigest is not deterministic for % bytes.\e[0m", size);
 		for chunk: chunks {
 			state: Service.Digest_State;
 			Service.digest_begin(*state);
@@ -178,12 +178,12 @@ test_digest :: () {
 				offset += length;
 			}
 
-			assert(Service.digest_end(*state) == one_shot, "Streaming digest differs for % bytes in % byte chunks.", size, chunk);
+			assert(Service.digest_end(*state) == one_shot, "\e[91mStreaming digest differs for % bytes in % byte chunks.\e[0m", size, chunk);
 		}
 
 		if size {
 			data[size / 2] ^= 0x01;
-			assert(Service.digest_128(input) != one_shot, "Bit flip not detected for % bytes.", size);
+			assert(Service.digest_128(input) != one_shot, "\e[91mBit flip not detected for % bytes.\e[0m", size);
 			data[size / 2] ^= 0x01;
 		}
 	}
@@ -191,8 +191,8 @@ test_digest :: () {
 	// Regression pins for this meow_hash build, not independent published vectors.
 	empty := Service.digest_128(.[]);
 	abc := Service.digest_128("abc".([] u8));
-	assert(hex(empty) == "45C059582AA07C655E26830355B5A775", "Empty-input digest changed: %.", hex(empty));
-	assert(hex(abc) == "3BCC0A43EC73F719B49A4C426B236D5F", "\"abc\" digest changed: %.", hex(abc));
+	assert(hex(empty) == "45C059582AA07C655E26830355B5A775", "\e[91mEmpty-input digest changed: %.\e[0m", hex(empty));
+	assert(hex(abc) == "3BCC0A43EC73F719B49A4C426B236D5F", "\e[91m\"abc\" digest changed: %.\e[0m", hex(abc));
 }
 
 hex :: (digest: Service.Digest_128) -> string {
@@ -213,7 +213,7 @@ test_identities :: () {
 	assert(ok_a && ok_b && !Service.bytes_equal(session_a.session.([] u8), session_b.session.([] u8)));
 	_, world := Service.issue_world(*session_a);
 	_, result := Service.issue_result(*session_a);
-	assert(!Service.bytes_equal(world.([] u8), result.([] u8)), "Equal tokens in different domains must stay distinct.");
+	assert(!Service.bytes_equal(world.([] u8), result.([] u8)), "\e[91mEqual tokens in different domains must stay distinct.\e[0m");
 
 	counter := Service.Identity_Counter.{next = Service.U64_MAX - 1};
 	last_ok, last := Service.issue_token(*counter);
@@ -234,27 +234,27 @@ test_handle_registry :: () {
 	assert(ticket.slot == 1);
 
 	forged := Service.Handle(.RESULT).{session = world.session, slot = world.slot, generation = world.generation};
-	assert(!Service.handle_is_live(*registry, forged), "A handle of the wrong kind must not validate.");
+	assert(!Service.handle_is_live(*registry, forged), "\e[91mA handle of the wrong kind must not validate.\e[0m");
 
 	foreign := world;
 	foreign.session = xx "session-b".([] u8);
 	assert(!Service.handle_is_live(*registry, foreign));
 
 	assert(Service.release_handle(*registry, world));
-	assert(!Service.release_handle(*registry, world), "Double release must fail.");
+	assert(!Service.release_handle(*registry, world), "\e[91mDouble release must fail.\e[0m");
 	assert(!Service.handle_is_live(*registry, world));
 
 	_, reused := Service.register_handle(*registry, .RESULT);
 	assert(reused.slot == world.slot && reused.generation == 2);
 	stale := Service.Handle(.RESULT).{session = world.session, slot = world.slot, generation = world.generation};
-	assert(!Service.handle_is_live(*registry, stale), "A stale generation must not address the reused slot.");
+	assert(!Service.handle_is_live(*registry, stale), "\e[91mA stale generation must not address the reused slot.\e[0m");
 
 	registry.slots[reused.slot].generation = Service.U64_MAX;
 	reused.generation = Service.U64_MAX;
 	assert(Service.release_handle(*registry, reused));
 	assert(registry.slots[reused.slot].retired && !registry.free_slots.count);
 	_, fresh := Service.register_handle(*registry, .WAITER);
-	assert(fresh.slot == 2 && fresh.generation == 1, "An exhausted slot must be retired, never reused.");
+	assert(fresh.slot == 2 && fresh.generation == 1, "\e[91mAn exhausted slot must be retired, never reused.\e[0m");
 }
 
 test_limits :: () {
@@ -276,7 +276,7 @@ test_limits :: () {
 	effective_failure, effective := Service.negotiate_limits(request, ceilings, minima);
 	assert(effective_failure == .NONE);
 	assert(effective.values[Service.Limit_Name.OWNED_BYTES] == 400);
-	assert(effective.values[Service.Limit_Name.VALUE_BYTES] == 1000, "A request above the ceiling is clamped to it.");
+	assert(effective.values[Service.Limit_Name.VALUE_BYTES] == 1000, "\e[91mA request above the ceiling is clamped to it.\e[0m");
 	assert(effective.values[Service.Limit_Name.BATCH_EVENTS] == 0);
 
 	below_minimum: Service.Limit_Request;
@@ -299,9 +299,9 @@ test_ledger :: () {
 	ledger.limits.values[Service.Limit_Name.OWNED_BYTES] = 100;
 
 	assert(Service.reserve(*ledger, .{.LIVE_HANDLES, 2}, .{.OWNED_BYTES, 60}));
-	assert(!Service.reserve(*ledger, .{.LIVE_HANDLES, 1}, .{.OWNED_BYTES, 41}), "One over the byte limit must reject.");
-	assert(ledger.reserved[Service.Limit_Name.LIVE_HANDLES] == 2, "A rejected reservation must not leave partial charges.");
-	assert(Service.reserve(*ledger, .{.LIVE_HANDLES, 1}, .{.OWNED_BYTES, 40}), "Exactly reaching the limit is allowed.");
+	assert(!Service.reserve(*ledger, .{.LIVE_HANDLES, 1}, .{.OWNED_BYTES, 41}), "\e[91mOne over the byte limit must reject.\e[0m");
+	assert(ledger.reserved[Service.Limit_Name.LIVE_HANDLES] == 2, "\e[91mA rejected reservation must not leave partial charges.\e[0m");
+	assert(Service.reserve(*ledger, .{.LIVE_HANDLES, 1}, .{.OWNED_BYTES, 40}), "\e[91mExactly reaching the limit is allowed.\e[0m");
 
 	Service.commit_reserved(*ledger, .LIVE_HANDLES, 3);
 	assert(ledger.live[Service.Limit_Name.LIVE_HANDLES] == 3 && !ledger.reserved[Service.Limit_Name.LIVE_HANDLES]);
@@ -310,7 +310,7 @@ test_ledger :: () {
 	assert(Service.reserve(*ledger, .{.LIVE_HANDLES, 2}));
 
 	assert(!Service.reserve(*ledger, .{.OWNED_BYTES, -1}));
-	assert(!Service.reserve(*ledger, .{.OWNED_BYTES, Service.S64_MAX}, .{.OWNED_BYTES, 1}), "Amount overflow must reject.");
+	assert(!Service.reserve(*ledger, .{.OWNED_BYTES, Service.S64_MAX}, .{.OWNED_BYTES, 1}), "\e[91mAmount overflow must reject.\e[0m");
 	Service.release_reserved(*ledger, .OWNED_BYTES, 100);
 	assert(!ledger.reserved[Service.Limit_Name.OWNED_BYTES]);
 }
@@ -337,7 +337,7 @@ test_epoch_issuer :: (executable: string) {
 	ok_other, _, other_failure := Service.reserve_epoch(directory, "project:D:/other".([] u8));
 	assert(!ok_other && other_failure == .AUTHORITY_MISMATCH);
 	ok_after_mismatch, after_mismatch := Service.reserve_epoch(directory, authority);
-	assert(ok_after_mismatch && after_mismatch == 13, "A rejected reservation must not consume or reset the epoch.");
+	assert(ok_after_mismatch && after_mismatch == 13, "\e[91mA rejected reservation must not consume or reset the epoch.\e[0m");
 
 	NAMESPACE_HEX :: "70726F6A6563743A443A2F6578616D706C65";
 	malformed_files := string.[
@@ -354,7 +354,7 @@ test_epoch_issuer :: (executable: string) {
 	for malformed_files {
 		write_entire_file(epoch_path, it);
 		ok_malformed, _, malformed_failure := Service.reserve_epoch(directory, authority);
-		assert(!ok_malformed && malformed_failure == .MALFORMED_FILE, "Malformed epoch file % accepted (%).", it_index, malformed_failure);
+		assert(!ok_malformed && malformed_failure == .MALFORMED_FILE, "\e[91mMalformed epoch file % accepted (%).\e[0m", it_index, malformed_failure);
 	}
 
 	write_entire_file(epoch_path, Service.encode_epoch_file(authority, Service.U64_MAX - 1,, temp));
@@ -372,23 +372,23 @@ test_epoch_issuer :: (executable: string) {
 		hooks.fail_at = it;
 		ok_fault, _, fault_failure := Service.reserve_epoch(directory, authority);
 		hooks.fail_at = .NONE;
-		assert(!ok_fault && fault_failure == .IO_ERROR, "Fault % gave %.", it, fault_failure);
+		assert(!ok_fault && fault_failure == .IO_ERROR, "\e[91mFault % gave %.\e[0m", it, fault_failure);
 		contents, read_ok := read_entire_file(epoch_path);
-		assert(read_ok && contents == intact, "Fault % changed the epoch file.", it);
+		assert(read_ok && contents == intact, "\e[91mFault % changed the epoch file.\e[0m", it);
 	}
 
 	ok_recovered, recovered := Service.reserve_epoch(directory, authority);
-	assert(ok_recovered && recovered == 21, "A failed reservation consumed an epoch or left the lock held.");
+	assert(ok_recovered && recovered == 21, "\e[91mA failed reservation consumed an epoch or left the lock held.\e[0m");
 
 	// A held lock blocks reservation; without the lock's exclusion the same holder does not (negative control).
 	held_ok, held := Service.hold_epoch_lock(directory);
 	assert(held_ok);
 	ok_blocked, _, blocked_failure := Service.reserve_epoch(directory, authority);
-	assert(!ok_blocked && blocked_failure == .LOCK_UNAVAILABLE, "A reservation ran while the lock was held (%).", blocked_failure);
+	assert(!ok_blocked && blocked_failure == .LOCK_UNAVAILABLE, "\e[91mA reservation ran while the lock was held (%).\e[0m", blocked_failure);
 	hooks.shared_lock = true;
 	ok_shared := Service.reserve_epoch(directory, authority);
 	hooks.shared_lock = false;
-	assert(ok_shared, "Control undetected: a reservation without exclusion was still blocked.");
+	assert(ok_shared, "\e[91mControl undetected: a reservation without exclusion was still blocked.\e[0m");
 	Service.drop_epoch_lock(held);
 	hooks.lock_attempts = Service.EPOCH_LOCK_ATTEMPTS;
 
@@ -415,7 +415,7 @@ test_epoch_issuer :: (executable: string) {
 
 			finished, result := get_process_result(it, 0);
 			if finished && result.type == .EXITED && !output_bytes && !error_bytes {
-				assert(result.exit_code == 0, "Epoch child failed.");
+				assert(result.exit_code == 0, "\e[91mEpoch child failed.\e[0m");
 				break;
 			}
 
@@ -434,10 +434,10 @@ test_epoch_issuer :: (executable: string) {
 		}
 	}
 
-	assert(seen.count == PROCESSES * PER_PROCESS, "Expected % epochs, got %.", PROCESSES * PER_PROCESS, seen.count);
+	assert(seen.count == PROCESSES * PER_PROCESS, "\e[91mExpected % epochs, got %.\e[0m", PROCESSES * PER_PROCESS, seen.count);
 	quick_sort(seen, x => x);
 	for seen {
-		assert(it == xx (it_index + 1), "Epochs must be unique and contiguous: position % holds %.", it_index, it);
+		assert(it == xx (it_index + 1), "\e[91mEpochs must be unique and contiguous: position % holds %.\e[0m", it_index, it);
 	}
 }
 

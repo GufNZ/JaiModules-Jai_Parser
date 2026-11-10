@@ -517,14 +517,70 @@ register_contexts :: (model: *Provider_Model, registrations: [] Context_Registra
 
 // Validates the whole batch against staged copies, then commits every member and one new frontier together, or nothing.
 apply_source_batch :: (model: *Provider_Model, batch: Source_Batch) -> (ok: bool, frontier: [] u8, error: Operation_Error) {
-	staging: Batch_Staging;
-	staging.model = model;
-	staging.storage = New(Pool);
+	storage := try_source_batch_pool();
+	if !storage {
+		return false, .[], .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	}
+
+
+	ok, frontier, error := apply_source_batch_with_storage(model, batch, storage);
+	return ok, frontier, error;
+}
+
+#scope_module
+
+apply_source_batch_with_storage :: (
+	model: *Provider_Model,
+	batch: Source_Batch,
+	storage: *Pool,
+	storage_allocator: Allocator = context.allocator,
+	state_allocator: Allocator = context.allocator,
+	revision_allocator: Allocator = context.allocator,
+	source_allocator: Allocator = context.allocator,
+	source_bytes_allocator: Allocator = context.allocator,
+	source_identity_allocator: Allocator = context.allocator,
+	edit_allocator: Allocator = context.allocator,
+	state_list_allocator: Allocator = context.allocator,
+	reference_list_allocator: Allocator = context.allocator,
+	context_list_allocator: Allocator = context.allocator,
+	path_allocator: Allocator = context.allocator
+) -> (ok: bool, frontier: [] u8, error: Operation_Error) {
+	staging := Batch_Staging.{
+		model = model,
+		storage = storage,
+		state_allocator = state_allocator,
+		revision_allocator = revision_allocator,
+		source_allocator = source_allocator,
+		source_bytes_allocator = source_bytes_allocator,
+		source_identity_allocator = source_identity_allocator,
+		edit_allocator = edit_allocator,
+		state_list_allocator = state_list_allocator,
+		reference_list_allocator = reference_list_allocator,
+		context_list_allocator = context_list_allocator,
+		path_allocator = path_allocator,
+	};
+
 	set_allocators(staging.storage);
+	paths_ok, paths := try_output_array(path_allocator, 4, Path_Step);
+	if !paths_ok {
+		discard_staging(*staging);
+		return false, .[], .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	}
+
+
+	staging.path.data = paths.data;
+	staging.path.allocated = paths.count;
+	staging.path.allocator = path_allocator;
 	ok := stage_batch(*staging, batch);
 	if !ok {
 		discard_staging(*staging);
 		return false, .[], staging.error;
+	}
+
+
+	if !try_source_batch_storage(model, storage_allocator) {
+		discard_staging(*staging);
+		return false, .[], .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
 	}
 
 
@@ -555,6 +611,21 @@ apply_source_batch :: (model: *Provider_Model, batch: Source_Batch) -> (ok: bool
 	return true, model.accepted_frontier, .{};
 }
 
+try_source_edit_size :: (current: s64, removed: s64, replacement: s64, capacity: s64) -> bool, s64 {
+	if current < 0 || removed < 0 || removed > current || replacement < 0 || capacity < 0 {
+		return false, 0;
+	}
+
+
+	retained := current - removed;
+	if replacement > capacity || retained > capacity - replacement {
+		return false, 0;
+	}
+
+
+	return true, retained + replacement;
+}
+
 #scope_file
 
 Batch_Staging :: struct {
@@ -565,6 +636,16 @@ Batch_Staging :: struct {
 	error: Operation_Error;
 	path: [..] Path_Step;
 	storage: *Pool;
+	state_allocator: Allocator;
+	revision_allocator: Allocator;
+	source_allocator: Allocator;
+	source_bytes_allocator: Allocator;
+	source_identity_allocator: Allocator;
+	edit_allocator: Allocator;
+	state_list_allocator: Allocator;
+	reference_list_allocator: Allocator;
+	context_list_allocator: Allocator;
+	path_allocator: Allocator;
 }
 
 release_document_sources :: (state: *Document_State) {
@@ -597,8 +678,19 @@ own :: (staging: *Batch_Staging, bytes: [] u8) -> [] u8 {
 }
 
 reject :: (staging: *Batch_Staging, code: Operation_Error_Code) -> bool {
+	ok, path := try_output_array(staging.path_allocator, staging.path.count, Path_Step);
+	if !ok {
+		staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		return false;
+	}
+
+
+	if path.count {
+		memcpy(path.data, staging.path.data, path.count * size_of(Path_Step));
+	}
+
 	staging.error.code = code;
-	staging.error.path = array_copy(staging.path);
+	staging.error.path = path;
 	return false;
 }
 
@@ -627,10 +719,41 @@ capability :: (staging: *Batch_Staging, schema: string) -> bool {
 	return reject(staging, .ADMISSION_DENIED);
 }
 
-new_source :: (bytes: [] u8) -> *Source_Backing {
-	backing := New(Source_Backing);
-	backing.bytes = array_copy(bytes);
-	backing.revision = source_revision_of(bytes);
+new_source :: (staging: *Batch_Staging, bytes: [] u8) -> *Source_Backing {
+	ok, storage := try_output_array(staging.source_allocator, 1, Source_Backing);
+	if !ok {
+		staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		return null;
+	}
+
+
+	backing := storage.data;
+	bytes_ok, copied := try_output_bytes(staging.source_bytes_allocator, bytes);
+	if !bytes_ok {
+		free(backing);
+		staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		return null;
+	}
+
+
+	version: [4] u8 = .[1, 0, 0, 0];
+	byte_count: [8] u8;
+	for 0..7 {
+		byte_count[it] = xx ((bytes.count >> (8 * it)) & 0xFF);
+	}
+
+	digest := digest_128(bytes);
+	identity_ok, identity := try_output_key(staging.source_identity_allocator, "source", version, byte_count, digest.bytes);
+	if !identity_ok {
+		free(copied.data);
+		free(backing);
+		staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		return null;
+	}
+
+
+	backing.bytes = copied;
+	backing.revision = identity;
 	backing.references = 1;
 	return backing;
 }
@@ -673,9 +796,19 @@ stage_batch :: (staging: *Batch_Staging, batch: Source_Batch) -> bool {
 	}
 
 
+	contexts_ok, contexts := try_output_array(staging.context_list_allocator, batch.contexts.count, Admitted_Context);
+	if !contexts_ok {
+		staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		return false;
+	}
+
+
+	staging.contexts.data = contexts.data;
+	staging.contexts.allocated = contexts.count;
+	staging.contexts.allocator = staging.context_list_allocator;
 	for registration: batch.contexts {
 		array_add(*staging.path, .{kind = .FIELD, name = "contexts"}, .{kind = .ELEMENT, index = it_index});
-		failure, admitted := admit_context(registration.identity, registration.descriptor);
+		failure, admitted := admit_context(registration.identity, registration.descriptor,, Allocator.{pool_allocator_proc, staging.storage});
 		if failure != .NONE {
 			return argument(staging, .INVALID_ENCODING);
 		}
@@ -696,6 +829,24 @@ stage_batch :: (staging: *Batch_Staging, batch: Source_Batch) -> bool {
 	}
 
 
+	states_ok, states := try_output_array(staging.state_list_allocator, batch.events.count, *Document_State);
+	if !states_ok {
+		staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		return false;
+	}
+
+
+	staging.states.data = states.data;
+	staging.states.allocated = states.count;
+	staging.states.allocator = staging.state_list_allocator;
+	references_ok, references := try_source_batch_references(batch.events.count, staging.reference_list_allocator);
+	if !references_ok {
+		staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		return false;
+	}
+
+
+	staging.referenced_contexts = references;
 	tracked_count := model.documents.count;
 	for event, event_index: batch.events {
 		array_add(*staging.path, .{kind = .FIELD, name = "events"}, .{kind = .ELEMENT, index = event_index});
@@ -795,7 +946,7 @@ stage_source :: (staging: *Batch_Staging, input: Source_Input, names: .. string)
 	}
 
 
-	return new_source(input.bytes);
+	return new_source(staging, input.bytes);
 }
 
 valid_provenance :: (staging: *Batch_Staging, provenance: Observation_Provenance) -> bool {
@@ -912,6 +1063,56 @@ install_overlay :: (staging: *Batch_Staging, state: *Document_State, source: *So
 	};
 }
 
+stage_edited_source :: (staging: *Batch_Staging, source: *Source_Backing, edits: [] Range_Edit) -> *Source_Backing {
+	current := source.bytes;
+	owned: [] u8;
+	defer free(owned.data);
+
+	for edit: edits {
+		if edit.start_byte > edit.end_byte || edit.end_byte > xx current.count {
+			array_add(*staging.path, .{kind = .FIELD, name = "edits"}, .{kind = .ELEMENT, index = it_index});
+			argument(staging, .OUT_OF_RANGE);
+			return null;
+		}
+
+
+		removed := (edit.end_byte - edit.start_byte).(s64);
+		size_ok, size := try_source_edit_size(current.count, removed, edit.replacement.count, staging.model.limits.values[Limit_Name.SOURCE_BYTES]);
+		if !size_ok {
+			limit(staging, .SOURCE_BYTES);
+			return null;
+		}
+
+
+		ok, next := try_output_array(staging.edit_allocator, size, u8);
+		if !ok {
+			staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+			return null;
+		}
+
+
+		start := edit.start_byte.(s64);
+		if start {
+			memcpy(next.data, current.data, start);
+		}
+
+		if edit.replacement.count {
+			memcpy(next.data + start, edit.replacement.data, edit.replacement.count);
+		}
+
+		tail := current.count - edit.end_byte.(s64);
+		if tail {
+			memcpy(next.data + start + edit.replacement.count, current.data + edit.end_byte.(s64), tail);
+		}
+
+		free(owned.data);
+		owned = next;
+		current = next;
+	}
+
+	return new_source(staging, current);
+}
+
 stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Document_State) -> bool {
 	model := staging.model;
 	if event.kind == .RENAME {
@@ -988,11 +1189,24 @@ stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Docum
 
 
 	// Stage a private copy of the tracked state; the model is untouched until commit.
-	state := New(Document_State);
+	state_ok, state_storage := try_output_array(staging.state_allocator, 1, Document_State);
+	if !state_ok {
+		staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		return false;
+	}
+
+
+	state := state_storage.data;
+	state.* = .{};
 	array_add(*staging.states, state);
+	revisions_ok, used_revisions := try_source_batch_revisions(existing, staging.revision_allocator);
+	if !revisions_ok {
+		staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		return false;
+	}
+
+
 	if existing {
-		used_revisions: [..] [] u8;
-		array_add(*used_revisions, ..existing.used_revisions);
 		state.* = existing.*;
 		state.used_revisions = used_revisions;
 		if state.disk.source {
@@ -1003,6 +1217,7 @@ stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Docum
 			retain_source(state.overlay.source);
 		}
 	} else {
+		state.used_revisions = used_revisions;
 		state.document = own(staging, event.document);
 		state.binding = event.binding.*;
 		state.binding.document = state.document;
@@ -1040,31 +1255,14 @@ stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Docum
 			}
 
 
-			// Each edit's range applies to the intermediate result of the edits before it.
-			current := array_copy(state.overlay.source.bytes,, temp);
-			for edit: event.edits {
-				if edit.start_byte > edit.end_byte || edit.end_byte > xx current.count {
-					array_add(*staging.path, .{kind = .FIELD, name = "edits"}, .{kind = .ELEMENT, index = it_index});
-					return argument(staging, .OUT_OF_RANGE);
-				}
-
-
-				removed := (edit.end_byte - edit.start_byte).(s64);
-				if current.count - removed > model.limits.values[Limit_Name.SOURCE_BYTES] - edit.replacement.count {
-					return limit(staging, .SOURCE_BYTES);
-				}
-
-
-				next := NewArray(current.count - removed + edit.replacement.count, u8,, temp);
-				start := edit.start_byte.(s64);
-				memcpy(next.data, current.data, start);
-				memcpy(next.data + start, edit.replacement.data, edit.replacement.count);
-				memcpy(next.data + start + edit.replacement.count, current.data + edit.end_byte.(s64), current.count - edit.end_byte.(s64));
-				current = next;
+			origin := state.overlay.origin;
+			source := stage_edited_source(staging, state.overlay.source, event.edits);
+			if !source {
+				return false;
 			}
 
-			origin := state.overlay.origin;
-			install_overlay(staging, state, new_source(current), event, origin);
+
+			install_overlay(staging, state, source, event, origin);
 
 		case .OBSERVE_DISK;
 			if !stage_disk(staging, state, event.disk, event.resulting_provider_revision) {

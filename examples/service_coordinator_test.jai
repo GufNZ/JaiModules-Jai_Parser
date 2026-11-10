@@ -16,7 +16,7 @@ main :: () {
 	test_analysis_requests();
 	test_shutdown_and_limits();
 	test_negative_controls();
-	print("Service coordinator PASS.\n");
+	print("Service coordinator \e[92mPASS\e[0m.\n");
 }
 
 new_service :: () -> *Service.Service {
@@ -75,7 +75,7 @@ open :: (session_options: Service.Session_Options) -> Fixture {
 	fixture: Fixture;
 	fixture.service = new_service();
 	ok, opened, error := Service.open_session(fixture.service, session_options);
-	assert(ok, "OpenSession failed: %.", error);
+	assert(ok, "\e[91mOpenSession failed: %.\e[0m", error);
 	fixture.handle = opened.session;
 	fixture.session = Service.session_of(fixture.service, opened.session);
 	return fixture;
@@ -115,25 +115,25 @@ set_text :: (fixture: *Fixture, key: string, text: string) -> Service.Handle(.TI
 		events = .[event],
 	};
 	ok, accepted, error := Service.submit_source_batch(fixture.service, fixture.handle, batch);
-	assert(ok, "SubmitSourceBatch failed: %.", error);
+	assert(ok, "\e[91mSubmitSourceBatch failed: %.\e[0m", error);
 	return accepted.ticket, accepted.frontier;
 }
 
 world_of :: (fixture: *Fixture, ticket: Service.Handle(.TICKET)) -> Service.Handle(.WORLD) {
 	ok, acquisition := Service.acquire_world(fixture.service, .{kind = .PUBLISHED_UPDATE, ticket = ticket});
-	assert(ok && acquisition.kind == .ACQUIRED, "AcquireWorld: %.", acquisition.kind);
+	assert(ok && acquisition.kind == .ACQUIRED, "\e[91mAcquireWorld: %.\e[0m", acquisition.kind);
 	return acquisition.world;
 }
 
 query :: (fixture: *Fixture, world: Service.Handle(.WORLD), key: string, kind: Service.Query_Kind) -> Service.Query_Start {
 	ok, start, error := Service.query(fixture.service, .{version = Service.INTERFACE_VERSION, world = world, document = doc(key), kind = kind});
-	assert(ok, "Query failed: %.", error);
+	assert(ok, "\e[91mQuery failed: %.\e[0m", error);
 	return start;
 }
 
 release :: (fixture: *Fixture, handle: Service.Handle($K)) {
 	ok, error := Service.release(fixture.service, handle);
-	assert(ok, "Release failed: %.", error);
+	assert(ok, "\e[91mRelease failed: %.\e[0m", error);
 }
 
 // After shutdown and every child release, only the `.SESSION` registration is still charged.
@@ -141,24 +141,24 @@ close :: (fixture: *Fixture) {
 	ok, shutdown := Service.request_shutdown(fixture.service, fixture.handle);
 	assert(ok);
 	_, observation := Service.poll(fixture.service, shutdown);
-	assert(observation.kind == .SHUTDOWN, "Shutdown still pending: %.", observation.phase);
+	assert(observation.kind == .SHUTDOWN, "\e[91mShutdown still pending: %.\e[0m", observation.phase);
 	release(fixture, shutdown);
 	ledger := fixture.session.ledger;
 	for ledger.live {
 		expected := ifx it_index.(Service.Limit_Name) == .LIVE_HANDLES then 1;
-		assert(it == expected && !ledger.reserved[it_index], "Ledger % holds % live, % reserved.", it_index.(Service.Limit_Name), it, ledger.reserved[it_index]);
+		assert(it == expected && !ledger.reserved[it_index], "\e[91mLedger % holds % live, % reserved.\e[0m", it_index.(Service.Limit_Name), it, ledger.reserved[it_index]);
 	}
 
 	release(fixture, fixture.handle);
-	assert(!Service.session_of(fixture.service, fixture.handle), "The session survived its final release.");
+	assert(!Service.session_of(fixture.service, fixture.handle), "\e[91mThe session survived its final release.\e[0m");
 }
 
 test_open_session :: () {
 	service := new_service();
 	expect :: (service: *Service.Service, session_options: Service.Session_Options, code: Service.Operation_Error_Code, what: string) {
 		ok, _, error := Service.open_session(service, session_options);
-		assert(!ok && error.code == code, "%: expected %, got %.", what, code, error.code);
-		assert(!service.sessions.count, "%: a partial session escaped.", what);
+		assert(!ok && error.code == code, "\e[91m%: expected %, got %.\e[0m", what, code, error.code);
+		assert(!service.sessions.count, "\e[91m%: a partial session escaped.\e[0m", what);
 	}
 
 	wrong_version := options();
@@ -196,7 +196,7 @@ test_open_session :: () {
 	release_ok, error := Service.release(fixture.service, fixture.handle);
 	assert(!release_ok && error.code == .ACTIVE_SESSION);
 	close(*fixture);
-	print("Open session PASS\n");
+	print("Open session \e[92mPASS\e[0m\n");
 }
 
 // T1: capture A, edit to B, await B's milestone and query it; A's leased results stay unchanged.
@@ -229,32 +229,32 @@ test_edit_and_query :: () {
 
 	// An index result resolves its node references through its own backing, with no snapshot query held.
 	node_ok, node := Service.resolve_node(fixture.service, index.result, index_description.index.entries[0].declaration_node_id);
-	assert(node_ok && node.kind == "DECLARATION", "Resolved %.", node.kind);
+	assert(node_ok && node.kind == "DECLARATION", "\e[91mResolved %.\e[0m", node.kind);
 	token_ok, token := Service.resolve_token(fixture.service, index.result, 0);
 	assert(token_ok && token == *index_description.index.snapshot.tokens[0]);
 	no_node := Service.resolve_node(fixture.service, index.result, 1000);
 	no_token := Service.resolve_token(fixture.service, index.result, 1000);
 	no_recovery := Service.resolve_recovery(fixture.service, index.result, 0);
-	assert(!no_node && !no_token && !no_recovery, "An out-of-range reference resolved.");
+	assert(!no_node && !no_token && !no_recovery, "\e[91mAn out-of-range reference resolved.\e[0m");
 
 	// Observations and descriptions are caller-owned copies: changing one leaves the next unchanged.
 	_, mine := Service.poll(fixture.service, waiter_a);
 	mine.operation_identity[0] ^= 0xFF;
 	_, fresh := Service.poll(fixture.service, waiter_a);
-	assert(!same(mine.operation_identity, fresh.operation_identity), "An observation borrowed session storage.");
+	assert(!same(mine.operation_identity, fresh.operation_identity), "\e[91mAn observation borrowed session storage.\e[0m");
 	Service.free_observation(*mine);
 	Service.free_observation(*fresh);
 	_, described := Service.describe_session(fixture.service, fixture.handle);
 	described.accepted_frontier[0] ^= 0xFF;
-	assert(!Service.bytes_equal(described.accepted_frontier, fixture.session.provider.accepted_frontier), "A description borrowed session storage.");
+	assert(!Service.bytes_equal(described.accepted_frontier, fixture.session.provider.accepted_frontier), "\e[91mA description borrowed session storage.\e[0m");
 
 	semantic := query(*fixture, world_a, "main", .SEMANTIC_QUERY);
-	assert(semantic.kind == .TERMINAL && semantic.observation.query.kind == .UNSUPPORTED && !fixture.session.ready.count, "Unsupported queries create no task.");
+	assert(semantic.kind == .TERMINAL && semantic.observation.query.kind == .UNSUPPORTED && !fixture.session.ready.count, "\e[91mUnsupported queries create no task.\e[0m");
 
 	_, records := Service.drain_completions(fixture.service, fixture.handle, 10);
 	assert(records.count == 1 && records[0].registration.slot == waiter_a.slot && records[0].observation.update.kind == .PUBLISHED);
 	_, again := Service.drain_completions(fixture.service, fixture.handle, 10);
-	assert(!again.count, "A completion was delivered twice.");
+	assert(!again.count, "\e[91mA completion was delivered twice.\e[0m");
 
 	ticket_b, frontier_b := set_text(*fixture, "main", "b :: 2;\nc :: 3;");
 	head_ok, head := Service.acquire_world(fixture.service, .{kind = .HEAD, session = fixture.handle, workspace = xx WORKSPACE, expected_frontier = frontier_b});
@@ -268,7 +268,7 @@ test_edit_and_query :: () {
 	snapshot_b := query(*fixture, head.world, "main", .SYNTAX_SNAPSHOT);
 	_, description_b := Service.read_result(fixture.service, snapshot_b.result);
 	_, description = Service.read_result(fixture.service, snapshot_a.result);
-	assert(description_b.snapshot.source == "b :: 2;\nc :: 3;" && description.snapshot.source == "a :: 1;", "A changed after B was published.");
+	assert(description_b.snapshot.source == "b :: 2;\nc :: 3;" && description.snapshot.source == "a :: 1;", "\e[91mA changed after B was published.\e[0m");
 
 	// A retained result outlives its world and ticket registrations.
 	release(*fixture, world_a);
@@ -277,7 +277,7 @@ test_edit_and_query :: () {
 	_, description = Service.read_result(fixture.service, snapshot_a.result);
 	assert(description.snapshot.source == "a :: 1;");
 	twice_ok, twice := Service.release(fixture.service, waiter_a);
-	assert(!twice_ok && twice.code == .INVALID_HANDLE, "Double release was accepted.");
+	assert(!twice_ok && twice.code == .INVALID_HANDLE, "\e[91mDouble release was accepted.\e[0m");
 
 	release(*fixture, snapshot_a.result);
 	release(*fixture, index.result);
@@ -285,7 +285,7 @@ test_edit_and_query :: () {
 	release(*fixture, head.world);
 	release(*fixture, ticket_b);
 	close(*fixture);
-	print("Edit and query PASS\n");
+	print("Edit and query \e[92mPASS\e[0m\n");
 }
 
 // T6: two waiters share one diagnostics task; the cancelled one gets no payload and a duplicate completion is rejected.
@@ -299,19 +299,19 @@ test_shared_waiters :: () {
 	lone := query(*fixture, world, "main", .SYNTAX_DIAGNOSTICS);
 	assert(lone.kind == .PENDING && fixture.session.ready.count == 1);
 	release(*fixture, lone.waiter);
-	assert(!fixture.session.ready.count, "Unconsumed queued work survived.");
+	assert(!fixture.session.ready.count, "\e[91mUnconsumed queued work survived.\e[0m");
 
 	first := query(*fixture, world, "main", .SYNTAX_DIAGNOSTICS);
 	second := query(*fixture, world, "main", .SYNTAX_DIAGNOSTICS);
-	assert(first.kind == .PENDING && second.kind == .PENDING && fixture.session.ready.count == 1, "Equivalent queries did not share one task.");
+	assert(first.kind == .PENDING && second.kind == .PENDING && fixture.session.ready.count == 1, "\e[91mEquivalent queries did not share one task.\e[0m");
 
 	ok, cancelled := Service.cancel_waiter(fixture.service, first.waiter);
 	assert(ok && !cancelled.already_terminal && cancelled.observation.query.cancellation == .CALLER);
-	assert(fixture.session.ready.count == 1, "Cancelling one consumer removed shared work.");
+	assert(fixture.session.ready.count == 1, "\e[91mCancelling one consumer removed shared work.\e[0m");
 
 	mailbox := Service.executor_dispatch(fixture.session);
 	assert(Service.executor_deliver(fixture.session, mailbox) == .PUBLISHED);
-	assert(Service.executor_deliver(fixture.session, mailbox) == .REJECTED, "A duplicate completion was accepted.");
+	assert(Service.executor_deliver(fixture.session, mailbox) == .REJECTED, "\e[91mA duplicate completion was accepted.\e[0m");
 
 	_, acquired := Service.acquire_result(fixture.service, second.waiter);
 	assert(acquired.kind == .ACQUIRED);
@@ -320,7 +320,7 @@ test_shared_waiters :: () {
 	assert(description.diagnostics_status.error_count > 0);
 
 	_, late := Service.acquire_result(fixture.service, first.waiter);
-	assert(late.kind == .TERMINAL && late.observation.query.kind == .CANCELLED, "The cancelled waiter received a payload.");
+	assert(late.kind == .TERMINAL && late.observation.query.kind == .CANCELLED, "\e[91mThe cancelled waiter received a payload.\e[0m");
 	_, recancel := Service.cancel_waiter(fixture.service, second.waiter);
 	assert(recancel.already_terminal && recancel.observation.query.kind == .AVAILABLE);
 
@@ -329,7 +329,7 @@ test_shared_waiters :: () {
 	assert(third.kind == .AVAILABLE && !fixture.session.ready.count);
 
 	_, records := Service.drain_completions(fixture.service, fixture.handle, 10);
-	assert(records.count == 2 && records[0].observation.query.kind == .CANCELLED && records[1].observation.query.kind == .AVAILABLE, "Completions out of commit order.");
+	assert(records.count == 2 && records[0].observation.query.kind == .CANCELLED && records[1].observation.query.kind == .AVAILABLE, "\e[91mCompletions out of commit order.\e[0m");
 
 
 	release(*fixture, first.waiter);
@@ -340,7 +340,7 @@ test_shared_waiters :: () {
 	release(*fixture, ticket);
 	Service.executor_run(fixture.session);
 	close(*fixture);
-	print("Shared waiters PASS\n");
+	print("Shared waiters \e[92mPASS\e[0m\n");
 }
 
 // T7: newer source supersedes B's unfinished work and pending waiters; B's published results stay readable and nothing is reissued.
@@ -365,14 +365,14 @@ test_supersession :: () {
 	_, c1 := Service.poll(fixture.service, ticket_c1);
 	_, c2 := Service.poll(fixture.service, ticket_c2);
 	assert(c1.kind == .UPDATE && c1.update.kind == .SUPERSEDED && same(c1.update.successor, c2.operation_identity));
-	assert(c2.kind == .PENDING && fixture.session.ready.count == 1, "The superseded candidate is still queued.");
+	assert(c2.kind == .PENDING && fixture.session.ready.count == 1, "\e[91mThe superseded candidate is still queued.\e[0m");
 
-	assert(Service.executor_deliver(fixture.session, running) == .DISCARDED, "A late obsolete-world result was published.");
+	assert(Service.executor_deliver(fixture.session, running) == .DISCARDED, "\e[91mA late obsolete-world result was published.\e[0m");
 	assert(!fixture.session.worlds[0].syntax[0].diagnostics);
 	late := query(*fixture, world_b, "main", .SYNTAX_DIAGNOSTICS);
 	assert(late.kind == .TERMINAL && late.observation.query.cancellation == .WORLD_SUPERSEDED && fixture.session.ready.count == 1);
 	kept := query(*fixture, world_b, "main", .SYNTAX_SNAPSHOT);
-	assert(kept.kind == .AVAILABLE, "B's published syntax became unreadable.");
+	assert(kept.kind == .AVAILABLE, "\e[91mB's published syntax became unreadable.\e[0m");
 
 	Service.executor_run(fixture.session);
 	_, c2 = Service.poll(fixture.service, ticket_c2);
@@ -389,7 +389,7 @@ test_supersession :: () {
 	}
 
 	close(*fixture);
-	print("Supersession PASS\n");
+	print("Supersession \e[92mPASS\e[0m\n");
 }
 
 test_analysis_requests :: () {
@@ -408,7 +408,7 @@ test_analysis_requests :: () {
 	assert(ok && Service.bytes_equal(joined.frontier, frontier));
 	_, observation := Service.poll(fixture.service, joined.ticket);
 	assert(observation.kind == .UPDATE && same(observation.update.world_identity, published.update.world_identity) && !fixture.session.ready.count);
-	assert(!same(observation.operation_identity, published.operation_identity), "A joined request reused another caller's operation.");
+	assert(!same(observation.operation_identity, published.operation_identity), "\e[91mA joined request reused another caller's operation.\e[0m");
 
 	error: Service.Operation_Error;
 	ok, _, error = request(*fixture, .[1, 2, 3], doc("main"));
@@ -419,12 +419,12 @@ test_analysis_requests :: () {
 	assert(!ok && error.rule == .INCONSISTENT_BINDING);
 	ok, _, error = request(*fixture, frontier);
 	assert(!ok && error.rule == .MISSING);
-	assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, frontier), "Analysis advanced the frontier.");
+	assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, frontier), "\e[91mAnalysis advanced the frontier.\e[0m");
 
 	release(*fixture, joined.ticket);
 	release(*fixture, ticket);
 	close(*fixture);
-	print("Analysis requests PASS\n");
+	print("Analysis requests \e[92mPASS\e[0m\n");
 }
 
 // The first shutdown uses its reserved slot at full capacity, and `.STOPPED` waits for the running producer.
@@ -452,11 +452,11 @@ test_shutdown_and_limits :: () {
 	};
 	ok, _, error := Service.submit_source_batch(fixture.service, fixture.handle, batch);
 	assert(!ok && error.code == .ADMISSION_DENIED && error.admission.limit == .LIVE_HANDLES);
-	assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, frontier), "A rejected submission advanced the frontier.");
+	assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, frontier), "\e[91mA rejected submission advanced the frontier.\e[0m");
 
 	running := Service.executor_dispatch(fixture.session);
 	shutdown_ok, shutdown := Service.request_shutdown(fixture.service, fixture.handle);
-	assert(shutdown_ok, "The reserved shutdown slot was unavailable at full capacity.");
+	assert(shutdown_ok, "\e[91mThe reserved shutdown slot was unavailable at full capacity.\e[0m");
 	repeat_ok, _, repeat_error := Service.request_shutdown(fixture.service, fixture.handle);
 	assert(!repeat_ok && repeat_error.admission.limit == .LIVE_HANDLES);
 
@@ -470,7 +470,7 @@ test_shutdown_and_limits :: () {
 	_, waited := Service.wait(fixture.service, shutdown, deadline);
 	assert(waited.timed_out && waited.observation.phase == .DRAINING && fixture.session.now == 1000);
 	foreign_ok := Service.wait(fixture.service, shutdown, .{clock_identity = xx "other-clock", nanoseconds = 2000});
-	assert(!foreign_ok, "A foreign clock was accepted.");
+	assert(!foreign_ok, "\e[91mA foreign clock was accepted.\e[0m");
 
 	assert(Service.executor_deliver(fixture.session, running) == .DISCARDED);
 	_, stopped := Service.poll(fixture.service, shutdown);
@@ -480,7 +480,7 @@ test_shutdown_and_limits :: () {
 	release(*fixture, observed.waiter);
 	release(*fixture, ticket);
 	close(*fixture);
-	print("Shutdown and limits PASS\n");
+	print("Shutdown and limits \e[92mPASS\e[0m\n");
 }
 
 // Each fault removes one safeguard, and the scenario guarding it must notice before releasing its owners.
@@ -504,15 +504,15 @@ test_negative_controls :: () {
 	}
 
 	// Either the stop request or the publication frontier check alone keeps a late obsolete result out.
-	assert(late_delivery(.{skip_running_stop = true, keep_unconsumed_work = true}) == .DISCARDED, "The publication frontier check alone let a late result through.");
-	assert(late_delivery(.{skip_publication_frontier_check = true, keep_unconsumed_work = true}) == .DISCARDED, "The stop request alone let a late result through.");
-	assert(late_delivery(.{skip_running_stop = true, skip_publication_frontier_check = true}) == .DISCARDED, "Unconsumed output was retained.");
+	assert(late_delivery(.{skip_running_stop = true, keep_unconsumed_work = true}) == .DISCARDED, "\e[91mThe publication frontier check alone let a late result through.\e[0m");
+	assert(late_delivery(.{skip_publication_frontier_check = true, keep_unconsumed_work = true}) == .DISCARDED, "\e[91mThe stop request alone let a late result through.\e[0m");
+	assert(late_delivery(.{skip_running_stop = true, skip_publication_frontier_check = true}) == .DISCARDED, "\e[91mUnconsumed output was retained.\e[0m");
 	all_disabled := late_delivery(.{
 		skip_running_stop = true,
 		skip_publication_frontier_check = true,
 		keep_unconsumed_work = true,
 	});
-	assert(all_disabled == .PUBLISHED, "Control undetected: a late obsolete result was not published without its safeguards.");
+	assert(all_disabled == .PUBLISHED, "\e[91mControl undetected: a late obsolete result was not published without its safeguards.\e[0m");
 
 	unconsumed := open();
 	unconsumed.session.faults.keep_unconsumed_work = true;
@@ -521,7 +521,7 @@ test_negative_controls :: () {
 	world := world_of(*unconsumed, ticket);
 	lone := query(*unconsumed, world, "main", .SYNTAX_DIAGNOSTICS);
 	release(*unconsumed, lone.waiter);
-	assert(unconsumed.session.ready.count == 1, "Control undetected: queued work was removed without the last-consumer rule.");
+	assert(unconsumed.session.ready.count == 1, "\e[91mControl undetected: queued work was removed without the last-consumer rule.\e[0m");
 	release(*unconsumed, world);
 	release(*unconsumed, ticket);
 	close(*unconsumed);
@@ -533,9 +533,9 @@ test_negative_controls :: () {
 	full.session.faults.shutdown_from_ordinary_capacity = true;
 	full_ticket := set_text(*full, "main", "a :: 1;");
 	shutdown_ok := Service.request_shutdown(full.service, full.handle);
-	assert(!shutdown_ok, "Control undetected: shutdown from ordinary capacity succeeded at full capacity.");
+	assert(!shutdown_ok, "\e[91mControl undetected: shutdown from ordinary capacity succeeded at full capacity.\e[0m");
 	full.session.faults.shutdown_from_ordinary_capacity = false;
 	release(*full, full_ticket);
 	close(*full);
-	print("Negative controls PASS\n");
+	print("Negative controls \e[92mPASS\e[0m\n");
 }

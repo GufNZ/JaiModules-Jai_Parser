@@ -174,7 +174,7 @@ get_differential_arguments :: () -> [] string {
 
 COMPILED_SECTION :: #run -> string {
 	arguments := get_differential_arguments();
-	assert(arguments.count <= 1 || arguments.count == 3, "Pass a section after '-', optionally followed by first and last fixture indices.");
+	assert(arguments.count <= 1 || arguments.count == 3, "\e[91mPass a section after '-', optionally followed by first and last fixture indices.\e[0m");
 	if arguments.count {
 		return arguments[0];
 	}
@@ -197,7 +197,7 @@ COMPILED_BATCH :: #run -> Differential_Batch {
 
 	first, first_valid, first_remainder := string_to_int(arguments[1], T = s64);
 	last, last_valid, last_remainder := string_to_int(arguments[2], T = s64);
-	assert(first_valid && last_valid && !first_remainder && !last_remainder && first >= 1 && last >= first, "Invalid fixture batch bounds.");
+	assert(first_valid && last_valid && !first_remainder && !last_remainder && first >= 1 && last >= first, "\e[91mInvalid fixture batch bounds.\e[0m");
 	return .{first = first, last = last};
 };
 
@@ -229,11 +229,11 @@ previous_assertion_handler: (Source_Code_Location, string) -> bool;
 differential_assertion_failed :: (location: Source_Code_Location, message: string) -> bool {
 	differential_progress.failed = true;
 	print_differential_test();
-	print("\e[91mFAIL\e[0m\n");
+	print("FAIL\n");
 	if !retain_differential_fixture() {
 		print("Unable to save failed fixture.\n");
 	} else if differential_progress.fixture_path {
-		print("\e[93mRetained fixture: %\e[0m\n", differential_progress.fixture_path);
+		print("Retained fixture: %\n", differential_progress.fixture_path);
 	}
 
 	return previous_assertion_handler(location, message);
@@ -241,7 +241,7 @@ differential_assertion_failed :: (location: Source_Code_Location, message: strin
 
 print_differential_test :: () {
 	print(
-		"%\e[90m[\e[91m%\e[90m/\e[91m%\e[90m]\e[0m \e[96m%\e[0m \e[93m%/%\e[0m \e[90m(total\e[0m \e[92m%\e[34m/\e[92m%\e[0m\e[90m)\e[0m: ",
+		"%[%/%] % %/% (total %/%): ",
 		CLEAR_PROGRESS_LINE,
 		differential_progress.section_index,
 		DIFFERENTIAL_SECTION_TOTAL,
@@ -284,12 +284,12 @@ prepare_differential_run :: (selection: string) -> bool {
 	for section, index: DIFFERENTIAL_SECTIONS {
 		if selection == "list" {
 			padding := string.{count = maxNameLen - section.name.count + 1, data = PADDING.data};
-			print("\e[36m%\e[0m: %%(% tests)\n", FormatInt.{value = index + 1, minimum_digits = 2, padding = 32}, section.name, padding, FormatInt.{value = section.total, minimum_digits = 3, padding = 32});
+			print("%: %%(% tests)\n", FormatInt.{value = index + 1, minimum_digits = 2, padding = 32}, section.name, padding, FormatInt.{value = section.total, minimum_digits = 3, padding = 32});
 			differential_progress.global_total += section.total;
 		} else if section_is_selected(selection, section.name, index + 1) {
 			if COMPILED_BATCH.last {
-				assert(selection && selection != "all" && section.batchable, "Fixture batches require one explicitly selected batchable section.");
-				assert(COMPILED_BATCH.last <= section.total, "Fixture batch exceeds the section total.");
+				assert(selection && selection != "all" && section.batchable, "\e[91mFixture batches require one explicitly selected batchable section.\e[0m");
+				assert(COMPILED_BATCH.last <= section.total, "\e[91mFixture batch exceeds the section total.\e[0m");
 				differential_progress.global_total += COMPILED_BATCH.last - COMPILED_BATCH.first + 1;
 			} else {
 				differential_progress.global_total += section.total;
@@ -303,7 +303,7 @@ prepare_differential_run :: (selection: string) -> bool {
 	}
 
 
-	assert(differential_progress.global_total > 0, "Unknown section '%'.  Use '- list' to list sections.", selection);
+	assert(differential_progress.global_total > 0, "\e[91mUnknown section '%'.  Use '- list' to list sections.\e[0m", selection);
 	return true;
 }
 
@@ -334,7 +334,7 @@ finish_differential_section :: () {
 	assert(differential_progress.test_depth == 0);
 	assert(
 		differential_progress.test_index == differential_progress.test_total,
-		"Section '%' ran % tests, expected %.  Update its total.",
+		"\e[91mSection '%' ran % tests, expected %.  Update its total.\e[0m",
 		differential_progress.section_name,
 		differential_progress.test_index,
 		differential_progress.test_total
@@ -370,7 +370,7 @@ begin_differential_test :: () -> bool {
 		differential_progress.test_index += 1;
 		differential_progress.global_index += 1;
 
-		assert(differential_progress.test_index <= differential_progress.test_total, "Section '%' exceeded its total %.  Update its total.", differential_progress.section_name, differential_progress.test_total);
+		assert(differential_progress.test_index <= differential_progress.test_total, "\e[91mSection '%' exceeded its total %.  Update its total.\e[0m", differential_progress.section_name, differential_progress.test_total);
 		print_differential_test();
 	}
 
@@ -423,7 +423,7 @@ delete_differential_build_artifact :: (info: *File_Visit_Info, stem: string) {
 
 	for artifact_extension: string.["exe", "rdi", "obj", "lib", "exp", "pdb", "ilk", "o", "a", "dll", "so", "dylib"] {
 		if extension == artifact_extension {
-			assert(file_delete(info.full_name), "Unable to remove successful fixture build artifact '%'.", info.full_name);
+			assert(file_delete(info.full_name), "\e[91mUnable to remove successful fixture build artifact '%'.\e[0m", info.full_name);
 			return;
 		}
 	}
@@ -510,7 +510,7 @@ main :: () {
 	begin_differential_test();
 	structural_temporary_bytes := context.temporary_storage.total_bytes_occupied;
 	test_structural_difference_reporting();
-	assert(context.temporary_storage.total_bytes_occupied == structural_temporary_bytes, "Structural comparison retained temporary storage.");
+	assert(context.temporary_storage.total_bytes_occupied == structural_temporary_bytes, "\e[91mStructural comparison retained temporary storage.\e[0m");
 	finish_differential_test();
 	#if CHECK_DIFFERENTIAL_MEMORY {
 		differential_memory_checkpoint("structural differences", *checkpoint_allocations, *checkpoint_bytes);
@@ -518,7 +518,7 @@ main :: () {
 	begin_differential_test();
 	layers_temporary_bytes := context.temporary_storage.total_bytes_occupied;
 	test_comparison_layers();
-	assert(context.temporary_storage.total_bytes_occupied == layers_temporary_bytes, "Comparison layers retained temporary storage.");
+	assert(context.temporary_storage.total_bytes_occupied == layers_temporary_bytes, "\e[91mComparison layers retained temporary storage.\e[0m");
 	finish_differential_test();
 	#if CHECK_DIFFERENTIAL_MEMORY {
 		differential_memory_checkpoint("comparison layers", *checkpoint_allocations, *checkpoint_bytes);
@@ -580,7 +580,7 @@ JAI
 	differential_memory_checkpoint :: (name: string, allocations: *s64, bytes: *s64) {
 		after_allocations, after_bytes := differential_memory_snapshot();
 		print("% retained: % allocations, % bytes\n", name, after_allocations - allocations.*, after_bytes - bytes.*);
-		assert(after_allocations == allocations.* && after_bytes == bytes.*, "Runtime check '%' retained fixture allocations.", name);
+		assert(after_allocations == allocations.* && after_bytes == bytes.*, "\e[91mRuntime check '%' retained fixture allocations.\e[0m", name);
 		allocations.* = after_allocations;
 		bytes.* = after_bytes;
 	}
@@ -648,7 +648,7 @@ test_fixture_temporary_reset :: () {
 	assert(outer_text == "fixture parent 42");
 	#if CHECK_DIFFERENTIAL_MEMORY {
 		after_allocations, after_bytes := differential_memory_snapshot();
-		assert(after_allocations == before_allocations && after_bytes == before_bytes, "Fixture temporary reset retained an overflow page.");
+		assert(after_allocations == before_allocations && after_bytes == before_bytes, "\e[91mFixture temporary reset retained an overflow page.\e[0m");
 	}
 }
 
@@ -688,7 +688,7 @@ test_differential_runner :: () {
 
 	neighbor_path := join(".build/", stem, "0.obj",, temp);
 	unrelated_path := tprint("%.txt", stem);
-	assert(path_strip_extension(path_filename(neighbor_path)) != stem, "Neighbor fixture path '%' has the same stem '%'.", neighbor_path, stem);
+	assert(path_strip_extension(path_filename(neighbor_path)) != stem, "\e[91mNeighbor fixture path '%' has the same stem '%'.\e[0m", neighbor_path, stem);
 	assert(write_entire_file(neighbor_path, "unrelated fixture artifact"));
 	assert(write_entire_file(unrelated_path, "not a build artifact"));
 	defer file_delete(neighbor_path);
@@ -699,38 +699,38 @@ test_differential_runner :: () {
 	compiler_source, compiler_exists := read_entire_file(compiler_path, log_errors = false);
 	defer free(compiler_source);
 
-	assert(compiler_exists && compiler_source == invalid_source, "Completed diagnostic fixture was not retained for a caller failure.");
+	assert(compiler_exists && compiler_source == invalid_source, "\e[91mCompleted diagnostic fixture was not retained for a caller failure.\e[0m");
 
 	for artifact_path: artifact_paths {
-		assert(file_exists(artifact_path), "Failed fixture build artifact was not retained: %.", artifact_path);
+		assert(file_exists(artifact_path), "\e[91mFailed fixture build artifact was not retained: %.\e[0m", artifact_path);
 	}
 
-	assert(differential_fixture_path() != compiler_path, "A rerun would overwrite the retained diagnostic fixture.");
+	assert(differential_fixture_path() != compiler_path, "\e[91mA rerun would overwrite the retained diagnostic fixture.\e[0m");
 	differential_progress.failed = false;
 	cleanup_differential_fixture();
 	deleted_source, compiler_still_exists := read_entire_file(compiler_path, log_errors = false);
 	defer free(deleted_source);
 
-	assert(!compiler_still_exists, "Successful diagnostic fixture was not cleaned up.");
+	assert(!compiler_still_exists, "\e[91mSuccessful diagnostic fixture was not cleaned up.\e[0m");
 
 	for artifact_path: artifact_paths {
-		assert(!file_exists(artifact_path), "Successful fixture build artifact was not cleaned up: %.", artifact_path);
+		assert(!file_exists(artifact_path), "\e[91mSuccessful fixture build artifact was not cleaned up: %.\e[0m", artifact_path);
 	}
 
-	assert(file_exists(neighbor_path), "Cleanup removed neighboring artifact '%' while cleaning stem '%'.", neighbor_path, stem);
-	assert(file_exists(unrelated_path), "Cleanup removed a file that was not a build artifact.");
+	assert(file_exists(neighbor_path), "\e[91mCleanup removed neighboring artifact '%' while cleaning stem '%'.\e[0m", neighbor_path, stem);
+	assert(file_exists(unrelated_path), "\e[91mCleanup removed a file that was not a build artifact.\e[0m");
 
 	workspace_source :: "fixture_retention :: 1;";
 	differential_progress.fixture_source = workspace_source;
-	assert(retain_differential_fixture(), "Unable to retain an in-memory workspace fixture.");
+	assert(retain_differential_fixture(), "\e[91mUnable to retain an in-memory workspace fixture.\e[0m");
 	workspace_path := differential_progress.fixture_path;
 	differential_progress.failed = true;
 	cleanup_differential_fixture();
 	workspace_text, workspace_exists := read_entire_file(workspace_path, log_errors = false);
 	defer free(workspace_text);
 
-	assert(workspace_exists && workspace_text == workspace_source, "Workspace fixture snapshot was not retained.");
-	assert(differential_fixture_path() != workspace_path, "A rerun would overwrite the retained workspace fixture.");
+	assert(workspace_exists && workspace_text == workspace_source, "\e[91mWorkspace fixture snapshot was not retained.\e[0m");
+	assert(differential_fixture_path() != workspace_path, "\e[91mA rerun would overwrite the retained workspace fixture.\e[0m");
 	differential_progress.failed = false;
 	cleanup_differential_fixture();
 }
@@ -768,7 +768,7 @@ capture_compiler_error :: (code: string, log_output := false, require_error_diag
 	differential_progress.fixture_source = code;
 	differential_progress.fixture_path = fixture_path;
 	written := write_entire_file(fixture_path, normalised_code);
-	assert(written, "Unable to write compiler diagnostic fixture '%'.", fixture_path);
+	assert(written, "\e[91mUnable to write compiler diagnostic fixture '%'.\e[0m", fixture_path);
 
 	result: Compiler_Diagnostic_Result;
 	result.storage = storage;
@@ -779,13 +779,13 @@ capture_compiler_error :: (code: string, log_output := false, require_error_diag
 		print_captured_output = log_output
 	);
 
-	assert(result.process_result.type == .EXITED, "Compiler diagnostic fixture failed to run.");
-	assert(result.process_result.exit_code != 0, "Compiler accepted invalid fixture:\n%", normalised_code);
+	assert(result.process_result.type == .EXITED, "\e[91mCompiler diagnostic fixture failed to run.\e[0m");
+	assert(result.process_result.exit_code != 0, "\e[91mCompiler accepted invalid fixture:\n%\e[0m", normalised_code);
 
 	append_compiler_diagnostics(result.standard_error, *result.diagnostics);
 	append_compiler_diagnostics(result.standard_output, *result.diagnostics);
 	if require_error_diagnostic {
-		assert(!!result.diagnostics.count, "Compiler failed without an Error diagnostic.\nstdout:\n%\nstderr:\n%", result.standard_output, result.standard_error);
+		assert(!!result.diagnostics.count, "\e[91mCompiler failed without an Error diagnostic.\nstdout:\n%\nstderr:\n%\e[0m", result.standard_output, result.standard_error);
 	}
 
 	finish_differential_test();
@@ -874,7 +874,7 @@ assert_compiler_error_message :: (code: string, expected_message: string) {
 	actual := result.diagnostics[0].message;
 	assert(
 		actual == expected_message,
-		"Compiler diagnostic differed.\nExpected: %\nActual:   %\n",
+		"\e[91mCompiler diagnostic differed.\nExpected: %\nActual:   %\n\e[0m",
 		expected_message,
 		actual
 	);
@@ -886,9 +886,9 @@ assert_invalid_expression_compiler_message :: (source: string, expected_message:
 	parsed := Parser.parse_expression(source);
 	defer Parser.release_parser_tree(*parsed);
 
-	assert(parsed.status != .COMPLETE, "Parser accepted invalid expression '%'.", source);
-	assert(!!parsed.diagnostics.count, "Parser rejected '%' without a diagnostic.", source);
-	assert(parsed.diagnostics[0].message == expected_message, "Parser diagnostic differed.\nExpected: %\nActual:   %\n", expected_message, parsed.diagnostics[0].message);
+	assert(parsed.status != .COMPLETE, "\e[91mParser accepted invalid expression '%'.\e[0m", source);
+	assert(!!parsed.diagnostics.count, "\e[91mParser rejected '%' without a diagnostic.\e[0m", source);
+	assert(parsed.diagnostics[0].message == expected_message, "\e[91mParser diagnostic differed.\nExpected: %\nActual:   %\n\e[0m", expected_message, parsed.diagnostics[0].message);
 
 	code := tprint(
 		#string JAI
@@ -950,7 +950,7 @@ JAI,
 	assert(result.diagnostics.count == 1);
 	assert(result.diagnostics[0].location.l0 == 2 && result.diagnostics[0].location.c0 == 12);
 	assert(result.diagnostics[0].location.c1 > result.diagnostics[0].location.c0);
-	assert(starts_with(result.diagnostics[0].message, expected_message), "Unexpected compiler ASM diagnostic: %", result.diagnostics[0].message);
+	assert(starts_with(result.diagnostics[0].message, expected_message), "\e[91mUnexpected compiler ASM diagnostic: %\e[0m", result.diagnostics[0].message);
 }
 
 test_asm_semantic_diagnostics :: () {
@@ -1988,7 +1988,7 @@ assert_expression_matches_code :: (source: string, expected_code: Code, layer :=
 	parsed := Parser.parse_expression(source, fully_pathed_filename);
 	defer Parser.release_parser_tree(*parsed);
 
-	assert(parsed.status == .COMPLETE, "Parser did not complete fixture '%'.", source);
+	assert(parsed.status == .COMPLETE, "\e[91mParser did not complete fixture '%'.\e[0m", source);
 
 	actual := normalise_parser_tree(parsed.root, layer);
 	defer array_free(actual.fields);
@@ -1999,7 +1999,7 @@ assert_expression_matches_code :: (source: string, expected_code: Code, layer :=
 	difference := compare_normalised_trees(actual, expected);
 	defer array_free(difference.differences);
 
-	assert(!difference.differences.count, "AST mismatch for '%':\n%", source, format_structural_differences(difference));
+	assert(!difference.differences.count, "\e[91mAST mismatch for '%':\n%\e[0m", source, format_structural_differences(difference));
 	finish_differential_test();
 }
 
@@ -2021,14 +2021,14 @@ assert_statement_matches_code :: (source: string, expected_code: Code, file_scop
 	parsed := ifx file_scope then Parser.parse_file(source) else Parser.parse_block(tprint("{ % }", source));
 	defer Parser.release_parser_tree(*parsed);
 
-	assert(parsed.status == .COMPLETE, "Parser did not complete statement fixture '%'.", source);
+	assert(parsed.status == .COMPLETE, "\e[91mParser did not complete statement fixture '%'.\e[0m", source);
 	actual_block := parsed.root.(*Parser.Parser_Block);
-	assert(actual_block.statements.count == 1, "Parser produced % statements for fixture '%'.", actual_block.statements.count, source);
+	assert(actual_block.statements.count == 1, "\e[91mParser produced % statements for fixture '%'.\e[0m", actual_block.statements.count, source);
 
 	expected_root := compiler_get_nodes(expected_code);
 	assert(expected_root.kind == .BLOCK);
 	expected_block := expected_root.(*Code_Block);
-	assert(expected_block.statements.count == 1, "Compiler produced % statements for fixture '%'.", expected_block.statements.count, source);
+	assert(expected_block.statements.count == 1, "\e[91mCompiler produced % statements for fixture '%'.\e[0m", expected_block.statements.count, source);
 
 	actual := normalise_parser_tree(actual_block.statements[0]);
 	defer array_free(actual.fields);
@@ -2039,7 +2039,7 @@ assert_statement_matches_code :: (source: string, expected_code: Code, file_scop
 	difference := compare_normalised_trees(actual, expected);
 	defer array_free(difference.differences);
 
-	assert(!difference.differences.count, "Statement AST mismatch for '%':\n%", source, format_structural_differences(difference));
+	assert(!difference.differences.count, "\e[91mStatement AST mismatch for '%':\n%\e[0m", source, format_structural_differences(difference));
 	finish_differential_test();
 }
 
@@ -2155,7 +2155,7 @@ assert_trivia_round_trip :: (source: string) {
 
 	parsed := Parser.materialise_tokens(source);
 	reconstructed := Parser.reconstruct_source(*parsed);
-	assert(reconstructed == source, "Trivia round trip differed for source:\n%", source);
+	assert(reconstructed == source, "\e[91mTrivia round trip differed for source:\n%\e[0m", source);
 }
 
 run_typechecked_workspace_fixture :: (source: string, expected_declaration: string) -> Workspace_Fixture_Result {
@@ -2164,7 +2164,7 @@ run_typechecked_workspace_fixture :: (source: string, expected_declaration: stri
 	differential_progress.fixture_source = source;
 	result: Workspace_Fixture_Result;
 	workspace := compiler_create_workspace("Jai_Parser differential fixture");
-	assert(cast(bool) workspace, "Unable to create differential fixture workspace.");
+	assert(cast(bool) workspace, "\e[91mUnable to create differential fixture workspace.\e[0m");
 
 	options := get_build_options(workspace);
 	copy_commonly_propagated_fields(get_build_options(), *options);
@@ -2235,10 +2235,10 @@ assert_file_workspace_fixture :: (source: string, expected_declaration: string) 
 	auto_release_fixture_temp();
 
 	result := run_typechecked_workspace_fixture(source, expected_declaration);
-	assert(result.completed, "Compiler did not complete file fixture '%'.", source);
-	assert(result.compilation_succeeded, "Compiler rejected file fixture '%'.", source);
-	assert(result.typechecked_message_count > 0, "Compiler did not typecheck file fixture '%'.", source);
-	assert(result.found_expected_declaration, "Compiler did not expose '%' for file fixture '%'.", expected_declaration, source);
+	assert(result.completed, "\e[91mCompiler did not complete file fixture '%'.\e[0m", source);
+	assert(result.compilation_succeeded, "\e[91mCompiler rejected file fixture '%'.\e[0m", source);
+	assert(result.typechecked_message_count > 0, "\e[91mCompiler did not typecheck file fixture '%'.\e[0m", source);
+	assert(result.found_expected_declaration, "\e[91mCompiler did not expose '%' for file fixture '%'.\e[0m", expected_declaration, source);
 }
 
 assert_overload_workspace_fixture :: (
@@ -2784,7 +2784,7 @@ test_invalid_integer_fixtures :: () {
 				rejected := capture_compiler_error(tprint(UNARY_OVERLOAD_SOURCE, first, second, value));
 				defer release_compiler_diagnostic_result(*rejected);
 
-				assert(!!rejected.diagnostics.count, "Compiler accepted invalid mixed %/% literal %.", first, second, value);
+				assert(!!rejected.diagnostics.count, "\e[91mCompiler accepted invalid mixed %/% literal %.\e[0m", first, second, value);
 			}
 		}
 	}
@@ -2865,7 +2865,7 @@ JAI;
 				overflow := capture_compiler_error(tprint(UNARY_OVERLOAD_SOURCE, fixture.parameter_type, "string", value));
 				defer release_compiler_diagnostic_result(*overflow);
 
-				assert(!!overflow.diagnostics.count, "Compiler accepted out-of-range % literal %.", fixture.parameter_type, value);
+				assert(!!overflow.diagnostics.count, "\e[91mCompiler accepted out-of-range % literal %.\e[0m", fixture.parameter_type, value);
 			}
 		}
 
@@ -2944,7 +2944,7 @@ test_aggregate_member_fixtures :: () {
 						}
 					}
 
-					assert(circular_dependency, "Compiler did not report the expected aggregate dependency cycle.");
+					assert(circular_dependency, "\e[91mCompiler did not report the expected aggregate dependency cycle.\e[0m");
 				}
 			}
 		}
@@ -3554,7 +3554,7 @@ assert_declaration_workspace_fixture :: (source: string) {
 	parsed := Parser.parse_declaration(source);
 	defer Parser.release_parser_tree(*parsed);
 
-	assert(parsed.status == .COMPLETE, "Parser did not complete declaration fixture '%'.", source);
+	assert(parsed.status == .COMPLETE, "\e[91mParser did not complete declaration fixture '%'.\e[0m", source);
 	actual := normalise_parser_tree(parsed.root);
 	defer array_free(actual.fields);
 
@@ -3605,21 +3605,21 @@ assert_declaration_workspace_fixture :: (source: string) {
 						difference := compare_normalised_trees(actual, expected);
 						defer array_free(difference.differences);
 
-						assert(!difference.differences.count, "Declaration AST mismatch for '%':\n%", source, format_structural_differences(difference));
+						assert(!difference.differences.count, "\e[91mDeclaration AST mismatch for '%':\n%\e[0m", source, format_structural_differences(difference));
 						found = true;
 					}
 				}
 
 			case .COMPLETE;
 				complete := message.(*Message_Complete);
-				assert(complete.error_code == .NONE, "Compiler rejected declaration fixture '%'.", source);
+				assert(complete.error_code == .NONE, "\e[91mCompiler rejected declaration fixture '%'.\e[0m", source);
 				break;
 		}
 	}
 
 	compiler_end_intercept(workspace);
 	compiler_destroy_workspace(workspace);
-	assert(found, "Compiler did not expose declaration fixture '%'.", source);
+	assert(found, "\e[91mCompiler did not expose declaration fixture '%'.\e[0m", source);
 	finish_differential_test();
 }
 
@@ -3633,7 +3633,7 @@ assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude
 	parsed := Parser.parse_block(tprint("{ % }", source));
 	defer Parser.release_parser_tree(*parsed);
 
-	assert(parsed.status == .COMPLETE, "Parser did not complete assignment fixture '%'.", source);
+	assert(parsed.status == .COMPLETE, "\e[91mParser did not complete assignment fixture '%'.\e[0m", source);
 	actual_block := parsed.root.(*Parser.Parser_Block);
 	assert(actual_block.statements.count == 1);
 	actual := normalise_parser_tree(actual_block.statements[0]);
@@ -3682,20 +3682,20 @@ assert_assignment_workspace_fixture :: (source: string, prelude: string, prelude
 					difference := compare_normalised_trees(actual, expected);
 					defer array_free(difference.differences);
 
-					assert(!difference.differences.count, "Assignment AST mismatch for '%':\n%", source, format_structural_differences(difference));
+					assert(!difference.differences.count, "\e[91mAssignment AST mismatch for '%':\n%\e[0m", source, format_structural_differences(difference));
 					found = true;
 				}
 
 			case .COMPLETE;
 				complete := message.(*Message_Complete);
-				assert(complete.error_code == .NONE, "Compiler rejected assignment fixture '%'.", source);
+				assert(complete.error_code == .NONE, "\e[91mCompiler rejected assignment fixture '%'.\e[0m", source);
 				break;
 		}
 	}
 
 	compiler_end_intercept(workspace);
 	compiler_destroy_workspace(workspace);
-	assert(found, "Compiler did not expose assignment fixture '%'.", source);
+	assert(found, "\e[91mCompiler did not expose assignment fixture '%'.\e[0m", source);
 	finish_differential_test();
 }
 
@@ -4227,7 +4227,7 @@ run_compile_time_sections :: () {
 		}
 
 		assert(differential_progress.global_index == expected_total);
-		print("\e[32mPASS\e[0m compile-time checks (%/% total tests)\n", differential_progress.global_index, differential_progress.global_total);
+		print("\e[92mPASS\e[0m compile-time checks (%/% total tests)\n", differential_progress.global_index, differential_progress.global_total);
 	} else {
 		set_build_options_dc(.{do_output = false});
 	}

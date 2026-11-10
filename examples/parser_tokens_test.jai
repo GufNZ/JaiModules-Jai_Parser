@@ -466,7 +466,7 @@ test_lexer_only_recovery :: () {
 	assert(escape.diagnostics[0].kind == .LEXER_ERROR);
 	assert(escape.diagnostics[0].message == "A decimal digit is required here.\n");
 	assert(escape.diagnostics[0].related_information.count == 1);
-	assert(escape.diagnostics[0].related_information[0].message == "\\d must be followed by exactly three decimal digits.\n", "Actual detail: '%'.", escape.diagnostics[0].related_information[0].message);
+	assert(escape.diagnostics[0].related_information[0].message == "\\d must be followed by exactly three decimal digits.\n", "\e[91mActual detail: '%'.\e[0m", escape.diagnostics[0].related_information[0].message);
 	assert(escape.diagnostics[0].related_information[0].span.first == escape.diagnostics[0].span.first);
 }
 
@@ -553,8 +553,8 @@ JAI;
 	assert(parsed.tokens.count == expected_spellings.count);
 
 	for token: parsed.tokens {
-		assert(token.type == expected_types[it_index], "Assembly token % ('%') has type %, expected %.", it_index, token.original_text, token.type, expected_types[it_index]);
-		assert(token.original_text == expected_spellings[it_index], "Assembly token % has spelling '%', expected '%'.", it_index, token.original_text, expected_spellings[it_index]);
+		assert(token.type == expected_types[it_index], "\e[91mAssembly token % ('%') has type %, expected %.\e[0m", it_index, token.original_text, token.type, expected_types[it_index]);
+		assert(token.original_text == expected_spellings[it_index], "\e[91mAssembly token % has spelling '%', expected '%'.\e[0m", it_index, token.original_text, expected_spellings[it_index]);
 		assert(token.byte_end - token.byte_start == token.original_text.count);
 		assert(slice(SOURCE, token.byte_start, token.byte_end - token.byte_start) == token.original_text);
 	}
@@ -753,7 +753,7 @@ test_rhs_semicolon_boundaries :: () {
 
 				assert(
 					plain.status == .COMPLETE && plain.diagnostics.count == terminated.(s64),
-					"Default RHS termination mismatch: % % (semicolon=%)",
+					"\e[91mDefault RHS termination mismatch: % % (semicolon=%)\e[0m",
 					prefix,
 					rhs,
 					terminated
@@ -804,7 +804,7 @@ test_rhs_semicolon_boundaries :: () {
 			);
 			assert(
 				terminated.status == .COMPLETE && terminated.diagnostics.count == 0,
-				"Required RHS termination mismatch: % %",
+				"\e[91mRequired RHS termination mismatch: % %\e[0m",
 				prefix,
 				rhs
 			);
@@ -2181,9 +2181,9 @@ check_excluded_type_instantiation :: (type_source: string) {
 	old := Extended.parse_file(old_source);
 	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
-	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "%", type_source);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "\e[91m%\e[0m", type_source);
 	old_type := old.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).type_inst;
-	assert(old_type && !Extended.reusable_type_instantiation(old_type), "%", type_source);
+	assert(old_type && !Extended.reusable_type_instantiation(old_type), "\e[91m%\e[0m", type_source);
 	statements := updated.root.(*Extended.Parser_Block).statements;
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	probe_tokens := Extended.materialise_tokens(new_source);
@@ -4306,7 +4306,7 @@ test_excluded_literal_ast_reuse_fallback :: () {
 		old := Extended.parse_file(old_source);
 		ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 		fresh := Extended.parse_file(new_source);
-		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "Excluded literal: %", declaration_source);
+		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "\e[91mExcluded literal: %\e[0m", declaration_source);
 		old_literal := old.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression;
 		assert(old_literal.kind == .LITERAL && !Extended.reusable_expression(old_literal));
 		statements := updated.root.(*Extended.Parser_Block).statements;
@@ -4939,7 +4939,7 @@ check_excluded_operator_fallback :: (expression: string, expected_operator: Oper
 	old := Extended.parse_file(old_source);
 	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
-	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "Excluded operator: %", expression);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "\e[91mExcluded operator: %\e[0m", expression);
 	old_expression := old.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression;
 	assert(!Extended.reusable_expression(old_expression));
 	statements := updated.root.(*Extended.Parser_Block).statements;
@@ -5060,7 +5060,7 @@ test_excluded_expression_nodes :: () {
 		}
 
 
-		assert(!Extended.reusable_expression(*candidate), "Unexpected expression reuse kind: %", candidate.kind);
+		assert(!Extended.reusable_expression(*candidate), "\e[91mUnexpected expression reuse kind: %\e[0m", candidate.kind);
 	}
 
 	check_excluded_expression_node("context", .CONTEXT);
@@ -5119,7 +5119,7 @@ check_excluded_file_node :: (directive: string, expected_kind: type_of(Extended.
 	old := Extended.parse_file(old_source);
 	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
-	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "%", directive);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "\e[91m%\e[0m", directive);
 	old_node := old.root.(*Extended.Parser_Block).statements[1];
 	statements := updated.root.(*Extended.Parser_Block).statements;
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
@@ -5590,7 +5590,7 @@ check_excluded_statement_node :: (statement: string, expected_kind: type_of(Exte
 	old := Extended.parse_file(old_source);
 	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
-	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "%", statement);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "\e[91m%\e[0m", statement);
 	old_statements := old.root.(*Extended.Parser_Block).statements;
 	statements := updated.root.(*Extended.Parser_Block).statements;
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
@@ -5666,9 +5666,9 @@ check_excluded_expression_node :: (expression: string, expected_kind: type_of(Ex
 	old := Extended.parse_file(old_source);
 	ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 	fresh := Extended.parse_file(new_source);
-	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "%", expression);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "\e[91m%\e[0m", expression);
 	old_expression := old.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression;
-	assert(old_expression.kind == expected_kind && !Extended.reusable_expression(old_expression), "%", expression);
+	assert(old_expression.kind == expected_kind && !Extended.reusable_expression(old_expression), "\e[91m%\e[0m", expression);
 	statements := updated.root.(*Extended.Parser_Block).statements;
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	probe_tokens := Extended.materialise_tokens(new_source);
@@ -6685,7 +6685,7 @@ test_cast_flags_ast_reuse :: () {
 		old := Extended.parse_file(old_source);
 		ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 		fresh := Extended.parse_file(new_source);
-		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "%", it);
+		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "\e[91m%\e[0m", it);
 		statements := updated.root.(*Extended.Parser_Block).statements;
 		fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 		probe_tokens := Extended.materialise_tokens(new_source);
@@ -6954,9 +6954,9 @@ test_call_cast_fallback :: () {
 		old := Extended.parse_file(old_source);
 		ok, updated := Extended.parse_file_edit(*old, 0, 0, new_source);
 		fresh := Extended.parse_file(new_source);
-		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "%", it);
+		assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "\e[91m%\e[0m", it);
 		old_expression := old.root.(*Extended.Parser_Block).statements[2].(*Extended.Parser_Declaration).expression;
-		assert((old_expression.kind == .PROCEDURE_CALL || old_expression.kind == .CAST) && !Extended.reusable_expression(old_expression), "%", it);
+		assert((old_expression.kind == .PROCEDURE_CALL || old_expression.kind == .CAST) && !Extended.reusable_expression(old_expression), "\e[91m%\e[0m", it);
 		statements := updated.root.(*Extended.Parser_Block).statements;
 		fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 		probe_tokens := Extended.materialise_tokens(new_source);
@@ -7006,7 +7006,7 @@ check_call_cast_candidate_edit :: (old_expression: string, new_expression: strin
 	old := Extended.parse_file(old_source);
 	ok, updated := Extended.parse_file_edit(*old, PREFIX.count + edit_first, PREFIX.count + edit_last, new_source);
 	fresh := Extended.parse_file(new_source);
-	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "% -> %", old_expression, new_expression);
+	assert(ok && old.status == .COMPLETE && updated.status == .COMPLETE && fresh.status == .COMPLETE, "\e[91m% -> %\e[0m", old_expression, new_expression);
 	statements := updated.root.(*Extended.Parser_Block).statements;
 	fresh_statements := fresh.root.(*Extended.Parser_Block).statements;
 	probe_tokens := Extended.materialise_tokens(new_source);
@@ -8040,7 +8040,7 @@ JAI;
 		diagnostic_token := Extended.token_at(*parsed, diagnostic.span.first);
 		assert(
 			false,
-			"Status %, diagnostics %, kind %, expected %, actual %, token '%'.",
+			"\e[91mStatus %, diagnostics %, kind %, expected %, actual %, token '%'.\e[0m",
 			parsed.status,
 			parsed.diagnostics.count,
 			diagnostic.kind,
@@ -8342,7 +8342,7 @@ test_uninitialized_indicator_and_here_string :: () {
 
 	SOURCE :: "#string END\nbody\nEND";
 	here_string := Extended.parse_expression(SOURCE);
-	assert(here_string.status == .COMPLETE, "Here-string status %, token count %, diagnostics %.", here_string.status, here_string.tokens.count, here_string.diagnostics.count);
+	assert(here_string.status == .COMPLETE, "\e[91mHere-string status %, token count %, diagnostics %.\e[0m", here_string.status, here_string.tokens.count, here_string.diagnostics.count);
 	literal := here_string.root.(*Extended.Parser_Literal);
 	assert(literal.value_type == .STRING);
 	assert((literal.value_flags & .HERE_STRING) != 0);
@@ -8493,7 +8493,7 @@ test_recovery_records :: () {
 	assert(continued.recovery_records[0].kind == .MISSING_TOKEN);
 	assert(continued.recovery_records[0].span.first == continued.synthetic_tokens[0].insertion_index);
 	assert(Extended.reconstruct_source(*continued) == CONTINUED_SOURCE);
-	assert(continued.recovery_records[0].owner == continued.root.(*Extended.Parser_Block).statements[0], "A missing terminator belongs to its statement.");
+	assert(continued.recovery_records[0].owner == continued.root.(*Extended.Parser_Block).statements[0], "\e[91mA missing terminator belongs to its statement.\e[0m");
 
 	// The smallest published node around an event owns it; the parenthesised expression owns its missing `)`.
 	assert(missing_record.owner == missing.root && missing_record.cursor == 2);
@@ -8501,7 +8501,7 @@ test_recovery_records :: () {
 	nested := Extended.parse_file("f :: () { inner :: ; other :: 1; }");
 	body := nested.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null;
 	inner := body.block.statements[0];
-	assert(nested.recovery_records.count == 1 && nested.recovery_records[0].owner == inner, "A nested hole belongs to its declaration, not the procedure or a sibling.");
+	assert(nested.recovery_records.count == 1 && nested.recovery_records[0].owner == inner, "\e[91mA nested hole belongs to its declaration, not the procedure or a sibling.\e[0m");
 
 	// An abandoned expression-led compound attempt keeps its records but marks them discarded and unowned.
 	abandoned := Extended.parse_block("{ x, (1 + ); }");
@@ -8511,19 +8511,19 @@ test_recovery_records :: () {
 			discarded += 1;
 			assert(!it.owner);
 		} else {
-			assert(it.owner != null, "Kept record % (% at %, span %) has no owner.", it_index, it.kind, it.cursor, it.span);
+			assert(it.owner != null, "\e[91mKept record % (% at %, span %) has no owner.\e[0m", it_index, it.kind, it.cursor, it.span);
 		}
 	}
 
-	assert(discarded >= 1, "Expected a discarded record.");
+	assert(discarded >= 1, "\e[91mExpected a discarded record.\e[0m");
 
 	// Truncated and mutated inputs found by mutation: none may crash, leave the cursor past the token array or misplace token bytes.
 	for string.["value :: a.", "value :: `", "f :: () { operator", "f :: () { #asm { add x, (a b); } }", "g :: inline (dest: *", "s :: #string DONE  \nmain :: () {}\n"] {
 		parsed := Extended.parse_file(it);
-		assert(parsed.status != .COMPLETE, "'%' should be diagnosed.", it);
+		assert(parsed.status != .COMPLETE, "\e[91m'%' should be diagnosed.\e[0m", it);
 		source := it;
 		for parsed.tokens {
-			assert(slice(source, it.byte_start, it.byte_end - it.byte_start) == it.original_text, "Token % of '%' is misplaced.", it_index, source);
+			assert(slice(source, it.byte_start, it.byte_end - it.byte_start) == it.original_text, "\e[91mToken % of '%' is misplaced.\e[0m", it_index, source);
 		}
 	}
 }
@@ -8759,7 +8759,7 @@ assert_overload_selection :: (source: string, expected_index: s64) {
 	}
 
 	inference_pool := parsed.root_scope.inference_pool;
-	assert(Extended.resolve_overloaded_aggregate_call(call, parsed.root_scope) == expected, "Expected overload index % for source:\n%", expected_index, source);
+	assert(Extended.resolve_overloaded_aggregate_call(call, parsed.root_scope) == expected, "\e[91mExpected overload index % for source:\n%\e[0m", expected_index, source);
 	assert(parsed.root_scope.inference_pool == inference_pool);
 	assert(Extended.resolve_overloaded_aggregate_call(call, parsed.root_scope) == expected);
 	assert(parsed.root_scope.inference_pool == inference_pool);
@@ -8774,7 +8774,7 @@ assert_multi_candidate_selection :: (parameters: []string, arguments: string, se
 assert_mapped_field_fixture :: (source: string, filename: string, mapped_count: s64 = 1, unsupported_count: s64 = 0) {
 	parsed := Extended.parse_file(source, filename);
 	imports := Extended.resolve_file_imports(*parsed, map_names = test_using_map_fields);
-	assert(parsed.status == .COMPLETE && imports.mapped_names.count == mapped_count && imports.unsupported_using_filters.count == unsupported_count, "Mapped-field fixture: %", source);
+	assert(parsed.status == .COMPLETE && imports.mapped_names.count == mapped_count && imports.unsupported_using_filters.count == unsupported_count, "\e[91mMapped-field fixture: %\e[0m", source);
 	root_statements := parsed.root.(*Extended.Parser_Block).statements;
 	procedure := root_statements[root_statements.count - 1].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header);
 	statements := procedure.body_or_null.block.statements;
@@ -10172,7 +10172,7 @@ JAI
 	for complete_call_receiver_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names = test_using_map_fields);
-		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 1 && imports.unsupported_using_filters.count == 0, "Complete call receiver fixture: %", it);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 1 && imports.unsupported_using_filters.count == 0, "\e[91mComplete call receiver fixture: %\e[0m", it);
 		Extended.release_file_imports(*imports);
 		Extended.release_parser_tree(*parsed);
 		Extended.release_parser_names(*parsed);
@@ -10279,7 +10279,7 @@ JAI
 	for unsupported_call_receiver_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names = test_using_map_fields);
-		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 0 && imports.unsupported_using_filters.count == 1, "Unsupported call receiver fixture: %", it);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 0 && imports.unsupported_using_filters.count == 1, "\e[91mUnsupported call receiver fixture: %\e[0m", it);
 		Extended.release_file_imports(*imports);
 		Extended.release_parser_tree(*parsed);
 		Extended.release_parser_names(*parsed);
@@ -10303,7 +10303,7 @@ JAI
 	for complete_receiver_inventory_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names = test_using_map_fields);
-		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 1 && imports.unsupported_using_filters.count == 0, "Complete receiver inventory fixture: %", it);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 1 && imports.unsupported_using_filters.count == 0, "\e[91mComplete receiver inventory fixture: %\e[0m", it);
 		Extended.release_file_imports(*imports);
 		Extended.release_parser_tree(*parsed);
 		Extended.release_parser_names(*parsed);
@@ -10351,7 +10351,7 @@ JAI
 	for unsupported_receiver_inventory_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names = test_using_map_fields);
-		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 0 && imports.unsupported_using_filters.count == 1, "Unsupported receiver inventory fixture: %", it);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 0 && imports.unsupported_using_filters.count == 1, "\e[91mUnsupported receiver inventory fixture: %\e[0m", it);
 		Extended.release_file_imports(*imports);
 		Extended.release_parser_tree(*parsed);
 		Extended.release_parser_names(*parsed);
@@ -10670,10 +10670,10 @@ JAI;
 		assert(literal_tokens.status == .COMPLETE);
 		literal_token := literal_tokens.tokens[ifx fixture.value[0] == #char "-" then 1 else 0];
 		assert(literal_token.type == .NUMBER);
-		assert(((literal_token.value_flags & .REQUIRES_FLOAT64) != 0) == !fixture.float32_compatible, "Required floating width for '%' disagrees with compiler acceptance.", fixture.value);
+		assert(((literal_token.value_flags & .REQUIRES_FLOAT64) != 0) == !fixture.float32_compatible, "\e[91mRequired floating width for '%' disagrees with compiler acceptance.\e[0m", fixture.value);
 		assert(
 			((literal_token.value_flags & .DEFAULTS_TO_FLOAT64) != 0) == (fixture.preferred_type == "float64" && fixture.float32_compatible),
-			"Default floating width for '%' disagrees with compiler overload selection.",
+			"\e[91mDefault floating width for '%' disagrees with compiler overload selection.\e[0m",
 			fixture.value
 		);
 
@@ -11729,7 +11729,7 @@ JAI,
 	for nested_field_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names = test_using_map_fields);
-		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 1 && imports.unsupported_using_filters.count == 0, "Nested field fixture: %", it);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 1 && imports.unsupported_using_filters.count == 0, "\e[91mNested field fixture: %\e[0m", it);
 		Extended.release_file_imports(*imports);
 		Extended.release_parser_tree(*parsed);
 		Extended.release_parser_names(*parsed);
@@ -11812,7 +11812,7 @@ JAI,
 	for unsupported_nested_field_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names = test_using_map_fields);
-		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 0 && imports.unsupported_using_filters.count == 1, "Unsupported nested field fixture: %", it);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 0 && imports.unsupported_using_filters.count == 1, "\e[91mUnsupported nested field fixture: %\e[0m", it);
 		Extended.release_file_imports(*imports);
 		Extended.release_parser_tree(*parsed);
 		Extended.release_parser_names(*parsed);
@@ -11881,7 +11881,7 @@ JAI,
 	for complete_alias_sources {
 		complete_alias := Extended.parse_file(it, filename);
 		complete_alias_imports := Extended.resolve_file_imports(*complete_alias, map_names = test_using_map_fields);
-		assert(complete_alias.status == .COMPLETE && complete_alias_imports.mapped_names.count == 1 && complete_alias_imports.unsupported_using_filters.count == 0, "Complete alias fixture: %", it);
+		assert(complete_alias.status == .COMPLETE && complete_alias_imports.mapped_names.count == 1 && complete_alias_imports.unsupported_using_filters.count == 0, "\e[91mComplete alias fixture: %\e[0m", it);
 		Extended.release_file_imports(*complete_alias_imports);
 		Extended.release_parser_tree(*complete_alias);
 		Extended.release_parser_names(*complete_alias);
@@ -11995,7 +11995,7 @@ JAI,
 	for unsupported_alias_sources {
 		unsupported_alias := Extended.parse_file(it, filename);
 		unsupported_alias_imports := Extended.resolve_file_imports(*unsupported_alias, map_names = test_using_map_fields);
-		assert(unsupported_alias.status == .COMPLETE && unsupported_alias_imports.mapped_names.count == 0 && unsupported_alias_imports.unsupported_using_filters.count == 1, "Unsupported alias fixture: %", it);
+		assert(unsupported_alias.status == .COMPLETE && unsupported_alias_imports.mapped_names.count == 0 && unsupported_alias_imports.unsupported_using_filters.count == 1, "\e[91mUnsupported alias fixture: %\e[0m", it);
 		Extended.release_file_imports(*unsupported_alias_imports);
 		Extended.release_parser_tree(*unsupported_alias);
 		Extended.release_parser_names(*unsupported_alias);
@@ -12204,7 +12204,7 @@ JAI,
 	for unsupported_generic_sources {
 		generic := Extended.parse_file(it, filename);
 		generic_imports := Extended.resolve_file_imports(*generic, map_names = test_using_map_fields);
-		assert(generic.status == .COMPLETE && generic_imports.mapped_names.count == 0 && generic_imports.unsupported_using_filters.count == 1, "Unsupported generic fixture: %", it);
+		assert(generic.status == .COMPLETE && generic_imports.mapped_names.count == 0 && generic_imports.unsupported_using_filters.count == 1, "\e[91mUnsupported generic fixture: %\e[0m", it);
 		Extended.release_file_imports(*generic_imports);
 		Extended.release_parser_tree(*generic);
 		Extended.release_parser_names(*generic);
@@ -12306,7 +12306,7 @@ JAI
 	for complete_conditional_receiver_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names = test_using_map_fields);
-		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 1 && imports.unsupported_using_filters.count == 0, "Complete conditional receiver fixture: %", it);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 1 && imports.unsupported_using_filters.count == 0, "\e[91mComplete conditional receiver fixture: %\e[0m", it);
 		Extended.release_file_imports(*imports);
 		Extended.release_parser_tree(*parsed);
 		Extended.release_parser_names(*parsed);
@@ -12369,7 +12369,7 @@ JAI
 	for unsupported_conditional_receiver_sources {
 		parsed := Extended.parse_file(it, filename);
 		imports := Extended.resolve_file_imports(*parsed, map_names = test_using_map_fields);
-		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 0 && imports.unsupported_using_filters.count == 1, "Unsupported conditional receiver fixture: %", it);
+		assert(parsed.status == .COMPLETE && imports.mapped_names.count == 0 && imports.unsupported_using_filters.count == 1, "\e[91mUnsupported conditional receiver fixture: %\e[0m", it);
 		Extended.release_file_imports(*imports);
 		Extended.release_parser_tree(*parsed);
 		Extended.release_parser_names(*parsed);
@@ -13128,7 +13128,7 @@ first_compound_in_block :: (parsed: *Extended.Parsed_Source) -> *Extended.Parser
 	}
 
 
-	assert(false, "No compound declaration in '%'.", parsed.source);
+	assert(false, "\e[91mNo compound declaration in '%'.\e[0m", parsed.source);
 	return null;
 }
 
@@ -13287,7 +13287,7 @@ test_compound_declarations :: () {
 
 	PARTIAL_REASSIGNMENT_SOURCE :: "{ a: int; a=, b := proc(); after(); }";
 	partial_reassignment := Extended.parse_block(PARTIAL_REASSIGNMENT_SOURCE);
-	assert(partial_reassignment.status == .COMPLETE, "Partial reassignment: status %, diagnostics %.", partial_reassignment.status, partial_reassignment.diagnostics.count);
+	assert(partial_reassignment.status == .COMPLETE, "\e[91mPartial reassignment: status %, diagnostics %.\e[0m", partial_reassignment.status, partial_reassignment.diagnostics.count);
 	partial_reassignment_statements := partial_reassignment.root.(*Extended.Parser_Block).statements;
 	assert(partial_reassignment_statements.count == 3 && partial_reassignment_statements[2].kind == .PROCEDURE_CALL);
 	partial_reassignment_node := partial_reassignment_statements[1].(*Extended.Parser_Compound_Declaration);
@@ -13300,7 +13300,7 @@ test_compound_declarations :: () {
 
 	PARTIAL_DECLARATION_SOURCE :: "{ b: int; a:, b = proc(); after(); }";
 	partial_declaration := Extended.parse_block(PARTIAL_DECLARATION_SOURCE);
-	assert(partial_declaration.status == .COMPLETE, "Partial declaration: status %, diagnostics %.", partial_declaration.status, partial_declaration.diagnostics.count);
+	assert(partial_declaration.status == .COMPLETE, "\e[91mPartial declaration: status %, diagnostics %.\e[0m", partial_declaration.status, partial_declaration.diagnostics.count);
 	partial_declaration_statements := partial_declaration.root.(*Extended.Parser_Block).statements;
 	assert(partial_declaration_statements.count == 3 && partial_declaration_statements[2].kind == .PROCEDURE_CALL);
 	partial_declaration_node := partial_declaration_statements[1].(*Extended.Parser_Compound_Declaration);
@@ -14008,7 +14008,7 @@ test_operator_declarations :: () {
 	assert(fixtures.count == 39);
 	for fixtures {
 		parsed := Extended.parse_declaration(it.source);
-		assert(parsed.status == .COMPLETE, "Operator declaration did not parse: %", it.source);
+		assert(parsed.status == .COMPLETE, "\e[91mOperator declaration did not parse: %\e[0m", it.source);
 		assert(parsed.root.(*Extended.Parser_Declaration).name == it.name);
 	}
 }
@@ -14339,13 +14339,13 @@ JAI);
 	for prefix: malformed_prefixes {
 		source := tprint("outer :: () { % { local := 1; } after := 2; }\nfinal :: 3;", prefix);
 		parsed_file := Extended.parse_file(source);
-		assert(parsed_file.status == .RECOVERED, "Expected recovery for %", prefix);
+		assert(parsed_file.status == .RECOVERED, "\e[91mExpected recovery for %\e[0m", prefix);
 		file_statements := parsed_file.root.(*Extended.Parser_Block).statements;
-		assert(file_statements.count == 2, "Lost file-scope declaration after %", prefix);
+		assert(file_statements.count == 2, "\e[91mLost file-scope declaration after %\e[0m", prefix);
 		procedure_body := file_statements[0].(*Extended.Parser_Declaration).expression.(*Extended.Parser_Procedure_Header).body_or_null.block;
-		assert(procedure_body.statements.count == 2, "Lost procedure statement after %", prefix);
+		assert(procedure_body.statements.count == 2, "\e[91mLost procedure statement after %\e[0m", prefix);
 		partial_for := procedure_body.statements[0].(*Extended.Parser_For);
-		assert(partial_for.block != null, "Lost loop body after %", prefix);
+		assert(partial_for.block != null, "\e[91mLost loop body after %\e[0m", prefix);
 		assert(partial_for.block.statements.count == 1);
 		assert(partial_for.block.statements[0].(*Extended.Parser_Declaration).name == "local");
 		assert(procedure_body.statements[1].(*Extended.Parser_Declaration).name == "after");
@@ -14423,7 +14423,7 @@ test_for_body_forms :: () {
 		for body: bodies {
 			source := tprint("{ for % % next(); }", prefix, body);
 			parsed := Extended.parse_block(source);
-			assert(parsed.status == .COMPLETE, "Loop body did not parse: %", source);
+			assert(parsed.status == .COMPLETE, "\e[91mLoop body did not parse: %\e[0m", source);
 			root := parsed.root.(*Extended.Parser_Block);
 			assert(root.statements.count == 2);
 			loop := root.statements[0].(*Extended.Parser_For);
@@ -15781,7 +15781,7 @@ assert_expression_tree_matches :: (actual: *Extended.Parser_Node, expected: *Cod
 			assert_expression_tree_matches(actual_binary.left, expected_binary.left);
 			assert_expression_tree_matches(actual_binary.right, expected_binary.right);
 		case;
-			assert(false, "Unsupported expression kind % in differential comparison.", actual.kind);
+			assert(false, "\e[91mUnsupported expression kind % in differential comparison.\e[0m", actual.kind);
 	}
 }
 
