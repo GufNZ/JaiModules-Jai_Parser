@@ -192,41 +192,47 @@ Key_View :: struct {
 	fields: [..] [] u8;
 }
 
-// Bounded K decoder: views borrow `bytes`; rejects bad framing, version, counts above `maximum_fields` and trailing bytes.
-parse_key :: (bytes: [] u8, maximum_fields: u64) -> bool, Key_View {
-	result: Key_View;
+#scope_module
+
+Borrowed_Key_View :: struct {
+	tag: [] u8;
+	fields: [] [] u8;
+}
+
+#scope_file
+
+read_key_u64 :: (bytes: [] u8, cursor: *s64) -> bool, u64 {
+	if bytes.count - cursor.* < 8 {
+		return false, 0;
+	}
+
+
+	value: u64;
+	for 0..7 {
+		value |= (bytes[cursor.* + it].(u64)) << (8 * it);
+	}
+
+	cursor.* += 8;
+	return true, value;
+}
+
+read_key_framed :: (bytes: [] u8, cursor: *s64) -> bool, [] u8 {
+	ok, length := read_key_u64(bytes, cursor);
+	if !ok || length > xx (bytes.count - cursor.*) {
+		return false, .[];
+	}
+
+
+	view: [] u8 = .{count = xx length, data = bytes.data + cursor.*};
+	cursor.* += xx length;
+	return true, view;
+}
+
+read_key_header :: (bytes: [] u8, maximum_fields: u64) -> bool, [] u8, u64, s64 {
 	cursor: s64;
-
-	read_u64 :: (bytes: [] u8, cursor: *s64) -> bool, u64 {
-		if bytes.count - cursor.* < 8 {
-			return false, 0;
-		}
-
-
-		value: u64;
-		for 0..7 {
-			value |= (bytes[cursor.* + it].(u64)) << (8 * it);
-		}
-
-		cursor.* += 8;
-		return true, value;
-	}
-
-	read_framed :: (bytes: [] u8, cursor: *s64) -> bool, [] u8 {
-		ok, length := read_u64(bytes, cursor);
-		if !ok || length > xx (bytes.count - cursor.*) {
-			return false, .[];
-		}
-
-
-		view: [] u8 = .{count = xx length, data = bytes.data + cursor.*};
-		cursor.* += xx length;
-		return true, view;
-	}
-
-	magic_ok, magic := read_framed(bytes, *cursor);
+	magic_ok, magic := read_key_framed(bytes, *cursor);
 	if !magic_ok || !bytes_equal(magic, KEY_MAGIC.([] u8)) || bytes.count - cursor < 4 {
-		return false, result;
+		return false, .[], 0, 0;
 	}
 
 
@@ -237,14 +243,28 @@ parse_key :: (bytes: [] u8, maximum_fields: u64) -> bool, Key_View {
 
 	cursor += 4;
 	if version != KEY_SCHEMA_VERSION {
-		return false, result;
+		return false, .[], 0, 0;
 	}
 
 
-	tag_ok, tag := read_framed(bytes, *cursor);
-	count_ok, field_count := read_u64(bytes, *cursor);
+	tag_ok, tag := read_key_framed(bytes, *cursor);
+	count_ok, field_count := read_key_u64(bytes, *cursor);
 	// Each field needs at least its 8-byte length prefix, which bounds the count before allocating.
 	if !tag_ok || !count_ok || field_count > maximum_fields || field_count > xx ((bytes.count - cursor) / 8) {
+		return false, .[], 0, 0;
+	}
+
+
+	return true, tag, field_count, cursor;
+}
+
+#scope_export
+
+// Bounded K decoder: views borrow `bytes`; rejects bad framing, version, counts above `maximum_fields` and trailing bytes.
+parse_key :: (bytes: [] u8, maximum_fields: u64) -> bool, Key_View {
+	result: Key_View;
+	header_ok, tag, field_count, cursor := read_key_header(bytes, maximum_fields);
+	if !header_ok {
 		return false, result;
 	}
 
@@ -252,7 +272,7 @@ parse_key :: (bytes: [] u8, maximum_fields: u64) -> bool, Key_View {
 	result.tag = tag;
 	array_reserve(*result.fields, xx field_count);
 	for 1..field_count {
-		field_ok, field := read_framed(bytes, *cursor);
+		field_ok, field := read_key_framed(bytes, *cursor);
 		if !field_ok {
 			array_free(result.fields);
 			return false, .{};
@@ -269,4 +289,38 @@ parse_key :: (bytes: [] u8, maximum_fields: u64) -> bool, Key_View {
 
 
 	return true, result;
+}
+
+#scope_module
+
+parse_key_into :: (bytes: [] u8, storage: [] [] u8) -> bool, Borrowed_Key_View {
+	if storage.count < 0 {
+		return false, .{};
+	}
+
+
+	header_ok, tag, field_count, cursor := read_key_header(bytes, xx storage.count);
+	if !header_ok {
+		return false, .{};
+	}
+
+
+	fields := storage;
+	fields.count = xx field_count;
+	for * fields {
+		field_ok, field := read_key_framed(bytes, *cursor);
+		if !field_ok {
+			return false, .{};
+		}
+
+
+		it.* = field;
+	}
+
+	if cursor != bytes.count {
+		return false, .{};
+	}
+
+
+	return true, .{tag = tag, fields = fields};
 }

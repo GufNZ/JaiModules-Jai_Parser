@@ -506,7 +506,7 @@ Exit: user decision recorded.
 						| Output Route | Caller Export | Remaining Allocation Boundary |
 						| --- | --- | --- |
 						| `open_session`, `describe_session` | Checked `try_output_description`; checked validation/context errors | Private `Session`/provider/control construction and `describe` owner snapshots |
-						| `submit_source_batch`, `request_analysis` | Checked `Accepted.frontier` and diagnostic copies | Remaining provider batch/metadata/provider-revision/frontier construction, context parsing/payload allocation and source candidate backing, analysis `new_update_operation` and ticket registration; source ticket/object/document-array/identity/list, staging `Provider_Model` object/document-pointer/context-array/cloned-state/used-revision, batch state-pointer/context-reference/admitted-context lists, staging diagnostic path reservation/rejection copies, per-event `Document_State` object/`used_revisions` list, `Source_Backing` object/source-byte copies/source-revision keys, edit intermediate byte arrays/size arithmetic and private/live pool-list transfer backing are checked before admission/provider commit |
+						| `submit_source_batch`, `request_analysis` | Checked `Accepted.frontier` and diagnostic copies | Source candidate backing, analysis `new_update_operation` and ticket registration; source ticket/object/document-array/identity/list, staging `Provider_Model` object/document-pointer/context-array/cloned-state/used-revision, batch state-pointer/context-reference/admitted-context lists, allocation-free bounded descriptor/path/identity field views and build-time expected compiler/adapter/fixed-tag canonical bytes, checked batch context identity/descriptor/three-path payload copies, staging diagnostic path reservation/rejection copies, final private provider document/context capacity and frontier key/token preparation, shared pooled document/path/context-reference/provenance/provider-revision copies, per-event `Document_State` object/`used_revisions` list, `Source_Backing` object/source-byte copies/source-revision keys, edit intermediate byte arrays/size arithmetic and private/live pool-list transfer backing are checked before admission/provider commit |
 						| `observe_ticket`, `acquire_world` | Checked observations/frontier bytes; borrowed identity in returned handles | Checked `new_waiter` registration/list backing and successful `acquire_world_handle` registration; owner terminal snapshots remain unqualified |
 						| `query`, `acquire_result` | Checked terminal/pending observations; borrowed identity in returned handles | Non-immediate `issue_operation`, diagnostic-worker `new_result` and pending `Operation`/`Task`/key/queue backing; immediate-result object/identity/registration, waiter registration/list backing and successful `acquire_result` registration are checked |
 						| `poll`, `wait`, `cancel_waiter`, `drain_completions` | Checked observations, records and diagnostic paths | Owner snapshots, `resolve_waiter` terminal observations/completion arrays and drain bookkeeping |
@@ -556,6 +556,12 @@ Exit: user decision recorded.
 						Attain initial and retry failure ordinals, require callback-relative waiter charges, readable competitor/replacement handles and zero final owner allocations.
 						Full-owner retirement attains partial registration and list failures while the call pin protects cleanup.
 						`allow_failed_waiter_backing` detects admission after a rejected backing allocation; `allow_stale_waiter_source` detects delivery through a retired source generation in both callback modes and both handle kinds.
+						- [x] Resolve the waiter-charge inspection race with deterministic pending/terminal orderings and state-aware accounting (2026-11-13).
+						A returned pending waiter can complete before the next locked inspection; handle liveness does not imply a retained `PENDING_REGISTRATIONS` charge.
+						The oracle derives `LIVE_HANDLES`, `PENDING_REGISTRATIONS` and `COMPLETION_RECORDS` contributions from live, pending and undelivered registration state in the same locked snapshot, retaining exact assertions and failure-only diagnostics.
+						`SELECTED` barriers force a newly admitted query to remain pending through inspection or become terminal before inspection, across direct/blocking callbacks at allocation ordinals one/four and rejection sweeps.
+						Terminal cases require `AVAILABLE`, no operation waiter links, one matching delivered completion, an empty second drain and exact charge restoration after release; pending cases require their charge until the barrier is released.
+						Both orderings pass on x64 and optimised LLVM without production changes; this resolves the observed test-oracle defect, not the remaining terminal-storage allocation-safety tasks.
 						- [ ] Apply checked registration admission to successful `acquire_world`, `acquire_result`, immediate result `query` and source/analysis ticket registration, coordinating with their remaining result/operation/provider commit boundaries.
 							- [x] Apply checked registration admission to successful `acquire_world`, preserving source revalidation and world references.
 								- [x] Prepare shared checked registration backing before handle charges or generation mutation for head-session, published-ticket and published-update-waiter selectors.
@@ -842,7 +848,161 @@ Exit: user decision recorded.
 												The existing one-shot `retain_source_batch_reference` fault exposes exactly one extra reference during retry and after return; balance it with `release_source` before normal sentinel teardown.
 												Submitted and unchanged sentinel bytes remain readable after competitors retire, with zero final caller/owner ledgers.
 												- [ ] Check pool-block growth and pooled document/path/context/identity copies with rejection cleanup.
-												- [ ] Check source backing object/bytes/revision construction across overlay, disk and edit events.
+													- [x] Check shared `own` metadata copies and their pool growth, preserving staged source ownership on rejection.
+													`try_source_batch_metadata_storage` checks allocation/header/alignment sizes and supplies ordinary blocks through checked allocation before the SDK pool cycles into them.
+													The current SDK ordinary-growth path dereferences a failed allocation; this local adapter avoids that path without changing the SDK.
+													Oversized allocation rejection and empty/reused storage remain checked.
+													`own` records the first resource rejection and stops later metadata copies.
+													Overlay/disk metadata is prepared before replacing the old selection; uninstalled sources are released, new-document binding failure stops staging and final provider revisions are checked before list insertion.
+													Helper tests cover initial/growth rejection, unchanged prior bytes/cursor after failed growth, reset/reuse without allocation, oversized rejection, byte-size overflow, overwrite stamping and zero final allocator storage.
+													Real overlay/new-document/edit/disk sweeps preserve frontier/counter/source references/registrations/charges through rejection and publication, with zero final caller/owner ledgers.
+													- [x] Extend checked batch pool allocation and payload copying to admitted context identities/descriptors/paths.
+													`validate_context_registration` returns validated borrowed views; batch staging copies the identity, descriptor and three path byte strings through `own`, stopping at the first rejection before appending the context.
+													The existing public `admit_context` remains an owning wrapper with unchanged behaviour.
+													The two-event metadata sweep now covers thirteen allocation points, including all five context copies and later event rejection.
+													Failure preserves context count along with frontier/counter/source/registration/charge state; publication checks exact bytes and independent backing for all five fields, with zero final caller/owner ledgers.
+													- [x] Qualify shared and admitted-context metadata allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+														- [x] Qualify single-overlay shared metadata allocation-three callbacks and lifecycle/session/frontier winners.
+														Reuse the isolated metadata allocator with one baseline sweeping all three allocation rejections and sixteen direct/blocking action/control groups targeting allocation three.
+														Frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse exercise existing winner controls; exact allocation counts, private admission charges, provider atomicity, successful bytes, retained-world readability and final zero caller/owner ledgers pass.
+														- [x] Qualify single-overlay shared metadata allocation-one/two callbacks and lifecycle/session/frontier winners.
+														`metadata_callback_at` selects either earlier allocation without changing the three-allocation attempt count; the default still targets allocation three.
+														Thirty-four groups cover one rejection-sweep baseline and sixteen direct/blocking action/control groups per ordinal; rejection at or after the selected boundary retains exact counts, winner precedence, private charges, provider atomicity, successful bytes, retained-world readability and zero final caller/owner ledgers.
+														- [x] Qualify first-event `EDIT_OVERLAY` shared metadata callbacks and lifecycle/session/frontier winners at all three allocation ordinals.
+														The existing full-range edit fixture supplies the current source revision and exact final bytes; isolated metadata hooks target ordinals one/two/three independently of source-object, byte, revision-identity and edit-scratch allocations.
+														Fifty-one groups cover one rejection-sweep baseline and sixteen direct/blocking action/control groups per ordinal, preserving exact allocation counts, winner precedence, private charges, provider atomicity, retained-world readability and zero final caller/owner ledgers.
+														- [x] Qualify `OBSERVE_DISK` shared metadata callbacks and lifecycle/session/frontier winners at all four allocation ordinals.
+														The disk fixture preserves the selected overlay while validating exact installed disk bytes/revision, unchanged disk backing after rejection, cleared live links after retirement and retained-world readability.
+														Sixty-eight groups cover one rejection-sweep baseline and sixteen direct/blocking action/control groups per ordinal, preserving exact allocation counts, winner precedence, private charges, provider atomicity and zero final caller/owner ledgers.
+														- [x] Qualify later-event `EDIT_OVERLAY` shared metadata callbacks after prior staging acquisition.
+														The fixture first stages a new document, then edits the existing document; thirteen isolated metadata allocations are swept, with callbacks at ordinals eleven/twelve/thirteen targeting the later event's overlay revision, source context and final provider revision.
+														Fifty-one groups cover one rejection-sweep baseline and sixteen direct/blocking action/control groups per selected ordinal, preserving exact counts, winner precedence, private charges, provider atomicity, exact two-document publication, retained-world readability and zero final caller/owner ledgers.
+														- [x] Qualify later-event `SET_OVERLAY` shared metadata callbacks after prior staging acquisition.
+														The generalised `later_event` fixture first stages a new document, then replaces the existing document's overlay; thirteen isolated metadata allocations are swept, with callbacks at ordinals eleven/twelve/thirteen targeting the later event's overlay revision, source context and final provider revision.
+														Fifty-one groups preserve exact allocation counts, direct/blocking winner precedence and negative controls, private charges, provider atomicity, exact two-document publication, retained-world readability and zero final caller/owner ledgers.
+														- [x] Qualify later-event `OBSERVE_DISK` shared metadata callback routes after prior staging acquisition.
+														The fixture first stages a new document, then observes disk backing for the existing document; fourteen isolated metadata allocations are swept, with callbacks at ordinals eleven/twelve/thirteen/fourteen targeting the later disk event after earlier staging acquisition.
+														Sixty-eight groups preserve exact allocation counts, direct/blocking winner precedence and negative controls, private charges, provider atomicity, exact two-document publication with the existing overlay still selected, exact installed disk bytes/revision, unchanged disk backing on rejection, cleared live links after retirement, retained-world readability and zero final caller/owner ledgers.
+														- [x] Qualify admitted-context identity metadata callbacks and lifecycle/session/frontier winners.
+														`stage_batch` copies the admitted identity at metadata ordinal one before the descriptor, paths and document events; the two-event fixture selects that callback boundary independently of its later-event metadata allocations.
+														Seventeen groups cover a thirteen-allocation rejection-sweep baseline and sixteen direct/blocking action/control groups, preserving exact counts, winner precedence, private charges, provider atomicity, exact two-document publication, retained-world readability and zero final caller/owner ledgers.
+														Successful metadata publication also verifies exact admitted identity/descriptor/path bytes and independent backing against the borrowed registration, reusing the existing rejection fixture's deep-copy oracle.
+														- [x] Qualify admitted-context descriptor metadata callbacks and lifecycle/session/frontier winners.
+														Metadata ordinal two copies the admitted descriptor after identity acquisition and before path/document staging; seventeen groups cover the rejection-sweep baseline and direct/blocking action/control matrix with exact committed-context deep-copy checks.
+														- [x] Qualify admitted-context path metadata callbacks and lifecycle/session/frontier winners.
+														Metadata ordinals three/four/five copy the visible filename, visible directory and relative base respectively, after identity/descriptor acquisition; fifty-one groups cover rejection sweeps and direct/blocking action/control matrices with exact path bytes and independent backing.
+														Both slices preserve exact allocation counts, winner precedence, private charges, provider/context atomicity, two-document publication, retained-world readability and zero final caller/owner ledgers.
+														- [x] Qualify shared/admitted-context metadata receipt-capacity retries and rejected-allocation retry controls.
+															- [x] Qualify single-event `SET_OVERLAY` shared metadata receipt-capacity retries.
+															Four direct/blocking registration/operation-capacity matrices sweep rejection across both three-allocation staging attempts, verifying six total allocations on successful retry, callback gate progress, output allocation counts, provider/frontier atomicity, exact published bytes, retained-world readability and zero final caller/owner ledgers.
+															- [x] Qualify single-event `EDIT_OVERLAY` shared metadata receipt-capacity retries.
+															Four direct/blocking registration/operation-capacity matrices sweep rejection across both three-allocation metadata staging attempts, verifying six total allocations on successful retry, callback gate progress, output allocation counts, provider/frontier atomicity, exact edited bytes, retained-world readability and zero final caller/owner ledgers.
+															- [x] Qualify single-event `OBSERVE_DISK` shared metadata receipt-capacity retries.
+															Four direct/blocking registration/operation-capacity matrices sweep rejection across both four-allocation metadata staging attempts, verifying eight total allocations on successful retry, callback gate progress, output allocation counts, provider/frontier atomicity, exact installed disk bytes/revision, preserved overlay selection, unchanged disk backing on rejection, retained-world readability and zero final caller/owner ledgers.
+															- [x] Qualify admitted-context metadata receipt-capacity retries with later-event `SET_OVERLAY`.
+															Four direct/blocking registration/operation-capacity matrices sweep rejection across both thirteen-allocation staging attempts, verifying twenty-six allocations on successful retry, unchanged document/context counts on rejection, exact deep copies of admitted context and new-document metadata, exact two-document publication, callback gate progress, returned private charges, retained-world readability and zero final caller/owner ledgers.
+															- [x] Qualify admitted-context metadata receipt-capacity retries with later-event `EDIT_OVERLAY`.
+															Four direct/blocking registration/operation-capacity matrices sweep rejection across both thirteen-allocation staging attempts, verifying twenty-six allocations on successful retry, unchanged document/context counts on rejection, exact context/new-document metadata deep copies, exact two-document publication with edited bytes, callback gate progress, restored private charges, retained-world readability and zero final caller/owner ledgers.
+															- [x] Qualify admitted-context metadata receipt-capacity retries with later-event `OBSERVE_DISK`.
+															Four direct/blocking registration/operation-capacity matrices sweep rejection across both fourteen-allocation staging attempts, verifying twenty-eight allocations on successful retry, unchanged document/context counts and original disk backing on rejection, exact context/new-document metadata deep copies, exact installed disk bytes/revision with preserved overlay selection, exact two-document publication, callback gate progress, restored private charges, retained-world readability and zero final caller/owner ledgers.
+															- [x] Qualify shared/admitted-context metadata rejected-allocation retry controls.
+																- [x] Qualify single-event `SET_OVERLAY` shared metadata rejected-allocation retry controls.
+																One standalone control and four direct/blocking registration/operation-capacity controls sweep three rejection ordinals each, detecting forbidden admission with exactly four/five/six allocations after initial rejection and seven/eight/nine after receipt-retry rejection.
+																Existing ordinary rejection matrices stop at the rejected ordinal; controls require exact published bytes, callback gate progress and caller receipt counts for capacity races, restored private charges, retained-world readability and zero final caller/owner ledgers.
+																- [x] Qualify single-event `EDIT_OVERLAY` shared metadata rejected-allocation retry controls.
+																One standalone control and four direct/blocking registration/operation-capacity controls sweep three rejection ordinals each, detecting forbidden admission with exactly four/five/six allocations after initial rejection and seven/eight/nine after receipt-retry rejection.
+																Existing ordinary edit rejection matrices stop at the rejected ordinal; controls require exact edited bytes, output callback gate progress and caller receipt counts for capacity races, restored private charges, retained-world readability and zero final caller/owner ledgers.
+																- [x] Qualify single-event `OBSERVE_DISK` shared metadata rejected-allocation retry controls.
+																One standalone control and four direct/blocking registration/operation-capacity controls sweep four rejection ordinals each, detecting forbidden admission with exactly five/six/seven/eight allocations after initial rejection and nine/ten/eleven/twelve after receipt-retry rejection.
+																Existing ordinary disk rejection matrices stop at the rejected ordinal and preserve original disk backing; controls require exact installed disk bytes/revision, preserved overlay selection, output callback gate progress and caller receipt counts for capacity races, restored private charges, retained-world readability and zero final caller/owner ledgers.
+																- [x] Qualify admitted-context metadata rejected-allocation retry controls with later-event `SET_OVERLAY`.
+																One standalone control and four direct/blocking registration/operation-capacity controls sweep thirteen rejection ordinals each, detecting forbidden admission with exactly fourteen through twenty-six allocations after initial rejection and twenty-seven through thirty-nine after receipt-retry rejection.
+																Existing ordinary rejection matrices stop at the rejected ordinal and preserve document/context counts; controls require exactly one new document/context, independent admitted-context and new-document metadata backing, exact two-document publication, output callback gate progress and caller receipt counts for capacity races, restored private charges, retained-world readability and zero final caller/owner ledgers.
+																- [x] Qualify admitted-context metadata rejected-allocation retry controls with later-event `EDIT_OVERLAY`.
+																One standalone control and four direct/blocking registration/operation-capacity controls sweep thirteen rejection ordinals each, detecting forbidden admission with exactly fourteen through twenty-six allocations after initial rejection and twenty-seven through thirty-nine after receipt-retry rejection.
+																Existing ordinary edit rejection matrices stop at the rejected ordinal and preserve document/context counts; controls require exactly one new document/context, independent admitted-context and new-document metadata backing, exact two-document publication with edited bytes, output callback gate progress and caller receipt counts for capacity races, restored private charges, retained-world readability and zero final caller/owner ledgers.
+																- [x] Qualify admitted-context metadata rejected-allocation retry controls with later-event `OBSERVE_DISK`.
+																One standalone control and four direct/blocking registration/operation-capacity controls sweep fourteen rejection ordinals each, detecting forbidden admission with exactly fifteen through twenty-eight allocations after initial rejection and twenty-nine through forty-two after receipt-retry rejection.
+																Existing ordinary disk rejection matrices stop at the rejected ordinal and preserve document/context counts and original disk backing; controls require exactly one new document/context, independent metadata backing, exact installed disk bytes/revision with preserved overlay selection, exact two-document publication, output callback gate progress and caller receipt counts for capacity races, restored private charges, retained-world readability and zero final caller/owner ledgers.
+														- [x] Qualify discarded-attempt metadata source-reference rollback with retained-sentinel controls.
+															- [x] Qualify single-event `SET_OVERLAY` shared metadata source-reference rollback with retained-sentinel controls.
+															Twelve direct/blocking groups cover caller-receipt rejection and registration/operation-capacity retries, each with ordinary and deliberate extra-reference controls; forty fixture attempts include all six initial/retry metadata rejection ordinals, success and the beyond-range sentinel.
+															The unchanged second document is held through a real world handle; callback four observes its reference count with the retried private clone alive, while caller-copy snapshots and post-return counts distinguish exactly one deliberately retained reference and verify ordinary rollback.
+															Three allocations per staging attempt and six on successful capacity retry are exact; controls balance their extra reference before teardown, published and sentinel bytes remain exact, private charges return and final caller/owner ledgers are zero.
+															- [x] Qualify single-event `EDIT_OVERLAY` shared metadata source-reference rollback with retained-sentinel controls.
+															Twelve direct/blocking groups cover caller-receipt rejection and registration/operation-capacity retries with ordinary and deliberate extra-reference controls; forty fixture attempts cover all six metadata rejection ordinals, success and the beyond-range sentinel.
+															The metadata hook excludes edit scratch allocations; three metadata allocations per attempt, retry callback four and six allocations on successful capacity retry remain exact.
+															Sentinel references restore after ordinary cleanup, the extra-reference control is detected and balanced, edited and sentinel bytes remain exact, private charges return and final caller/owner ledgers are zero.
+															- [x] Qualify single-event `OBSERVE_DISK` shared metadata source-reference rollback with retained-sentinel controls.
+															Twelve direct/blocking groups cover caller-receipt rejection and registration/operation-capacity retries with ordinary and deliberate extra-reference controls; forty-eight fixture attempts cover all eight metadata rejection ordinals, success and the beyond-range sentinel.
+															Four metadata allocations per attempt, retry callback five and eight allocations on successful capacity retry remain exact; sentinel reference snapshots distinguish the private clone and deliberate extra reference, with ordinary restoration and explicit control balancing before teardown.
+															Successful admission installs exact disk bytes/revision while preserving overlay selection; rejection preserves the original disk backing, sentinel bytes remain exact, private charges return and final caller/owner ledgers are zero.
+															- [x] Qualify admitted-context metadata source-reference rollback with later-event `SET_OVERLAY` and retained-sentinel controls.
+															Twelve direct/blocking groups cover caller-receipt rejection and registration/operation-capacity retries with ordinary and deliberate extra-reference controls; 120 fixture attempts cover all twenty-six initial/retry metadata rejection ordinals, success and the beyond-range sentinel.
+															Thirteen metadata allocations per attempt, retry callback fourteen and twenty-six allocations on successful capacity retry remain exact; callback/caller-copy/post-return snapshots distinguish private-clone cleanup and the deliberate extra reference, which controls explicitly balance before teardown.
+															Successful admission adds exactly one document/context with independent metadata backing and exact two-document publication; rejection preserves document/context counts and omits the added document.
+															The separate retained sentinel remains readable, private charges return and final caller/owner ledgers are zero.
+															- [x] Qualify admitted-context metadata source-reference rollback with later-event `EDIT_OVERLAY` and retained-sentinel controls.
+															Twelve direct/blocking groups cover caller-receipt rejection and registration/operation-capacity retries with ordinary and deliberate extra-reference controls; 120 fixture attempts cover all twenty-six initial/retry metadata rejection ordinals, success and the beyond-range sentinel.
+															The full-range edit targets the existing document in the second event, leaving the first event's new document/context intact; the isolated metadata hook excludes edit scratch allocations, preserving thirteen allocations per attempt, retry callback fourteen and twenty-six allocations on successful capacity retry.
+															Reference snapshots require ordinary restoration or exactly one deliberately retained reference, which controls explicitly balance.
+															Exact document/context counts, independent metadata backing, two-document publication, retained-sentinel bytes, returned private charges and zero final caller/owner ledgers remain asserted.
+															- [x] Qualify admitted-context metadata source-reference rollback with later-event `OBSERVE_DISK` and retained-sentinel controls.
+															Twelve direct/blocking groups cover caller-receipt rejection and registration/operation-capacity retries with ordinary and deliberate extra-reference controls; 128 fixture attempts cover all twenty-eight initial/retry metadata rejection ordinals, success and the beyond-range sentinel.
+															Disk preparation and verification target the existing document in the second event; fourteen metadata allocations per attempt, retry callback fifteen and twenty-eight allocations on successful capacity retry remain exact.
+															Reference snapshots require ordinary restoration or exactly one deliberately retained reference, which controls explicitly balance.
+															Successful admission adds exactly one document/context with independent metadata backing and installs exact disk bytes/revision while preserving overlay selection and exact two-document publication; rejection preserves document/context counts and the original disk backing.
+															Retained-sentinel bytes, returned private charges and zero final caller/owner ledgers remain asserted; all six metadata reference-rollback routes are now qualified.
+														- [x] Qualify actual shared/admitted-context metadata frees with allocating/mutating reentry and discriminating controls.
+															- [x] Qualify single-event `SET_OVERLAY` metadata pool-block frees after caller-receipt rejection, registration/operation-capacity retry and validation rejection.
+															Twenty cases cover direct/blocking allocating/mutating reentry, suppressed-callback controls and held-heap controls across four cleanup scenarios.
+															The first metadata hook captures the actual `Pool.memblock_size` allocation, not the requested metadata slice; exactly one tracked block free is required, with three metadata calls per attempt and six on successful capacity retry.
+															Callbacks verify gate progress, retained-world readability and private charges; successful retries publish exact bytes, suppressed callbacks perform no reentry, held-heap controls detect blocked allocation, and final caller/owner ledgers are zero.
+															- [x] Qualify single-event `EDIT_OVERLAY` metadata pool-block frees with allocating/mutating reentry and discriminating controls.
+															Twenty cases cover caller-receipt rejection, registration/operation-capacity retries and duplicate-event validation rejection with direct/blocking allocating/mutating callbacks, suppressed-callback controls and held-heap controls.
+															The full-range edit setup is independent of hook selection: the metadata hook captures the actual first pool block, excludes edit scratch allocations and requires three metadata calls per attempt, six on successful retry and exactly one captured block free.
+															Gate progress, retained-world readability, private callback charges, exact edited publication, restored charges and zero final caller/owner ledgers remain asserted; controls distinguish suppressed reentry and blocked owner allocation.
+															- [x] Qualify single-event `OBSERVE_DISK` metadata pool-block frees with allocating/mutating reentry and discriminating controls.
+															Twenty cases cover caller-receipt rejection, registration/operation-capacity retries and duplicate-event validation rejection with direct/blocking allocating/mutating callbacks, suppressed-callback controls and held-heap controls.
+															A present disk observation uses a canonical source revision; the metadata hook requires four calls per attempt, eight on successful capacity retry and exactly one captured pool-block free.
+															Successful admission installs exact disk bytes/revision while preserving selected overlay bytes and publication; rejection preserves the original disk backing.
+															Gate progress, retained-world readability, private callback charges, restored charges and zero final caller/owner ledgers remain asserted; controls distinguish suppressed reentry and blocked owner allocation.
+															- [x] Qualify admitted-context metadata pool-block frees with later-event `SET_OVERLAY` and discriminating reentry controls.
+															Twenty cases cover caller-receipt rejection, registration/operation-capacity retries and duplicate-event validation rejection with direct/blocking allocating/mutating callbacks, suppressed-callback controls and held-heap controls.
+															The first event admits a new document/context before the existing overlay update; validation appends a third duplicate without replacing that valid prefix and requires the error at `events[2].document`.
+															Thirteen metadata calls per attempt, twenty-six on successful retry and exactly one captured pool-block free remain exact.
+															Successful admission requires exactly one new document/context with independent metadata backing and exact two-document publication; rejection preserves document/context counts and leaves both additions absent.
+															Callback gate progress/readability/private charges, discriminating controls, restored charges and zero final caller/owner ledgers remain asserted.
+															- [x] Qualify admitted-context metadata pool-block frees with later-event `EDIT_OVERLAY` and discriminating reentry controls.
+															Twenty cases cover caller-receipt rejection, registration/operation-capacity retries and third-event duplicate rejection with direct/blocking allocating/mutating callbacks, suppressed-callback controls and held-heap controls.
+															The full-range edit targets the existing document in event one, leaving the new document/context in event zero intact; the separate metadata hook excludes edit scratch allocations and requires thirteen metadata calls per attempt, twenty-six on retry and exactly one captured pool-block free.
+															Exact new document/context counts and independent metadata backing, two-document edited publication, validation path `events[2].document`, callback gate progress/readability/private charges, restored charges and zero final caller/owner ledgers remain asserted.
+															- [x] Qualify admitted-context metadata pool-block frees with later-event `OBSERVE_DISK` and discriminating reentry controls.
+															Twenty cases cover caller-receipt rejection, registration/operation-capacity retries and third-event duplicate rejection with direct/blocking allocating/mutating callbacks, suppressed-callback controls and held-heap controls.
+															Disk preparation and verification share the existing document's second-event index; fourteen metadata calls per attempt, twenty-eight on retry and exactly one captured pool-block free remain exact.
+															Successful admission adds exactly one document/context with independent metadata backing and installs exact disk bytes/revision while preserving selected overlay bytes and two-document publication; rejection preserves document/context counts and original disk backing and leaves the additions absent.
+															Validation path `events[2].document`, callback gate progress/readability/private charges, discriminating controls, restored charges and zero final caller/owner ledgers remain asserted; all six route matrices now pass, while partial-staging actual-free qualification remains open.
+															- [x] Qualify partially staged metadata-block frees after later metadata allocation rejection with discriminating reentry controls.
+																- [x] Qualify single-event `SET_OVERLAY` partial metadata-block frees after rejecting metadata allocation two or three.
+																Ten cases cover both rejected ordinals with direct/blocking allocating/mutating reentry, suppressed-callback controls and held-heap controls.
+																The first metadata block is captured and freed exactly once; rejection stops at the chosen ordinal with no caller receipt allocation.
+																Early `discard_staging` cleanup observes one still-live private ticket; post-return provider counts, source identity/reference count and frontier remain unchanged, private charges restore and final caller/owner ledgers are zero.
+																- [x] Qualify single-event `EDIT_OVERLAY` partial metadata-block frees after later metadata allocation rejection.
+																Ten cases cover metadata rejection ordinals two and three with direct/blocking allocating/mutating reentry, suppressed-callback controls and held-heap controls; the isolated metadata hook excludes edit scratch allocations and requires exactly one captured block free with no caller allocation.
+																Early cleanup observes one private ticket still live; post-return document/context counts, original source identity/reference count and frontier remain unchanged, private charges restore and final caller/owner ledgers are zero.
+																- [x] Qualify single-event `OBSERVE_DISK` partial metadata-block frees after later metadata allocation rejection.
+																Fifteen cases cover metadata rejection ordinals two through four with direct/blocking allocating/mutating reentry, suppressed-callback controls and held-heap controls; each requires exactly one captured block free with no caller allocation.
+																Early cleanup observes one private ticket still live; post-return document/context counts, original source identity/reference count, disk backing, overlay bytes and frontier remain unchanged, private charges restore and final caller/owner ledgers are zero.
+																- [x] Qualify admitted-context later-event `SET_OVERLAY` partial metadata-block frees after later metadata allocation rejection.
+																Sixty cases cover metadata rejection ordinals two through thirteen with direct/blocking allocating/mutating reentry, suppressed-callback controls and held-heap controls; each requires exactly one captured block free with no caller allocation.
+																Early cleanup observes one private ticket still live; the new document and admitted context remain absent, original source identity/reference count, document/context counts and frontier remain unchanged, private charges restore and final caller/owner ledgers are zero.
+																- [x] Qualify admitted-context later-event `EDIT_OVERLAY` partial metadata-block frees after later metadata allocation rejection.
+																Sixty cases cover metadata rejection ordinals two through thirteen with direct/blocking allocating/mutating reentry, suppressed-callback controls and held-heap controls; the isolated metadata hook excludes edit scratch allocations and requires exactly one captured block free with no caller allocation.
+																Early cleanup observes one private ticket still live; the new document and admitted context remain absent, original source identity/reference count, document/context counts and frontier remain unchanged, private charges restore and final caller/owner ledgers are zero.
+																- [x] Qualify admitted-context later-event `OBSERVE_DISK` partial metadata-block frees after later metadata allocation rejection.
+																Sixty-five cases cover metadata rejection ordinals two through fourteen with direct/blocking allocating/mutating reentry, suppressed-callback controls and held-heap controls; each requires exactly one captured block free with no caller allocation.
+																Early cleanup observes one private ticket still live; the new document and admitted context remain absent, original source identity/reference count, disk backing, overlay bytes, document/context counts and frontier remain unchanged, private charges restore and final caller/owner ledgers are zero.
+												- [x] Check source backing object/bytes/revision construction across overlay, disk and edit events.
 													- [x] Check `Source_Backing` object allocation before source acquisition, preserving rejection cleanup across inline, disk and edit routes.
 													`new_source` checks one object with the private source allocator and returns `ADMISSION_DENIED`/`RESOURCE_EXHAUSTED` through staging on rejection.
 													`EDIT_OVERLAY` checks the returned pointer before replacing its previous source.
@@ -856,15 +1016,124 @@ Exit: user decision recorded.
 													The private builder supplies stack-local version/byte-count fields and the source digest to `try_output_key`; a rejected identity allocation frees the copied bytes and uninstalled object before reporting `ADMISSION_DENIED`/`RESOURCE_EXHAUSTED`.
 													Isolated first/second-event overlay, empty-source, edit and disk sweeps qualify rejection through success across registration array/object/reuse cases.
 													Disk validation compares the checked identity with the existing canonical helper; rejected frontier, source identity/references, registrations/counters and charges remain unchanged, with zero final caller/owner ledgers.
-													- [ ] Qualify source-object allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
-													- [ ] Qualify source-byte allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
-													- [ ] Qualify source revision-identity allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+													- [x] Qualify source-object allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+														- [x] Qualify first-event overlay source-object allocation callbacks and lifecycle/session/frontier winners in direct and synchronously blocking modes.
+														Reuse `test_source_batch_storage_admission` with the isolated `source_batch_source_allocation_hook`; sixteen action/control groups cover frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including rejection at the callback allocation.
+														Existing stale-frontier, shutdown-precedence and stale-session controls discriminate the wrong winner; callbacks see one active private admission, retained worlds remain readable, private charges are returned and final caller/owner ledgers are zero.
+														- [x] Extend source-object callback qualification to later events, edit and disk construction routes.
+															- [x] Qualify first-event `EDIT_OVERLAY` source-object callbacks and lifecycle/session/frontier winners.
+															The existing construction fixture replaces the selected source's complete byte range with a `Range_Edit` keyed to its source revision, then runs the isolated object-allocation callback after edit scratch preparation.
+															Sixteen direct/blocking action/control groups cover frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including object-allocation rejection where applicable.
+															Existing precedence controls discriminate the wrong winner; edited/sentinel bytes remain readable, private charges are returned and final caller/owner ledgers are zero after edit scratch cleanup.
+															- [x] Qualify source-object callbacks at later batch events after earlier source staging.
+															A second new-document `SET_OVERLAY` moves the isolated source-object callback to allocation two, after a first `SET_OVERLAY`, `EDIT_OVERLAY` or `OBSERVE_DISK` source is staged.
+															Three baseline groups reject each object allocation through publication; 48 direct/blocking action/control groups qualify frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse at the second object.
+															Rejection leaves the added document/context uncommitted; publication checks both documents' exact bytes by identity rather than member order, with disk/overlay selection rules preserved.
+															Earlier staged sources are released on discard, private charges are returned, retained worlds remain readable and final caller/owner ledgers are zero; actual-free callback controls remain separate.
+															- [x] Qualify first-event `OBSERVE_DISK` source-object callbacks and lifecycle/session/frontier winners.
+															A `PRESENT` observation supplies canonical source-revision and provenance data; baseline publication/rejection and sixteen direct/blocking action/control groups exercise the isolated source-object hook.
+															Published provider disk bytes/revision are checked independently from the retained overlay selected by the world; live-provider rejection preserves the original disk source, and stale-frontier/shutdown/session controls discriminate incorrect winners.
+															Session release intentionally clears provider source links, so retirement cases assert those cleared links and exact original overlay bytes through a retained world instead of requiring a live provider overlay.
+															Private charges are returned and final caller/owner ledgers are zero; later-event and actual-free qualification remain separate.
+														- [x] Qualify source-object receipt-capacity retry allocation/rejection and discarded-attempt source-reference rollback.
+														Reuse the construction receipt-retry and retained-sentinel fixtures with `source_batch_source_allocation_hook` in direct and synchronously blocking modes, across registry and operation-list capacity races.
+														Initial/retry object rejection, successful publication, caller-receipt rejection and the existing rejected-allocation retry control distinguish admission after failure; a second independent caller receipt is allocated only after retry construction succeeds.
+														A normally retained second-document world exposes source-reference rollback on discarded attempts; the one-extra-reference control is visible during retry and after return, then explicitly released before teardown.
+														Callback-relative charges and operation/world counters remain consistent, unchanged provider/frontier state survives rejection, submitted/sentinel bytes remain readable and final caller/owner ledgers are zero.
+														- [x] Qualify actual source-object cleanup callbacks with allocating/mutating reentry and discriminating controls.
+														Capture the first isolated source-object allocation and intercept its actual owner-delegated free, rather than a nearby pool or revision free.
+														Twenty groups cover caller-receipt rejection, registry/operation-list capacity retries and duplicate-event discard, with direct/blocking allocating and retain/release reentry, suppressed-callback controls and held-heap-gate controls.
+														Exactly one captured free occurs; callbacks see one private admission with consistent handle/acquisition charges, retained worlds remain readable, successful retries publish exact source bytes and final caller/owner ledgers are zero.
+													- [x] Qualify source-byte allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+														- [x] Qualify first-event overlay source-byte allocation callbacks and lifecycle/session/frontier winners in direct and synchronously blocking modes.
+														Reuse `test_source_batch_storage_admission` with the isolated `source_batch_source_bytes_allocation_hook`, after the source object is allocated but before its bytes are copied.
+														One baseline group covers allocation rejection through exact-byte publication; sixteen action/control groups cover frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including rejection at the callback allocation.
+														Existing stale-frontier, shutdown-precedence and stale-session controls discriminate incorrect winners; callbacks see one private admission, retained worlds remain readable, partial source objects are released and final caller/owner ledgers are zero.
+														- [x] Qualify first-event `EDIT_OVERLAY` source-byte callbacks and lifecycle/session/frontier winners.
+														A full-range `Range_Edit` reaches the isolated source-byte hook after edit scratch preparation and source-object allocation; one baseline group covers rejection through exact edited-byte publication.
+														Sixteen direct/blocking action/control groups qualify frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including byte-allocation rejection and the existing incorrect-winner controls.
+														Callbacks see one private admission; retained worlds remain readable, partial source objects and edit scratch are released, private charges are returned and final caller/owner ledgers are zero.
+														- [x] Qualify first-event `OBSERVE_DISK` source-byte callbacks and lifecycle/session/frontier winners.
+														A `PRESENT` observation supplies canonical source-revision and provenance data; one baseline group and sixteen direct/blocking action/control groups exercise the isolated source-byte hook after source-object allocation.
+														Published disk bytes/revision are checked independently from the retained overlay selected by the world; rejected live-provider attempts preserve the original disk source, and lifecycle/session/frontier controls discriminate incorrect winners.
+														Retirement clears provider source links while the retained world remains readable; partial source objects are released, private charges are returned and final caller/owner ledgers are zero.
+														- [x] Qualify source-byte callbacks at later batch events after earlier source staging.
+														A second new-document `SET_OVERLAY` moves the isolated source-byte callback to allocation two, after a first `SET_OVERLAY`, `EDIT_OVERLAY` or `OBSERVE_DISK` source is staged.
+														Three baseline groups reject each byte allocation through publication; 48 direct/blocking action/control groups qualify frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse at the second byte allocation.
+														Rejected attempts leave the added document/context uncommitted; successful worlds contain both exact sources checked by document identity, with disk/overlay selection preserved.
+														Earlier staged sources and partial later source objects are released on discard, retained worlds remain readable, private charges are returned and final caller/owner ledgers are zero.
+														- [x] Qualify source-byte receipt-capacity retry allocation/rejection and rejected-allocation retry controls.
+														Reuse `test_source_batch_construction_receipt_retry` with the isolated source-byte hook; nine groups cover direct/blocking registry and operation-list capacity races plus the existing rejected-allocation retry control.
+														First/retry byte rejection releases partial source objects and discarded staging, preserves provider/frontier state and returns private charges; exact-byte publication succeeds after a valid retry, and final caller/owner ledgers are zero.
+														One byte allocation occurs per construction attempt; a second caller receipt is allocated only after retry construction succeeds, and the control exposes admission after an actually rejected byte allocation.
+														- [x] Qualify discarded-attempt source-reference rollback and its retained-sentinel controls with isolated source-byte callbacks.
+														Reuse the retained-sentinel fixture with the isolated source-byte hook; twelve direct/blocking groups cover registry and operation-list capacity retries plus caller-receipt rejection, with and without the one-extra-reference control.
+														Reference counts are checked during retry and after return; the deliberate extra reference is detected and explicitly released before teardown, while submitted/sentinel bytes remain exact and final caller/owner ledgers are zero.
+														- [x] Qualify actual source-byte cleanup callbacks with allocating/mutating reentry and discriminating controls.
+														Capture the first isolated byte allocation and intercept its actual owner-delegated free, rather than a nearby source-object or pool free.
+														Twenty groups cover caller-receipt rejection, registry/operation-list capacity retries and duplicate-event discard, with direct/blocking allocating and retain/release reentry, suppressed-callback controls and held-heap-gate controls.
+														Exactly one captured free occurs; callbacks see one private admission with consistent handle/acquisition charges, retained worlds remain readable, successful retries publish exact source bytes and final caller/owner ledgers are zero.
+													- [x] Qualify source revision-identity allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+														- [x] Qualify first-event overlay source revision-identity allocation callbacks and lifecycle/session/frontier winners in direct and synchronously blocking modes.
+														Reuse `test_source_batch_storage_admission` with the isolated `source_batch_source_identity_allocation_hook`, after the source object and byte copy have been allocated.
+														One baseline group covers allocation rejection through exact-byte publication; sixteen action/control groups cover frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including rejection at the callback allocation.
+														Existing stale-frontier, shutdown-precedence and stale-session controls discriminate incorrect winners; callbacks see one private admission, retained worlds remain readable, partial source objects/byte copies are released and final caller/owner ledgers are zero.
+														- [x] Qualify first-event `EDIT_OVERLAY` source revision-identity callbacks and lifecycle/session/frontier winners.
+														Reuse the full-range `Range_Edit` fixture and isolated identity-allocation hook after edit scratch, source-object and byte-copy allocation.
+														One baseline group covers rejection through exact-byte publication; sixteen direct/blocking action/control groups qualify frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including callback-allocation rejection.
+														Rejected construction releases edit scratch, copied bytes and the partial source object; retained worlds remain readable, admission charges return and final caller/owner ledgers are zero.
+														- [x] Qualify first-event `OBSERVE_DISK` source revision-identity callbacks and lifecycle/session/frontier winners.
+														Reuse the present-disk fixture with canonical revision and provenance; the isolated identity hook runs after source-object and byte-copy allocation, before installing the disk state.
+														One baseline and sixteen direct/blocking action/control groups qualify rejection, frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse.
+														Success preserves overlay selection while installing exact disk bytes/revision; rejection preserves the prior disk source, retirement clears live source links, retained worlds remain readable and final caller/owner ledgers are zero.
+														- [x] Qualify source revision-identity callbacks at later batch events after earlier source staging.
+														Reuse the two-event fixture with isolated identity allocation two after each first-event route (`SET_OVERLAY`, `EDIT_OVERLAY`, `OBSERVE_DISK`); the second event adds a new document with `SET_OVERLAY`.
+														Three baseline groups and forty-eight direct/blocking action/control groups qualify rejection after earlier staging, frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse.
+														Rejection adds no document/context and releases earlier staging plus the partial second source; success publishes exact bytes for both members independent of member order, retained worlds remain readable and final caller/owner ledgers are zero.
+														- [x] Qualify source revision-identity receipt-capacity retry allocation/rejection and rejected-allocation retry controls.
+														Reuse `test_source_batch_construction_receipt_retry` with exclusive identity allocation: one standalone rejected-allocation retry control and eight direct/blocking registry/operation-capacity retry groups with ordinary and incorrect-retry controls.
+														Exact identity-allocation counts distinguish a capacity-driven retry from retrying a rejected allocation; rejection sweeps include the second attempt, successful retries publish exact source bytes, retained worlds remain readable and final caller/owner ledgers are zero.
+														- [x] Qualify discarded-attempt source-reference rollback and its retained-sentinel controls with isolated source revision-identity callbacks.
+														Reuse the retained-sentinel fixture with isolated identity allocation; twelve direct/blocking groups cover caller-receipt rejection and registry/operation-list capacity retries, each with ordinary and retained-reference controls.
+														Callback and post-cleanup reference counts distinguish discarded-attempt rollback from the deliberate extra reference; allocation rejection sweeps, exact retry publication, retained-world bytes and final zero caller/owner ledgers pass.
+														- [x] Qualify actual source revision-identity cleanup callbacks with allocating/mutating reentry and discriminating controls.
+														Capture the first isolated identity allocation and intercept its actual owner-delegated free, rather than a nearby byte-copy, source-object or pool free.
+														Twenty groups cover caller-receipt rejection, registry/operation-list capacity retries and duplicate-event discard, with direct/blocking allocating and retain/release reentry, suppressed-callback controls and held-heap-gate controls.
+														Exactly one captured free occurs; callbacks see one private admission with consistent charges, retained worlds remain readable, successful retries publish exact source bytes and final caller/owner ledgers are zero.
 													- [x] Check edit intermediate byte arrays and arithmetic before final source construction.
 													`stage_edited_source` borrows the unchanged input, checks each intermediate allocation and frees replaced/final scratch storage on success or rejection.
 													`try_source_edit_size` validates nonnegative sizes and bounds before subtraction/addition; numeric maximum, overflow, exact-limit, over-limit, invalid-removal and empty-result checks pass without large allocations.
 													First/second intermediate rejection and sequential edits preserve the existing admission invariants; a successful empty edit performs no scratch allocation.
 													Final caller/owner ledgers are zero, including rejection after earlier scratch was acquired.
-													- [ ] Qualify edit intermediate allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+													- [x] Qualify edit intermediate allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+														- [x] Qualify first-event, first-intermediate `EDIT_OVERLAY` allocation callbacks and lifecycle/session/frontier winners.
+														Reuse the full-range edit fixture with isolated `source_batch_edit_allocation_hook`; one baseline and sixteen direct/blocking action/control groups cover rejection, frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse.
+														Existing incorrect-winner controls discriminate stale admission; successful publication preserves exact edited bytes, retained worlds remain readable, scratch is released and final caller/owner ledgers are zero.
+														- [x] Qualify later intermediate edit allocations after earlier scratch acquisition.
+														Two sequential full-range edits produce distinct intermediate and final bytes; one baseline sweeps both scratch-allocation rejections and sixteen direct/blocking action/control groups target allocation two.
+														Frontier/lifecycle/session winner controls, exact final publication, retained-world readability and zero final caller/owner ledgers pass, including rejection while earlier scratch remains owned.
+														- [x] Qualify later-event edits after earlier source staging.
+														Stage a new-document `SET_OVERLAY` before editing the existing document; one baseline and sixteen direct/blocking action/control groups target the second event's first scratch allocation.
+														Rejection adds no document/context and discards earlier source staging; success publishes exact bytes for both members independent of order, winner controls discriminate stale admission, retained worlds remain readable and final caller/owner ledgers are zero.
+														- [x] Qualify edit intermediate receipt-capacity retry allocation/rejection and rejected-allocation retry controls.
+														Eighteen groups cover single and sequential edits: each has a standalone rejected-allocation retry control and eight direct/blocking registry/operation-list capacity retry groups with ordinary and incorrect-retry controls.
+														Exact scratch-allocation counts distinguish capacity-driven restaging from retrying a rejected allocation; sweeps include both intermediate allocations on both attempts, successful retries publish exact final bytes, retained worlds remain readable and final caller/owner ledgers are zero.
+														- [x] Qualify discarded-attempt source-reference rollback and retained-sentinel controls with isolated edit intermediate callbacks.
+														Twenty-four groups cover single and sequential edits, each with direct/blocking caller-receipt rejection and registry/operation-list capacity retries, plus retained-reference controls.
+														Exact scratch-allocation counts and callback/post-cleanup sentinel reference counts qualify discarded-attempt rollback, including both intermediate rejections on both attempts; successful retries preserve exact final bytes, retained worlds remain readable and final caller/owner ledgers are zero after balancing the control reference.
+														- [x] Qualify actual edit intermediate cleanup callbacks with allocating/mutating reentry and discriminating controls.
+															- [x] Qualify actual single-edit scratch frees with allocating/mutating reentry and controls.
+															Capture the isolated edit-scratch allocation and intercept its actual free during private staging, before caller-receipt allocation; callbacks observe one private handle charge rather than later capacity competitors.
+															Twenty groups cover caller-receipt rejection, registry/operation-list capacity retries and duplicate-event discard, with direct/blocking allocating and retain/release reentry, suppressed-callback controls and held-heap-gate controls.
+															Exactly one captured free occurs; retained worlds remain readable, successful retries publish exact edited bytes and final caller/owner ledgers are zero.
+															- [x] Qualify replaced earlier scratch frees during sequential edits, including cleanup after later allocation rejection.
+															Capture scratch allocation one; twenty groups intercept its actual free when scratch two replaces it, across caller-receipt rejection, registry/operation-list capacity retries and duplicate-event discard.
+															Five additional direct/blocking ordinary/suppressed and held-heap controls reject allocation two and intercept deferred cleanup of scratch one without any caller-receipt allocation.
+															Exactly one captured free occurs; allocating/mutating reentry, private charges, retained-world readability, exact successful edited bytes and zero final caller/owner ledgers remain checked.
+															- [x] Qualify final scratch frees during sequential edits with allocating/mutating reentry and controls.
+															Capture scratch allocation two; intercept its actual deferred free after final source construction and before caller-receipt allocation, leaving the replaced earlier scratch free untracked.
+															Twenty groups cover caller-receipt rejection, registry/operation-list capacity retries and duplicate-event discard, with direct/blocking allocating and retain/release reentry, suppressed-callback controls and held-heap-gate controls.
+															Exactly one captured free occurs; private admission charges, retained-world readability, exact successful edited bytes and final zero caller/owner ledgers remain checked.
 												- [ ] Check staging pointer/path/context/reference arrays and final provider document/context/frontier commit backing.
 													- [x] Reserve checked staging state-pointer backing before event state acquisition.
 													After context registration validation, reserve one pointer per validated batch event with `try_output_array`; install its allocator/capacity in the empty staging list so each event's state append requires no growth.
@@ -874,8 +1143,56 @@ Exit: user decision recorded.
 													`stage_event` and `stage_disk` are the only callers of `known_context`, each at most once per event; future callers must preserve or revise this bound.
 													Helper tests cover negative/overflow counts without allocator calls, empty storage, allocation rejection and filling reserved capacity without growth.
 													One/two-event overlay and full two-reference disk cases qualify admission rollback; reference rejection also frees the already-reserved state list, with zero final caller/owner ledgers.
-													- [ ] Qualify staging state-pointer allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
-													- [ ] Qualify staging context-reference allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+													- [x] Qualify staging state-pointer allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+														- [x] Qualify first-event overlay staging state-pointer allocation callbacks and lifecycle/session/frontier winners.
+														Reuse `test_source_batch_storage_admission` and `test_source_batch_construction_callbacks` with exclusive `batch_state_list`/`state_list` selectors and `source_batch_state_list_allocation_hook`.
+														Seventeen groups cover one single-allocation rejection/publication baseline and sixteen direct/blocking frontier replacement, requested shutdown, staging-shutdown protection and session retirement/reuse action/control groups.
+														Exact allocation counts, callback gate progress/private admission, winner precedence controls, frontier/counter/charge restoration, exact published bytes, retained-world readability and zero final caller/owner ledgers pass.
+														- [x] Extend staging state-pointer callback qualification to edit/disk and two-event batch shapes.
+															- [x] Qualify first-event `EDIT_OVERLAY` staging state-pointer callbacks and lifecycle/session/frontier winners.
+															Seventeen groups reuse the current source revision and full-range edit fixture with the isolated state-pointer reservation hook before event staging; one rejection/publication baseline and sixteen direct/blocking action/control groups preserve exact single-allocation counts, winner precedence, private charges, edited publication, retained-world readability and zero final caller/owner ledgers.
+															- [x] Qualify first-event `OBSERVE_DISK` staging state-pointer callbacks and lifecycle/session/frontier winners.
+															Seventeen groups target the single state-pointer reservation with a present disk observation and canonical revision; the rejection/publication baseline and sixteen direct/blocking action/control groups preserve exact allocation counts, winner precedence, private charges, installed disk bytes/revision, selected overlay bytes, original disk backing on rejection and retained-world readability, with zero final caller/owner ledgers.
+															- [x] Qualify staging state-pointer callbacks for two-event batch shapes.
+															Fifty-one groups cover a first-event `SET_OVERLAY`, `EDIT_OVERLAY` or `OBSERVE_DISK` followed by a new-document overlay: each shape has one rejection/publication baseline and sixteen direct/blocking winner action/control groups.
+															The state-pointer hook still observes exactly one whole-batch reservation; successful publication checks both documents by identity, rejected attempts omit the new document/context, disk/overlay selection remains exact, private charges restore and final caller/owner ledgers are zero.
+														- [x] Qualify staging state-pointer receipt-capacity retries and rejected-allocation retry controls.
+														Nine groups reuse `test_source_batch_construction_receipt_retry` with exclusive `state_list` selection: one standalone rejected-allocation retry control and eight direct/blocking registration/operation-capacity retry groups with ordinary and incorrect-retry controls.
+														One reservation per staging attempt gives two allocations on successful capacity retry; ordinary rejection stops at the rejected ordinal, while controls expose forbidden retry with two allocations after initial rejection and three after second-attempt rejection.
+														Caller receipt counts, callback gate progress, provider/frontier atomicity, exact published bytes, restored charges, retained-world readability and zero final caller/owner ledgers remain asserted.
+														- [x] Qualify discarded-attempt source-reference rollback with staging state-pointer callbacks and retained-sentinel controls.
+														Twelve direct/blocking groups reuse `test_source_registration_receipt_retry` and `test_source_batch_construction_reference_rollback` with exclusive `batch_state_list`/`state_list` selection across caller-receipt rejection and registration/operation-capacity retries, each with ordinary and deliberate extra-reference controls.
+														One state-pointer reservation per attempt preserves exact initial/retry rejection counts; callback, caller-copy and post-return sentinel reference snapshots distinguish private-clone cleanup from the extra-reference control, which is balanced before teardown.
+														Exact publication, retained-sentinel readability, frontier/counter/charge restoration and zero final caller/owner ledgers remain asserted.
+														- [x] Qualify actual staging state-pointer frees with allocating/mutating reentry and discriminating controls.
+														Twenty cases capture the first isolated state-pointer allocation and its actual owner-delegated free across caller-receipt rejection, registration/operation-capacity retries and duplicate-event validation rejection.
+														Direct/blocking owner-allocation and real-world retain/release reentry, suppressed-callback controls and held-heap controls require exactly one captured free, callback gate progress/readability and one still-live private ticket before caller receipt allocation.
+														Exact list allocation counts, restored charges, successful retry publication and zero final caller/owner ledgers remain asserted.
+													- [x] Qualify staging context-reference allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+														- [x] Qualify first-event overlay staging context-reference allocation callbacks and lifecycle/session/frontier winners.
+														Reuse the same callback fixture with exclusive `batch_reference_list`/`reference_list` selectors and `source_batch_reference_list_allocation_hook`, after state-pointer reservation and before event validation.
+														Seventeen groups cover one single-allocation rejection/publication baseline and sixteen direct/blocking frontier replacement, requested shutdown, staging-shutdown protection and session retirement/reuse action/control groups.
+														Exact allocation counts, callback gate progress/private admission, winner precedence controls, frontier/counter/charge restoration, exact published bytes, retained-world readability and zero final caller/owner ledgers pass.
+														- [x] Extend staging context-reference callback qualification to edit/disk and two-event batch shapes.
+															- [x] Qualify first-event `EDIT_OVERLAY` staging context-reference callbacks and lifecycle/session/frontier winners.
+															Seventeen groups reuse the current source revision and full-range edit fixture with the isolated context-reference reservation hook after state-pointer backing and before event staging; one rejection/publication baseline and sixteen direct/blocking action/control groups preserve exact single-allocation counts, winner precedence, private charges, edited publication, retained-world readability and zero final caller/owner ledgers.
+															- [x] Qualify first-event `OBSERVE_DISK` staging context-reference callbacks and lifecycle/session/frontier winners.
+															Seventeen groups target the single context-reference reservation after state-pointer backing with a present disk observation and canonical revision; the rejection/publication baseline and sixteen direct/blocking action/control groups preserve exact allocation counts, winner precedence, private charges, installed disk bytes/revision, selected overlay bytes, original disk backing on rejection and retained-world readability, with zero final caller/owner ledgers.
+															- [x] Qualify staging context-reference callbacks for two-event batch shapes.
+															Fifty-one groups cover a first-event `SET_OVERLAY`, `EDIT_OVERLAY` or `OBSERVE_DISK` followed by a new-document overlay: each shape has one rejection/publication baseline and sixteen direct/blocking winner action/control groups.
+															The context-reference hook still observes exactly one whole-batch reservation after state-pointer backing; successful publication checks both documents by identity, rejected attempts omit the new document/context, disk/overlay selection remains exact, private charges restore and final caller/owner ledgers are zero.
+														- [x] Qualify staging context-reference receipt-capacity retries and rejected-allocation retry controls.
+														Nine groups reuse the same receipt-retry fixture with exclusive `reference_list` selection: one standalone rejected-allocation retry control and eight direct/blocking registration/operation-capacity retry groups with ordinary and incorrect-retry controls.
+														One context-reference reservation per attempt gives two allocations on successful capacity retry; rejection stops at the chosen ordinal, while incorrect retries require two allocations after initial rejection and three after second-attempt rejection.
+														Caller receipt counts, callback gate progress, provider/frontier atomicity, exact published bytes, restored charges, retained-world readability and zero final caller/owner ledgers remain asserted.
+														- [x] Qualify discarded-attempt source-reference rollback with staging context-reference callbacks and retained-sentinel controls.
+														Twelve direct/blocking groups use exclusive `batch_reference_list`/`reference_list` selection across caller-receipt rejection and registration/operation-capacity retries, each with ordinary and deliberate extra-reference controls.
+														One context-reference reservation per attempt preserves exact initial/retry rejection counts; callback, caller-copy and post-return sentinel reference snapshots distinguish private-clone cleanup from the extra-reference control, which is balanced before teardown.
+														Exact publication, retained-sentinel readability, frontier/counter/charge restoration and zero final caller/owner ledgers remain asserted.
+														- [x] Qualify actual staging context-reference frees with allocating/mutating reentry and discriminating controls.
+														Twenty cases capture the first isolated context-reference allocation and its actual owner-delegated free across caller-receipt rejection, registration/operation-capacity retries and duplicate-event validation rejection.
+														Direct/blocking owner-allocation and real-world retain/release reentry, suppressed-callback controls and held-heap controls require exactly one captured free, callback gate progress/readability and one still-live private ticket before caller receipt allocation.
+														Exact list allocation counts, restored charges, successful retry publication and zero final caller/owner ledgers remain asserted.
 													- [x] Check admitted staging context-array backing and its rejected registration cleanup.
 													Reserve one checked `Admitted_Context` slot per registration before parsing; an empty list performs no list allocation.
 													Admit copied identity/descriptor/path data explicitly into the batch pool, so rejection discards those bytes with the root and successful transfer keeps them alive.
@@ -886,10 +1203,223 @@ Exit: user decision recorded.
 													Either allocation failure returns `ADMISSION_DENIED`/`RESOURCE_EXHAUSTED` without allocating an error path; future deeper diagnostics must revise the reservation bound.
 													Single/two-event success and isolated reservation/copy rejection sweeps pass.
 													A four-step disk-context error verifies unchanged provider/source/registration/counter/charge state and exact caller-owned diagnostics after successful copying; final caller/owner ledgers are zero.
-													- [ ] Qualify staging admitted-context list allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
-													- [ ] Qualify staging diagnostic path reservation/copy callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
-													- [ ] Check context-admission parsing/canonical scratch allocation and pooled identity/descriptor/path copying before treating context construction as fallible.
-													- [ ] Check final provider document/context/frontier commit backing before provider mutation.
+													- [x] Qualify staging admitted-context list allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+														- [x] Qualify nonempty staging admitted-context list callbacks and lifecycle/session/frontier winners for two-event overlay batches.
+														Reuse `test_source_batch_storage_admission` and `test_source_batch_construction_callbacks` with exclusive `batch_context_list`/`context_list` selection and `source_batch_context_list_allocation_hook`.
+														The existing-document `SET_OVERLAY` followed by a new-document overlay supplies a nonempty admitted-context list; reservation occurs once for the whole batch, not once per event.
+														Seventeen groups cover a rejection/publication baseline and sixteen direct/blocking frontier replacement, requested shutdown, staging-shutdown protection and session retirement/reuse action/control groups.
+														Exact allocation counts, winner precedence, callback gate progress/private admission, provider/frontier/charge atomicity, two-document publication by identity, rejected new-document/context absence, retained-world readability and zero final caller/owner ledgers pass.
+														- [x] Qualify nonempty staging admitted-context list receipt-capacity retries and rejected-allocation retry controls for two-event overlay batches.
+														Nine groups use exclusive `context_list` selection in `test_source_batch_construction_receipt_retry`: one standalone rejected-allocation retry control and eight direct/blocking registration/operation-capacity retry groups with ordinary and incorrect-retry controls.
+														Only context-list mode permits paired receipt retries; other paired construction modes retain their existing restrictions.
+														One reservation per attempt gives two allocations on successful capacity retry; incorrect retry requires two after initial rejection and three after second-attempt rejection, preserving exact caller receipt counts, callback progress, publication/rollback, restored charges, retained-world readability and zero final caller/owner ledgers.
+														- [x] Extend admitted-context list callback/winner coverage to edit/disk and additional batch shapes.
+															- [x] Qualify admitted-context list callbacks for a first-event `EDIT_OVERLAY` followed by a new-document overlay.
+															Seventeen groups reuse the current source revision and full-range edit fixture with exclusive `context_list` selection and `batch_pair`; one whole-batch reservation remains required despite the two events.
+															The rejection/publication baseline and sixteen direct/blocking frontier/lifecycle/session winner action/control groups preserve exact allocation counts, winner precedence, callback progress/private charges, edited publication and two-document identity checks, absent new document/context on rejection, retained-world readability and zero final caller/owner ledgers.
+															- [x] Qualify admitted-context list callbacks for a first-event `OBSERVE_DISK` followed by a new-document overlay.
+															Seventeen groups use a present disk observation with canonical revision and provenance; the single reservation, rejection/publication baseline and direct/blocking winner action/control groups preserve exact installed disk bytes/revision, selected overlay bytes, original disk backing on rejection, two-document identity checks, restored charges, retained-world readability and zero final caller/owner ledgers.
+															- [x] Qualify admitted-context list callbacks and winner controls for a single new-document event.
+															Exclusive `new_document` selection with `context_list` supplies one new-document `SET_OVERLAY` and one admitted-context list reservation, without paired events or receipt retries.
+															Seventeen baseline and direct/blocking winner action/control groups require exact document/context insertion counts, absent new document/context on rejection and one requested world member with the new document's identity and bytes.
+															Separate provider checks preserve the original document on ordinary paths and the replacement on correct frontier rejection; the deliberate stale-frontier control is detected through forbidden admission and its restoration of original bytes from the stale private snapshot.
+															Exact allocation counts, callback gate progress/private admission, precedence, charge restoration, retained-world readability and zero final caller/owner ledgers remain asserted.
+														- [x] Qualify discarded-attempt source-reference rollback with admitted-context list callbacks and retained-sentinel controls.
+														Twelve direct/blocking groups extend `test_source_registration_receipt_retry` and `test_source_batch_construction_reference_rollback` with exclusive `batch_context_list`/`context_list` selection; a single new-document overlay supplies a nonempty registration list while a retained `b.jai` world supplies the independent source-reference sentinel.
+														Caller-receipt rejection and registration/operation-capacity retries retain one list allocation per attempt and exact rejection/retry counts; callback, caller-copy and post-return reference snapshots distinguish discarded private clones from deliberate extra-reference controls, balanced before teardown.
+														Exact document/context insertion or rollback, copied identity/descriptor/path metadata, requested-world document identity/bytes, sentinel readability, restored charges and zero final caller/owner ledgers remain asserted.
+														- [x] Qualify actual admitted-context list frees with allocating/mutating reentry and discriminating controls.
+														Twenty cases extend `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup` with exclusive `batch_context_list`/`context_list` selection and the single-new-document fixture; the exact-size storage probe captures the first list allocation and exactly one actual owner-delegated free.
+														Caller-receipt rejection, registration/operation-capacity retries and duplicate-event validation rejection cover direct/blocking allocating/mutating reentry, suppressed-callback controls and held-heap controls.
+														The captured free occurs while one private ticket remains live before caller receipt allocation; gate progress/readability, exact counts, copied-context insertion/rollback, retry publication, restored charges and zero final caller/owner ledgers pass.
+													- [x] Qualify staging diagnostic path reservation/copy callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+														- [x] Qualify single-overlay staging diagnostic path reservation callbacks and lifecycle/session/frontier winners.
+														Exclusive `batch_paths`/`paths` selection installs `source_batch_path_allocation_hook` before provider staging; the valid single-`SET_OVERLAY` fixture isolates the initial reservation from error-path copying.
+														Seventeen rejection/publication and direct/blocking winner action/control groups require one allocation per attempt, exact callback progress/private admission, winner precedence, provider/frontier/charge atomicity, exact published bytes, retained-world readability and zero final caller/owner ledgers.
+														- [x] Qualify single-overlay staging diagnostic path reservation receipt-capacity retries and rejected-allocation retry controls.
+														Nine groups reuse `test_source_batch_construction_receipt_retry` with exclusive `paths` selection across the standalone rejected-allocation retry control and direct/blocking registration/operation-capacity ordinary and incorrect-retry groups.
+														One reservation per attempt preserves exact two-allocation capacity retry and two/three-allocation forbidden-retry control counts, caller receipt counts, callback progress, publication/rollback, restored charges, retained-world readability and zero final caller/owner ledgers.
+														- [x] Extend diagnostic path reservation callback/winner coverage to edit/disk and two-event batch shapes.
+															- [x] Qualify single-`EDIT_OVERLAY` diagnostic path reservation callbacks and lifecycle/session/frontier winners.
+															Seventeen groups use exclusive `paths` selection with the current source revision and full-range edit fixture; the valid event isolates one initial reservation before provider staging, without error-path copying.
+															The baseline and sixteen direct/blocking winner action/control groups preserve exact allocation counts, callback progress/private admission, precedence, edited publication, provider/frontier/charge atomicity, retained-world readability and zero final caller/owner ledgers.
+															- [x] Qualify single-`OBSERVE_DISK` diagnostic path reservation callbacks and lifecycle/session/frontier winners.
+															Seventeen groups use a present disk observation with canonical revision and provenance; one initial reservation and the baseline/direct/blocking action/control groups preserve exact allocation counts, precedence, installed disk bytes/revision, selected overlay bytes, original disk backing on rejection, callback progress, restored charges, retained-world readability and zero final caller/owner ledgers.
+															- [x] Qualify diagnostic path reservation callbacks and winner controls for two-event overlay/edit/disk batch shapes.
+																- [x] Qualify a first-event `SET_OVERLAY` followed by a new-document overlay.
+																Seventeen groups permit `batch_pair` with isolated `paths` selection, retain one whole-batch reservation and keep paired path receipt/rejected-allocation retries disallowed.
+																Baseline and direct/blocking winner action/control groups require identity-based two-document publication, absent new document/context on rejection, exact allocation counts, precedence, callback progress/private charges, retained-world readability and zero final caller/owner ledgers.
+																- [x] Qualify a first-event `EDIT_OVERLAY` followed by a new-document overlay.
+																Seventeen groups reuse the current source revision and full-range edit, with one initial path reservation, exact edited/new-document publication, rejection rollback and the same direct/blocking winner/control invariants.
+																- [x] Qualify a first-event `OBSERVE_DISK` followed by a new-document overlay.
+																Seventeen groups reuse a present disk observation with canonical revision and provenance; one initial reservation, exact disk bytes/revision, selected overlay bytes, original disk backing on rejection and both document identities remain checked alongside the same winner/control invariants.
+														- [x] Qualify diagnostic error-path copying callbacks, lifecycle/session/frontier winners and receipt retries separately from reservation.
+															- [x] Qualify diagnostic-copy allocation callbacks and lifecycle/session/frontier winner controls.
+															Exclusive `path_error` selection with `batch_paths`/`paths` uses a present disk event with an unknown syntax context; the path hook sees initial reservation followed by the four-step error-path copy, with callbacks targeted at ordinal two.
+															Seventeen baseline and direct/blocking frontier replacement, requested shutdown, staging-shutdown protection and session retirement/reuse action/control groups always reject, preserve exact allocation counts and distinguish final winner precedence from deliberate stale-frontier/shutdown/session controls.
+															Successful diagnostic export returns caller-owned `INVALID_ARGUMENT`/`INCONSISTENT_BINDING` with `events[0].disk.context`; allocation rejection returns `RESOURCE_EXHAUSTED` without publication, and retained disk/overlay state and worlds remain intact apart from the explicit winning callback mutation.
+															- [x] Qualify diagnostic-copy no-capacity-retry behavior and forbidden allocation-retry controls.
+															Nine groups extend `test_source_batch_construction_receipt_retry` with `path_error`; malformed batches return their diagnostic before receipt-capacity revalidation, so registration/operation-capacity mutations during diagnostic export must not trigger a second staging attempt.
+															One attempt makes two path allocations, and ordinary allocation rejection stops at the rejected ordinal; the explicit forbidden-retry control makes three allocations after initial reservation rejection or four after copy rejection, then returns the original four-step diagnostic without a ticket.
+															Exact caller allocation counts, callback gate progress, provider/frontier/operation-counter/charge atomicity and zero final caller/owner ledgers remain asserted.
+														- [x] Qualify discarded-attempt source-reference rollback with diagnostic path callbacks and retained-sentinel controls.
+															- [x] Qualify initial diagnostic path reservation rollback with retained-sentinel controls.
+															Twelve direct/blocking groups use exclusive `batch_paths`/`paths` selection with a valid single-overlay batch and a real retained `b.jai` sentinel across caller-receipt rejection and registration/operation-capacity retries, each with ordinary and deliberate extra-reference controls.
+															One reservation per attempt preserves exact allocation counts; callback, caller-copy and post-return reference snapshots, explicitly balanced control references, exact publication, sentinel readability, frontier/counter/charge restoration and zero final caller/owner ledgers pass.
+															- [x] Qualify diagnostic error-path copy rollback with retained-sentinel controls.
+															Twelve direct/blocking groups extend `test_source_registration_receipt_retry` and `test_source_batch_construction_reference_rollback` with the unknown disk-context diagnostic, retaining the independent `b.jai` sentinel across caller diagnostic-copy rejection and both capacity-mutation routes.
+															The copy callback and caller allocator see one private-clone source reference; `finish_source_admission` injects the deliberate extra-reference control only during finalisation, so post-return snapshots distinguish restored ordinary references from the extra reference, which is balanced before teardown.
+															One-attempt allocation counts, exact caller-owned diagnostics and cleanup, callback progress/private charges, unchanged frontier/disk backing, operation-counter accounting, sentinel readability and zero final caller/owner ledgers pass.
+															The successful-retry world-counter formula is not applied when capacity mutation creates competing worlds after the copy callback; existing modes retain their prior assertions.
+														- [x] Qualify actual diagnostic path reservation/copy frees with allocating/mutating reentry and discriminating controls.
+															- [x] Qualify actual initial diagnostic path reservation frees with allocating/mutating reentry and discriminating controls.
+															Twenty cases use exclusive `batch_paths`/`paths` selection and capture exactly one free of the first reservation, across caller-receipt rejection, registration/operation-capacity retries and duplicate-event validation rejection.
+															Direct/blocking owner allocation/free and real-world retain/release reentry, suppressed-callback controls and held-heap controls preserve callback gate progress/readability, one still-live private ticket, exact publication, restored charges and zero final caller/owner ledgers.
+															Validation observes two hook allocations, the initial reservation and diagnostic copy; only the first reservation's free is captured here, so copy-free qualification remains separate.
+															- [x] Qualify actual diagnostic error-path copy frees with allocating/mutating reentry and discriminating controls.
+															Twenty cases extend `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup` with `path_error`, capturing allocation ordinal two and exactly one actual owner-delegated free of the diagnostic copy rather than the reservation.
+															Caller diagnostic-copy rejection, registration/operation-capacity mutation and duplicate-event diagnostics cover direct/blocking allocating/mutating reentry, suppressed-callback controls and held-heap controls; all remain rejected after exactly two path allocations with no capacity retry.
+															This later free occurs after diagnostic export, while the private ticket and any competing callback-created handles remain live; exact free-time handle accounting, gate progress/readability, diagnostic contents, disk/overlay preservation, restored charges and zero final caller/owner ledgers pass.
+													- [x] Remove context-admission parsing/canonical scratch allocation from borrowed validation.
+														- [x] Remove descriptor/path `parse_key` field-view allocation and rejected partial parsing cleanup.
+														Module-scoped `parse_key_into` shares framing checks with owning `parse_key` and borrows caller field storage.
+														Context validation uses stack buffers for ten descriptor fields, eight values per field and two path fields; successful payload views still borrow descriptor bytes.
+														Capacity/framing rejection returns an empty view without allocations or cleanup; tests cover every truncation, trailing bytes, insufficient storage, zero fields and exact borrowed pointers under a rejecting allocator.
+														- [x] Remove `expected_field_values` and fixed canonical tag runtime scratch construction.
+														Build-time `#run` constants hold the compiler/SDK key, syntax adapter descriptor and `NO_RESOLUTION`/`UNSUPPORTED` keys; digest arrays, schema strings, parser flags and profiles retain their existing values and lifetimes.
+														Late resolver/semantic rejection under an allocator that rejects every allocation proves all preceding field validation and both fixed-tag checks require no runtime scratch allocation; identity validation is covered separately below.
+														- [x] Remove recomputed context identity backing and rejection cleanup.
+														Decode the supplied identity with `parse_key_into` and two stack field slots, requiring the canonical `context` tag, exactly two fields, the implemented schema and exact descriptor bytes; bounded canonical framing makes this equivalent to byte comparison against `context_id` without allocating that key.
+														A rejecting allocator permits complete valid registration with borrowed identity/descriptor/path payloads, rejects every truncated prefix and every single-byte low-bit mutation, and preserves `IDENTITY_MISMATCH` for wrong tags/schema/descriptor/order/counts and trailing bytes.
+														Rejected payloads remain empty, malformed descriptors retain precedence and valid retry succeeds; no runtime validation scratch requires allocation or cleanup.
+													- [x] Check final provider document/context/frontier commit backing before provider mutation.
+														- [x] Prepare checked document/context replacement arrays atomically, retaining existing headers on rejection and reusing spare capacity.
+														`try_source_batch_commit` checks count addition and byte sizes, copies only existing entries and releases prepared document backing if context allocation fails.
+														Replacements install only after frontier and pool-transfer capacity preparation succeed; subsequent appends fit prepared capacity.
+														Helper sweeps cover first/second allocation failure, unchanged original headers/prefixes, no-growth reuse and negative/overflow counts without allocator calls.
+														Actual no-growth and new-document/context batches qualify rejection through publication with zero final caller/owner ledgers.
+														- [x] Prepare checked canonical frontier identity and counter advancement before commit, rejecting token exhaustion without assertion or mutation.
+														`try_source_batch_frontier` issues from a copied `Identity_Counter`, encodes its token on the stack and calls `try_output_key`; allocation rejection/exhaustion leaves the original counter unchanged.
+														Prepared identity/array backing is discarded on later pool-capacity rejection; successful commit installs the key and advanced counter together.
+														Canonical comparison at the first/last usable token, rejection with no counter consumption and exhausted-counter rejection without allocator calls pass.
+														Real single/two-event and exhausted-frontier batches preserve live frontier/counter/source/registration/charge state on rejection, including earlier prepared-array cleanup.
+													- [ ] Qualify final provider array preparation allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+														- [x] Qualify final document-array preparation callbacks and lifecycle/session/frontier winners for two-event overlay batches.
+														Exclusive `batch_commit`/`commit` selection in `test_source_batch_storage_admission` and `test_source_batch_construction_callbacks` uses an existing-document overlay followed by a new-document overlay, forcing document and context backing preparation before provider mutation.
+														Seventeen baseline and direct/blocking frontier replacement, requested shutdown, staging-shutdown protection and session retirement/reuse action/control groups select `commit_callback_at = 1`, the document-array allocation.
+														Exact two-allocation attempt counts, rejection ordinals, callback gate progress/private admission, winner precedence, provider/frontier/charge atomicity, identity-based two-document publication, absent new document/context on rejection, retained-world readability and zero final caller/owner ledgers pass.
+														- [x] Qualify final context-array preparation callbacks and lifecycle/session/frontier winners for two-event overlay batches.
+														Seventeen groups select `commit_callback_at = 2`, after document backing has been prepared and before context backing is installed; the same rejection/publication and direct/blocking winner/control invariants pass, including second-allocation rejection and cleanup of earlier prepared backing.
+														- [x] Qualify final document-array preparation callbacks and lifecycle/session/frontier winners for paired edit batches.
+														The first event replaces the existing overlay through a current-revision full-range edit, followed by a new-document overlay; seventeen baseline and direct/blocking action/control groups select `commit_callback_at = 1`.
+														- [x] Qualify final context-array preparation callbacks and lifecycle/session/frontier winners for paired edit batches.
+														Seventeen groups select `commit_callback_at = 2`, preserving exact two-allocation attempt counts, first/second rejection ordinals and cleanup of earlier prepared document backing.
+														- [x] Qualify final document-array preparation callbacks and lifecycle/session/frontier winners for paired disk batches.
+														A canonical present-disk observation for the existing document precedes a new-document overlay; seventeen groups select `commit_callback_at = 1`, retaining the existing overlay selection while checking disk-source publication or preservation on rejection.
+														- [x] Qualify final context-array preparation callbacks and lifecycle/session/frontier winners for paired disk batches.
+														Seventeen groups select `commit_callback_at = 2`, after document backing exists.
+														All four paired edit/disk matrices preserve callback gate progress/private admission, winner precedence, provider/frontier/charge atomicity, identity-based two-document publication, absent new document/context on rejection, retained-world readability and zero final caller/owner ledgers.
+														- [x] Qualify single-new-document final document-array preparation callbacks and lifecycle/session/frontier winners.
+														Seventeen baseline and direct/blocking action/control groups select `commit_callback_at = 1`.
+														Exclusive `batch_commit`/`commit` mode permits `new_document` without `batch_pair`; retry qualification is recorded below.
+														- [x] Qualify single-new-document final context-array preparation callbacks and lifecycle/session/frontier winners.
+														Seventeen groups select `commit_callback_at = 2`, after document backing exists.
+														Both matrices preserve exact two-allocation attempt counts and earlier prepared-backing cleanup.
+														Checks distinguish the one-member request-scoped world from the provider's original and new documents.
+														Original-document preservation, absent new document/context on rejection and retained-world readability pass.
+														Gate progress/private admission, winner precedence, charge atomicity and zero final caller/owner ledgers pass.
+														- [x] Qualify final provider array preparation receipt-capacity retries and rejected-allocation retry controls.
+															- [x] Qualify paired-overlay document-array preparation receipt retries and rejected-allocation controls.
+															Nine groups select `commit_callback_at = 1` with isolated `commit` mode and a two-event overlay batch.
+															Direct/blocking registration and operation-capacity races force fresh private attempts.
+															Exact allocation/rejection ordinals distinguish ordinary rejection from deliberate extra retries.
+															Paired publication or absent new document/context, restored charges and zero final ledgers pass.
+															- [x] Qualify paired-overlay context-array preparation receipt retries and rejected-allocation controls.
+															Nine groups select `commit_callback_at = 2`, after document backing exists.
+															- [x] Qualify paired-edit document-array preparation receipt retries and rejected-allocation controls.
+															Nine groups select ordinal one with a current-revision full-range edit followed by a new-document overlay.
+															- [x] Qualify paired-edit context-array preparation receipt retries and rejected-allocation controls.
+															Nine groups select ordinal two with the same paired edit route.
+															- [x] Qualify paired-disk document-array preparation receipt retries and rejected-allocation controls.
+															Nine groups select ordinal one, preserving overlay selection while checking disk-source publication or rollback.
+															Explicit `event_kind` selection is restricted to isolated `commit` mode; other callers retain their event defaults.
+															All four matrices preserve two allocations per attempt, exact rejection ordinals and deliberate extra retries.
+															Capacity-race progress, paired publication/rollback, restored charges, retained worlds and zero final ledgers pass.
+															- [x] Qualify paired-disk context-array preparation receipt retries and rejected-allocation controls.
+															Nine groups select ordinal two, after document backing exists, with unchanged disk/overlay publication oracles.
+															- [x] Qualify single-new-document document-array preparation receipt retries and rejected-allocation controls.
+															Nine groups select ordinal one; only isolated commit mode permits single-new-document retries.
+															- [x] Qualify single-new-document context-array preparation receipt retries and rejected-allocation controls.
+															Nine groups select ordinal two, retaining two allocations per attempt and earlier prepared-backing cleanup.
+															Both single-new-document matrices check request-scoped publication and original-document preservation.
+															Exact rejection ordinals, deliberate extra attempts, absent new document/context and restored charges pass.
+															Retained worlds and zero final caller/owner ledgers pass across both ordinals and all planned array retry routes.
+														- [x] Qualify discarded-attempt source-reference rollback with final provider array preparation callbacks and retained-sentinel controls.
+															- [x] Qualify paired-overlay document-array preparation retained-sentinel rollback and controls.
+															- [x] Qualify paired-overlay context-array preparation retained-sentinel rollback and controls.
+															- [x] Qualify paired-edit document-array preparation retained-sentinel rollback and controls.
+															- [x] Qualify paired-edit context-array preparation retained-sentinel rollback and controls.
+															- [x] Qualify paired-disk document-array preparation retained-sentinel rollback and controls.
+															- [x] Qualify paired-disk context-array preparation retained-sentinel rollback and controls.
+															- [x] Qualify single-new-document document-array preparation retained-sentinel rollback and controls.
+															- [x] Qualify single-new-document context-array preparation retained-sentinel rollback and controls.
+														Each matrix runs twelve direct/blocking normal/control groups across receipt rejection and both capacity races.
+														An unrelated retained source survives private staging and is sampled during caller export and retry preparation.
+														Callbacks select retry allocation three or four; both first-attempt allocation rejections remain covered.
+														The ordinal-one matrix also covers retry rejection before ordinal two can be reached.
+														Post-return snapshots detect the deliberate extra source reference injected during admission finalisation.
+														Controls balance that reference before teardown; two allocations per attempt and exact rejection counts pass.
+														Paired identity publication, new-document/context absence on rejection and original-document preservation pass.
+														Disk/overlay selection, retained-world readability, restored charges and zero final caller/owner ledgers pass.
+														- [ ] Qualify actual final provider preparation-array frees with allocating/mutating reentry and discriminating controls.
+													- [ ] Qualify final provider frontier preparation allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+														- [x] Qualify single-overlay final provider frontier preparation callbacks and lifecycle/session/frontier winners.
+														Exclusive `batch_frontier`/`frontier` selection installs `source_batch_frontier_allocation_hook` after array preparation; seventeen baseline and direct/blocking winner action/control groups require one canonical frontier allocation per attempt.
+														The live frontier counter advances once for accepted publication or the callback's source replacement and remains unchanged on ordinary rejection; session retirement retains its separate lifecycle/identity checks rather than comparing counters in a retired provider.
+														Exact allocation counts, precedence, gate progress/private admission, frontier/charge atomicity, published bytes, retained-world readability and zero final caller/owner ledgers pass.
+														- [x] Qualify final provider frontier preparation callbacks for two-event overlay batches.
+														Seventeen groups use an existing-document overlay followed by a new-document overlay, reaching frontier preparation after document/context backing preparation; the hook still observes exactly one allocation for the whole batch.
+														The same winner/control and counter invariants hold alongside identity-based two-document publication and absent new document/context on rejection, with restored charges, retained-world readability and zero final caller/owner ledgers.
+														- [x] Qualify single-edit final provider frontier preparation callbacks and lifecycle/session/frontier winners.
+														Seventeen groups use a current-revision full-range edit, with exactly one frontier allocation per attempt.
+														- [x] Qualify single-disk final provider frontier preparation callbacks and lifecycle/session/frontier winners.
+														Seventeen groups preserve overlay selection while checking present-disk publication or rejection preservation.
+														Both matrices retain counter consumption, winner precedence, private admission and gate-progress checks.
+														Provider/frontier/charge atomicity, retained worlds and zero final caller/owner ledgers pass.
+														- [x] Qualify paired-edit final provider frontier preparation callback/winner routes.
+														Seventeen groups use a current-revision full-range edit followed by a new-document overlay.
+														- [x] Qualify paired-disk final provider frontier preparation callback/winner routes.
+														Seventeen groups preserve overlay selection while checking present-disk publication or rejection preservation.
+														Both paired routes retain one frontier allocation per attempt and identity-based two-document publication.
+														- [x] Qualify single-new-document final provider frontier preparation callback/winner routes.
+														Seventeen groups retain one frontier allocation and one-member request-scoped world publication.
+														Original-document preservation and absent new document/context on rejection remain asserted.
+														All three routes preserve exact counter consumption, lifecycle/session winners and gate progress/private admission.
+														Frontier/charge atomicity, retained-world readability and zero final caller/owner ledgers pass.
+														- [x] Qualify final provider frontier preparation receipt-capacity retries and rejected-allocation retry controls.
+															- [x] Qualify single-overlay frontier preparation receipt retries and rejected-allocation controls.
+															Nine groups use isolated `frontier` mode with one allocation per private attempt.
+															Capacity races require fresh staging; ordinary rejection and deliberate extra retries remain distinct.
+															Counter consumption, frontier/charge atomicity, retained worlds and zero final caller/owner ledgers pass.
+															- [x] Qualify paired-overlay frontier preparation receipt retries and rejected-allocation controls.
+															Nine groups use an explicit `batch_pair` restricted to isolated `frontier` mode.
+															- [x] Qualify single-edit frontier preparation receipt retries and rejected-allocation controls.
+															Nine groups use the current source revision and a full-range replacement through `.EDIT_OVERLAY`.
+															- [x] Qualify single-disk frontier preparation receipt retries and rejected-allocation controls.
+															Nine groups check present-disk publication or rollback independently of the selected overlay.
+															- [x] Qualify paired-edit frontier preparation receipt retries and rejected-allocation controls.
+															Nine groups add a new-document overlay after the existing-document edit.
+															- [x] Qualify paired-disk frontier preparation receipt retries and rejected-allocation controls.
+															Nine groups combine the disk observation with a new-document overlay and identity-based paired publication.
+															- [x] Qualify single-new-document frontier preparation receipt retries and rejected-allocation controls.
+															Nine groups retain one-member request-scoped publication and original-document preservation.
+															All six routes use one frontier allocation per private attempt, including paired batches.
+															Direct/blocking registration and operation-capacity races force fresh staging with exact counter consumption.
+															Ordinary allocation rejection and deliberate extra-retry controls preserve exact allocation/rejection counts.
+															Frontier/provider atomicity, rejected new-document/context absence and restored operation/handle charges pass.
+															Retained-world readability and zero final caller/owner ledgers pass; all planned frontier retry routes are complete.
+														- [ ] Qualify discarded-attempt source-reference rollback with final provider frontier preparation callbacks and retained-sentinel controls.
+														- [ ] Qualify actual prepared provider-frontier frees with allocating/mutating reentry and discriminating controls.
 										- [x] Prepare checked provider pool-transfer capacity and qualify construction/transfer rollback before closing provider storage or combined source admission.
 											- [x] Check private batch pool-list growth before provider state mutation, preserving existing pool pointers on allocation rejection.
 											`try_source_batch_storage` checks empty/full list growth, copies only existing pool pointers and installs replacement backing only after allocation succeeds; spare capacity performs no allocation.
@@ -1014,6 +1544,919 @@ Exit: user decision recorded.
 	The subsequent callback/quota increment below passes the full worker gates on both backends; focused mode remains opt-in.
 	At that checkpoint, batch pool-object qualification, pool-block/source/document/context/revision/frontier construction, pool transfer, source candidate and combined admission, analysis and other Phase 5/`C3`/`C5` requirements remained open.
 	Broad parser and foreign-target regressions were not rerun.
+	- [x] Final provider array preparation retained-sentinel rollback qualification (2026-11-16).
+	Extend `test_source_batch_construction_reference_rollback` and `test_source_registration_receipt_retry` with isolated commit mode.
+	Both document/context allocation ordinals run paired overlay/edit/disk and single-new-document routes.
+	Eight matrices, each with twelve direct/blocking normal/control groups, passed focused x64 `batch-pool` mode.
+	The sentinel source remains outside the submitted batch and is sampled during caller export, retry preparation and post-return cleanup.
+	Retry callbacks target allocation three or four; allocation rejection before the context callback is covered by the ordinal-one matrix.
+	The finaliser-injected retained-reference control is detected by exact post-return counts and balanced before teardown.
+	All ninety-six groups preserve exact allocation counts, private-admission protection and restored operation/handle charges.
+	Paired publication/rollback, single-new-document original-source preservation, retained worlds and zero final ledgers pass.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM.
+	No production code changed.
+	Array reference rollback is complete; array actual-free qualification remains open.
+	Frontier reference rollback and actual-free qualification remain open, as do both broad preparation parents and Phase 5.
+	- [x] Paired-overlay frontier preparation receipt-retry increment (2026-11-16).
+	Add explicit `batch_pair` selection restricted to isolated frontier mode; nine groups passed focused x64 `batch-pool` mode.
+	- [x] Single-edit frontier preparation receipt-retry increment (2026-11-16).
+	Permit `.EDIT_OVERLAY` in the shared frontier retry wrapper; nine groups passed focused x64 mode.
+	- [x] Single-disk frontier preparation receipt-retry increment (2026-11-16).
+	Permit `.OBSERVE_DISK` for single batches; nine groups passed focused x64 mode with separate disk and overlay oracles.
+	- [x] Paired-edit frontier preparation receipt-retry increment (2026-11-16).
+	Extend paired retry admission to the edit route and register once; nine groups passed focused x64 mode.
+	- [x] Paired-disk frontier preparation receipt-retry increment (2026-11-16).
+	Extend paired retry admission to the disk route and register once; nine groups passed focused x64 mode.
+	- [x] Single-new-document frontier preparation receipt-retry increment (2026-11-16).
+	Permit isolated frontier retries with `new_document`; nine groups passed focused x64 mode.
+	Request-scoped publication, original-document preservation and rejected new-document/context absence remain asserted.
+	All fifty-four new groups preserve one frontier allocation per attempt, including pairs, and exact live-counter consumption.
+	Registration/operation-capacity races and ordinary rejection versus deliberate extra retries remain distinguished.
+	Provider/frontier/charge atomicity, restored charges, retained worlds and zero final caller/owner ledgers pass.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM.
+	No production code changed.
+	Both array and frontier retry subtrees are complete.
+	The four array/frontier retained-sentinel rollback and actual-free qualification items remain open.
+	Both broad preparation parents, the staging-array parent and Phase 5 remain open.
+	- [x] Paired-disk context-array preparation receipt-retry increment (2026-11-16).
+	Register `commit_callback_at = 2` with `.OBSERVE_DISK` once; nine groups passed focused x64 `batch-pool` mode.
+	- [x] Single-new-document document-array preparation receipt-retry increment (2026-11-16).
+	Extend the shared retry wrapper with `new_document`; isolated commit mode selects a single event instead of a pair.
+	Register ordinal one once; nine groups passed focused x64 mode with two allocations per attempt.
+	- [x] Single-new-document context-array preparation receipt-retry increment (2026-11-16).
+	Register ordinal two once; nine groups passed focused x64 mode, including earlier document-backing cleanup.
+	Both single-new-document matrices preserve request-scoped publication, original-document state and rejection atomicity.
+	All planned array retry routes now pass at both ordinals; the array retry subtree is complete.
+	- [x] Single-overlay frontier preparation receipt-retry increment (2026-11-16).
+	Add isolated `frontier` mode to the retry wrapper, restricted to a single existing-document overlay.
+	Nine capacity-race and rejected-allocation control groups passed focused x64 mode with one allocation per attempt.
+	Exact counter consumption, ordinary rejection versus deliberate retries and frontier/charge atomicity remain asserted.
+	All thirty-six new groups preserve exact allocation/rejection counts, restored charges, retained worlds and zero final ledgers.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM.
+	No production code changed.
+	Frontier retries remain open for paired overlay, edit/disk and single-new-document routes.
+	Both broad preparation parents remain open for retained-sentinel rollback and actual-free controls.
+	The staging-array parent and Phase 5 remain open.
+	- [x] Paired-overlay context-array preparation receipt-retry increment (2026-11-16).
+	Register `commit_callback_at = 2` once; nine capacity-race and rejected-allocation control groups passed focused x64 mode.
+	- [x] Paired-edit document-array preparation receipt-retry increment (2026-11-16).
+	Add explicit `event_kind` selection to `test_source_batch_construction_receipt_retry`, restricted to isolated `commit` mode.
+	Register `.EDIT_OVERLAY` at ordinal one once; nine groups passed focused x64 `batch-pool` mode.
+	The shared event selector preserves existing non-commit edit and diagnostic-path defaults.
+	- [x] Paired-edit context-array preparation receipt-retry increment (2026-11-16).
+	Register the same paired edit route at ordinal two once; nine groups passed focused x64 `batch-pool` mode.
+	- [x] Paired-disk document-array preparation receipt-retry increment (2026-11-16).
+	Permit `.OBSERVE_DISK` for paired commit retries and register ordinal one once; nine groups passed focused x64 mode.
+	Disk-source publication/rollback remains distinct from the selected overlay, including capacity races and extra-retry controls.
+	All thirty-six new groups preserve two allocations per attempt, exact rejection ordinals and earlier prepared-backing cleanup.
+	Registration/operation-capacity races, paired publication or rejected new-document/context absence and restored charges pass.
+	Retained worlds and zero final caller/owner ledgers pass; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM.
+	Array retries still need paired-disk context-array and both single-new-document allocation-ordinal matrices.
+	Single-new-document retries and frontier retries remain restricted until explicitly qualified.
+	Both broad preparation parents remain open for remaining retries, retained-sentinel rollback and actual-free controls.
+	The staging-array parent and Phase 5 remain open.
+	- [x] Paired-edit final provider frontier preparation callback increment (2026-11-16).
+	Enable paired `.EDIT_OVERLAY` in isolated frontier mode and register once; seventeen groups passed focused x64 `batch-pool` mode.
+	- [x] Paired-disk final provider frontier preparation callback increment (2026-11-16).
+	Enable paired `.OBSERVE_DISK` and register once; seventeen groups passed focused x64 `batch-pool` mode.
+	Both paired matrices retain one frontier allocation per attempt, identity-based publication and rejected new-document/context absence.
+	- [x] Single-new-document final provider frontier preparation callback increment (2026-11-16).
+	Permit isolated frontier mode with `new_document`, keeping retries disabled; seventeen groups passed focused x64 `batch-pool` mode.
+	Request-scoped publication, original-document preservation, counter consumption and lifecycle/session winners remain checked.
+	- [x] Paired-overlay document-array preparation receipt-retry increment (2026-11-16).
+	Extend `test_source_batch_construction_receipt_retry` with isolated `commit` selection and `commit_callback_at`.
+	Register ordinal one once; nine registration/operation-capacity race and rejected-allocation control groups passed focused x64 mode.
+	Two allocations per attempt, exact rejection ordinals and deliberate extra attempts remain distinguished.
+	Paired publication/rollback, restored operation/handle charges, retained worlds and zero final caller/owner ledgers pass.
+	All sixty new groups passed their focused checks; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM.
+	Both broad preparation parents remain open for further retry coverage, retained-sentinel rollback and actual-free controls.
+	Array retry qualification still needs context-array and additional-route matrices; frontier retry qualification remains open.
+	The staging-array parent and Phase 5 remain open.
+	- [x] Single-new-document final document-array preparation callback increment (2026-11-16).
+	Allow exclusive `batch_commit`/`commit` mode with `new_document` instead of `batch_pair`; register ordinal one once.
+	Seventeen baseline and direct/blocking winner action/control groups passed focused x64 `batch-pool` mode.
+	- [x] Single-new-document final context-array preparation callback increment (2026-11-16).
+	Register the same request shape once at `commit_callback_at = 2`; its seventeen groups passed focused x64 `batch-pool` mode.
+	Both matrices retain two-allocation attempt counts, first/second rejection ordinals and earlier prepared-backing cleanup.
+	They check one-member request-scoped publication, original-document preservation and absent new document/context on rejection.
+	- [x] Single-edit final provider frontier preparation callback increment (2026-11-16).
+	Allow single `.EDIT_OVERLAY` in isolated `batch_frontier`/`frontier` mode; paired edit/disk routes remain restricted.
+	Seventeen groups passed focused x64 `batch-pool` mode with one frontier allocation per attempt and exact counter checks.
+	- [x] Single-disk final provider frontier preparation callback increment (2026-11-16).
+	Register single `.OBSERVE_DISK` once; its seventeen groups passed focused x64 `batch-pool` mode.
+	Overlay selection, disk-source publication or preservation, counter consumption and lifecycle/session winners remain checked.
+	All sixty-eight new groups retain callback gate progress/private admission, winner precedence and provider/frontier/charge atomicity.
+	Retained-world readability and zero final caller/owner ledgers pass; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM.
+	Array preparation still needs receipt/rejected-allocation retry controls, retained-sentinel rollback and actual-free controls.
+	Frontier preparation still needs paired edit/disk and single-new-document routes plus those controls.
+	Both broader preparation parents, the staging-array parent and Phase 5 remain open.
+	- [x] Paired-edit final document-array preparation callback increment (2026-11-16): admit `.EDIT_OVERLAY` in the exclusive `batch_commit`/`commit` guards and register the two-event edit/new-document matrix once at `commit_callback_at = 1`.
+	Seventeen baseline and direct/blocking frontier/lifecycle/session winner action/control groups passed focused x64 `batch-pool` mode, using the current source revision and full-range replacement with exactly two commit-array allocations per attempt.
+	- [x] Paired-edit final context-array preparation callback increment (2026-11-16): register the paired edit matrix once at `commit_callback_at = 2`.
+	Its seventeen groups passed focused x64 `batch-pool` mode, covering callbacks after document backing exists, first/second allocation rejection and earlier prepared-backing cleanup with identity-based paired publication or absent new document/context on rejection.
+	- [x] Paired-disk final document-array preparation callback increment (2026-11-16): admit `.OBSERVE_DISK` in the same exclusive commit guards and register the present-disk/new-document matrix once at `commit_callback_at = 1`.
+	Seventeen groups passed focused x64 `batch-pool` mode, preserving overlay selection while checking disk-source publication, rejection and callback winner mutations independently.
+	- [x] Paired-disk final context-array preparation callback increment (2026-11-16): register the paired disk matrix once at `commit_callback_at = 2`.
+	Its seventeen groups passed focused x64 `batch-pool` mode, retaining exact two-allocation attempt counts and later-allocation cleanup assertions.
+	All sixty-eight new groups preserve mode isolation, callback gate progress/private admission, frontier/lifecycle/session winner precedence, provider/frontier/charge atomicity, retained-world readability and zero final caller/owner ledgers; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM after all four increments.
+	Both broader final provider preparation qualification parents remain open.
+	Array preparation still needs single-new-document callback routes, receipt/rejected-allocation retry controls, retained-sentinel rollback and actual-free controls; frontier preparation still needs its additional routes and controls.
+	The broader staging-array parent and Phase 5 remain open.
+	- [x] Final provider document-array preparation callback increment (2026-11-16): extend `test_source_batch_storage_admission` and `test_source_batch_construction_callbacks` with exclusive `batch_commit`/`commit` selection, require the two-event overlay/new-document fixture and register `commit_callback_at = 1` once.
+	Seventeen baseline and direct/blocking frontier/lifecycle/session winner action/control groups passed focused x64 `batch-pool` mode on the first attempt, confirming document-array preparation is the first of two checked commit allocations and preserving exact paired publication/rollback assertions.
+	- [x] Final provider context-array preparation callback increment (2026-11-16): register `commit_callback_at = 2` once with the same isolated two-event commit mode.
+	Its seventeen groups passed focused x64 `batch-pool` mode on the first attempt, exercising context-array preparation after document backing exists, including allocation rejection and winner precedence with earlier backing cleanup.
+	- [x] Single-overlay final provider frontier preparation callback increment (2026-11-16): add exclusive `batch_frontier`/`frontier` selection and register the single-overlay matrix once.
+	Seventeen baseline and direct/blocking winner action/control groups passed focused x64 `batch-pool` mode on the first attempt; one frontier allocation per attempt preserves exact published bytes and explicit live-counter consumption for accepted publication/source replacement versus ordinary rejection, with separate retirement checks.
+	- [x] Two-event overlay final provider frontier preparation callback increment (2026-11-16): register `frontier = true` with `batch_pair` once, reaching frontier preparation after document/context array preparation.
+	Its seventeen groups passed focused x64 `batch-pool` mode on the first attempt; whole-batch frontier allocation remains one despite two events, with exact counter behaviour, identity-based publication and rejected new-document/context absence.
+	All four matrices retain mode isolation, exact allocation counts, callback gate progress/private admission, frontier/lifecycle/session winner precedence, provider/frontier/charge atomicity, retained-world readability and zero final caller/owner ledgers; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after all four increments.
+	Both broader final provider preparation qualification parents remain open for additional batch routes, receipt/rejected-allocation retry controls, retained-sentinel rollback and actual-free controls.
+	The broader staging-array parent and Phase 5 remain open.
+	- [x] Diagnostic error-path copy callback increment (2026-11-16): extend `test_source_batch_storage_admission` and `test_source_batch_construction_callbacks` with exclusive `path_error` selection for a present disk event with an unknown syntax context, targeting the second path-hook allocation.
+	Seventeen baseline and direct/blocking frontier/lifecycle/session winner action/control groups passed focused x64 `batch-pool` mode on the first attempt; malformed batches never publish, allocation failure and final winner precedence remain distinct, and successful export returns the exact caller-owned four-step `events[0].disk.context` diagnostic.
+	- [x] Diagnostic error-path copy retry-behaviour increment (2026-11-16): extend `test_source_batch_construction_receipt_retry` with `path_error` and register its nine-group matrix once.
+	All nine groups passed focused x64 `batch-pool` mode on the first attempt, confirming one staged attempt despite registration/operation-capacity mutations during diagnostic export, exact rejection ordinals and forbidden-retry controls with three/four allocations after reservation/copy rejection respectively.
+	- [x] Diagnostic error-path copy retained-sentinel rollback increment (2026-11-16): extend `test_source_registration_receipt_retry` and `test_source_batch_construction_reference_rollback` with `path_error` and register the twelve-group matrix once.
+	All twelve groups passed focused x64 `batch-pool` mode on the first attempt; callback and caller-copy snapshots see the private clone, post-return snapshots expose the finalizer-injected deliberate extra reference, and controls balance that reference before teardown.
+	The one-attempt rejection oracle handles caller diagnostic-copy rejection and capacity mutation without imposing successful-retry snapshot timing; caller-owned diagnostic storage is explicitly freed, and existing modes retain their assertions.
+	- [x] Diagnostic error-path copy actual-free increment (2026-11-16): extend `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup` with `path_error`, capture the second path allocation and register its twenty-case matrix once.
+	All twenty caller diagnostic-copy rejection, registration/operation-capacity mutation and duplicate-event cases passed focused x64 `batch-pool` mode on the first attempt, confirming exactly one actual copy free and late-free accounting for the private ticket plus competing callback-created handles.
+	Direct/blocking owner allocation/free and real-world retain/release reentry, gate progress/readability, suppressed-callback controls and held-heap discrimination remain asserted; reservation free and diagnostic-copy free are captured separately by their respective matrices.
+	All four increments preserve exact allocation counts, diagnostic contents/ownership, rejection without publication, frontier/disk/overlay preservation apart from explicit winner mutations, operation-counter/charge restoration, retained-world/sentinel readability and zero final caller/owner ledgers; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after all four increments.
+	These leaves complete the broader diagnostic path reservation/copy qualification parent.
+	Final provider array/frontier preparation qualification, the broader staging-array parent and other Phase 5 requirements remain open.
+	- [x] Staging admitted-context list retained-sentinel rollback increment (2026-11-16): extend `test_source_registration_receipt_retry` and `test_source_batch_construction_reference_rollback` with exclusive `batch_context_list`/`context_list` selection and register the matrix once.
+	A single new-document overlay creates the nonempty list while a separate retained `b.jai` world supplies the sentinel; all twelve direct/blocking caller-receipt rejection and registration/operation-capacity ordinary/extra-reference control groups passed focused x64 `batch-pool` mode on the first attempt.
+	Exact one-allocation-per-attempt counts, callback/caller-copy/post-return reference snapshots, balanced control references, copied-context insertion/rollback and requested-world document identity/bytes remain asserted.
+	- [x] Staging diagnostic path reservation retained-sentinel rollback increment (2026-11-16): add exclusive `batch_paths`/`paths` selection to the same fixtures and register its valid single-overlay matrix once.
+	All twelve retained-sentinel ordinary/control groups passed focused x64 `batch-pool` mode on the first attempt, preserving exact reservation counts and reference/charge restoration without invoking error-path copying.
+	- [x] Staging admitted-context list actual-free increment (2026-11-16): extend `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup` with exclusive `batch_context_list`/`context_list` selection, require the single-new-document fixture and register its matrix once.
+	All twenty caller-receipt rejection, registration/operation-capacity retry and duplicate-event validation ordinary/suppression/held-heap cases passed focused x64 `batch-pool` mode on the first attempt, confirming exactly one captured list free while one private ticket is still live.
+	- [x] Staging diagnostic path reservation actual-free increment (2026-11-16): extend the same cleanup fixtures with exclusive `batch_paths`/`paths` selection and register its single-overlay matrix once.
+	All twenty cases passed focused x64 `batch-pool` mode on the first attempt; validation counts both reservation and diagnostic-copy allocations but captures only the first reservation's actual free, leaving copy-free qualification unchecked.
+	Both actual-free modes exercise direct/blocking owner allocation/free and real-world retain/release reentry, callback gate progress/readability, suppressed-callback controls and held-heap discrimination, with exact counts and successful retry publication.
+	All four matrices preserve provider/frontier/counter/charge atomicity, retained-world/sentinel readability and zero final caller/owner ledgers; hooks are detached before teardown and no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after all four increments.
+	These leaves complete the broader admitted-context list qualification parent.
+	Diagnostic-path reservation qualification is recorded separately from still-open error-path copy callbacks/winners/retries, retained-sentinel rollback and actual-free controls; the broader path parent, staging-array qualification and Phase 5 remain open.
+	- [x] Single-new-document staging admitted-context list callback increment (2026-11-16): extend `test_source_batch_storage_admission` and `test_source_batch_construction_callbacks` with exclusive `new_document` selection, restricted to context-list callbacks without pairing or receipt retries, and register its matrix once.
+	Seventeen baseline and direct/blocking frontier/lifecycle/session winner action/control groups pass focused x64 `batch-pool` mode after two local oracle corrections: worlds contain requested batch documents rather than all provider documents, and the deliberate stale-frontier control can restore original bytes from the private snapshot.
+	The final oracle checks one requested new-document world member by identity/bytes, exact provider document/context insertion or rollback, original-document preservation on ordinary paths and replacement preservation on correct frontier rejection; forbidden control admission and stale overwrite are explicit.
+	- [x] Two-event overlay staging diagnostic path reservation callback increment (2026-11-16): permit `batch_pair` for exclusive `batch_paths`/`paths` selection, exclude this mode from per-event allocation counting and register the overlay/new-document matrix once.
+	Seventeen baseline and direct/blocking winner action/control groups passed focused x64 `batch-pool` mode on the first attempt, preserving one initial reservation, two-document identity-based publication and rejected new-document/context absence; paired path receipt/rejected-allocation retries remain disallowed.
+	- [x] Two-event edit staging diagnostic path reservation callback increment (2026-11-16): register the current-revision full-range edit followed by a new-document overlay with the same isolated reservation hook.
+	Its seventeen groups passed focused x64 `batch-pool` mode after one transient compiler source-open failure was retried without code changes; the failed compilation did not execute a stale binary.
+	- [x] Two-event disk staging diagnostic path reservation callback increment (2026-11-16): register a present disk observation with canonical revision/provenance followed by a new-document overlay.
+	Its seventeen groups passed focused x64 `batch-pool` mode on the first attempt, preserving exact disk bytes/revision, selected overlay bytes, original disk backing on rejection and both published document identities.
+	All four matrices retain exact allocation counts, callback gate progress/private admission, frontier/lifecycle/session winner precedence, provider/frontier/counter/charge atomicity, retained-world readability and zero final caller/owner ledgers; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after all four increments.
+	The admitted-context and path-reservation batch-shape coverage branches are complete; both broader qualification parents remain open for retained-sentinel source-reference rollback and actual-free controls, with diagnostic error-path copying still separate unchecked work.
+	Staging-array qualification and Phase 5 remain open.
+	- [x] Edit staging admitted-context list callback increment (2026-11-16): allow first-event `EDIT_OVERLAY` with exclusive `batch_context_list`/`context_list` selection in `test_source_batch_storage_admission` and `test_source_batch_construction_callbacks`, retaining the nonempty two-event fixture and registering its matrix once in the shared suite.
+	Seventeen baseline and direct/blocking frontier/lifecycle/session winner action/control groups passed focused x64 `batch-pool` mode on the first attempt, preserving the single whole-batch reservation, current-revision full-range edit and two-document identity-based publication/rollback checks.
+	- [x] Disk staging admitted-context list callback increment (2026-11-16): permit first-event `OBSERVE_DISK` with the same isolated list mode and register its nonempty two-event matrix once.
+	Its seventeen groups passed focused x64 `batch-pool` mode on the first attempt, with exact disk bytes/canonical revision, overlay selection, original disk backing on rejection, new-document/context absence on rejection and successful two-document publication.
+	- [x] Edit staging diagnostic path reservation callback increment (2026-11-16): allow single-`EDIT_OVERLAY` batches with exclusive `batch_paths`/`paths` selection and register the matrix once.
+	Seventeen baseline and direct/blocking winner action/control groups passed focused x64 `batch-pool` mode on the first attempt; the valid current-revision edit isolates one initial reservation before provider staging without diagnostic error-path copying.
+	- [x] Disk staging diagnostic path reservation callback increment (2026-11-16): permit single-`OBSERVE_DISK` batches with the same isolated reservation hook and register its matrix once.
+	Its seventeen groups passed focused x64 `batch-pool` mode on the first attempt, preserving single-allocation counts and exact disk/overlay publication and rollback assertions.
+	All four increments retain mode isolation, exact callback counts, gate progress/private admission, frontier/lifecycle/session winner precedence, provider/frontier/counter/charge atomicity, retained-world readability and zero final caller/owner ledgers; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after all four increments.
+	The admitted-context route parent remains open for single-new-document callbacks; the path route parent remains open for two-event overlay/edit/disk callbacks.
+	Broader context/path qualification still requires retained-sentinel rollback and actual-free controls, and diagnostic error-path copying remains separate unchecked work.
+	Staging-array qualification and Phase 5 remain open.
+	- [x] Staging admitted-context list callback increment (2026-11-16): extend `test_source_batch_storage_admission` and `test_source_batch_construction_callbacks` with exclusive `batch_context_list`/`context_list` selection, require the nonempty two-event overlay fixture and register its matrix once in the shared suite.
+	Seventeen baseline and direct/blocking frontier/lifecycle/session winner action/control groups passed in focused x64 `batch-pool` mode on the first attempt; the single reservation is counted per batch, while publication checks both documents by identity and rejection omits the new document/context.
+	- [x] Staging diagnostic path reservation callback increment (2026-11-16): extend the same fixtures with exclusive `batch_paths`/`paths` selection and register the valid single-overlay matrix once.
+	Seventeen baseline and direct/blocking winner action/control groups passed in focused x64 `batch-pool` mode on the first attempt, isolating one initial reservation before provider staging without invoking diagnostic error-path copying.
+	- [x] Staging admitted-context list receipt-retry increment (2026-11-16): extend `test_source_batch_construction_receipt_retry` with exclusive `context_list` selection, supplying the nonempty two-event overlay fixture; permit paired receipt retries only for this list mode.
+	Nine standalone rejected-allocation and direct/blocking registration/operation-capacity ordinary/incorrect-retry groups passed in focused x64 `batch-pool` mode on the first attempt.
+	- [x] Staging diagnostic path reservation receipt-retry increment (2026-11-16): extend the same wrapper with exclusive `paths` selection and register its single-overlay retry matrix once.
+	Its nine ordinary/control groups passed in focused x64 `batch-pool` mode on the first attempt.
+	Both retry modes reserve once per attempt: successful capacity retry allocates twice; forbidden retries are distinguished by two allocations after initial rejection and three after second-attempt rejection.
+	All four increments preserve exact allocation/receipt counts, callback gate progress/private admission, winner precedence, provider/frontier/counter/charge atomicity, exact publication, retained-world readability and zero final caller/owner ledgers; hooks are detached before teardown and no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after all four increments.
+	Both broader admitted-context/path qualification parents remain open for broader route coverage, retained-sentinel rollback and actual-free controls; diagnostic error-path copying remains separate unchecked work.
+	Staging-array qualification and Phase 5 remain open.
+	- [x] Staging state-pointer actual-free increment (2026-11-16): extend `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup` with exclusive `batch_state_list`/`state_list` selection and register the matrix once in the shared suite.
+	The isolated storage probe captures the actual owner allocation size and first state-pointer free, not a nearby metadata pool block; twenty direct/blocking ordinary/suppressed and held-heap cases cover caller-receipt rejection, registration/operation-capacity retries and duplicate-event validation rejection.
+	All twenty cases passed in the focused x64 `batch-pool` run on the first attempt, confirming exactly one captured free and one private ticket still live before caller receipt allocation.
+	- [x] Staging context-reference actual-free increment (2026-11-16): extend the same fixtures with mutually exclusive `batch_reference_list`/`reference_list` selection and register its matrix once.
+	The corresponding twenty actual-free/reentry/control cases passed in the focused x64 `batch-pool` run on the first attempt, with the same early private-ticket accounting.
+	Both matrices require owner allocation/free and real-world retain/release reentry, callback gate progress and retained-world readability; suppressed callbacks perform no reentry and held-heap controls detect blocked allocation before releasing the heap gate.
+	Exact allocation counts, restored charges, successful retry publication and zero final caller/owner ledgers remain asserted; hooks are detached before teardown and no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after both increments.
+	These leaves complete both staging state-pointer and context-reference qualification parents; admitted-context list, diagnostic path and other staging-array qualification and Phase 5 requirements remain open.
+	- [x] Staging state-pointer retained-sentinel rollback increment (2026-11-16): extend `test_source_registration_receipt_retry` and `test_source_batch_construction_reference_rollback` with exclusive `batch_state_list`/`state_list` selection and register the matrix once in the shared suite.
+	Twelve direct/blocking groups cover caller-receipt rejection and registration/operation-capacity retries, each with ordinary and deliberate extra-reference controls; the focused x64 `batch-pool` run passed on its first attempt.
+	- [x] Staging context-reference retained-sentinel rollback increment (2026-11-16): extend the same fixtures with mutually exclusive `batch_reference_list`/`reference_list` selection and register the corresponding matrix once.
+	Its twelve direct/blocking ordinary/control groups passed in the focused x64 `batch-pool` run on the first attempt.
+	Both list modes use one allocation per attempt and preserve exact rejection/retry counts; callback, caller-copy and post-return sentinel reference snapshots distinguish discarded private-clone cleanup from the deliberate extra reference.
+	Controls explicitly balance the extra reference before teardown; exact submitted/sentinel bytes, provider/frontier atomicity, returned private charges and zero final caller/owner ledgers remain asserted.
+	Hooks are detached before teardown and no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after both increments.
+	Both broader list qualification parents retain explicit actual-free reentry/control follow-ups; staging-array qualification and Phase 5 remain open.
+	- [x] Staging state-pointer receipt-retry increment (2026-11-16): extend `test_source_batch_construction_receipt_retry` with exclusive `state_list` selection and register its matrix once in `test_source_batch_pool_checks`.
+	One standalone rejected-allocation retry control and eight direct/blocking registration/operation-capacity retry groups cover ordinary retries and incorrect-retry controls; all nine groups passed in the focused x64 `batch-pool` run on the first attempt.
+	- [x] Staging context-reference receipt-retry increment (2026-11-16): extend the same wrapper with mutually exclusive `reference_list` selection and register its matrix once in the shared suite.
+	The corresponding nine groups passed in the focused x64 `batch-pool` run on the first attempt.
+	Each list reserves once per attempt, giving two list allocations on a successful capacity retry; ordinary rejection stops exactly at the failed allocation, while controls distinguish forbidden retry with two allocations after initial rejection and three after second-attempt rejection.
+	Existing caller-receipt counts, output callback gate progress, provider/frontier atomicity, exact publication, retained-world readability, restored charges and zero final caller/owner ledgers remain asserted.
+	No production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after both increments.
+	Both broader list qualification parents retain explicit retained-sentinel rollback and actual-free follow-ups; staging-array qualification and Phase 5 remain open.
+	- [x] Two-event staging state-pointer callback increment (2026-11-16): permit `batch_pair` with exclusive `batch_state_list`/`state_list` selection and register all three first-event kinds once each in the shared suite.
+	A first-event `SET_OVERLAY`, `EDIT_OVERLAY` or `OBSERVE_DISK` precedes a new-document overlay; each shape runs a rejection/publication baseline and sixteen direct/blocking frontier replacement, requested shutdown, staging-shutdown protection and session retirement/reuse action/control groups.
+	All fifty-one groups passed in the focused x64 `batch-pool` run on the first attempt.
+	- [x] Two-event staging context-reference callback increment (2026-11-16): permit `batch_pair` with exclusive `batch_reference_list`/`reference_list` selection and register the same three first-event kinds once each.
+	All fifty-one corresponding baseline/action/control groups passed in the focused x64 `batch-pool` run on the first attempt.
+	List modes preserve exactly one allocation per attempt for the whole batch; existing paired source construction still requires two allocations, and list modes still exclude `later_event` and paired receipt/rejected-allocation retries.
+	Both matrices preserve exact counts, callback gate progress/private admission, incorrect-winner discrimination, restored frontier/counters/charges, two-document publication checked by identity, absent new document/context after rejection, disk/overlay selection and retained-world readability, with zero final caller/owner ledgers.
+	No production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after both increments.
+	Both edit/disk/two-event batch-shape parents are complete; broader list qualification parents retain explicit receipt-retry, retained-sentinel rollback and actual-free follow-ups, and staging-array qualification and Phase 5 remain open.
+	- [x] Disk staging state-pointer callback increment (2026-11-16): permit first-event `OBSERVE_DISK` with exclusive `batch_state_list`/`state_list` selection and register its matrix once in `test_source_batch_pool_checks`.
+	The existing present-disk fixture supplies a canonical revision and provenance; the isolated state-pointer hook still targets one reservation before event staging.
+	One rejection/publication baseline and sixteen direct/blocking frontier replacement, requested shutdown, staging-shutdown protection and session retirement/reuse action/control groups passed in the focused x64 `batch-pool` run on the first attempt.
+	- [x] Disk staging context-reference callback increment (2026-11-16): permit first-event `OBSERVE_DISK` with exclusive `batch_reference_list`/`reference_list` selection and register its matrix once in the shared suite.
+	The hook targets one context-reference reservation after state-pointer backing and before event staging; its rejection/publication baseline and sixteen direct/blocking action/control groups passed in the focused x64 `batch-pool` run on the first attempt.
+	Both matrices preserve exact allocation counts, callback gate progress/private admission, incorrect-winner discrimination, restored frontier/counters/charges, exact installed disk bytes/revision, selected overlay bytes and original disk backing on live-provider rejection.
+	Retirement clears live source links while the retained world remains readable; final caller/owner ledgers are zero.
+	No production code changed; two-event list modes remain disabled.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after both increments.
+	Both batch-shape and broader list qualification parents remain open with explicit two-event, receipt-retry, retained-sentinel rollback and actual-free follow-ups; staging-array qualification and Phase 5 remain open.
+	- [x] Edit staging state-pointer callback increment (2026-11-16): permit first-event `EDIT_OVERLAY` with exclusive `batch_state_list`/`state_list` selection and register its matrix once in `test_source_batch_pool_checks`.
+	The existing full-range edit setup supplies the current source revision and exact replacement bytes; the isolated state-pointer hook still targets one reservation before event staging, independently of edit scratch allocation.
+	One rejection/publication baseline and sixteen direct/blocking frontier replacement, requested shutdown, staging-shutdown protection and session retirement/reuse action/control groups passed in the focused x64 `batch-pool` run on the first attempt.
+	- [x] Edit staging context-reference callback increment (2026-11-16): permit first-event `EDIT_OVERLAY` with exclusive `batch_reference_list`/`reference_list` selection and register its matrix once in the shared suite.
+	The hook targets one context-reference reservation after state-pointer backing and before event staging; its rejection/publication baseline and sixteen direct/blocking action/control groups passed in the focused x64 `batch-pool` run on the first attempt.
+	Both matrices preserve exact allocation counts, callback gate progress/private admission, incorrect-winner discrimination, restored frontier/counters/charges, exact edited publication, retained-world readability and zero final caller/owner ledgers.
+	No production code changed; single-event disk and two-event list modes remain disabled.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after both increments.
+	Both batch-shape and broader list qualification parents remain open with explicit disk/two-event, receipt-retry, retained-sentinel rollback and actual-free follow-ups; staging-array qualification and Phase 5 remain open.
+	- [x] Staging state-pointer callback increment (2026-11-16): extend `test_source_batch_storage_admission` and `test_source_batch_construction_callbacks` with exclusive `batch_state_list`/`state_list` selection and register the first-event overlay matrix once in `test_source_batch_pool_checks`.
+	One rejection/publication baseline and sixteen direct/blocking action/control groups target the single state-pointer reservation before event staging; the focused x64 `batch-pool` run passed all seventeen groups on its first attempt.
+	Frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse exercise existing incorrect-winner controls, with exact allocation counts, callback gate progress/private admission, restored frontier/counters/charges, exact publication, retained-world readability and zero final caller/owner ledgers.
+	- [x] Staging context-reference callback increment (2026-11-16): extend the same fixture with exclusive `batch_reference_list`/`reference_list` selection and register its first-event overlay matrix once in the shared suite.
+	The hook targets the single context-reference reservation after state-pointer backing; its rejection/publication baseline and sixteen direct/blocking action/control groups passed in the focused x64 `batch-pool` run on the first attempt.
+	The shared fixture preserves the same allocation, winner, charge, publication and cleanup oracles for both list modes; hooks are detached before teardown and no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after both increments.
+	Both broader list qualification parents remain open with explicit edit/disk/two-event, receipt-retry, retained-sentinel rollback and actual-free follow-ups; staging-array qualification and Phase 5 remain open.
+	- [x] Source-backing construction qualification completion (2026-11-16): close the source object/bytes/revision construction parent after completing its existing child matrices across overlay, disk and edit routes.
+	The checked children cover source-object, byte-copy and revision-identity rejection cleanup; direct/blocking allocation callbacks and lifecycle/session/frontier winners; later-event construction; receipt-capacity retries and rejected-allocation retry controls; retained-sentinel source-reference rollback; and actual-free reentry controls.
+	Edit intermediate size/arithmetic checks, first/later scratch callbacks, later-event edits, retry/rollback qualification and single/replaced/final scratch actual-free controls are also checked.
+	This increment changes only the checklist and completion evidence; no production or test code changed, and completed executable matrices were not rerun merely for checklist closure.
+	Staging state-pointer/context-reference qualification, broader batch-construction and other Phase 5 requirements remain open; this completion does not begin Phase 6.
+	- [x] Shared/admitted-context metadata qualification completion (2026-11-16): close the metadata callback/winner/retry/actual-free qualification parent after completing its existing child matrices.
+	The checked children cover single-event and later-event overlay/edit/disk callbacks, admitted-context identity/descriptor/path callbacks, lifecycle/session/frontier winners, receipt-capacity retries, rejected-allocation retry controls, retained-sentinel source-reference rollback, ordinary actual frees and partial-staging actual frees with discriminating reentry controls.
+	The final implementation increment passed its focused x64 `batch-pool` run and all twelve scoped x64/optimised LLVM service gates on their first attempts.
+	This increment changes only the checklist and completion evidence; no production or test code changed, and completed executable matrices were not rerun merely for checklist closure.
+	Broader batch-construction and other Phase 5 requirements remain open; this completion does not begin Phase 6.
+	- [x] Admitted-context later-disk partial metadata-block free increment (2026-11-16): enable later-event `OBSERVE_DISK` with `metadata_reject_at` in `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup`, and register rejection ordinals two through fourteen once each in `test_source_batch_pool_checks`.
+	The focused x64 `batch-pool` run passed all sixty-five new cases on its first attempt: each ordinal covers direct/blocking allocating/mutating callbacks, suppressed-callback controls and a held-heap control.
+	Rejection stops at the chosen metadata ordinal with no caller allocation and exactly one captured pool-block free; single-event bounds and later-event overlay/edit bounds remain unchanged.
+	Early `discard_staging` cleanup observes one private ticket still live, while post-return private charges restore.
+	Ordinary callbacks allocate through the owner allocator, retain/release a real world and verify gate progress/readability/private charges; suppressed-callback controls observe no reentry, while held-heap controls detect blocked allocation before releasing the heap gate.
+	The new document and admitted context remain absent; document/context counts, original source identity/reference count, original disk backing, overlay bytes and accepted frontier remain unchanged, and final caller/owner ledgers are zero.
+	No production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts.
+	All six partial-staging routes are now checked, completing the partial-staging parent; together with the six ordinary actual-free matrices, they complete the actual shared/admitted-context metadata-free parent.
+	Broader metadata qualification and Phase 5 remain open.
+	- [x] Admitted-context later-edit partial metadata-block free increment (2026-11-16): enable later-event `EDIT_OVERLAY` with `metadata_reject_at` in `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup`, and register rejection ordinals two through thirteen once each in `test_source_batch_pool_checks`.
+	The focused x64 `batch-pool` run passed all sixty new cases on its first attempt: each ordinal covers direct/blocking allocating/mutating callbacks, suppressed-callback controls and a held-heap control.
+	The metadata hook remains separate from edit scratch allocation; rejection stops at the chosen metadata ordinal with no caller allocation and exactly one captured pool-block free.
+	Single-event bounds remain unchanged and later-event disk rejection remains excluded.
+	Early `discard_staging` cleanup observes one private ticket still live, while post-return private charges restore.
+	Ordinary callbacks allocate through the owner allocator, retain/release a real world and verify gate progress/readability/private charges; suppressed-callback controls observe no reentry, while held-heap controls detect blocked allocation before releasing the heap gate.
+	The new document and admitted context remain absent; document/context counts, original source identity/reference count and accepted frontier remain unchanged, and final caller/owner ledgers are zero.
+	No production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts.
+	Admitted-context later-event disk rejection cleanup, the partial-staging parent, actual-free parent, broader metadata qualification and Phase 5 remain open.
+	- [x] Admitted-context later-overlay partial metadata-block free increment (2026-11-16): enable later-event `SET_OVERLAY` with `metadata_reject_at` in `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup`, and register rejection ordinals two through thirteen once each in `test_source_batch_pool_checks`.
+	The focused x64 `batch-pool` run passed all sixty new cases on its first attempt: each ordinal covers direct/blocking allocating/mutating callbacks, suppressed-callback controls and a held-heap control.
+	Rejection stops at the chosen metadata ordinal with no caller allocation and exactly one captured pool-block free; single-event bounds remain unchanged and later-event edit/disk rejection remains excluded.
+	Early `discard_staging` cleanup observes one private ticket still live, while post-return private charges restore.
+	Ordinary callbacks allocate through the owner allocator, retain/release a real world and verify gate progress/readability/private charges; suppressed-callback controls observe no reentry, while held-heap controls detect blocked allocation before releasing the heap gate.
+	The new document and admitted context remain absent; document/context counts, original source identity/reference count and accepted frontier remain unchanged, and final caller/owner ledgers are zero.
+	No production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts.
+	Admitted-context later-event edit/disk rejection cleanup, the partial-staging parent, actual-free parent, broader metadata qualification and Phase 5 remain open.
+	- [x] Single-disk partial metadata-block free increment (2026-11-16): enable `OBSERVE_DISK` with the single-event `metadata_reject_at` selector in `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup`, and register rejection ordinals two through four once each in `test_source_batch_pool_checks`.
+	The focused x64 `batch-pool` run passed all fifteen new cases on its first attempt: each ordinal covers direct/blocking allocating/mutating callbacks, suppressed-callback controls and a held-heap control.
+	Rejection stops at the chosen metadata ordinal with no caller allocation and exactly one captured pool-block free; overlay/edit bounds remain two through three and later-event rejection remains excluded.
+	Early `discard_staging` cleanup observes one private ticket still live, while post-return private charges restore.
+	Ordinary callbacks allocate through the owner allocator, retain/release a real world and verify gate progress/readability/private charges; suppressed-callback controls observe no reentry, while held-heap controls detect blocked allocation before releasing the heap gate.
+	Document/context counts, original source identity/reference count, original disk backing, overlay bytes and accepted frontier remain unchanged after partial disk cleanup, and final caller/owner ledgers are zero.
+	No production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts.
+	The three single-event partial metadata-block free leaves are checked; admitted-context later-event rejection cleanup, the partial-staging parent, actual-free parent, broader metadata qualification and Phase 5 remain open.
+	- [x] Single-edit partial metadata-block free increment (2026-11-16): enable `EDIT_OVERLAY` with the single-event `metadata_reject_at` selector in `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup`, and register rejection ordinals two and three once each in `test_source_batch_pool_checks`.
+	The focused x64 `batch-pool` run passed all ten new cases on its first attempt: both ordinals cover direct/blocking allocating/mutating callbacks, suppressed-callback controls and a held-heap control.
+	The metadata hook remains separate from edit scratch allocation; rejection stops at the chosen ordinal with no caller allocation and exactly one captured pool-block free.
+	Early `discard_staging` cleanup observes one private ticket still live, while post-return private charges restore.
+	Ordinary callbacks allocate through the owner allocator, retain/release a real world and verify gate progress/readability/private charges; suppressed-callback controls observe no reentry, while held-heap controls detect blocked allocation before releasing the heap gate.
+	Document/context counts, original source identity/reference count and accepted frontier remain unchanged after partial edit cleanup, and final caller/owner ledgers are zero.
+	No production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	Partial-staging disk and admitted-context rejection cleanup remain open, as do the partial-staging parent, actual-free parent, broader metadata qualification and Phase 5.
+	The completed six-route metadata reference-rollback parent and six ordinary actual-free route matrices stay checked.
+	- [x] Single-overlay partial metadata-block free increment (2026-11-16): append an exclusive `metadata_reject_at` selector to `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup`, capture the first metadata block and reject metadata allocation two or three, and register both ordinal matrices once in `test_source_batch_pool_checks`.
+	Ten cases cover both rejection points with direct/blocking allocating/mutating callbacks, suppressed-callback controls and a held-heap control.
+	Rejection stops exactly at the chosen metadata ordinal with no caller allocation; the captured block is freed exactly once.
+	The first focused run exposed an incorrect callback live-handle expectation: allocation failure calls `discard_staging` before returning to the coordinator, so the free callback observes one private ticket still live.
+	The test oracle now distinguishes this early cleanup from receipt-rejection cleanup; the same focused x64 `batch-pool` check then passed all ten new cases and the suite.
+	Ordinary callbacks allocate through the owner allocator, retain/release a real world and verify gate progress/readability/private charges; suppressed-callback controls observe no reentry, while held-heap controls detect blocked allocation before releasing the heap gate.
+	After API return, document/context counts, original source identity/reference count and accepted frontier remain unchanged, private charges restore and final caller/owner ledgers are zero.
+	No production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	Partial-staging edit/disk and admitted-context rejection cleanup remain explicit open leaves; the partial-staging parent, actual-free parent, broader metadata qualification and Phase 5 remain open.
+	The completed six-route metadata reference-rollback parent and six ordinary actual-free route matrices stay checked.
+	- [x] Admitted-context disk actual metadata-block free increment (2026-11-16): enable metadata-only `later_event` with `OBSERVE_DISK` in `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup`, share the selected event index across preparation and verification, and register the route once in `test_source_batch_pool_checks`.
+	The focused x64 `batch-pool` run passed all twenty new cases on its first attempt: caller-receipt rejection, registration-capacity retry, operation-capacity retry and third-event validation rejection each cover direct/blocking allocating/mutating callbacks, suppressed-callback controls and a held-heap control.
+	Fourteen metadata calls per staging attempt, twenty-eight on successful capacity retry and exactly one captured first pool-block free remain exact.
+	Validation preserves the new-document and disk prefix and requires the duplicate error at `events[2].document`.
+	Successful admission requires exactly one new document/context with independently backed metadata and exact disk bytes/revision on the existing document, preserving its selected overlay and exact two-document publication; rejected operations preserve document/context counts, original disk backing and frontier and leave the additions absent.
+	Ordinary callbacks allocate through the owner allocator, retain/release a real world and verify gate progress/readability/private charges; suppressed-callback controls observe no reentry, while held-heap controls detect blocked allocation before releasing the heap gate.
+	Successful capacity retries require two caller receipt copies, private charges return and final caller/owner ledgers are zero.
+	No production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	All six single-event/admitted-context actual-free route matrices now pass.
+	Partial-staging rejection cleanup remains open, so the actual-free parent, broader metadata qualification and Phase 5 remain open; the completed six-route metadata reference-rollback parent stays checked.
+	- [x] Admitted-context edit actual metadata-block free increment (2026-11-16): enable metadata-only `later_event` with `EDIT_OVERLAY` in `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup`, target the existing document's second event for full-range edit preparation, and register the route once in `test_source_batch_pool_checks`.
+	The focused x64 `batch-pool` run passed all twenty new cases on its first attempt: caller-receipt rejection, registration-capacity retry, operation-capacity retry and third-event validation rejection each cover direct/blocking allocating/mutating callbacks, suppressed-callback controls and a held-heap control.
+	The metadata hook remains separate from edit scratch allocation; thirteen metadata calls per staging attempt, twenty-six on successful capacity retry and exactly one captured first pool-block free remain exact.
+	Validation preserves the new-document and edit prefix and requires the duplicate error at `events[2].document`.
+	Successful admission requires exactly one new document/context with independently backed metadata and exactly two distinct published members with exact new/edited bytes; rejected operations preserve document/context counts and frontier and leave the new document and context absent.
+	Ordinary callbacks allocate through the owner allocator, retain/release a real world and verify gate progress/readability/private charges; suppressed-callback controls observe no reentry, while held-heap controls detect blocked allocation before releasing the heap gate.
+	Successful capacity retries require two caller receipt copies, private charges return and final caller/owner ledgers are zero.
+	No production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	Admitted-context disk and partial-staging actual metadata frees remain open, as do the actual-free parent, broader metadata qualification and Phase 5.
+	The completed six-route metadata reference-rollback parent stays checked.
+	- [x] Admitted-context overlay actual metadata-block free increment (2026-11-16): append a metadata-only `later_event` selector to `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup`, restricted to `SET_OVERLAY` for this increment, and register the route once in `test_source_batch_pool_checks`.
+	The first event adds a new document/context before the existing overlay update.
+	Validation locally appends a third duplicate of the update, preserving both valid events instead of using the generic helper that replaces the event list; the exact error path is `events[2].document` with the duplicate rule.
+	The focused x64 `batch-pool` run passed all twenty new cases on its first attempt: caller-receipt rejection, registration-capacity retry, operation-capacity retry and third-event validation rejection each cover direct/blocking allocating/mutating callbacks, suppressed-callback controls and a held-heap control.
+	Thirteen metadata calls per staging attempt, twenty-six on successful capacity retry and exactly one captured first pool-block free remain exact.
+	Ordinary callbacks allocate through the owner allocator, retain/release a real world and verify gate progress/readability/private charges; suppressed-callback controls observe no reentry, while held-heap controls detect blocked allocation before releasing the heap gate.
+	Successful admission requires exactly one new document/context, independently backed document/binding/revisions/context/path metadata and exactly two distinct published members with exact bytes; rejected operations preserve document/context counts and frontier and leave the new document and context absent.
+	Successful capacity retries require two caller receipt copies, private charges return, retained worlds remain readable and final caller/owner ledgers are zero.
+	No production code or generic provider-error helper changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	Admitted-context edit/disk and partial-staging actual metadata frees remain open, as do the actual-free parent, broader metadata qualification and Phase 5.
+	The completed six-route metadata reference-rollback parent stays checked.
+	- [x] Single-disk actual metadata-block free increment (2026-11-16): extend the metadata-only `event_kind` selector in `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup` to `OBSERVE_DISK`, prepare a present observation with canonical source revision, and register the route once in `test_source_batch_pool_checks`.
+	The focused x64 `batch-pool` run passed all twenty new cases on its first attempt: caller-receipt rejection, registration-capacity retry, operation-capacity retry and duplicate-event validation rejection each cover direct/blocking allocating/mutating callbacks, suppressed-callback controls and a held-heap control.
+	The metadata hook captures the actual first pool block; four metadata calls per attempt, eight on successful capacity retry and exactly one captured block free remain exact.
+	Ordinary callbacks allocate through the owner allocator, retain/release a real world and verify gate progress/readability/private charges; suppressed-callback controls observe no reentry, while held-heap controls detect blocked allocation before releasing the heap gate.
+	Successful admission installs exact disk bytes/revision while preserving the original selected overlay and exact published-world bytes; rejected operations preserve original disk backing and frontier.
+	Successful capacity retries require two caller receipt copies, private charges return, retained worlds remain readable and final caller/owner ledgers are zero.
+	The fixture releases its canonical revision on every route; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	Admitted-context and partial-staging actual metadata frees remain open, as do the actual-free parent, broader metadata qualification and Phase 5.
+	The completed six-route metadata reference-rollback parent stays checked.
+	- [x] Single-edit actual metadata-block free increment (2026-11-16): append a metadata-only `event_kind` selector to `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup`, separate full-range edit preparation from allocation-hook selection, and register the `EDIT_OVERLAY` metadata route once in `test_source_batch_pool_checks`.
+	The focused x64 `batch-pool` run passed all twenty new cases on its first attempt: caller-receipt rejection, registration-capacity retry, operation-capacity retry and duplicate-event validation rejection each cover direct/blocking allocating/mutating callbacks, suppressed-callback controls and a held-heap control.
+	The metadata hook captures the actual first pool block rather than edit scratch storage; three metadata calls per attempt, six on successful capacity retry and exactly one captured block free remain exact.
+	Metadata-block callbacks retain the existing pool-cleanup private-charge timing rather than the edit-scratch callback oracle.
+	Ordinary callbacks allocate through the owner allocator, retain/release a real world and verify gate progress/readability/private charges; suppressed-callback controls observe no reentry, while held-heap controls detect blocked allocation before releasing the heap gate.
+	Successful capacity retries require two caller receipt copies and exact edited bytes; rejected operations preserve the frontier, private charges return, retained worlds remain readable and final caller/owner ledgers are zero.
+	No production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	Single-event disk, admitted-context and partial-staging actual metadata frees remain open, as do the actual-free parent, broader metadata qualification and Phase 5.
+	The completed six-route metadata reference-rollback parent stays checked.
+	- [x] Single-overlay actual metadata-block free increment (2026-11-16): add exclusive metadata mode to `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup`, capture the first metadata pool-block allocation through `metadata_cleanup_allocation_probe`, and register the route once in `test_source_batch_pool_checks`.
+	The probe uses the default pool's `memblock_size` to match the actual owned block allocation rather than the metadata slice request; the independent allocator ledger requires the captured block to be freed exactly once, with its callback detached before allocating/mutating reentry.
+	The focused x64 `batch-pool` run passed all twenty new cases on its first attempt: caller-receipt rejection, registration-capacity retry, operation-capacity retry and duplicate-event validation rejection each cover direct/blocking callbacks, suppressed-callback controls and a held-heap control.
+	Three tracked metadata calls per attempt and six on successful capacity retry remain exact.
+	Ordinary callbacks allocate through the owner allocator, retain/release a real world, verify gate progress/readability/private charges and return; suppressed-callback controls observe no reentry, while held-heap controls must detect the blocked owner allocation before releasing the heap gate.
+	Successful capacity retries require two caller receipt copies and exact published bytes; rejected operations preserve the frontier, private charges return, retained worlds remain readable and final caller/owner ledgers are zero.
+	No production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	The actual-free parent remains open with explicit single-event edit/disk, admitted-context and partial-staging cleanup leaves; broader metadata qualification and Phase 5 remain open.
+	The completed six-route metadata reference-rollback parent stays checked.
+	- [x] Admitted-context disk metadata retained-sentinel reference-rollback increment (2026-11-16): enable metadata-only `later_event` with `OBSERVE_DISK` in `test_source_registration_receipt_retry` and `test_source_batch_construction_reference_rollback`, share the selected event index between preparation and verification, and register the route once in `test_source_batch_pool_checks`.
+	The focused x64 `batch-pool` run passed all twelve new groups on its first attempt; 128 fixture attempts cover direct/blocking caller-receipt rejection and registration/operation-capacity retries with ordinary and deliberate extra-reference controls.
+	Initial metadata rejection ordinals one through fourteen and retry ordinals fifteen through twenty-eight stop exactly; successful capacity retry uses twenty-eight tracked metadata allocations and two caller receipt copies, with retry callback fifteen observing the private clone and deliberate extra reference.
+	Caller-copy and post-return reference snapshots require ordinary restoration or exactly one deliberately retained reference, which controls explicitly release before teardown.
+	The first event admits exactly one new document/context with independent metadata backing; the second installs exact disk bytes/revision while preserving the original selected overlay and exact two-document publication.
+	Rejected admission preserves document/context counts and original disk backing and leaves the added document absent.
+	Exact separate retained-sentinel bytes, callback gate progress, returned private charges and zero final caller/owner ledgers remain asserted; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	All six metadata reference-rollback routes are now qualified, completing their checklist parent.
+	Actual shared/admitted-context metadata frees, broader metadata qualification and Phase 5 remain open.
+	- [x] Admitted-context edit metadata retained-sentinel reference-rollback increment (2026-11-16): enable metadata-only `later_event` with `EDIT_OVERLAY` in `test_source_registration_receipt_retry` and `test_source_batch_construction_reference_rollback`, select the existing document's second event for the full-range edit, and register the route once in `test_source_batch_pool_checks`.
+	The focused x64 `batch-pool` run passed all twelve new groups on its first attempt; 120 fixture attempts cover direct/blocking caller-receipt rejection and registration/operation-capacity retries with ordinary and deliberate extra-reference controls.
+	Initial metadata rejection ordinals one through thirteen and retry ordinals fourteen through twenty-six stop exactly; the metadata hook excludes edit scratch allocations, successful capacity retry uses twenty-six tracked metadata allocations and two caller receipt copies, and retry callback fourteen observes the private clone and deliberate extra reference.
+	Caller-copy and post-return reference snapshots require ordinary restoration or exactly one deliberately retained reference, which controls explicitly release before teardown.
+	The first event still admits exactly one new document/context with independent metadata backing; successful publication contains exactly the new and edited documents with exact bytes, while rejection preserves document/context counts and leaves the added document absent.
+	Exact separate retained-sentinel bytes, callback gate progress, returned private charges and zero final caller/owner ledgers remain asserted; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	Admitted-context disk metadata reference rollback, actual metadata frees, the reference-rollback parent, broader metadata qualification and Phase 5 remain open.
+	- [x] Admitted-context overlay metadata retained-sentinel reference-rollback increment (2026-11-16): append a metadata-only `later_event` selector to `test_source_registration_receipt_retry` and `test_source_batch_construction_reference_rollback`, restricted to `SET_OVERLAY` for this increment, and register the route once in `test_source_batch_pool_checks`.
+	The first event adds a new document/context before the second event updates the existing overlay; the unchanged second-document sentinel remains separately protected through a real world handle.
+	The focused x64 `batch-pool` run passed all twelve new groups on its first attempt; 120 fixture attempts cover direct/blocking caller-receipt rejection and registration/operation-capacity retries with ordinary and deliberate extra-reference controls.
+	Initial metadata rejection ordinals one through thirteen and retry ordinals fourteen through twenty-six stop exactly; successful capacity retry uses twenty-six tracked metadata allocations and two caller receipt copies, with retry callback fourteen observing the private clone and deliberate extra reference.
+	Caller-copy and post-return reference snapshots require ordinary restoration or exactly one deliberately retained reference, which controls explicitly release before teardown.
+	Successful admission adds exactly one document/context, verifies independent document/binding/revision/context/path backing and publishes exactly the two changed documents with exact bytes; rejected admission preserves document/context counts and leaves the added document absent.
+	Exact retained-sentinel bytes, callback gate progress, returned private charges and zero final caller/owner ledgers remain asserted; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	Admitted-context edit/disk metadata reference rollback, actual metadata frees, the reference-rollback parent, broader metadata qualification and Phase 5 remain open.
+	- [x] Single-disk metadata retained-sentinel reference-rollback increment (2026-11-16): extend the metadata-only `event_kind` selector in `test_source_registration_receipt_retry` and `test_source_batch_construction_reference_rollback` to single-event `OBSERVE_DISK`, prepare a present disk observation with canonical source revision, and register the route once in `test_source_batch_pool_checks`.
+	The focused x64 `batch-pool` run passed all twelve new groups on its first attempt; forty-eight fixture attempts cover direct/blocking caller-receipt rejection and registration/operation-capacity retries with ordinary and deliberate extra-reference controls.
+	Initial metadata rejection ordinals one through four and retry ordinals five through eight stop exactly; successful capacity retry uses eight tracked metadata allocations and two caller receipt copies, with retry callback five observing the unchanged second-document sentinel through a real world handle.
+	Callback and caller-copy snapshots distinguish the private-clone and deliberate extra reference; post-return counts require ordinary restoration or exactly one extra reference, which controls explicitly release before teardown.
+	Successful admission installs exact disk bytes/revision while preserving selected overlay bytes and exact published-world contents; rejected admission preserves the original disk backing.
+	Sentinel bytes, returned private charges, callback gate progress and zero final caller/owner ledgers remain asserted; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	Admitted-context metadata reference rollback, actual metadata frees, the reference-rollback parent, broader metadata qualification and Phase 5 remain open.
+	- [x] Single-edit metadata retained-sentinel reference-rollback increment (2026-11-16): append a metadata-only `event_kind` selector to `test_source_registration_receipt_retry` and `test_source_batch_construction_reference_rollback`, reuse the full-range edit setup with the isolated metadata hook, and register the single-event `EDIT_OVERLAY` metadata route once in `test_source_batch_pool_checks`.
+	The focused x64 `batch-pool` run passed all twelve new groups on its first attempt; forty fixture attempts cover direct/blocking caller-receipt rejection and registration/operation-capacity retries with ordinary and deliberate extra-reference controls.
+	Initial metadata rejection ordinals one through three and retry ordinals four through six stop exactly; successful capacity retry uses six tracked metadata allocations and two caller receipt copies, while edit scratch allocations remain outside the metadata hook.
+	A real world handle protects the unchanged second-document sentinel; callback four and caller-copy snapshots distinguish the private-clone and deliberate extra reference, post-return counts require ordinary restoration or exactly one extra reference, and controls balance that extra reference before teardown.
+	Exact edited and sentinel bytes, returned private charges, callback gate progress and zero final caller/owner ledgers remain asserted; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	Single-event disk and admitted-context metadata reference rollback, actual metadata frees, the reference-rollback parent, broader metadata qualification and Phase 5 remain open.
+	- [x] Single-overlay metadata retained-sentinel reference-rollback increment (2026-11-13): extend `test_source_registration_receipt_retry` and `test_source_batch_construction_reference_rollback` with exclusive metadata mode for single-event `SET_OVERLAY`, and register `test_source_batch_construction_reference_rollback(metadata = true)` once in the shared `test_source_batch_pool_checks` suite.
+	The focused x64 `batch-pool` run passed on its first attempt; a formatting-only follow-up rerun displayed all twelve metadata rollback groups and the final focused PASS.
+	Forty fixture attempts cover direct/blocking caller-receipt rejection and registration/operation-capacity retry flows with ordinary and extra-reference controls; initial metadata rejection ordinals one through three and retry ordinals four through six stop exactly, while successful capacity retry uses six tracked metadata allocations and two caller receipt copies.
+	A real world handle keeps the unchanged second-document source alive; retry callback four and caller-copy snapshots observe its private-clone reference, post-return counts require ordinary restoration or exactly one deliberate extra reference, and controls explicitly release that extra reference before teardown.
+	Exact published and sentinel bytes, returned private charges, callback gate progress and zero final caller/owner ledgers remain asserted; no production code changed.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	The reference-rollback parent remains open with explicit single-event edit/disk and admitted-context route leaves; actual metadata frees, broader metadata qualification and Phase 5 remain open, while the completed metadata retry parents stay checked.
+	- [x] Admitted-context disk metadata rejected-allocation retry-control increment (2026-11-13): extend `batch_metadata` with `retry_rejection` to later-event `OBSERVE_DISK` in the two-event fixture, and register one standalone control plus four direct/blocking registration/operation-capacity controls once in `test_source_batch_pool_checks`, shared by both `main` modes.
+	The focused x64 `batch-pool` run passed on its first attempt; seventy new control attempts cover all fourteen initial metadata rejection ordinals and all fourteen receipt-retry rejection ordinals in each capacity matrix.
+	The existing `retry_failed_source_batch_storage` fault exposes forbidden successful admission with exactly fifteen through twenty-eight metadata allocations after initial rejection and twenty-nine through forty-two after receipt-retry rejection, versus ordinary disk rejection stopping at the failed ordinal.
+	Existing assertions verify exactly one new context/document, independent admitted-context and new-document metadata backing, exact installed disk bytes/revision with preserved overlay selection, unchanged original disk backing on ordinary rejection, exact two-document publication, output callback gate progress and two caller receipt copies for successful capacity retries, returned private charges, retained-world readability and zero final caller/owner ledgers.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	No production code changed; all six metadata rejected-allocation control routes and all six ordinary receipt-capacity retry routes are now qualified, completing their two checklist parents.
+	Retained-sentinel metadata source-reference rollback and actual shared/admitted-context metadata frees remain open, as do the metadata qualification parent and Phase 5.
+	- [x] Admitted-context edit metadata rejected-allocation retry-control increment (2026-11-13): extend `batch_metadata` with `retry_rejection` to later-event `EDIT_OVERLAY` in the two-event fixture, and register one standalone control plus four direct/blocking registration/operation-capacity controls once in `test_source_batch_pool_checks`, shared by both `main` modes.
+	The focused x64 `batch-pool` run passed on its first attempt; sixty-five new control attempts cover all thirteen initial metadata rejection ordinals and all thirteen receipt-retry rejection ordinals in each capacity matrix.
+	The existing `retry_failed_source_batch_storage` fault exposes forbidden successful admission with exactly fourteen through twenty-six metadata allocations after initial rejection and twenty-seven through thirty-nine after receipt-retry rejection, versus ordinary edit rejection stopping at the failed ordinal.
+	Existing assertions verify exactly one new context/document, independent copies of admitted identity/descriptor/three paths and new-document metadata, exact two-document publication with edited bytes, output callback gate progress and two caller receipt copies for successful capacity retries, returned private charges, retained-world readability and zero final caller/owner ledgers.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	No production code changed; later-event `OBSERVE_DISK` metadata rejected-allocation controls, retained-sentinel reference rollback and actual frees remain open, as do the metadata retry parent, metadata parent and Phase 5.
+	- [x] Admitted-context overlay metadata rejected-allocation retry-control increment (2026-11-13): permit `batch_metadata` with `retry_rejection` in the two-event fixture only for later-event `SET_OVERLAY`, and register one standalone control plus four direct/blocking registration/operation-capacity controls once in `test_source_batch_pool_checks`, shared by both `main` modes.
+	The focused x64 `batch-pool` run passed on its first attempt; sixty-five new control attempts cover all thirteen initial metadata rejection ordinals and all thirteen receipt-retry rejection ordinals in each capacity matrix.
+	The existing `retry_failed_source_batch_storage` fault exposes forbidden successful admission with exactly fourteen through twenty-six metadata allocations after initial rejection and twenty-seven through thirty-nine after receipt-retry rejection, versus ordinary rejection stopping at the failed ordinal.
+	Existing assertions verify exactly one new context/document, independent copies of admitted identity/descriptor/three paths and new-document metadata, exact two-document publication, output callback gate progress and two caller receipt copies for successful capacity retries, returned private charges, retained-world readability and zero final caller/owner ledgers.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	No production code changed; later-event `EDIT_OVERLAY`/`OBSERVE_DISK` metadata rejected-allocation controls, retained-sentinel reference rollback and actual frees remain open, as do the metadata retry parent, metadata parent and Phase 5.
+	- [x] Single-disk metadata rejected-allocation retry-control increment (2026-11-13): extend `batch_metadata` with `retry_rejection` to single-event `OBSERVE_DISK` and register one standalone control plus four direct/blocking registration/operation-capacity controls once in `test_source_batch_pool_checks`, shared by both `main` modes.
+	The focused x64 `batch-pool` run passed on its first attempt; twenty new control attempts cover all four initial metadata rejection ordinals and all four receipt-retry rejection ordinals in each capacity matrix.
+	The existing `retry_failed_source_batch_storage` fault exposes forbidden successful admission with exactly five/six/seven/eight metadata allocations after initial rejection and nine/ten/eleven/twelve after receipt-retry rejection, versus ordinary disk rejection stopping at the failed ordinal.
+	Existing assertions verify exact installed disk bytes/revision, preserved overlay selection, unchanged original disk backing on ordinary rejection, output callback gate progress and two caller receipt copies for successful capacity retries, returned private charges, retained-world readability and zero final caller/owner ledgers.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	No production code changed; all three single-event metadata rejected-allocation control routes are qualified, while admitted-context controls, retained-sentinel reference rollback and actual frees remain open, as do the metadata retry parent, metadata parent and Phase 5.
+	- [x] Single-edit metadata rejected-allocation retry-control increment (2026-11-13): extend `batch_metadata` with `retry_rejection` to single-event `EDIT_OVERLAY` and register one standalone control plus four direct/blocking registration/operation-capacity controls once in `test_source_batch_pool_checks`, shared by both `main` modes.
+	The focused x64 `batch-pool` run passed on its first attempt; fifteen new control attempts cover all three initial metadata rejection ordinals and all three receipt-retry rejection ordinals in each capacity matrix.
+	The existing `retry_failed_source_batch_storage` fault exposes forbidden successful admission with exactly four/five/six metadata allocations after initial rejection and seven/eight/nine after receipt-retry rejection, versus ordinary edit rejection stopping at the failed ordinal.
+	Existing assertions verify exact edited bytes, output callback gate progress and two caller receipt copies for successful capacity retries, returned private charges, retained-world readability and zero final caller/owner ledgers.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	No production code changed; disk and admitted-context rejected-allocation controls, retained-sentinel reference rollback and actual frees remain open, as do the metadata retry parent, metadata parent and Phase 5.
+	- [x] Single-overlay metadata rejected-allocation retry-control increment (2026-11-13): permit `batch_metadata` with `retry_rejection` only for single-event `SET_OVERLAY` and register one standalone control plus four direct/blocking registration/operation-capacity controls once in `test_source_batch_pool_checks`, shared by both `main` modes.
+	The focused x64 `batch-pool` run passed on its first attempt; fifteen new control attempts cover all three initial metadata rejection ordinals and all three receipt-retry rejection ordinals in each capacity matrix.
+	The existing `retry_failed_source_batch_storage` fault exposes forbidden successful admission with exactly four/five/six metadata allocations after initial rejection and seven/eight/nine after receipt-retry rejection, versus ordinary rejection stopping at the failed ordinal.
+	Existing assertions verify exact published bytes, output callback gate progress and two caller receipt copies for successful capacity retries, returned private charges, retained-world readability and zero final caller/owner ledgers.
+	Scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts; whitespace and touched-file diagnostics checks passed.
+	No production code changed; edit/disk and admitted-context rejected-allocation controls, retained-sentinel reference rollback and actual frees remain open, as do the metadata retry parent, metadata parent and Phase 5.
+	- [x] Admitted-context disk metadata receipt-retry increment (2026-11-13): permit metadata-mode receipt-capacity retries with later-event `OBSERVE_DISK` and register direct/blocking registration/operation-capacity matrices once in each `main` branch.
+	The focused x64 `batch-pool` run passed all four matrices on its first attempt; each sweeps all twenty-eight metadata allocation rejection points across two fourteen-allocation staging attempts, plus successful retry and the beyond-range sentinel.
+	Rejection preserves document/context counts, original disk backing and provider/frontier state; successful retry verifies exact independent context and new-document metadata backing, exact disk bytes/revision, preserved overlay selection and exact bytes for both published documents.
+	Exact staging/output allocation counts, callback gate progress, private charges, retained-world readability and zero final caller/owner ledgers passed.
+	All twelve scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts, including existing metadata routes and resolved waiter regressions.
+	No production code changed; rejected-allocation retry controls, reference rollback and actual frees remain open, as do the metadata retry parent, metadata parent and Phase 5.
+	- [x] Admitted-context edit metadata receipt-retry increment (2026-11-13): permit metadata-mode receipt-capacity retries with later-event `EDIT_OVERLAY` and register direct/blocking registration/operation-capacity matrices once in each `main` branch.
+	The focused x64 `batch-pool` run passed all four matrices on its first attempt; each sweeps all twenty-six metadata allocation rejection points across two thirteen-allocation staging attempts, plus successful retry and the beyond-range sentinel.
+	Rejection preserves document/context counts and provider/frontier state; successful retry verifies exact independent context and new-document metadata backing, with exact bytes for both published documents including the edited source.
+	Exact staging/output allocation counts, callback gate progress, private charges, retained-world readability and zero final caller/owner ledgers passed.
+	All twelve scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts, including existing metadata routes and resolved waiter regressions.
+	No production code changed; admitted-context later-disk receipt retries, rejected-allocation retry controls, reference rollback and actual frees remain open, as do the metadata retry parent, metadata parent and Phase 5.
+	- [x] Admitted-context overlay metadata receipt-retry increment (2026-11-13): permit metadata-mode receipt-capacity retries in the two-event `SET_OVERLAY` fixture and register direct/blocking registration/operation-capacity matrices once in each `main` branch.
+	The focused x64 `batch-pool` run passed all four matrices on its first attempt; each sweeps all twenty-six metadata allocation rejection points across two thirteen-allocation staging attempts, plus successful retry and the beyond-range sentinel.
+	Rejection preserves document/context counts and provider/frontier state; successful retry verifies exact independent identity/descriptor/path and new-document binding/revision/context backing, with exact bytes for both published documents.
+	Exact staging/output allocation counts, callback gate progress, private charges, retained-world readability and zero final caller/owner ledgers passed.
+	All twelve scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts, including existing metadata routes and resolved waiter regressions.
+	No production code changed; admitted-context later-edit/disk receipt retries, rejected-allocation retry controls, reference rollback and actual frees remain open, as do the metadata retry parent, metadata parent and Phase 5.
+	- [x] Single-disk shared metadata receipt-retry increment (2026-11-13): permit isolated metadata receipt-capacity retry mode for single-event `OBSERVE_DISK` and register its direct/blocking registration/operation-capacity matrices once in each `main` branch, preserving the current compact overlay/edit registrations.
+	The focused x64 `batch-pool` run passed all four disk metadata receipt-retry matrices on its first attempt; each sweeps all eight metadata allocation rejection points across two staging attempts, plus successful retry and the beyond-range sentinel.
+	Exact staging/output allocation counts, callback gate progress, private charges, provider/frontier atomicity, exact disk bytes/revision, preserved overlay selection, unchanged disk backing on rejection, retained-world readability and zero final caller/owner ledgers passed.
+	All twelve scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts, including existing metadata routes and resolved waiter regressions.
+	No production code changed; admitted-context receipt retries, rejected-allocation retry controls, reference rollback and actual frees remain open, as do the metadata retry parent, metadata parent and Phase 5.
+	- [x] Single-edit shared metadata receipt-retry increment (2026-11-13): permit isolated metadata receipt-capacity retry mode for single-event `EDIT_OVERLAY` and register its direct/blocking registration/operation-capacity matrices once in each `main` branch, preserving the current overlay registrations and formatting.
+	The focused x64 `batch-pool` run passed all four edit metadata receipt-retry matrices on its first attempt; each sweeps all six metadata allocation rejection points across two staging attempts, plus successful retry and the beyond-range sentinel.
+	Exact staging/output allocation counts, callback gate progress, private charges, provider/frontier atomicity, exact edited bytes, retained-world readability and zero final caller/owner ledgers passed.
+	All twelve scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts, including existing metadata routes and resolved waiter regressions.
+	No production code changed; metadata disk and admitted-context receipt retries, rejected-allocation retry controls, reference rollback and actual frees remain open, as do the metadata retry parent, metadata parent and Phase 5.
+	- [x] Single-overlay shared metadata receipt-retry increment (2026-11-13): permit isolated metadata receipt-capacity retry mode only for single-event `SET_OVERLAY` and register direct/blocking registration/operation-capacity matrices once in each `main` branch.
+	The focused x64 `batch-pool` run passed all four metadata receipt-retry matrices on its first attempt; each sweeps all six allocation rejection points across two staging attempts, plus successful retry and the beyond-range sentinel.
+	Exact staging/output allocation counts, callback gate progress, private charges, provider/frontier atomicity, exact published bytes, retained-world readability and zero final caller/owner ledgers passed.
+	All twelve scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts, including existing metadata routes and resolved waiter regressions.
+	No production code changed; metadata edit/disk and admitted-context receipt retries, rejected-allocation retry controls, reference rollback and actual frees remain open, as do the metadata retry parent, metadata parent and Phase 5.
+	- [x] Admitted-context descriptor/path metadata callback increment (2026-11-13): qualify existing ordinal-two descriptor and ordinal-three/four/five path registrations in the two-event `SET_OVERLAY` fixture, preserving the current expanded ordinal-one-through-ten loops in both `main` branches.
+	The initial focused compile exposed a test oracle calling the provider-private `bindings_equal`; equivalent explicit document/path-encoding/path-bytes/policy-version assertions repair the test without changing production exports or weakening its deep-copy checks.
+	After that repair, the focused x64 `batch-pool` run passed all sixty-eight descriptor/path groups: seventeen descriptor groups and fifty-one path groups, including thirteen-allocation rejection sweeps and direct/blocking replacement, shutdown, staging-shutdown and session-retirement actions with negative controls.
+	Exact allocation counts, winner precedence, private admission/charges, provider/context/frontier atomicity, exact committed identity/descriptor/path bytes with independent backing, two-document publication, retained-world readability and zero final caller/owner ledgers passed.
+	All twelve scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts after the repair, including existing metadata routes and resolved waiter regressions.
+	No production code changed; metadata retries, reference rollback and actual frees remain open, as do the metadata parent and Phase 5.
+	- [x] Admitted-context identity metadata callback increment (2026-11-13): select metadata ordinal one in the two-event `SET_OVERLAY` fixture once in each `main` branch, before descriptor/path copies and document staging.
+	The focused x64 `batch-pool` run passed all seventeen identity-boundary groups on its first attempt, including a thirteen-allocation rejection sweep and direct/blocking replacement, shutdown, staging-shutdown and session-retirement actions with their negative controls.
+	The committed-context oracle verifies exact identity/descriptor/path bytes and distinct backing against the borrowed registration, alongside exact allocation counts, winner precedence, private admission/charges, provider/frontier atomicity, two-document publication, retained-world readability and zero final caller/owner ledgers.
+	All twelve scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts, including existing metadata routes and resolved waiter regressions.
+	No production code changed; admitted-context descriptor/path callbacks, retries, reference rollback and actual frees remain open, as do the metadata parent and Phase 5.
+	- [x] Later-disk-event shared metadata callback increment (2026-11-13): permit isolated later-event `OBSERVE_DISK` metadata mode, account for fourteen metadata allocations and register ordinals eleven/twelve/thirteen/fourteen once in each `main` branch.
+	The metadata count adds the earlier staging's ten allocations to the selected event's three overlay/edit or four disk allocations; disk assertions now inspect `batch.events[event_index]` rather than always inspecting the first event.
+	The focused x64 `batch-pool` run passed all sixty-eight later-disk metadata groups on its first attempt, including fourteen-allocation rejection sweeps and direct/blocking replacement, shutdown, staging-shutdown and session-retirement actions with their negative controls.
+	Exact allocation counts, winner precedence, private admission/charges, provider/frontier atomicity, both published document bytes with the existing overlay selected, exact disk bytes/revision, rejection/retirement cleanup, retained-world readability and zero final caller/owner ledgers passed.
+	All twelve scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts, including existing later-overlay/edit and resolved waiter regressions.
+	No production code changed; admitted-context callbacks, retries, reference rollback and actual frees remain open, as do the metadata parent and Phase 5.
+	- [x] Later-overlay-event shared metadata callback increment (2026-11-13): generalise the test-only selector from `later_event_edit` to `later_event`, permit isolated later-event `SET_OVERLAY` metadata mode and register ordinals eleven/twelve/thirteen once in each `main` branch.
+	The first event stages a new document before replacement of the existing document's overlay; callbacks target the later event's overlay revision, source context and final provider revision after prior staging acquisition.
+	The focused x64 `batch-pool` run passed all fifty-one later-overlay metadata groups on its first attempt, including thirteen-allocation rejection sweeps and direct/blocking replacement, shutdown, staging-shutdown and session-retirement actions with their negative controls.
+	Exact allocation counts, winner precedence, private admission/charges, provider/frontier atomicity, both published document bytes, retained-world readability and zero final caller/owner ledgers passed.
+	All twelve scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts, including existing later-edit and resolved waiter regressions.
+	No production code changed; later-event disk callbacks, admitted-context callbacks, retries, reference rollback and actual frees remain open, as do the metadata parent and Phase 5.
+	- [x] Later-edit-event shared metadata callback increment (2026-11-13): extend the existing `later_event_edit` fixture to isolated metadata mode and register ordinals eleven/twelve/thirteen once in each `main` branch.
+	The first event stages a new document before the existing-document edit; `install_overlay` supplies the later event's first two metadata copies, followed by `stage_event` copying its final provider revision.
+	The focused x64 `batch-pool` run passed all fifty-one later-event metadata groups on its first attempt, including thirteen-allocation rejection sweeps and direct/blocking replacement, shutdown, staging-shutdown and session-retirement actions with their negative controls.
+	Exact allocation counts, winner precedence, private admission/charges, provider/frontier atomicity, both published document bytes, retained-world readability and zero final caller/owner ledgers passed.
+	All twelve scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts, including the resolved waiter regressions.
+	No production code changed; later-event overlay/disk routes, admitted-context callbacks, retries, reference rollback and actual frees remain open, as do the metadata parent and Phase 5.
+	- [x] Disk-event shared metadata callback increment (2026-11-13): permit exclusive metadata callback modes for `OBSERVE_DISK`, select four allocations per attempt and register all four ordinals once in each `main` branch.
+	The focused x64 `batch-pool` run passed all sixty-eight disk metadata groups on its first attempt, covering rejection sweeps and direct/blocking replacement, shutdown, staging-shutdown and session-retirement actions with their negative controls.
+	Existing disk/overlay and retained-world oracles passed alongside exact allocation counts, private admission/charges, provider/frontier atomicity and zero final caller/owner ledgers.
+	All twelve scoped worker/provider/coordinator/host/deterministic/native trace gates passed on x64 and optimised LLVM on their first attempts, including the resolved waiter regressions.
+	No production code changed; shared metadata later-event/admitted-context callbacks, retries, reference rollback and actual frees remain open, as do the metadata parent and Phase 5.
+	- [x] Edit-event shared metadata callback increment (2026-11-13): permit exclusive metadata callback modes for `EDIT_OVERLAY` and register all three ordinals once in each `main` branch.
+	Reuse the existing full-range edit setup and current source revision; the three isolated metadata allocations remain distinct from checked source-object, byte-copy, revision-identity and intermediate-scratch backing.
+	Fifty-one groups cover one rejection-sweep baseline and sixteen direct/blocking action/control groups per ordinal, including frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse.
+	Baselines sweep all three metadata rejections; action sweeps reject at or after the selected callback, with shutdown negative controls rejecting exactly at that boundary.
+	Exact allocation counts, one private admission, charge restoration, provider/frontier/counter atomicity, exact successful edited bytes, retained-world readability and zero final caller/owner ledgers remain checked.
+	Immediate focused x64 `- batch-pool` checks pass all fifty-one groups on the first compile/run attempt.
+	Full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass all twelve checks on their first compile/run attempts, including the deterministic waiter-charge regressions.
+	Only worker tests and this plan changed in this increment; the user's `main` layout, allocation-count readability refactor, coordinator documentation/grouping and waiter-oracle resolution were preserved.
+	No SDK, public API or production behaviour changed; broad parser, context, differential and foreign-target regressions were not rerun.
+	The shared metadata edit route is complete; disk/later-event routes, admitted-context callbacks, receipt retries, source-reference rollback and actual frees remain open, along with broader Phase 5 and `C3`/`C5` requirements.
+	- [x] Waiter-charge race resolution (2026-11-13): correct `test_waiter_backing_interleavings` to distinguish a live waiter from a still-pending registration at locked inspection.
+	The previously recorded `WORLD`/`COMPLETE_WORK` failure is reproduced deterministically by completing the newly admitted query before inspection; its live terminal handle legitimately retains no pending charge, contradicting the old handle-presence-only expectation.
+	The callback baseline is sampled after the original held work completes; the selected barrier controls the new query, and completion drains are deferred until after inspection so existing baseline registrations cannot be consumed between snapshots in these forced cases.
+	The existing matrix retains exact ledger assertions, source-generation negative controls and failure-only diagnostics, with state-specific contributions for live handles, pending registrations and undelivered completions.
+	Four new matrix modes force pending-before-inspection and terminal-before-inspection in direct and blocking callbacks, each sweeping callback ordinals one/four and allocation failures zero through eight.
+	Successful terminal paths check the `AVAILABLE` observation, empty operation waiter links, exactly one matching completion, an empty second drain and restored handle/pending charges with zero completion charges after delivery and release.
+	Failed admission disarms the unused one-shot selection barrier and retains the existing resource-rejection and cleanup assertions.
+	The immediate x64 worker check and all twelve scoped x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts after the forced-ordering edit.
+	Only worker tests and this plan changed; production waiter transitions already implement the required accounting and were not modified.
+	Earlier entries describing this assertion as unresolved are historical checkpoints; the observed inspection race is now resolved with deterministic regression coverage.
+	No SDK or public API changed; broad parser, context, differential and foreign-target regressions were not rerun, and remaining Phase 5 allocation-recovery/qualification and `C3`/`C5` requirements stay open.
+	- [x] Earlier shared metadata callback increment (2026-11-13): add metadata-only `metadata_callback_at` selection to both existing construction admission/callback helpers and register ordinals one and two once in each `main` branch.
+	The zero/default selector preserves allocation-three behaviour; explicit earlier ordinals change callback timing and failure eligibility, not the three-allocation attempt count or existing winner assertions.
+	Thirty-four groups cover one baseline and sixteen direct/blocking action/control groups per ordinal, including frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse.
+	Baselines sweep all three rejections; action sweeps include rejection at and after the selected callback, while shutdown negative controls reject exactly at that callback boundary.
+	Exact allocation counts, one private admission, charge restoration, provider/frontier/counter atomicity, exact successful edited bytes, retained-world readability and zero final caller/owner ledgers remain checked.
+	Immediate focused x64 `- batch-pool` checks pass all thirty-four groups on the first compile/run attempt.
+	Full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass all twelve checks on their first compile/run attempts.
+	The intermittent waiter assertion did not recur in this increment; its prior diagnostic evidence remains preserved, and the issue is not fixed.
+	Only worker tests and this plan changed in this increment; the user's `main` layout, allocation-count readability refactor and coordinator documentation/grouping edits were preserved.
+	No SDK, public API or production behaviour changed; broad parser, context, differential and foreign-target regressions were not rerun.
+	Single-overlay shared metadata callbacks are qualified at all three ordinals; edit/disk/later-event routes, admitted-context callbacks, receipt retries, source-reference rollback and actual frees remain open, along with broader Phase 5 and `C3`/`C5` requirements.
+	- [x] Shared metadata callback increment (2026-11-13): add exclusive `batch_metadata`/`metadata` modes to the existing construction admission/callback helpers and register the callback mode once in each `main` branch.
+	A single-overlay batch performs three isolated metadata allocations; the baseline sweeps rejection at all three and the callback probe targets allocation three after prior staging acquisition.
+	Sixteen direct/blocking action/control groups cover frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse without altering the existing winner assertions.
+	Exact allocation counts, one private admission, charge restoration, provider/frontier/counter atomicity, exact successful edited bytes, retained-world readability and zero final caller/owner ledgers remain checked.
+	Immediate focused x64 `- batch-pool` checks pass all seventeen groups on the first compile/run attempt.
+	Full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass all twelve checks on their first compile/run attempts.
+	The intermittent waiter assertion did not recur in this increment; its prior diagnostic evidence remains preserved, and the issue is not fixed.
+	Only worker tests and this plan changed in this increment; the user's `main` layout, allocation-count readability refactor and intervening coordinator documentation/grouping edits were preserved.
+	No SDK, public API or production behaviour changed; broad parser, context, differential and foreign-target regressions were not rerun.
+	The metadata qualification parent remains open with explicit earlier/event-route, admitted-context callback, receipt-retry, source-reference rollback and actual-free children; broader Phase 5 and `C3`/`C5` requirements remain open.
+	- [x] Final sequential edit-scratch cleanup increment (2026-11-13): add `final_scratch` selection to both existing cleanup helpers and register it once in each `main` branch.
+	Capture isolated scratch allocation two; its actual deferred free runs after final source construction and before caller-receipt allocation, while scratch allocation one's replacement free remains untracked.
+	Twenty groups cover caller-receipt rejection, registry/operation-list capacity retries and duplicate-event discard, with direct/blocking allocating and retain/release reentry, suppressed-callback controls and held-heap-gate controls.
+	Exactly one captured free occurs; callbacks observe one private admission with consistent charges, successful retries publish exact final edited bytes, retained worlds remain readable and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks pass on the first compile/run attempt.
+	The first full scoped run passes all six x64 gates, then stops in the optimised LLVM worker at the existing waiter-charge assertion in `test_source_batch_storage_admission` (`WORLD`, `COMPLETE_WORK`, callback four, failure eight, `PENDING_REGISTRATIONS`, before/after zero).
+	Failure-only diagnostics report a nonterminal returned handle still live at slot eight/generation one, but its registration and query operation are terminal, the operation has one registration and zero waiters, and the task is `TERMINAL` with query outcome `AVAILABLE`.
+	This preserves the suspected pending-charge test-oracle race evidence; no waiter assertion or production behaviour was changed, and the issue remains unresolved.
+	An unchanged full rerun passes all twelve x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	Final sequential scratch-free qualification, its actual edit-cleanup parent and the edit allocation qualification parent are complete; broader source-construction, Phase 5 and `C3`/`C5` requirements remain open.
+	- [x] Earlier sequential edit-scratch cleanup increment (2026-11-13): extend the construction cleanup fixture with sequential edits and optional rejection of scratch allocation two, registering both variants in each `main` branch.
+	Capture scratch allocation one; its actual free occurs when scratch two replaces it, or through deferred cleanup if allocation two rejects.
+	Twenty groups cover caller-receipt rejection, registry/operation-list capacity retries and duplicate-event discard; five additional groups reject allocation two before caller-receipt allocation.
+	Direct/blocking allocating and retain/release reentry, suppressed-callback controls and held-heap-gate controls discriminate missing or blocked reentry on both cleanup routes.
+	Exactly one captured free occurs; callbacks observe one private admission with consistent charges, successful retries publish exact final edited bytes, retained worlds remain readable and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its prior terminal-registration diagnostic evidence remains preserved, and no waiter assertion or production behaviour was changed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At that checkpoint earlier sequential scratch-free qualification was complete; final sequential scratch frees remained open, along with broader Phase 5 and `C3`/`C5` requirements.
+	- [x] Actual single-edit scratch cleanup increment (2026-11-13): extend the existing construction cleanup fixture with exclusive edit-allocation capture and interception of the scratch backing's actual free, and register it in both `main` branches.
+	The full-range edit borrows the existing source revision; its scratch free runs during private staging, before caller-receipt allocation, so callback charge checks expect one private handle rather than later capacity competitors.
+	Twenty groups cover caller-receipt rejection, registry and operation-list capacity retries, and duplicate-event discard; direct/blocking callbacks allocate owner backing and mutate handle registrations through retain/release reentry.
+	Suppressed-callback controls discriminate missing reentry, and held-heap-gate controls detect blocked allocating reentry before releasing the gate and proving progress.
+	Exactly one captured scratch free occurs; callbacks observe one active private admission with consistent charges, retained worlds remain readable, successful retries publish exact edited bytes and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its prior terminal-registration diagnostic evidence remains preserved, and no waiter assertion or production behaviour was changed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At this checkpoint only single-edit scratch-free qualification was complete; replaced/final sequential scratch frees remained explicit open children, along with broader Phase 5 and `C3`/`C5` requirements.
+	- [x] Edit-intermediate reference-rollback increment (2026-11-13): extend the existing retained-sentinel wrapper and `test_source_registration_receipt_retry` with exclusive single/sequential edit modes, and register both in each `main` branch.
+	Twenty-four direct/blocking groups cover caller-receipt rejection and registry/operation-list capacity retries, each with ordinary and deliberately retained-reference controls across both edit modes.
+	Single/sequential edits use one/two scratch allocations per attempt; the allocation probe runs on the first scratch allocation of the retry, after the earlier attempt has been discarded.
+	Exact allocation counts and callback/post-cleanup sentinel reference counts distinguish correct rollback from the extra-reference control; rejection sweeps cover both intermediate allocations on both attempts without relaxing the existing charge/provider atomicity assertions.
+	Successful retries publish exact final edited bytes, retained sentinel worlds remain readable and final caller/owner ledgers are zero after releasing the control reference.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its prior terminal-registration diagnostic evidence remains preserved, and no waiter assertion or production behaviour was changed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	The edit reference-rollback leaf is complete; actual edit-intermediate free controls remain open, along with broader Phase 5 and `C3`/`C5` requirements.
+	- [x] Edit-intermediate receipt-retry increment (2026-11-12): extend `test_source_batch_construction_receipt_retry` with exclusive edit and sequential-edit modes, and register both in each `main` branch.
+	Eighteen groups cover single and sequential edits; each mode runs a standalone rejected-allocation retry control plus direct/blocking registry and operation-list capacity retries with ordinary and incorrect-retry controls.
+	Exact scratch-allocation counts distinguish capacity-driven restaging from incorrectly retrying a rejected allocation; sweeps cover the initial and retried attempt, including the second intermediate allocation while earlier scratch remains owned.
+	Successful retries publish exact final edited bytes, retained worlds remain readable and final caller/owner ledgers are zero; later-event edits remain explicitly excluded from receipt retries in this fixture.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its prior terminal-registration diagnostic evidence remains preserved, and no waiter assertion or production behaviour was changed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At this checkpoint the single-event edit receipt-retry leaf was complete; edit reference rollback and actual-free controls remained open, along with broader Phase 5 and `C3`/`C5` requirements.
+	- [x] Later-event edit-intermediate callback increment (2026-11-12): add an exclusive later-event edit option to the construction callback fixture and register it in both `main` branches.
+	The first event stages a new-document `SET_OVERLAY`; the second applies a full-range `EDIT_OVERLAY` to the existing document, with the isolated callback on that event's first scratch allocation.
+	One baseline and sixteen direct/blocking action/control groups qualify rejection after earlier source staging, frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including callback-allocation rejection.
+	Rejection adds no document/context and releases earlier staging; success publishes exact bytes for both members independent of order, existing incorrect-winner controls remain checked, retained worlds remain readable and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its prior terminal-registration diagnostic evidence remains preserved, and no waiter assertion or production behaviour was changed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At this checkpoint the later-event edit callback leaf was complete; edit receipt retries, reference rollback and actual-free controls remained open, along with broader Phase 5 and `C3`/`C5` requirements.
+	- [x] Second edit-intermediate callback increment (2026-11-12): add an exclusive sequential-edit option to the construction callback fixture and register it in both `main` branches.
+	The first full-range edit writes distinct intermediate bytes; the second replaces them with the expected final bytes, and callbacks target scratch allocation two while the first scratch remains owned.
+	One baseline sweeps rejection of both allocations; sixteen direct/blocking action/control groups qualify frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including rejection at the callback allocation.
+	Exact allocation counts and existing incorrect-winner controls remain checked; final edited bytes and retained worlds are readable, both scratch lifetimes are cleaned up and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks pass on the first attempt.
+	The first full scoped run stops in the existing waiter assertion: `WORLD` / `COMPLETE_WORK`, callback 4, failure 0, `PENDING_REGISTRATIONS` before/after 0, expected 1.
+	Gate-coherent diagnostics show admission success, an originally nonterminal return and a live `WAITER` handle, but a terminal, undelivered registration with `QUERY` observation, a terminal query operation with no waiters and `AVAILABLE` outcome, and task phase `TERMINAL`.
+	This supports the suspected waiter test-oracle race between admission and inspection; no waiter assertion or production behaviour was changed.
+	An unchanged full rerun passes all twelve x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates; the intermittent waiter issue remains open.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At this checkpoint the second-intermediate callback leaf was complete; later-event edits, receipt retries, reference rollback and actual-free controls remained open, along with broader Phase 5 and `C3`/`C5` requirements.
+	- [x] First-event edit-intermediate callback increment (2026-11-12): extend the construction callback fixture with an exclusive edit-allocation mode and register first-event `EDIT_OVERLAY` in both `main` branches.
+	The full-range edit reaches the isolated `source_batch_edit_allocation_hook` before source construction; one baseline and sixteen direct/blocking action/control groups cover rejection, frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including callback-allocation rejection.
+	Existing stale-frontier, shutdown-precedence and stale-session controls discriminate incorrect winners; callbacks see one active private admission, successful publication preserves exact edited bytes, retained worlds remain readable, scratch is released and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks pass on the first attempt; an output-only follow-up adds the explicit `batch edits` label and the focused checks pass again.
+	Full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its gate-coherent failure diagnostics remain intact, and its cause remains unconfirmed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At this checkpoint only the first-event, first-intermediate edit callback leaf was complete; later intermediate/later-event callbacks, receipt retries, reference rollback and actual-free controls remained explicit open children.
+	Metadata/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remain open, as do Phase 5 and `C3`/`C5`.
+	- [x] Actual source revision-identity cleanup increment (2026-11-12): extend the existing construction cleanup fixture with isolated identity-allocation capture and interception of that backing's actual owner-delegated free, and register it in both `main` branches.
+	Twenty groups cover caller-receipt rejection, registry and operation-list capacity retries, and duplicate-event discard; direct/blocking callbacks allocate owner backing and mutate handle registrations through retain/release reentry.
+	Suppressed-callback controls discriminate missing reentry, and held-heap-gate controls detect blocked allocating reentry before releasing the gate and proving progress.
+	Exactly one captured identity free occurs; callbacks observe one active private admission with consistent charges, retained worlds remain readable, successful retries publish exact source bytes and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its gate-coherent failure diagnostics remain intact, and its cause remains unconfirmed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	Actual identity-free controls and the source revision-identity qualification parent are complete; metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remain open, as do Phase 5 and `C3`/`C5`.
+	- [x] Source revision-identity reference-rollback increment (2026-11-12): extend the existing retained-sentinel wrapper and `test_source_registration_receipt_retry` with exclusive identity allocation, and register it in both `main` branches.
+	Twelve direct/blocking groups cover caller-receipt rejection and registry/operation-list capacity retries, each with ordinary and deliberately retained-reference controls.
+	Callback and post-cleanup reference counts distinguish discarded-attempt rollback from the extra-reference control; construction allocation counts, rejection sweeps, released admission charges and provider atomicity remain checked.
+	Successful retries publish exact source bytes, retained sentinel worlds remain readable and final caller/owner ledgers are zero after releasing the control reference.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its gate-coherent failure diagnostics remain intact, and its cause remains unconfirmed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At this checkpoint the identity reference-rollback leaf was complete; actual identity-free controls remained open, along with metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements, Phase 5 and `C3`/`C5`.
+	- [x] Source revision-identity receipt-retry increment (2026-11-12): extend `test_source_batch_construction_receipt_retry` with exclusive identity allocation and register it in both `main` branches.
+	Nine groups cover a standalone rejected-allocation retry control plus direct/blocking registry and operation-list capacity retries, each with ordinary and incorrect-retry controls.
+	Exact identity-allocation counts distinguish capacity-driven restaging from incorrectly retrying a rejected allocation; rejection sweeps cover the initial and retried attempt, successful retries publish exact source bytes, retained worlds remain readable and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its gate-coherent failure diagnostics remain intact, and its cause remains unconfirmed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At this checkpoint the identity receipt-retry leaf was complete; identity reference rollback and actual-free controls remained open, along with metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements, Phase 5 and `C3`/`C5`.
+	- [x] Later-event source revision-identity callback increment (2026-11-12): enable isolated identity allocation in the existing two-event fixture and register it for each first-event route in both `main` branches.
+	The first event stages `SET_OVERLAY`, `EDIT_OVERLAY` or `OBSERVE_DISK`; the second adds a new document with `SET_OVERLAY`, with the callback at identity allocation two.
+	Three baseline groups and forty-eight direct/blocking action/control groups cover rejection after earlier staging, frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including rejection at the callback allocation and existing incorrect-winner controls.
+	Rejection adds no document/context and releases earlier staging plus the partial second source; success publishes exact bytes for both members independent of member order, disk observations preserve overlay selection, retained worlds remain readable and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its gate-coherent failure diagnostics remain intact, and its cause remains unconfirmed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At this checkpoint the later-event identity leaf was complete; identity receipt retries, reference rollback and actual-free controls remained open, along with metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements, Phase 5 and `C3`/`C5`.
+	- [x] First-event disk-source revision-identity callback increment (2026-11-12): enable the isolated identity-allocation mode for `OBSERVE_DISK` in the existing construction callback fixture and register it in both `main` branches.
+	The present-disk fixture supplies canonical revision and provenance; identity allocation follows source-object and byte-copy allocation, before disk-state installation.
+	One baseline covers rejection through successful publication; sixteen direct/blocking action/control groups qualify frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including callback-allocation rejection and existing incorrect-winner controls.
+	Success installs exact disk bytes/revision without displacing the selected overlay; rejection preserves the prior disk source, retirement clears live source links, retained worlds remain readable, partial source objects/byte copies are released and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its gate-coherent failure diagnostics remain intact, and its cause remains unconfirmed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At this checkpoint the first-event disk-source identity leaf was complete; later-event identity callbacks, receipt retries, reference rollback and actual-free controls remained open, along with metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements, Phase 5 and `C3`/`C5`.
+	- [x] First-event edited-source revision-identity callback increment (2026-11-12): enable the isolated identity-allocation mode for `EDIT_OVERLAY` in the existing construction callback fixture and register it in both `main` branches.
+	The full-range `Range_Edit` reaches identity allocation after edit scratch, source-object and byte-copy allocation; one baseline group covers rejection through exact-byte publication, and sixteen direct/blocking action/control groups cover frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including callback-allocation rejection.
+	Existing winner controls discriminate incorrect outcomes; rejected construction releases edit scratch, copied bytes and the partial source object, retained worlds remain readable, admission charges return and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its gate-coherent failure diagnostics remain intact, and its cause remains unconfirmed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At this checkpoint the first-event edited-source identity leaf was complete; identity disk/later-event callbacks, receipt retries, reference rollback and actual-free controls remained open, along with metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements, Phase 5 and `C3`/`C5`.
+	- [x] First-event source revision-identity callback increment (2026-11-12): extend the existing construction callback fixture with an isolated identity-allocation mode after partial source-object and byte-copy allocation.
+	One baseline group covers rejection through exact-byte publication; sixteen direct/blocking action/control groups qualify frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including callback-allocation rejection.
+	Existing stale-frontier, shutdown-precedence and stale-session controls discriminate incorrect winners; callbacks observe one private admission, retained worlds remain readable, partial source objects/byte copies are released and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its gate-coherent failure diagnostics are preserved, and its cause remains unconfirmed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At this checkpoint the first-event overlay identity leaf was complete; identity edit/disk/later-event callbacks, receipt retries, reference rollback and actual-free controls remained explicit open leaves.
+	Metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remain open, as do Phase 5 and `C3`/`C5`.
+	- [x] Actual source-byte cleanup increment (2026-11-12): extend the existing construction cleanup fixture with isolated byte-allocation capture and interception of that backing's actual owner-delegated free.
+	Twenty groups cover caller-receipt rejection, registry and operation-list capacity retries, and duplicate-event discard; direct/blocking callbacks allocate owner backing and mutate handle registrations through retain/release reentry.
+	Suppressed-callback controls discriminate missing reentry, and held-heap-gate controls detect blocked allocating reentry before releasing the gate and proving progress.
+	Exactly one captured byte free occurs; callbacks observe one active private admission with consistent charges, retained worlds remain readable, successful retries publish exact source bytes and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur; its gate-coherent failure diagnostics are preserved, and its cause remains unconfirmed.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	The actual byte-free leaf and source-byte qualification parent are complete.
+	Source revision-identity, metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remain open, as do Phase 5 and `C3`/`C5`.
+	- [x] Source-byte reference-rollback increment (2026-11-12): extend the existing retained-sentinel construction fixture with the isolated source-byte allocation hook.
+	Twelve direct/blocking groups cover registry and operation-list capacity retries plus caller-receipt rejection, each with normal rollback and a deliberate one-extra-reference control.
+	Reference counts are checked during retry and after return; the control is detected and explicitly balanced before teardown, submitted/sentinel worlds retain exact bytes, rejected attempts preserve provider/frontier state and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks pass on the first compile/run attempt.
+	The initial full x64 worker run hit the unresolved `test_waiter_backing_interleavings` assertion: `WORLD` / `COMPLETE_WORK`, callback 1, failure 0, `PENDING_REGISTRATIONS`, before 0 / after 0.
+	No waiter code was changed; an unchanged rerun passes full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At that checkpoint, the source-byte reference-rollback leaf was complete; actual byte-free callback controls remained open.
+	Source revision-identity, metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remain open, as do Phase 5 and `C3`/`C5`.
+	- [x] Source-byte receipt-retry increment (2026-11-12): expose isolated source-byte allocation through the existing construction receipt-retry fixture.
+	Nine groups cover direct/blocking registry and operation-list capacity races, first/retry byte rejection, successful publication and the existing rejected-allocation retry control.
+	One byte allocation occurs per construction attempt; retry rejection does not allocate a second caller receipt, while valid retry publication checks exact source bytes.
+	Rejection releases partial source objects and discarded staging, preserves provider/frontier state and returns private charges; final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At that checkpoint, the source-byte receipt-retry leaf was complete; retained-sentinel source-reference rollback and actual byte-free callback controls remained open.
+	Source revision-identity, metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remain open, as do Phase 5 and `C3`/`C5`.
+	- [x] Later-event source-byte callback increment (2026-11-12): reuse two-event construction mode with the isolated source-byte callback at allocation two, after an earlier source is staged.
+	The second event creates a new-document overlay after each first-event `SET_OVERLAY`, `EDIT_OVERLAY` and `OBSERVE_DISK` route; three baseline groups reject first/second byte allocations through publication, and 48 direct/blocking action/control groups qualify lifecycle/session/frontier winners and their negative controls at the second allocation.
+	Document/context counts and absence of the added document prove rejected attempts do not partially commit; successful worlds contain both exact sources checked by document identity without assuming member order, and disk/overlay selection remains correct.
+	Discard releases earlier staged sources and partial later source objects; retained worlds remain readable, private charges are returned and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At that checkpoint, the later-event source-byte leaf was complete; source-byte receipt retries, reference rollback and actual-free controls remained open.
+	Source revision-identity, metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remain open, as do Phase 5 and `C3`/`C5`.
+	- [x] Disk-source byte callback increment (2026-11-12): enable first-event `OBSERVE_DISK` for isolated source-byte callbacks after partial source-object allocation.
+	A `PRESENT` observation supplies canonical source revision and provenance; one baseline group covers rejection through publication, and sixteen direct/blocking action/control groups qualify frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including allocation rejection and existing incorrect-winner controls.
+	Published disk bytes/revision are checked independently from the retained overlay selected by the world; rejection preserves the live provider's original disk source, while retirement intentionally clears provider source links and retained-world bytes remain readable.
+	Callbacks observe one private admission, partial source objects are released, private charges are returned and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At that checkpoint, the first-event `OBSERVE_DISK` source-byte leaf was complete; later-event callbacks, receipt retries, reference rollback and actual-free controls remained open.
+	Source revision-identity, metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remain open, as do Phase 5 and `C3`/`C5`.
+	- [x] Edited-source byte callback increment (2026-11-12): enable the existing first-event `EDIT_OVERLAY` setup for isolated source-byte callbacks after edit scratch preparation and partial source-object allocation.
+	One baseline group covers byte-allocation rejection through exact edited-byte publication; sixteen direct/blocking action/control groups qualify frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including callback-allocation rejection and existing incorrect-winner controls.
+	Callbacks observe one private admission, retained worlds remain readable, partial source objects and edit scratch are released, private charges are returned and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	Only worker tests and this plan changed; the user's explicit compile-time `else` layout in `main` and the allocation-count readability refactor were preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	The first-event `EDIT_OVERLAY` source-byte leaf is complete.
+	At that checkpoint, disk/later-event callbacks, receipt retries, reference rollback and actual-free controls remained open, along with source revision-identity, metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements, Phase 5 and `C3`/`C5`.
+	- [x] First-event source-byte callback increment (2026-11-12): extend the existing construction callback fixture with isolated source-byte allocation callbacks after partial source-object allocation.
+	One baseline group covers rejection through exact-byte publication; sixteen direct/blocking action/control groups qualify frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including callback-allocation rejection.
+	Existing stale-frontier, shutdown-precedence and stale-session controls discriminate incorrect winners; callbacks observe one private admission, retained worlds remain readable, partial source objects are released and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first compile/run attempts for this increment.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	The user's explicit compile-time `else` branch in `main` was reread and preserved; the new source-byte registration appears once in each branch, without restoring the previous layout or changing unrelated tests.
+	Only worker tests and this plan changed.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	At that checkpoint, the first-event overlay leaf was complete; source-byte edit/disk/later-event callbacks, receipt retries, reference rollback and actual-free controls remained explicit open leaves.
+	Source revision-identity, metadata/edit/list/path/commit qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remain open, as do Phase 5 and `C3`/`C5`.
+	- [x] Actual source-object cleanup increment (2026-11-12): extend the existing construction cleanup fixture with isolated source-object allocation capture and interception of that object's actual owner-delegated free.
+	Twenty groups cover caller-receipt rejection, registry and operation-list capacity retries, and duplicate-event discard; direct/blocking callbacks allocate owner backing and mutate handle registrations through retain/release reentry.
+	Suppressed-callback controls discriminate missing reentry, and held-heap-gate controls detect blocked allocating reentry before releasing the gate and proving progress.
+	Exactly one captured object free occurs, callbacks observe one active private admission with consistent charges, retained worlds remain readable, successful retries publish exact source bytes and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first runs for this increment.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	The actual-free leaf and source-object qualification parent are complete.
+	Source-byte/identity, metadata/edit/list/path/commit callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remain open, as do Phase 5 and `C3`/`C5`.
+	Only worker tests and this plan changed; the allocation-count readability refactor was preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	- [x] Later-event source-object callback increment (2026-11-12): add a two-event construction mode with the isolated source-object callback at allocation two, after an earlier source is staged.
+	The second event creates a new-document overlay after each first-event `SET_OVERLAY`, `EDIT_OVERLAY` and `OBSERVE_DISK` route; three baseline groups reject first/second allocation through publication, and 48 direct/blocking action/control groups qualify lifecycle/session/frontier winners and their negative controls at the second object.
+	Document/context counts and absence of the added document prove rejected attempts do not partially commit; successful worlds contain both exact sources, checked by document identity without assuming member order, and disk/overlay selection remains correct.
+	Discard releases earlier staged sources, retained worlds remain readable, private charges are returned and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first runs for this increment.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	At that checkpoint, the source-object event-route parent was complete; actual source-object cleanup callback controls remained open, along with source-byte/identity, metadata/edit/list/path/commit callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements, Phase 5 and `C3`/`C5`.
+	Only worker tests and this plan changed; the allocation-count readability refactor was preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	- [x] Disk-source object callback increment (2026-11-12): extend the construction callback fixture to first-event `OBSERVE_DISK`, using a `PRESENT` observation with canonical source revision and provenance.
+	Baseline allocation rejection/publication and sixteen direct/blocking action/control groups qualify frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including object-allocation rejection where applicable.
+	Provider disk bytes/revision are checked separately from selected overlay bytes; live-provider rejection preserves the original disk source, retained worlds preserve exact overlay bytes, and existing stale-frontier/shutdown/session controls discriminate incorrect winners.
+	The first focused run exposed an invalid live-overlay assertion after session release, which intentionally clears provider source links; retirement-aware provider and retained-world assertions corrected the test before focused x64 `- batch-pool` checks passed.
+	Full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first full runs for this increment, with private charges returned and zero final caller/owner ledgers.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	At that checkpoint, later-event source-object callbacks and actual-free controls remained open; source-byte/identity, metadata/edit/list/path/commit callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remained open, as did Phase 5 and `C3`/`C5`.
+	Only worker tests and this plan changed; the allocation-count readability refactor was preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	- [x] Edited-source object callback increment (2026-11-12): extend the construction callback fixture to first-event `EDIT_OVERLAY`, using a whole-source `Range_Edit` and the selected source revision before submission.
+	The isolated `source_batch_source_allocation_hook` runs after edit scratch preparation; sixteen direct/blocking action/control groups qualify frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, including object-allocation rejection where applicable.
+	Existing stale-frontier, shutdown-precedence and stale-session controls discriminate the wrong winner; expected edited bytes and retained worlds remain readable, private charges are returned and final caller/owner ledgers are zero after edit scratch cleanup.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first runs for this increment.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	At that checkpoint, later-event and disk source-object callbacks and actual-free controls remained open; source-byte/identity, metadata/edit/list/path/commit callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remained open, as did Phase 5 and `C3`/`C5`.
+	Only worker tests and this plan changed; the allocation-count readability refactor was preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	- [x] Source-object receipt-retry increment (2026-11-12): extend existing construction retry and retained-sentinel fixtures to the isolated `source_batch_source_allocation_hook`, without production changes.
+	Direct/blocking registry and operation-list capacity races cover initial/retry allocation rejection through publication, caller-receipt rejection and the existing rejected-allocation retry control, with callback-relative private charges and operation/world counter assertions.
+	A normally retained second-document world qualifies discarded-attempt source-reference rollback; the one-extra-reference control remains visible during retry and after return, is explicitly balanced, and leaves submitted/sentinel bytes readable with zero final caller/owner ledgers.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first runs for this increment.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	At that checkpoint, the source-object callback parent remained open for later-event/edit/disk routes and actual-free controls; source-byte/identity, metadata/edit/list/path/commit callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remained open, as did Phase 5 and `C3`/`C5`.
+	Only worker tests and this plan changed; the allocation-count readability refactor was preserved.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	- [x] First source-object callback increment (2026-11-12): route the existing construction callback matrix through `source_batch_source_allocation_hook` for a first-event overlay source object, without production changes.
+	Sixteen direct/blocking action/control groups cover frontier replacement, requested shutdown, staging-shutdown protection and exact session retirement/reuse, with successful allocation and rejection where applicable.
+	Existing `allow_stale_source_batch_storage`, `prefer_failed_source_batch_storage` and `allow_stale_source_batch_pool` controls distinguish incorrect frontier/shutdown/session validation; callbacks observe one active private admission, retained worlds remain readable and final caller/owner ledgers are zero.
+	Immediate focused x64 `- batch-pool` checks and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first runs for this increment.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	At that checkpoint, the source-object callback parent remained open for later-event/edit/disk routes, receipt retries/source-reference rollback and actual-free controls; source-byte/identity, metadata/edit/list/path/commit callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remained open, as did Phase 5 and `C3`/`C5`.
+	Only worker tests and this plan changed.
+	No SDK, public API or production behaviour changed; broad parser, differential and foreign-target regressions were not rerun.
+	- [x] Allocation-free context-identity increment (2026-11-12): replace validator `context_id` recomputation with bounded canonical identity parsing into two stack field slots and exact tag/schema/descriptor checks.
+	The public `context_id` builder and owning `admit_context` API remain unchanged; malformed or mismatched identities still return `IDENTITY_MISMATCH`, after descriptor validation.
+	Rejecting-allocator tests prove complete valid registration has zero allocation calls and preserves borrowed identity/descriptor and exact path bytes; every identity truncation and single-byte low-bit mutation rejects with empty payloads.
+	Wrong tag/schema/descriptor, swapped/missing/extra fields and trailing bytes reject; malformed descriptor precedence and subsequent valid retry pass without allocation.
+	Immediate focused x64 checks and full x64/optimised LLVM worker, standalone provider, dedicated context, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first runs for this increment.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	The borrowed context-validation scratch parent is complete; metadata/source/edit/list/path/commit callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remain open, as do Phase 5 and `C3`/`C5`.
+	No SDK or public signature changes were made.
+	Broad parser, differential and foreign-target regressions were not rerun.
+	- [x] Allocation-free expected-context increment (2026-11-12): precompute compiler/SDK, syntax adapter and fixed resolver/semantic canonical bytes with `#run`, removing runtime allocation from `expected_field_values` and fixed-tag checks.
+	Existing descriptor layout and admission controls preserve canonical byte content and failure categories; resolver/semantic rejection under a rejecting allocator reaches the expected late-field failure with zero allocation calls and empty admitted payloads, before identity recomputation.
+	Immediate focused x64 checks and full x64/optimised LLVM worker, standalone provider, dedicated context, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first runs for this increment.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	At that checkpoint, context-identity scratch backing/rejection cleanup remained unchecked; metadata/source/edit/list/path/commit callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remained open, as did Phase 5 and `C3`/`C5`.
+	Intervening canonical edits were preserved without modifying that file; no SDK or public signature changes were made.
+	Broad parser, differential and foreign-target regressions were not rerun.
+	- [x] Allocation-free context field-view increment (2026-11-12): use module-scoped `parse_key_into` and bounded stack storage for descriptor, field-value and nested path parsing in context validation.
+	The owning `parse_key` API retains its allocation/ownership behaviour and shares framing checks with the borrowed decoder; public `admit_context` behaviour is preserved.
+	Rejecting-allocator tests prove no decoder allocation calls, exact borrowed pointers and caller-storage use, rejection of every truncated prefix, trailing bytes and insufficient capacity, and successful zero-field decoding.
+	The first focused compile caught an immutable slice argument; a local bounded slice and zero-safe collection loop corrected it before the dedicated context suite passed.
+	Full worker, standalone provider, dedicated context, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on x64 and optimised LLVM; final expanded truncation checks also pass on both backends.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	At that checkpoint, expected canonical values/fixed tags and context-identity scratch allocation remained unchecked; metadata/source/edit/list/path/commit callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remained open, as did Phase 5 and `C3`/`C5`.
+	No SDK changes or broad parser, differential or foreign-target regression runs were needed for this increment.
+	- [x] Checked batch context-payload increment (2026-11-12): extract borrowed `validate_context_registration` and copy validated identity/descriptor/three-path data through checked batch metadata storage before admitting the context.
+	The thirteen-point two-event sweep rejects each context/event metadata allocation through publication, preserving context count, frontier/counter/source identity/references, document count, registrations/counters and charges on rejection.
+	Successful publication verifies exact identity/descriptor/path bytes and distinct caller/provider backing for all five fields; final caller/owner ledgers are zero.
+	Immediate focused x64 checks and full x64/optimised LLVM worker, standalone provider, dedicated context, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first runs for this increment.
+	The intermittent waiter assertion did not recur and remains unresolved.
+	Public `admit_context` ownership/validation behaviour is preserved; this increment changes only batch payload acquisition, not unchecked descriptor parsing, expected canonical values or recomputed identity scratch allocation.
+	Metadata/source/edit/list/path/commit callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remain open, as do Phase 5 and `C3`/`C5`.
+	Existing intervening edits were preserved; no SDK or public signature changes were made.
+	Broad parser, differential and foreign-target regressions were not rerun for this increment.
+	- [x] Checked shared pooled-metadata increment (2026-11-12): route `own` through a local checked pool adapter, preparing ordinary blocks safely before SDK growth and checking oversized/header/alignment arithmetic.
+	Initial/growing block allocation failure, preserved previous bytes/cursor, reset/reuse, oversized rejection, empty input, overflow and overwrite-stamp tests pass.
+	Metadata rejection stops subsequent copies; overlay/disk preparation preserves prior sources and releases uninstalled replacements before batch discard.
+	Overlay/new-document/edit/disk ordinal sweeps preserve frontier/counter/source identity/references, document count, registrations/counters and charges without caller receipt allocation on rejection; publication and zero final caller/owner ledgers pass.
+	Focused x64 checks pass after correcting test imports, explicit multi-value forwarding, the aligned pool-fill fixture and the explicit staging failure flag.
+	Full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass on their first full runs for this increment; the intermittent waiter assertion did not recur and remains unresolved.
+	Only shared metadata copying is newly checked.
+	At that checkpoint, direct context-admission pool/canonical scratch allocation, metadata/source/edit/list/path/commit callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remained open, as did Phase 5 and `C3`/`C5`.
+	The SDK and public `apply_source_batch` signature remain unchanged; the optional internal metadata allocator must delegate to the checked batch pool and is not an independently owning allocator.
+	Broad parser, differential and foreign-target regressions were not rerun for this increment.
+	- [x] Checked final provider array increment (2026-11-11): prepare document/context capacity before mutation, checking count/byte overflow, preserving copied prefixes and freeing partial backing if the second allocation rejects.
+	Helper first/second failure and no-growth cases retain original headers; actual existing/new-document/context submissions preserve frontier, source identity/references, registrations/counters and charges on rejection, with zero final caller/owner ledgers.
+	- [x] Checked final provider frontier increment (2026-11-11): prepare a canonical key with `try_output_key` and an advanced copy of `Identity_Counter`, committing both only after array/frontier/pool-capacity preparation succeeds.
+	First/last usable token canonical bytes, allocation rejection without token consumption and exhaustion without allocator calls pass.
+	Real single/two-event and exhausted-counter batches qualify literal resource rejection and prepared-array cleanup; existing failure sweeps now also assert unchanged live frontier counters and exactly one increment on publication.
+	Immediate focused x64 checks after both edits pass.
+	The first full x64 worker run hit the previously observed `test_waiter_backing_interleavings` assertion: `WORLD`/`COMPLETE_WORK`, callback `4`, failure `8`, `PENDING_REGISTRATIONS`, before/after `0`.
+	The unchanged rerun passes full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates.
+	The intermittent waiter assertion remains unresolved; no waiter implementation or test changes were made.
+	Final provider commit backing is allocation-checked, not fully callback-qualified.
+	At that checkpoint, pool-block/pooled metadata allocation, context parsing/canonical scratch storage, source/edit/list/path/commit callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remained open, as did Phase 5 and `C3`/`C5`.
+	The public `apply_source_batch` signature remains unchanged; commit/frontier allocators are optional internal `apply_source_batch_with_storage` parameters.
+	Broad parser, differential and foreign-target regressions were not rerun for these increments.
 	- [x] Checked staging context-list increment (2026-11-10): reserve checked registration capacity before parsing and explicitly pool-own admitted identity/descriptor/path data for batch-root discard or transfer.
 	Empty registration lists allocate no list backing; nonempty list rejection/publication and subsequent construction failures preserve admission invariants.
 	Pool-block and context parser/payload allocation themselves remain unchecked.
@@ -1021,7 +2464,7 @@ Exit: user decision recorded.
 	Single/two-event success and a disk-context diagnostic sweep distinguish reservation failure, copy failure and exact caller error delivery; rejected frontier, source identity/references, document count, registrations/counters and charges are unchanged, with zero final caller/owner ledgers.
 	Immediate focused x64 checks after both edits and full x64/optimised LLVM worker, standalone provider, coordinator, default-import host and deterministic/native T1-T8/V1-V8 gates pass; the historical waiter-charge assertion did not recur.
 	Staging list/path backing is checked, not fully callback-qualified.
-	Final provider document/context/frontier commit backing, pool-block/pooled metadata allocation, context parsing/canonical scratch storage, source/edit/list/path callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remain open, as do Phase 5 and `C3`/`C5`.
+	At that checkpoint, final provider document/context/frontier commit backing, pool-block/pooled metadata allocation, context parsing/canonical scratch storage, source/edit/list/path callback qualification and broader candidate/combined admission, analysis, owner/scratch/quota/X requirements remained open, as did Phase 5 and `C3`/`C5`.
 	The public `apply_source_batch` signature remains unchanged; context-list/path allocators are optional internal `apply_source_batch_with_storage` parameters.
 	Broad parser, differential and foreign-target regressions were not rerun for these increments.
 	- [x] Checked staging state-pointer increment (2026-11-10): reserve one pointer per validated batch event before acquiring event states, using checked byte-size allocation and an owner-consistent empty dynamic header.

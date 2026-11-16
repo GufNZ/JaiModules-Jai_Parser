@@ -543,7 +543,10 @@ apply_source_batch_with_storage :: (
 	state_list_allocator: Allocator = context.allocator,
 	reference_list_allocator: Allocator = context.allocator,
 	context_list_allocator: Allocator = context.allocator,
-	path_allocator: Allocator = context.allocator
+	path_allocator: Allocator = context.allocator,
+	commit_allocator: Allocator = context.allocator,
+	frontier_allocator: Allocator = context.allocator,
+	metadata_allocator: Allocator = .{}
 ) -> (ok: bool, frontier: [] u8, error: Operation_Error) {
 	staging := Batch_Staging.{
 		model = model,
@@ -558,7 +561,12 @@ apply_source_batch_with_storage :: (
 		reference_list_allocator = reference_list_allocator,
 		context_list_allocator = context_list_allocator,
 		path_allocator = path_allocator,
+		metadata_allocator = metadata_allocator,
 	};
+
+	if !staging.metadata_allocator.proc {
+		staging.metadata_allocator = .{proc = source_batch_metadata_pool_allocate, data = storage};
+	}
 
 	set_allocators(staging.storage);
 	paths_ok, paths := try_output_array(path_allocator, 4, Path_Step);
@@ -578,11 +586,57 @@ apply_source_batch_with_storage :: (
 	}
 
 
+	new_documents: s64;
+	for staging.states {
+		if !find_document(model, it.document) {
+			new_documents += 1;
+		}
+	}
+
+	commit_ok, commit := try_source_batch_commit(model, new_documents, staging.contexts.count, commit_allocator);
+	if !commit_ok {
+		discard_staging(*staging);
+		return false, .[], .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	}
+
+
+	defer {
+		free(commit.documents.data,, commit_allocator);
+		free(commit.contexts.data,, commit_allocator);
+	}
+
+	frontier_ok, frontier, counter := try_source_batch_frontier(model, frontier_allocator);
+	if !frontier_ok {
+		discard_staging(*staging);
+		return false, .[], .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	}
+
+
+	defer free(frontier.data,, frontier_allocator);
+
 	if !try_source_batch_storage(model, storage_allocator) {
 		discard_staging(*staging);
 		return false, .[], .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
 	}
 
+
+	if commit.documents.count {
+		previous := model.documents;
+		model.documents.data = commit.documents.data;
+		model.documents.allocated = commit.documents.count;
+		model.documents.allocator = commit_allocator;
+		commit.documents = .[];
+		array_free(previous);
+	}
+
+	if commit.contexts.count {
+		previous := model.contexts;
+		model.contexts.data = commit.contexts.data;
+		model.contexts.allocated = commit.contexts.count;
+		model.contexts.allocator = commit_allocator;
+		commit.contexts = .[];
+		array_free(previous);
+	}
 
 	for staging.contexts {
 		array_add(*model.contexts, it);
@@ -600,9 +654,9 @@ apply_source_batch_with_storage :: (
 		}
 	}
 
-	token_ok, token := issue_token(*model.frontier_counter);
-	assert(token_ok);
-	model.accepted_frontier = provider_frontier_id(model.provider_namespace, model.session, token);
+	model.frontier_counter = counter;
+	model.accepted_frontier = frontier;
+	frontier = .[];
 	array_add(*model.batch_storage, staging.storage);
 	array_free(staging.states);
 	array_free(staging.contexts);
@@ -646,6 +700,8 @@ Batch_Staging :: struct {
 	reference_list_allocator: Allocator;
 	context_list_allocator: Allocator;
 	path_allocator: Allocator;
+	metadata_allocator: Allocator;
+	metadata_failed: bool;
 }
 
 release_document_sources :: (state: *Document_State) {
@@ -674,7 +730,18 @@ discard_staging :: (staging: *Batch_Staging) {
 }
 
 own :: (staging: *Batch_Staging, bytes: [] u8) -> [] u8 {
-	return array_copy(bytes,, Allocator.{pool_allocator_proc, staging.storage});
+	if staging.metadata_failed {
+		return .[];
+	}
+
+
+	ok, copied := try_output_bytes(staging.metadata_allocator, bytes);
+	if !ok {
+		staging.metadata_failed = true;
+		staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	}
+
+	return copied;
 }
 
 reject :: (staging: *Batch_Staging, code: Operation_Error_Code) -> bool {
@@ -808,9 +875,26 @@ stage_batch :: (staging: *Batch_Staging, batch: Source_Batch) -> bool {
 	staging.contexts.allocator = staging.context_list_allocator;
 	for registration: batch.contexts {
 		array_add(*staging.path, .{kind = .FIELD, name = "contexts"}, .{kind = .ELEMENT, index = it_index});
-		failure, admitted := admit_context(registration.identity, registration.descriptor,, Allocator.{pool_allocator_proc, staging.storage});
+		failure, admitted := validate_context_registration(registration.identity, registration.descriptor);
 		if failure != .NONE {
 			return argument(staging, .INVALID_ENCODING);
+		}
+
+
+		admitted.identity = own(staging, admitted.identity);
+		admitted.descriptor = own(staging, admitted.descriptor);
+		path_slots := (*Path_Value).[
+			*admitted.paths.visible_filename,
+			*admitted.paths.visible_directory,
+			*admitted.paths.relative_base,
+		];
+
+		for path_slots {
+			it.code_units = own(staging, it.code_units);
+		}
+
+		if staging.metadata_failed {
+			return false;
 		}
 
 
@@ -988,14 +1072,21 @@ stage_disk :: (staging: *Batch_Staging, state: *Document_State, observation: Dis
 		}
 
 
+		syntax_context := own(staging, observation.syntax_context);
+		provenance := owned_provenance(staging, observation.provenance);
+		if staging.metadata_failed {
+			return false;
+		}
+
+
 		if state.disk.source {
 			release_source(state.disk.source);
 		}
 
 		state.disk = .{
 			kind = .ABSENT,
-			syntax_context = own(staging, observation.syntax_context),
-			provenance = owned_provenance(staging, observation.provenance),
+			syntax_context = syntax_context,
+			provenance = provenance,
 		};
 		return true;
 	}
@@ -1013,6 +1104,14 @@ stage_disk :: (staging: *Batch_Staging, state: *Document_State, observation: Dis
 	}
 
 
+	syntax_context := own(staging, observation.syntax_context);
+	provenance := owned_provenance(staging, observation.provenance);
+	if staging.metadata_failed {
+		release_source(source);
+		return false;
+	}
+
+
 	if state.disk.source {
 		release_source(state.disk.source);
 	}
@@ -1020,8 +1119,8 @@ stage_disk :: (staging: *Batch_Staging, state: *Document_State, observation: Dis
 	state.disk = .{
 		kind = .PRESENT,
 		source = source,
-		syntax_context = own(staging, observation.syntax_context),
-		provenance = owned_provenance(staging, observation.provenance),
+		syntax_context = syntax_context,
+		provenance = provenance,
 	};
 	return true;
 }
@@ -1052,15 +1151,25 @@ clear_overlay :: (state: *Document_State) {
 	}
 }
 
-install_overlay :: (staging: *Batch_Staging, state: *Document_State, source: *Source_Backing, event: Document_Event, origin: Overlay_Origin) {
+install_overlay :: (staging: *Batch_Staging, state: *Document_State, source: *Source_Backing, event: Document_Event, origin: Overlay_Origin) -> bool {
+	revision := own(staging, event.resulting_provider_revision);
+	syntax_context := own(staging, event.source_context);
+	if staging.metadata_failed {
+		release_source(source);
+		return false;
+	}
+
+
 	clear_overlay(state);
 	state.has_overlay = true;
 	state.overlay = .{
-		installation_revision = own(staging, event.resulting_provider_revision),
+		installation_revision = revision,
 		source = source,
-		syntax_context = own(staging, event.source_context),
+		syntax_context = syntax_context,
 		origin = origin,
 	};
+
+	return true;
 }
 
 stage_edited_source :: (staging: *Batch_Staging, source: *Source_Backing, edits: [] Range_Edit) -> *Source_Backing {
@@ -1222,6 +1331,10 @@ stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Docum
 		state.binding = event.binding.*;
 		state.binding.document = state.document;
 		state.binding.absolute_path.code_units = own(staging, event.binding.absolute_path.code_units);
+		if staging.metadata_failed {
+			return false;
+		}
+
 	}
 
 	if event.kind == {
@@ -1232,7 +1345,9 @@ stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Docum
 			}
 
 
-			install_overlay(staging, state, source, event, .ACTIVE);
+			if !install_overlay(staging, state, source, event, .ACTIVE) {
+				return false;
+			}
 
 		case .EDIT_OVERLAY;
 			if !state.has_overlay {
@@ -1262,7 +1377,9 @@ stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Docum
 			}
 
 
-			install_overlay(staging, state, source, event, origin);
+			if !install_overlay(staging, state, source, event, origin) {
+				return false;
+			}
 
 		case .OBSERVE_DISK;
 			if !stage_disk(staging, state, event.disk, event.resulting_provider_revision) {
@@ -1325,7 +1442,9 @@ stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Docum
 			}
 
 
-			install_overlay(staging, state, source, event, .RESTORED);
+			if !install_overlay(staging, state, source, event, .RESTORED) {
+				return false;
+			}
 	}
 
 
@@ -1337,6 +1456,11 @@ stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Docum
 
 
 	state.provider_revision = own(staging, event.resulting_provider_revision);
+	if staging.metadata_failed {
+		return false;
+	}
+
+
 	array_add(*state.used_revisions, state.provider_revision);
 	return true;
 }

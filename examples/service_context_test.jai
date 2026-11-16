@@ -23,9 +23,138 @@ FIELDS :: string.[
 main :: () {
 	test_schema_tuples();
 	test_paths();
+	test_borrowed_key_views();
+	test_expected_context_scratch();
+	test_context_identity_scratch();
 	test_descriptor_layout();
 	test_admission_controls();
 	print("Service context \e[92mPASS\e[0m.\n");
+}
+
+reject_view_allocation :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+	if mode == .ALLOCATE || mode == .RESIZE {
+		attempts := data.(*s64);
+		attempts.* += 1;
+	}
+
+	return null;
+}
+
+test_borrowed_key_views :: () {
+	encoded := Service.make_key("borrowed", "first".([] u8), "second".([] u8));
+	defer free(encoded.data);
+
+	legacy_ok, legacy := Service.parse_key(encoded, 2);
+	assert(legacy_ok);
+	defer array_free(legacy.fields);
+
+	storage: [2] [] u8;
+	attempts: s64;
+	allocator := Allocator.{proc = reject_view_allocation, data = *attempts};
+	ok, view := Service.parse_key_into(encoded, storage,, allocator);
+	assert(ok && !attempts && view.fields.count == 2 && view.fields.data == storage.data);
+	assert(view.tag.data == legacy.tag.data && Service.bytes_equal(view.tag, legacy.tag));
+	for view.fields {
+		assert(it.data == legacy.fields[it_index].data && Service.bytes_equal(it, legacy.fields[it_index]));
+	}
+
+	short_storage: [1] [] u8;
+	ok, view = Service.parse_key_into(encoded, short_storage,, allocator);
+	assert(!ok && !view.fields.count && !view.tag.count && !attempts);
+	for 0..encoded.count - 1 {
+		truncated := encoded;
+		truncated.count = it;
+		ok, view = Service.parse_key_into(truncated, storage,, allocator);
+		assert(!ok && !view.fields.count && !view.tag.count && !attempts);
+	}
+
+	trailing := NewArray(encoded.count + 1, u8);
+	memcpy(trailing.data, encoded.data, encoded.count);
+	defer free(trailing.data);
+
+	ok, view = Service.parse_key_into(trailing, storage,, allocator);
+	assert(!ok && !view.fields.count && !view.tag.count && !attempts);
+	zero := Service.make_key("empty");
+	defer free(zero.data);
+
+	ok, view = Service.parse_key_into(zero, .[],, allocator);
+	assert(ok && !view.fields.count && view.tag.(string) == "empty" && !attempts);
+	print("Borrowed bounded key views/no allocation/capacity/framing \e[92mPASS\e[0m\n");
+}
+
+test_expected_context_scratch :: () {
+	_, descriptor := Service.syntax_context_descriptor(paths());
+	identity := Service.context_id(descriptor);
+	resolver := with_field(descriptor, 8, "resolver_binding", Service.make_key("RESOLVER_CONFIG"));
+	semantics := with_field(descriptor, 9, "semantic_extension", Service.make_key("SUPPORTED"));
+	attempts: s64;
+	allocator := Allocator.{proc = reject_view_allocation, data = *attempts};
+	resolver_failure, resolver_context := Service.validate_context_registration(identity, resolver,, allocator);
+	assert(resolver_failure == .UNSUPPORTED_RESOLVER && !attempts);
+	assert(!resolver_context.identity.count && !resolver_context.descriptor.count);
+	semantic_failure, semantic_context := Service.validate_context_registration(identity, semantics,, allocator);
+	assert(semantic_failure == .UNSUPPORTED_SEMANTICS && !attempts);
+	assert(!semantic_context.identity.count && !semantic_context.descriptor.count);
+	print("Expected context values/fixed tags/no runtime allocation \e[92mPASS\e[0m\n");
+}
+
+test_context_identity_scratch :: () {
+	input_paths := paths();
+	_, descriptor := Service.syntax_context_descriptor(input_paths);
+	identity := Service.context_id(descriptor);
+	attempts: s64;
+	allocator := Allocator.{proc = reject_view_allocation, data = *attempts};
+	failure, admitted := Service.validate_context_registration(identity, descriptor,, allocator);
+	assert(failure == .NONE && !attempts);
+	assert(admitted.identity.data == identity.data && admitted.descriptor.data == descriptor.data);
+	assert(Service.bytes_equal(admitted.paths.visible_filename.code_units, input_paths.visible_filename.code_units));
+	assert(Service.bytes_equal(admitted.paths.visible_directory.code_units, input_paths.visible_directory.code_units));
+	assert(Service.bytes_equal(admitted.paths.relative_base.code_units, input_paths.relative_base.code_units));
+	for 0..identity.count - 1 {
+		truncated := identity;
+		truncated.count = it;
+		failure, admitted = Service.validate_context_registration(truncated, descriptor,, allocator);
+		assert(failure == .IDENTITY_MISMATCH && !attempts);
+		assert(!admitted.identity.count && !admitted.descriptor.count);
+	}
+
+	mutated := array_copy(identity);
+	defer free(mutated.data);
+
+	for * mutated {
+		it.* ^= 1;
+		failure, admitted = Service.validate_context_registration(mutated, descriptor,, allocator);
+		assert(failure == .IDENTITY_MISMATCH && !attempts);
+		assert(!admitted.identity.count && !admitted.descriptor.count);
+		it.* ^= 1;
+	}
+
+	trailing := NewArray(identity.count + 1, u8);
+	memcpy(trailing.data, identity.data, identity.count);
+	defer free(trailing.data);
+
+	schema := Service.SYNTAX_CONTEXT_SCHEMA.([] u8);
+	candidates: [7] [] u8 = .[
+		Service.make_key("not-context", schema, descriptor),
+		Service.make_key("context", "other-schema".([] u8), descriptor),
+		Service.make_key("context", schema, "other-descriptor".([] u8)),
+		Service.make_key("context", descriptor, schema),
+		Service.make_key("context", schema),
+		Service.make_key("context", schema, descriptor, "extra".([] u8)),
+		trailing
+	];
+	for candidates {
+		failure, admitted = Service.validate_context_registration(it, descriptor,, allocator);
+		assert(failure == .IDENTITY_MISMATCH && !attempts);
+		assert(!admitted.identity.count && !admitted.descriptor.count);
+	}
+
+	failure, admitted = Service.validate_context_registration(.[], .[],, allocator);
+	assert(failure == .MALFORMED && !attempts);
+	assert(!admitted.identity.count && !admitted.descriptor.count);
+	failure, admitted = Service.validate_context_registration(identity, descriptor,, allocator);
+	assert(failure == .NONE && !attempts);
+	print("Context identity/exact canonical match/no runtime allocation \e[92mPASS\e[0m\n");
 }
 
 test_schema_tuples :: () {

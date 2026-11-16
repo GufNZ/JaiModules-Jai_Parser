@@ -439,7 +439,10 @@ Session :: struct {
 	// Deterministic monotonic clock, advanced only by `wait`.
 	now: u64;
 	#if TEST_HOOKS {
+		// == Per-session controls and deterministic barriers ==
+		// Behaviour switches and allocator callbacks; worker failure/interleaving controls and coordinator negative controls:
 		faults: Test_Faults;
+		// One barrier per `Test_Boundary`; worker lifecycle/wait races and native service trace tests:
 		pauses: [#run enum_names(Test_Boundary).count] Test_Pause;
 	}
 }
@@ -449,17 +452,36 @@ Service :: struct {
 	clock_base: Apollo_Time;
 	allocator: Allocator;
 	#if TEST_HOOKS {
+		// == Owned-memory accounting ==
+		// Atomic live session/owner allocation count; worker rollback, retirement and final-zero-ledger checks:
 		owned_allocations: s64;
+		// Atomic live session/owner byte count; the same leak and cleanup checks, excluding caller-owned output:
 		owned_bytes: s64;
+
+		// == Worker startup and shutdown reservation ==
+		// Reject worker startup during session open; `test_open_output_failures` verifies output/owner rollback:
 		fail_worker_startup: bool;
+		// Reject this one-based shutdown-reserve allocation attempt (zero disables); `test_shutdown_reserve_failures`:
 		fail_shutdown_reserve_at: s64;
+		// Atomic count of reserve allocation attempts; the same test resets it and sweeps every failure point:
 		shutdown_reserve_attempts: s64;
+
+		// == Session-open output and argument controls ==
+		// Ignore open-description/context-error copy failure; `test_open_context_failures` negative control:
 		allow_failed_open_output: bool;
+		// Return `INVALID_ARGUMENT` despite argument-path copy failure; `test_open_argument_failures` control:
 		allow_failed_open_argument: bool;
+		// Use cached `output_allocator()` instead of current `context.allocator` for open errors; same allocator-routing control:
 		cached_open_argument_allocator: bool;
+
+		// == Session-directory backing ==
+		// Charge shared directory backing to a session owner; `test_directory_backing`/`test_directory_retirement_reentry` controls:
 		session_owned_directory: bool;
+		// Override directory backing allocator when `proc` is set; directory allocation failure/interleaving probes:
 		directory_allocator: Allocator;
+		// Retry rejected directory backing rather than fail open; `test_directory_allocation_failures` control:
 		retry_failed_directory_allocation: bool;
+		// Reject changed directory membership after unlocked allocation instead of refreshing; `test_directory_allocation_interleavings`:
 		reject_changed_directory: bool;
 	}
 	incarnation: Service_Incarnation;
@@ -1172,6 +1194,23 @@ submit_source_batch_attempt :: (
 					path_allocator = .{proc = source_batch_path_allocate, data = session};
 				}
 
+				commit_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					commit_allocator = .{proc = source_batch_commit_allocate, data = session};
+				}
+
+				frontier_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					frontier_allocator = .{proc = source_batch_frontier_allocate, data = session};
+				}
+
+				metadata_data: Source_Batch_Metadata_Allocation;
+				metadata_allocator: Allocator;
+				#if TEST_HOOKS {
+					metadata_data = .{session = session, storage = storage};
+					metadata_allocator = .{proc = source_batch_metadata_allocate, data = *metadata_data};
+				}
+
 				ok, frontier, error = apply_source_batch_with_storage(
 					staged,
 					batch,
@@ -1186,7 +1225,10 @@ submit_source_batch_attempt :: (
 					state_list_allocator,
 					reference_list_allocator,
 					context_list_allocator,
-					path_allocator
+					path_allocator,
+					commit_allocator,
+					frontier_allocator,
+					metadata_allocator
 				);
 
 				if ok && need_transfer {
@@ -2569,8 +2611,12 @@ Delivery :: enum u8 {
 	}
 
 	Test_Pause :: struct {
+		// == One-shot worker and trace barriers ==
+		// Armed by `arm_pause`, cleared at the boundary; worker interleaving and native trace tests:
 		enabled: bool;
+		// Signalled on arrival with the session gate released; `await_pause` lets those tests observe the boundary:
 		arrived: Semaphore;
+		// Waited on at the boundary; `resume_pause` releases the worker after the test's intervening action:
 		proceed: Semaphore;
 	}
 
@@ -2619,102 +2665,254 @@ Delivery :: enum u8 {
 		signal(*session.pauses[boundary].proceed);
 	}
 
-	// Each switch removes one safeguard, so a test can show that its control detects the loss.
+	// Per-session instrumentation, compiled only with `TEST_HOOKS`; zero initialization preserves normal behaviour.
+	// Boolean controls deliberately remove safeguards so the corresponding tests can detect their loss.
+	// Allocation hooks run before owner-delegated `ALLOCATE`/`RESIZE`; returning false rejects the request.
+	// Cleanup hooks run before owner-delegated `FREE`; their return value is ignored.
+	// Each `*_data` field is borrowed opaque callback state, not owned or freed by the service.
+	// Callbacks may inject failures or reenter the service at the allocator boundary; they are not payload options.
+	// Test categories below refer to `service_worker_test.jai` unless another suite is named:
+	// - source admission = `test_source_registration_failures`, `test_source_registration_failure_control`,
+	//    `test_source_registration_interleavings`, `test_source_registration_quota`, `test_source_registration_receipt_retry`.
+	// - construction = `test_source_batch_storage_admission`, `test_source_batch_pool_cleanup`,
+	//    `test_source_registration_failures`, `test_source_registration_receipt_retry` (isolated backing modes).
+	// - storage = `test_source_batch_storage_admission`, `test_source_batch_storage_cleanup`,
+	//    `test_source_registration_receipt_retry` (private pool-transfer backing).
 	Test_Faults :: struct {
+		// == Output copying and revalidation ==
+		// Ignore terminal query copy failure; `test_terminal_query_failures` negative control:
 		allow_failed_terminal_query: bool;
+		// Skip post-copy query observation revalidation; `test_terminal_query_interleavings` control:
 		allow_stale_terminal_query: bool;
+		// Return an argument error despite copy failure; coordinator/analysis/result argument and provider-error failure tests:
 		allow_failed_argument_error: bool;
+		// Keep an argument error after its source becomes stale; coordinator/analysis/result argument interleaving tests:
 		allow_stale_argument_error: bool;
+		// Accept analysis despite receipt-copy failure; `test_analysis_receipt_failures` control:
 		allow_failed_analysis_output: bool;
+		// Ignore frontier changes during analysis receipt allocation; `test_analysis_receipt_interleavings` control:
 		skip_analysis_frontier_check: bool;
+		// Accept a source batch despite receipt-copy failure; `test_source_receipt_failures` control:
 		allow_failed_submit_output: bool;
+		// Export bytes despite post-copy source revalidation failure; `test_world_output_revalidation_control`:
 		allow_stale_byte_export: bool;
+		// Return a description after session retirement; `test_description_retirement_negative_control`:
 		allow_retired_description: bool;
+		// Commit cancellation before copying its observation; `test_cancellation_output_negative_control`:
 		cancel_before_output: bool;
+		// Mark completions delivered even when output allocation fails; `test_drain_output_negative_controls`:
 		consume_failed_drain: bool;
+		// Keep copied completions whose registrations became stale/already delivered; `test_drain_output_negative_controls`:
 		allow_stale_drain_output: bool;
+
+		// == Scheduling, task stopping and publication ==
+		// Select optional work ahead of required work; `test_optional_fifo` scheduling control:
 		optional_first: bool;
+		// Do not stop running tasks; `service_coordinator_test:jai` `test_negative_controls` late-delivery cases:
 		skip_running_stop: bool;
+		// Ignore publication frontier mismatch; same late-delivery cases isolate this from the stop safeguard:
 		skip_publication_frontier_check: bool;
+		// Keep work/output without consumers; same late-delivery and queued-last-consumer controls:
 		keep_unconsumed_work: bool;
+
+		// == Shutdown reserves and session retirement ==
+		// Charge ordinary handle capacity for first shutdown; pressure/reserved-shutdown tests and coordinator negative controls:
 		shutdown_from_ordinary_capacity: bool;
+		// Allocate first-shutdown identity/registration instead of activating reserves; `test_shutdown_reserved_activation`:
 		allocate_shutdown_backing: bool;
+		// Allow release before the session stops, enabling retirement/reuse during source admission and construction callbacks:
 		allow_active_session_release: bool;
+
+		// == Shared registration backing and handle revalidation ==
+		// Shared registration-slot/list backing hook; retain, waiter, world, result, immediate-result, source and repeated-shutdown tests:
 		registration_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `registration_allocation_hook` in those backing failure/quota/interleaving/retry tests:
 		registration_allocation_data: *void;
+		// Reuse a stale retained-handle source after backing allocation; `test_retain_backing_interleavings` control:
 		allow_stale_retain_registration: bool;
+		// Reuse a stale session after repeated-shutdown backing allocation; `test_repeated_shutdown_interleavings` control:
 		allow_stale_shutdown_registration: bool;
+		// Retry waiter creation after rejected backing; `test_waiter_failed_backing_control` detects the extra attempt:
 		allow_failed_waiter_backing: bool;
+		// Ignore waiter-source revalidation failure; `test_waiter_backing_interleavings` control:
 		allow_stale_waiter_source: bool;
+		// Ignore world-source revalidation after backing allocation; `test_world_registration_interleavings` control:
 		allow_stale_world_registration: bool;
+		// Retry rejected world backing; `test_world_registration_failure_control` detects incorrect retry:
 		retry_failed_world_registration: bool;
+		// Ignore result-source revalidation after backing allocation; `test_result_registration_interleavings` control:
 		allow_stale_result_registration: bool;
+		// Retry rejected result backing; `test_result_registration_quota_and_control`:
 		retry_failed_result_registration: bool;
+		// Ignore immediate-result source revalidation; `test_immediate_result_interleavings` control:
 		allow_stale_immediate_result: bool;
+		// Retry rejected immediate-result backing; `test_immediate_result_failure_control`:
 		retry_failed_immediate_result: bool;
+
+		// == Source-ticket registration ==
+		// Ignore session revalidation after source-ticket backing allocation; source admission interleaving controls:
 		allow_stale_source_registration: bool;
+		// Retry rejected source-ticket backing; source admission incorrect-retry control:
 		retry_failed_source_registration: bool;
+
+		// == Source-update backing ==
+		// Source-update backing allocation; source admission failure/interleaving controls and `test_source_update_counter`:
 		source_update_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_update_allocation_hook`:
 		source_update_allocation_data: *void;
+		// Retry rejected source-update backing; source admission incorrect-retry control:
 		retry_failed_source_update: bool;
+
+		// == Source-operation backing ==
+		// Source-operation backing allocation; source admission failure/interleaving and receipt-retry tests:
 		source_operation_allocation_hook: (size: s64, data: *void) -> bool;
+		// State for `source_operation_allocation_hook` and `source_operation_cleanup_hook`:
 		source_operation_allocation_data: *void;
+		// Observe source-operation backing frees; source admission interleaving cleanup callbacks:
 		source_operation_cleanup_hook: (size: s64, data: *void) -> bool;
+		// Retry rejected source-operation backing; source admission incorrect-retry control:
 		retry_failed_source_operation: bool;
+		// Ignore session revalidation after source-operation allocation; source admission interleaving control:
 		allow_stale_source_operation: bool;
+
+		// == Private provider model ==
+		// Private `Provider_Model` allocation; source admission failure/quota/interleaving and receipt-retry tests:
 		source_provider_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_provider_allocation_hook`:
 		source_provider_allocation_data: *void;
+		// Retry rejected provider-model backing; source admission incorrect-retry control:
 		retry_failed_source_provider: bool;
+		// Ignore session revalidation after provider-model allocation; source admission interleaving control:
 		allow_stale_source_provider: bool;
+
+		// == Private provider document/context arrays ==
+		// Private provider document/context arrays; source admission and `test_source_provider_arrays_refresh`:
 		source_provider_arrays_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_provider_arrays_allocation_hook`:
 		source_provider_arrays_allocation_data: *void;
+		// Observe private provider-array frees; source admission interleaving cleanup callbacks:
 		source_provider_arrays_cleanup_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_provider_arrays_cleanup_hook`:
 		source_provider_arrays_cleanup_data: *void;
+		// Retry rejected provider-array backing; source admission incorrect-retry control:
 		retry_failed_source_provider_arrays: bool;
+		// Ignore session revalidation after provider-array allocation; source admission interleaving control:
 		allow_stale_source_provider_arrays: bool;
+
+		// == Private provider states ==
+		// Private provider-state backing; source admission and `test_source_provider_arrays_refresh`:
 		source_provider_states_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_provider_states_allocation_hook`:
 		source_provider_states_allocation_data: *void;
+		// Observe private provider-state frees; source admission interleaving cleanup callbacks:
 		source_provider_states_cleanup_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_provider_states_cleanup_hook`:
 		source_provider_states_cleanup_data: *void;
+		// Retry rejected provider-state backing; source admission incorrect-retry control:
 		retry_failed_source_provider_states: bool;
+		// Ignore session revalidation after provider-state allocation; source admission interleaving control:
 		allow_stale_source_provider_states: bool;
+
+		// == Private provider revision arrays ==
+		// Private revision-pointer backing; source admission and `test_source_provider_revisions_empty`/`test_source_provider_revisions_refresh`:
 		source_provider_revisions_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_provider_revisions_allocation_hook`:
 		source_provider_revisions_allocation_data: *void;
+		// Observe private revision-array frees; source interleaving and revision-refresh cleanup tests:
 		source_provider_revisions_cleanup_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_provider_revisions_cleanup_hook`:
 		source_provider_revisions_cleanup_data: *void;
+		// Retry rejected revision-array backing; source admission incorrect-retry control:
 		retry_failed_source_provider_revisions: bool;
+		// Ignore session revalidation after revision-array allocation; source admission interleaving control:
 		allow_stale_source_provider_revisions: bool;
+
+		// == Batch pool root and session revalidation ==
+		// Batch pool root allocation; source admission rejection/quota/retry/interleaving and actual-free reentry tests:
 		source_batch_pool_allocation_hook: (size: s64, data: *void) -> bool;
-		source_batch_state_allocation_hook: (size: s64, data: *void) -> bool;
-		source_batch_source_allocation_hook: (size: s64, data: *void) -> bool;
-		source_batch_source_bytes_allocation_hook: (size: s64, data: *void) -> bool;
-		source_batch_source_identity_allocation_hook: (size: s64, data: *void) -> bool;
-		source_batch_edit_allocation_hook: (size: s64, data: *void) -> bool;
-		source_batch_state_list_allocation_hook: (size: s64, data: *void) -> bool;
-		source_batch_reference_list_allocation_hook: (size: s64, data: *void) -> bool;
-		source_batch_context_list_allocation_hook: (size: s64, data: *void) -> bool;
-		source_batch_path_allocation_hook: (size: s64, data: *void) -> bool;
-		source_batch_revisions_allocation_hook: (size: s64, data: *void) -> bool;
-		source_batch_storage_allocation_hook: (size: s64, data: *void) -> bool;
-		source_batch_storage_allocation_data: *void;
-		allow_stale_source_batch_storage: bool;
-		retry_failed_source_batch_storage: bool;
-		prefer_failed_source_batch_storage: bool;
+		// State passed to `source_batch_pool_allocation_hook` in source admission/pool cleanup tests:
 		source_batch_pool_allocation_data: *void;
-		source_batch_state_allocation_data: *void;
-		source_batch_source_allocation_data: *void;
-		source_batch_source_bytes_allocation_data: *void;
-		source_batch_source_identity_allocation_data: *void;
-		source_batch_edit_allocation_data: *void;
-		source_batch_state_list_allocation_data: *void;
-		source_batch_reference_list_allocation_data: *void;
-		source_batch_context_list_allocation_data: *void;
-		source_batch_path_allocation_data: *void;
-		source_batch_revisions_allocation_data: *void;
+		// Retry rejected pool-root allocation; source admission incorrect-retry control:
 		retry_failed_source_batch_pool: bool;
+		// Ignore post-staging session revalidation; source admission and construction retirement/reuse controls:
 		allow_stale_source_batch_pool: bool;
+
+		// == Batch source construction and edit scratch ==
+		// Batch document-state object allocation; construction callbacks, rejection, retries and actual-free controls:
+		source_batch_state_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_state_allocation_hook` in construction tests:
+		source_batch_state_allocation_data: *void;
+		// Batch `Source_Backing` object allocation; construction callbacks, rejection, retries and actual-free controls:
+		source_batch_source_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_source_allocation_hook` in construction tests:
+		source_batch_source_allocation_data: *void;
+		// Batch source-byte copies; construction callbacks, rejection, retries and actual-free controls:
+		source_batch_source_bytes_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_source_bytes_allocation_hook` in construction tests:
+		source_batch_source_bytes_allocation_data: *void;
+		// Batch source revision-identity copies; construction callbacks, rejection, retries and actual-free controls:
+		source_batch_source_identity_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_source_identity_allocation_hook` in construction tests:
+		source_batch_source_identity_allocation_data: *void;
+		// Batch state revision-pointer arrays; construction callbacks, rejection, retries and actual-free controls:
+		source_batch_revisions_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_revisions_allocation_hook` in construction tests:
+		source_batch_revisions_allocation_data: *void;
+		// Intermediate edit scratch; construction tests include sequential/later-event edits and replaced/final actual frees:
+		source_batch_edit_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_edit_allocation_hook` in construction tests:
+		source_batch_edit_allocation_data: *void;
+
+		// == Batch staging lists and diagnostic paths ==
+		// Staging state-pointer list; currently isolated source admission rejection sweeps:
+		source_batch_state_list_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_state_list_allocation_hook` in isolated rejection sweeps:
+		source_batch_state_list_allocation_data: *void;
+		// Staging context-reference list; currently isolated source admission rejection sweeps:
+		source_batch_reference_list_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_reference_list_allocation_hook` in isolated rejection sweeps:
+		source_batch_reference_list_allocation_data: *void;
+		// Staging admitted-context list; currently isolated source admission rejection sweeps:
+		source_batch_context_list_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_context_list_allocation_hook` in isolated rejection sweeps:
+		source_batch_context_list_allocation_data: *void;
+		// Staging diagnostic path reservation; currently isolated source admission rejection sweeps:
+		source_batch_path_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_path_allocation_hook` in isolated rejection sweeps:
+		source_batch_path_allocation_data: *void;
+
+		// == Batch commit, frontier and pooled metadata ==
+		// Final provider document/context commit arrays; currently isolated source admission rejection sweeps:
+		source_batch_commit_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_commit_allocation_hook` in isolated rejection sweeps:
+		source_batch_commit_allocation_data: *void;
+		// Accepted-frontier key backing; currently isolated source admission rejection sweeps:
+		source_batch_frontier_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_frontier_allocation_hook` in isolated rejection sweeps:
+		source_batch_frontier_allocation_data: *void;
+		// Pooled copied metadata, including admitted-context payloads; currently isolated source admission rejection sweeps:
+		source_batch_metadata_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_metadata_allocation_hook` in isolated rejection sweeps:
+		source_batch_metadata_allocation_data: *void;
+
+		// == Batch pool transfer and admission winners ==
+		// Private pool-transfer list backing; storage rejection/retry/interleaving and cleanup controls:
+		source_batch_storage_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_batch_storage_allocation_hook` in storage tests:
+		source_batch_storage_allocation_data: *void;
+		// Ignore post-staging frontier mismatch; storage/construction admission winner controls:
+		allow_stale_source_batch_storage: bool;
+		// Retry rejected private staging backing; storage/construction incorrect-retry controls:
+		retry_failed_source_batch_storage: bool;
+		// Prefer staging failure over concurrent shutdown; storage/construction lifecycle-winner controls:
+		prefer_failed_source_batch_storage: bool;
+
+		// == Discarded-attempt source-reference rollback ==
+		// Deliberately keep an extra source reference during discarded-attempt cleanup; source receipt-retry retained-sentinel control:
 		retain_source_batch_reference: *Source_Backing;
-		// Fails conversion of this member in its candidate's parse task.
+
+		// == Parse failure containment ==
+		// Fail conversion of the named member in its candidate parse task; `service_traces_test.jai` `trace_v6` failure containment:
 		fail_parse_document: [] u8;
 	}
 

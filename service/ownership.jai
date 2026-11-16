@@ -201,6 +201,181 @@ try_source_batch_pool :: (allocator: Allocator = context.allocator) -> *Pool {
 	return storage.data;
 }
 
+try_source_batch_metadata_storage :: (pool: *Pool, count: s64) -> bool, [] u8 {
+	if count < 0 {
+		return false, .[];
+	}
+
+
+	if !count {
+		return true, .[];
+	}
+
+
+	header_size :: size_of(type_of(pool.current_memblock.*));
+	if (pool.alignment <= 0 || pool.alignment > 0x80000000
+		|| (pool.alignment & (pool.alignment - 1))
+		|| count > S64_MAX - header_size - (pool.alignment - 1)
+	) {
+		return false, .[];
+	}
+
+
+	if !pool.block_allocator.proc {
+		set_allocators(pool);
+	}
+
+	if count < pool.oversized_size {
+		if count > pool.memblock_size - header_size - (pool.alignment - 1) {
+			return false, .[];
+		}
+
+
+		offset := (pool.current_pos.(u64) & (pool.alignment - 1).(u64)).(s64);
+		bump := (pool.alignment - offset) & (pool.alignment - 1);
+		if pool.bytes_left < count + bump && !pool.unused_memblocks {
+			ok, storage := try_output_array(pool.block_allocator, pool.memblock_size, u8);
+			if !ok {
+				return false, .[];
+			}
+
+
+			block := storage.data.(type_of(pool.unused_memblocks));
+			block.next = null;
+			if pool.overwrite_memory {
+				memset(storage.data + header_size, 0xCC, storage.count - header_size);
+			}
+
+			pool.unused_memblocks = block;
+		}
+	}
+
+
+	ok, copied := try_output_array(.{proc = pool_allocator_proc, data = pool}, count, u8);
+	return ok, copied;
+}
+
+try_source_batch_metadata :: (pool: *Pool, source: [] u8) -> bool, [] u8 {
+	ok, storage := try_source_batch_metadata_storage(pool, source.count);
+	if ok && source.count {
+		memcpy(storage.data, source.data, source.count);
+	}
+
+	return ok, storage;
+}
+
+source_batch_metadata_pool_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+	if mode == .ALLOCATE || mode == .RESIZE {
+		ok, storage := try_source_batch_metadata_storage(data.(*Pool), size);
+		if !ok {
+			return null;
+		}
+
+
+		if mode == .RESIZE && old_size && size {
+			memcpy(storage.data, old_memory, min(old_size, size));
+		}
+
+		return storage.data;
+	}
+
+
+	return pool_allocator_proc(mode, size, old_size, old_memory, data);
+}
+
+Source_Batch_Metadata_Allocation :: struct {
+	session: *Session;
+	storage: *Pool;
+}
+
+try_source_batch_frontier :: (model: *Provider_Model, allocator: Allocator = context.allocator) -> bool, [] u8, Identity_Counter {
+	counter := model.frontier_counter;
+	ok, token := issue_token(*counter);
+	if !ok {
+		return false, .[], model.frontier_counter;
+	}
+
+
+	encoded: [8] u8;
+	for 0..7 {
+		encoded[it] = xx ((token >> (8 * it)) & 0xFF);
+	}
+
+	identity_ok, identity := try_output_key(allocator, "provider-frontier", model.provider_namespace, model.session.([] u8), encoded);
+	if !identity_ok {
+		return false, .[], model.frontier_counter;
+	}
+
+
+	return true, identity, counter;
+}
+
+Source_Batch_Commit_Backing :: struct {
+	documents: [] *Document_State;
+	contexts: [] Admitted_Context;
+}
+
+try_source_batch_commit :: (
+	model: *Provider_Model,
+	additional_documents: s64,
+	additional_contexts: s64,
+	allocator: Allocator = context.allocator
+) -> bool, Source_Batch_Commit_Backing {
+	result: Source_Batch_Commit_Backing;
+	if (additional_documents < 0 || additional_contexts < 0
+		|| model.documents.count > S64_MAX - additional_documents
+		|| model.contexts.count > S64_MAX - additional_contexts
+	) {
+		return false, result;
+	}
+
+
+	document_count := model.documents.count + additional_documents;
+	context_count := model.contexts.count + additional_contexts;
+	if document_count > model.documents.allocated {
+		capacity := max(8, document_count);
+		if model.documents.allocated <= S64_MAX / 2 {
+			capacity = max(capacity, model.documents.allocated * 2);
+		}
+
+		ok, storage := try_output_array(allocator, capacity, *Document_State);
+		if !ok {
+			return false, result;
+		}
+
+
+		if model.documents.count {
+			memcpy(storage.data, model.documents.data, model.documents.count * size_of(*Document_State));
+		}
+
+		result.documents = storage;
+	}
+
+
+	if context_count > model.contexts.allocated {
+		capacity := max(8, context_count);
+		if model.contexts.allocated <= S64_MAX / 2 {
+			capacity = max(capacity, model.contexts.allocated * 2);
+		}
+
+		ok, storage := try_output_array(allocator, capacity, Admitted_Context);
+		if !ok {
+			free(result.documents.data,, allocator);
+			return false, .{};
+		}
+
+
+		if model.contexts.count {
+			memcpy(storage.data, model.contexts.data, model.contexts.count * size_of(Admitted_Context));
+		}
+
+		result.contexts = storage;
+	}
+
+
+	return true, result;
+}
+
 try_source_batch_references :: (event_count: s64, allocator: Allocator = context.allocator) -> bool, [..] [] u8 {
 	result: [..] [] u8;
 	if event_count < 0 || event_count > S64_MAX / 2 {
@@ -280,6 +455,47 @@ try_source_batch_storage :: (model: *Provider_Model, allocator: Allocator = cont
 		if mode == .ALLOCATE || mode == .RESIZE {
 			hook := session.faults.source_batch_revisions_allocation_hook;
 			if hook && !hook(size, session.faults.source_batch_revisions_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+
+	source_batch_metadata_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		allocation := data.(*Source_Batch_Metadata_Allocation);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := allocation.session.faults.source_batch_metadata_allocation_hook;
+			if hook && !hook(size, allocation.session.faults.source_batch_metadata_allocation_data) {
+				return null;
+			}
+		}
+
+
+		return source_batch_metadata_pool_allocate(mode, size, old_size, old_memory, allocation.storage);
+	}
+
+	source_batch_frontier_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_frontier_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_frontier_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+
+	source_batch_commit_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_batch_commit_allocation_hook;
+			if hook && !hook(size, session.faults.source_batch_commit_allocation_data) {
 				return null;
 			}
 		}

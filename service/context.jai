@@ -273,7 +273,27 @@ Admitted_Context :: struct {
 
 // Parses and validates a `ContextRegistration` against this build, then recomputes its identity; the result owns copies of both byte strings.
 admit_context :: (identity: [] u8, descriptor: [] u8) -> Context_Failure, Admitted_Context {
-	ok, root := parse_key(descriptor, SYNTAX_CONTEXT_FIELDS.count,, temp);
+	failure, result := validate_context_registration(identity, descriptor);
+	if failure != .NONE {
+		return failure, .{};
+	}
+
+
+	result.identity = array_copy(result.identity);
+	result.descriptor = array_copy(result.descriptor);
+	path_slots := (*Path_Value).[*result.paths.visible_filename, *result.paths.visible_directory, *result.paths.relative_base];
+	for path_slots {
+		it.code_units = array_copy(it.code_units);
+	}
+
+	return .NONE, result;
+}
+
+#scope_module
+
+validate_context_registration :: (identity: [] u8, descriptor: [] u8) -> Context_Failure, Admitted_Context {
+	root_storage: [SYNTAX_CONTEXT_FIELDS.count] [] u8;
+	ok, root := parse_key_into(descriptor, root_storage);
 	if !ok || root.tag.(string) != "syntax-context-descriptor" || root.fields.count != SYNTAX_CONTEXT_FIELDS.count {
 		return .MALFORMED, .{};
 	}
@@ -282,8 +302,9 @@ admit_context :: (identity: [] u8, descriptor: [] u8) -> Context_Failure, Admitt
 	expected := expected_field_values();
 	result: Admitted_Context;
 	path_slots := (*Path_Value).[*result.paths.visible_filename, *result.paths.visible_directory, *result.paths.relative_base];
+	field_storage: [8] [] u8;
 	for name: SYNTAX_CONTEXT_FIELDS {
-		field_ok, field := parse_key(root.fields[it_index], 8,, temp);
+		field_ok, field := parse_key_into(root.fields[it_index], field_storage);
 		if !field_ok {
 			return .MALFORMED, .{};
 		}
@@ -344,30 +365,36 @@ admit_context :: (identity: [] u8, descriptor: [] u8) -> Context_Failure, Admitt
 				path_slots[it_index - 5].* = path;
 
 			case "resolver_binding";
-				if values.count != 1 || !bytes_equal(values[0], make_key("NO_RESOLUTION",, temp)) {
+				if values.count != 1 || !bytes_equal(values[0], EXPECTED_NO_RESOLUTION) {
 					return .UNSUPPORTED_RESOLVER, .{};
 				}
 
 			case "semantic_extension";
-				if values.count != 1 || !bytes_equal(values[0], make_key("UNSUPPORTED",, temp)) {
+				if values.count != 1 || !bytes_equal(values[0], EXPECTED_UNSUPPORTED_SEMANTICS) {
 					return .UNSUPPORTED_SEMANTICS, .{};
 				}
 		}
 	}
 
-	if !bytes_equal(identity, context_id(descriptor,, temp)) {
+	identity_storage: [2] [] u8;
+	identity_ok, identity_key := parse_key_into(identity, identity_storage);
+	if (
+		!identity_ok
+		|| identity_key.tag.(string) != "context"
+		|| identity_key.fields.count != 2
+		|| !bytes_equal(identity_key.fields[0], SYNTAX_CONTEXT_SCHEMA.([] u8))
+		|| !bytes_equal(identity_key.fields[1], descriptor)
+	) {
 		return .IDENTITY_MISMATCH, .{};
 	}
 
 
-	result.identity = array_copy(identity);
-	result.descriptor = array_copy(descriptor);
-	for path_slots {
-		it.code_units = array_copy(it.code_units);
-	}
-
+	result.identity = identity;
+	result.descriptor = descriptor;
 	return .NONE, result;
 }
+
+#scope_export
 
 // Parser, lexer and adapter source digests; called at compile time, including from a cross-compiling build's host.
 build_source_digests :: () -> (parser_digest: [16] u8, lexer_digest: [16] u8, adapter_digest: [16] u8) {
@@ -464,7 +491,8 @@ parse_path_key :: (values: [] [] u8) -> bool, Path_Value {
 	}
 
 
-	ok, key := parse_key(values[0], 2,, temp);
+	storage: [2] [] u8;
+	ok, key := parse_key_into(values[0], storage);
 	if !ok || key.tag.(string) != "path" || key.fields.count != 2 {
 		return false, .{};
 	}
@@ -507,15 +535,20 @@ Expected_Values :: struct {
 	diagnostic_profile: [3] [] u8;
 }
 
+EXPECTED_COMPILER_SDK :: #run make_key("compiler-sdk", COMPILER_VERSION.([] u8), COMPILER_LAYOUT_DIGEST_BYTES);
+EXPECTED_SYNTAX_ADAPTER :: #run syntax_adapter_descriptor();
+EXPECTED_NO_RESOLUTION :: #run make_key("NO_RESOLUTION");
+EXPECTED_UNSUPPORTED_SEMANTICS :: #run make_key("UNSUPPORTED");
+
 expected_field_values :: () -> Expected_Values {
 	result: Expected_Values;
 	result.producer = .[
 		PRODUCER_NAMESPACE.([] u8),
 		parser_build_digest,
-		make_key("compiler-sdk", COMPILER_VERSION.([] u8), compiler_layout_digest,, temp),
+		EXPECTED_COMPILER_SDK,
 		lexer_build_digest,
 		adapter_build_digest,
-		syntax_adapter_descriptor(,, temp)
+		EXPECTED_SYNTAX_ADAPTER
 	];
 	result.syntax_schemas = .[
 		SOURCE_TOKENS_SCHEMA.([] u8),

@@ -1,4 +1,6 @@
 #import "Basic";
+#import "String";
+#import "Pool";
 #import "Compiler";
 #import "File";
 #import "File_Utilities";
@@ -2592,48 +2594,82 @@ test_source_registration_failures :: (
 	batch_reference_list := false,
 	batch_context_list := false,
 	batch_paths := false,
+	batch_commit := false,
+	batch_frontier := false,
+	batch_metadata := false,
+	frontier_exhausted := false,
 	path_error := false,
 	edit_pair := false,
 	empty_source := false,
 	event_kind: Service.Event_Kind = .SET_OVERLAY
 ) {
-	assert(event_kind == .SET_OVERLAY || (batch_sources || batch_source_bytes || batch_source_identities || batch_edits || batch_reference_list || batch_paths) && !batch_pair && (!empty_source || batch_edits));
+	assert(
+		event_kind == .SET_OVERLAY
+		|| (batch_sources || batch_source_bytes || batch_source_identities || batch_edits || batch_reference_list || batch_paths || batch_metadata)
+			&& !batch_pair
+			&& (!empty_source || batch_edits)
+	);
 	assert(!path_error || batch_paths && event_kind == .OBSERVE_DISK);
+	assert(!frontier_exhausted || batch_frontier);
 	assert(!batch_edits || event_kind == .EDIT_OVERLAY);
 	assert(!edit_pair || batch_edits && !empty_source);
 	assert(!empty_source || (batch_source_bytes || batch_source_identities || batch_edits) && !batch_pair);
-	assert(!batch_pair || batch_states || batch_revisions || batch_sources || batch_source_bytes || batch_source_identities || batch_state_list || batch_reference_list || batch_context_list || batch_paths);
+	assert(
+		!batch_pair || batch_states || batch_revisions
+		|| batch_sources || batch_source_bytes || batch_source_identities
+		|| batch_state_list || batch_reference_list || batch_context_list
+		|| batch_paths || batch_commit || batch_frontier || batch_metadata
+	);
 	for Retain_Backing_Case.[.ARRAYS, .OBJECT, .REUSE] {
 		scenario := it;
-		allocation_count := ifx batch_paths
-			then ifx path_error
+		allocation_count: s64;
+		if batch_metadata {
+			if batch_pair {
+				allocation_count = 13;
+			} else if event_kind == .OBSERVE_DISK {
+				allocation_count = 4;
+			} else {
+				allocation_count = 3;
+			}
+		} else if frontier_exhausted {
+			allocation_count = 0;
+		} else if batch_frontier {
+			allocation_count = 1;
+		} else if batch_commit {
+			allocation_count = ifx batch_pair
 				then 2
-				else 1
-			else ifx batch_context_list
-				then ifx batch_pair
-					then 1
-					else 0
-				else ifx empty_source && (batch_source_bytes || batch_edits)
-					then 0
-					else ifx batch_edits
-						then ifx edit_pair
-							then 2
-							else 1
-						else ifx batch_state_list || batch_reference_list
-							then 1
-							else ifx arrays
-								then 2
-								else ifx batch_states || batch_revisions || batch_sources || batch_source_bytes || batch_source_identities
-									then ifx batch_pair
-										then 2
-										else 1
-									else ifx list || provider || states || revisions || pool
-										then 1
-										else ifx update || scenario == .ARRAYS
-											then 3
-											else ifx scenario == .OBJECT
-												then 1
-												else 0;
+				else 0;
+		} else if batch_paths {
+			allocation_count = ifx path_error
+				then 2
+				else 1;
+		} else if batch_context_list {
+			allocation_count = ifx batch_pair
+				then 1
+				else 0;
+		} else if empty_source && (batch_source_bytes || batch_edits) {
+			allocation_count = 0;
+		} else if batch_edits {
+			allocation_count = ifx edit_pair
+				then 2
+				else 1;
+		} else if batch_state_list || batch_reference_list {
+			allocation_count = 1;
+		} else if arrays {
+			allocation_count = 2;
+		} else if batch_states || batch_revisions || batch_sources || batch_source_bytes || batch_source_identities {
+			allocation_count = ifx batch_pair
+				then 2
+				else 1;
+		} else if list || provider || states || revisions || pool {
+			allocation_count = 1;
+		} else if update || scenario == .ARRAYS {
+			allocation_count = 3;
+		} else if scenario == .OBJECT {
+			allocation_count = 1;
+		} else {
+			allocation_count = 0;
+		}
 
 		for 1..allocation_count + 1 {
 			fail_at := it;
@@ -2655,10 +2691,12 @@ test_source_registration_failures :: (
 
 			before: Service.Resource_Ledger;
 			identities: Service.Session_Identities;
+			frontier_counter: Service.Identity_Counter;
 			slots: [] Service.Registration_Slot;
 			free_count: s64;
 			operations: s64;
 			documents: s64;
+			provider_contexts: s64;
 			source: *Service.Source_Backing;
 			source_references: s64;
 			probe := Registration_Probe.{fail_at = fail_at};
@@ -2669,10 +2707,16 @@ test_source_registration_failures :: (
 				#code {
 					before = fixture.session.ledger;
 					identities = fixture.session.identities;
+					if frontier_exhausted {
+						fixture.session.provider.frontier_counter.next = 0xFFFFFFFFFFFFFFFF;
+					}
+
+					frontier_counter = fixture.session.provider.frontier_counter;
 					slots = array_copy(fixture.session.registry.slots);
 					free_count = fixture.session.registry.free_slots.count;
 					operations = fixture.session.operations.count;
 					documents = fixture.session.provider.documents.count;
+					provider_contexts = fixture.session.provider.contexts.count;
 					source = Service.selected_document(Service.find_document(fixture.session.provider, batch.events[0].document)).source;
 					assert(!!source);
 					source_references = source.references;
@@ -2717,7 +2761,16 @@ test_source_registration_failures :: (
 						event.disk.syntax_context = xx "unknown-context";
 					}
 
-					if batch_paths {
+					if batch_metadata {
+						fixture.session.faults.source_batch_metadata_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_metadata_allocation_data = *probe;
+					} else if batch_frontier {
+						fixture.session.faults.source_batch_frontier_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_frontier_allocation_data = *probe;
+					} else if batch_commit {
+						fixture.session.faults.source_batch_commit_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_batch_commit_allocation_data = *probe;
+					} else if batch_paths {
 						fixture.session.faults.source_batch_path_allocation_hook = registration_allocation_probe;
 						fixture.session.faults.source_batch_path_allocation_data = *probe;
 					} else if batch_context_list {
@@ -2823,10 +2876,16 @@ test_source_registration_failures :: (
 					fixture.session.faults.source_batch_context_list_allocation_data = null;
 					fixture.session.faults.source_batch_path_allocation_hook = null;
 					fixture.session.faults.source_batch_path_allocation_data = null;
+					fixture.session.faults.source_batch_commit_allocation_hook = null;
+					fixture.session.faults.source_batch_commit_allocation_data = null;
+					fixture.session.faults.source_batch_frontier_allocation_hook = null;
+					fixture.session.faults.source_batch_frontier_allocation_data = null;
+					fixture.session.faults.source_batch_metadata_allocation_hook = null;
+					fixture.session.faults.source_batch_metadata_allocation_data = null;
 					assert(!fixture.session.active_admissions);
-					if fail_at <= allocation_count || path_error {
+					if fail_at <= allocation_count || path_error || frontier_exhausted {
 						assert(!ok && !accepted.ticket.owner_token && !accepted.frontier.count);
-						if fail_at <= allocation_count {
+						if fail_at <= allocation_count || frontier_exhausted {
 							assert(error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
 							assert(!error.path.count && !output_probe.allocations);
 						} else {
@@ -2839,7 +2898,9 @@ test_source_registration_failures :: (
 						}
 
 						assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, batch.description.accepted_frontier));
+						assert(fixture.session.provider.frontier_counter.next == frontier_counter.next);
 						assert(fixture.session.provider.documents.count == documents);
+						assert(fixture.session.provider.contexts.count == provider_contexts);
 						assert(Service.selected_document(Service.find_document(fixture.session.provider, batch.events[0].document)).source == source);
 						assert(source.references == source_references);
 						assert(fixture.session.operations.count == operations && fixture.session.registry.slots.count == slots.count && fixture.session.registry.free_slots.count == free_count);
@@ -2858,6 +2919,7 @@ test_source_registration_failures :: (
 						assert(ok && accepted.ticket.owner_token && output_probe.allocations == 1);
 						assert(Service.handle_is_live(*fixture.session.registry, accepted.ticket));
 						assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, accepted.frontier));
+						assert(fixture.session.provider.frontier_counter.next == frontier_counter.next + 1);
 						if event_kind == .OBSERVE_DISK {
 							state := Service.find_document(fixture.session.provider, batch.events[0].document);
 							assert(state.disk.source && Service.bytes_equal(state.disk.source.bytes, xx submitted));
@@ -2868,6 +2930,20 @@ test_source_registration_failures :: (
 							added := Service.find_document(fixture.session.provider, batch.events[1].document);
 							assert(!!added);
 							assert(Service.bytes_equal(Service.selected_document(added).source.bytes, xx "second :: 2;"));
+							assert(fixture.session.provider.contexts.count == provider_contexts + 1);
+							registration := batch.contexts[0];
+							admitted := Service.find_context(fixture.session.provider, registration.identity);
+							assert(!!admitted);
+							assert(Service.bytes_equal(admitted.identity, registration.identity) && admitted.identity.data != registration.identity.data);
+							assert(Service.bytes_equal(admitted.descriptor, registration.descriptor) && admitted.descriptor.data != registration.descriptor.data);
+							failure, borrowed := Service.validate_context_registration(registration.identity, registration.descriptor);
+							assert(failure == .NONE);
+							assert(Service.bytes_equal(admitted.paths.visible_filename.code_units, borrowed.paths.visible_filename.code_units));
+							assert(Service.bytes_equal(admitted.paths.visible_directory.code_units, borrowed.paths.visible_directory.code_units));
+							assert(Service.bytes_equal(admitted.paths.relative_base.code_units, borrowed.paths.relative_base.code_units));
+							assert(admitted.paths.visible_filename.code_units.data != borrowed.paths.visible_filename.code_units.data);
+							assert(admitted.paths.visible_directory.code_units.data != borrowed.paths.visible_directory.code_units.data);
+							assert(admitted.paths.relative_base.code_units.data != borrowed.paths.relative_base.code_units.data);
 						}
 
 						assert(fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + 1);
@@ -2912,7 +2988,14 @@ test_source_registration_failures :: (
 	}
 
 	print(
-		"X5 source ticket/update/list/provider backing array/object/reuse failures/provider commit/charges/generations/canonical identities (update = %, list = %, provider = %, arrays = %, states = %, revisions = %, pool = %, batch states = %, batch revisions = %, batch pair = %, batch sources = %, batch source bytes = %, batch source identities = %, batch edits = %, batch state list = %, batch reference list = %, batch context list = %, batch paths = %, path error = %, edit pair = %, empty source = %, event = %) \e[92mPASS\e[0m\n",
+		#run join(
+			"X5 source ticket/update/list/provider backing array/object/reuse failures/provider commit/charges/generations/canonical identities",
+			" (update = %, list = %, provider = %, arrays = %, states = %, revisions = %, pool = %,",
+			" batch states = %, batch revisions = %, batch pair = %, batch sources = %, batch source bytes = %,",
+			" batch source identities = %, batch edits = %, batch state list = %, batch reference list = %, batch context list = %,",
+			" batch paths = %, batch commit = %, batch frontier = %, batch metadata = %, frontier exhausted = %,",
+			" path error = %, edit pair = %, empty source = %, event = %) \e[92mPASS\e[0m\n"
+		),
 		update,
 		list,
 		provider,
@@ -2931,6 +3014,10 @@ test_source_registration_failures :: (
 		batch_reference_list,
 		batch_context_list,
 		batch_paths,
+		batch_commit,
+		batch_frontier,
+		batch_metadata,
+		frontier_exhausted,
 		path_error,
 		edit_pair,
 		empty_source,
@@ -2971,6 +3058,151 @@ test_source_batch_edit_failures :: () {
 	test_source_registration_failures(batch_edits = true, edit_pair = true, event_kind = .EDIT_OVERLAY);
 	test_source_registration_failures(batch_edits = true, empty_source = true, event_kind = .EDIT_OVERLAY);
 	print("X5 checked edit intermediate backing/size limits/overflow/empty result \e[92mPASS\e[0m\n");
+}
+
+test_source_batch_metadata_storage :: () {
+	probe := Output_Probe.{fail_at = 1};
+	allocator := open_output_probe(*probe);
+	pool := Service.try_source_batch_pool();
+	assert(!!pool);
+	pool.memblock_size = 64;
+	pool.oversized_size = 48;
+	pool.block_allocator = allocator;
+	pool.overwrite_memory = true;
+	text := "0123456789ABCDEFGHIJKLMN".([] u8);
+	assert(text.count == 24);
+	ok, bytes := Service.try_source_batch_metadata(pool, .[]);
+	assert(ok && !bytes.count && !probe.allocations);
+	ok, bytes = Service.try_source_batch_metadata(pool, text);
+	assert(!ok && !bytes.count && probe.allocations == 1 && !pool.current_memblock && !pool.unused_memblocks);
+	probe.fail_at = 0;
+	first_ok, first := Service.try_source_batch_metadata(pool, text);
+	second_ok, second := Service.try_source_batch_metadata(pool, text);
+	assert(first_ok && second_ok && probe.allocations == 2);
+	position := pool.current_pos;
+	remaining := pool.bytes_left;
+	probe.fail_at = 3;
+	ok, bytes = Service.try_source_batch_metadata(pool, text);
+	assert(!ok && !bytes.count && probe.allocations == 3 && pool.current_pos == position && pool.bytes_left == remaining);
+	assert(Service.bytes_equal(first, text) && Service.bytes_equal(second, text));
+	probe.fail_at = 0;
+	ok, bytes = Service.try_source_batch_metadata(pool, text);
+	assert(ok && Service.bytes_equal(bytes, text) && probe.allocations == 4);
+	reset(pool);
+	ok, bytes = Service.try_source_batch_metadata(pool, text);
+	assert(ok && Service.bytes_equal(bytes, text) && probe.allocations == 4);
+	large: [80] u8;
+	for * large {
+		it.* = xx it_index;
+	}
+
+	probe.fail_at = 5;
+	ok, bytes = Service.try_source_batch_metadata(pool, large);
+	assert(!ok && !bytes.count && !pool.out_of_band_allocations && probe.allocations == 5);
+	probe.fail_at = 0;
+	ok, bytes = Service.try_source_batch_metadata(pool, large);
+	assert(ok && Service.bytes_equal(bytes, large) && pool.out_of_band_allocations && probe.allocations == 6);
+	huge: [] u8;
+	huge.count = 0x7FFFFFFFFFFFFFFF;
+	ok, bytes = Service.try_source_batch_metadata(pool, huge);
+	assert(!ok && !bytes.count && probe.allocations == 6);
+	release(pool);
+	free(pool);
+	close_output_probe(*probe);
+	test_source_registration_failures(batch_metadata = true);
+	test_source_registration_failures(batch_metadata = true, batch_pair = true);
+	test_source_registration_failures(batch_metadata = true, event_kind = .EDIT_OVERLAY);
+	test_source_registration_failures(batch_metadata = true, event_kind = .OBSERVE_DISK);
+	print("X5 checked metadata pool initial/growth/reuse/oversized rejection/overflow \e[92mPASS\e[0m\n");
+}
+
+test_source_batch_frontier_storage :: () {
+	model := Service.Provider_Model.{
+		provider_namespace = xx "commit-provider",
+		session = xx "commit-session",
+	};
+
+	probe: Output_Probe;
+	allocator := open_output_probe(*probe);
+	for u64.[1, 0xFFFFFFFFFFFFFFFE] {
+		model.frontier_counter.next = it;
+		for 1..2 {
+			probe.fail_at = it;
+			probe.allocations = 0;
+			before := model.frontier_counter;
+			ok, identity, counter := Service.try_source_batch_frontier(*model, allocator);
+			assert(probe.allocations == 1 && model.frontier_counter.next == before.next);
+			if it == 1 {
+				assert(!ok && !identity.count && counter.next == before.next);
+			} else {
+				expected := Service.provider_frontier_id(model.provider_namespace, model.session, before.next,, temp);
+				assert(ok && counter.next == before.next + 1 && Service.bytes_equal(identity, expected));
+			}
+
+			free(identity.data,, allocator);
+			assert(!probe.backing.live_bytes);
+		}
+	}
+
+	model.frontier_counter.next = 0xFFFFFFFFFFFFFFFF;
+	probe.allocations = 0;
+	ok, identity, counter := Service.try_source_batch_frontier(*model, allocator);
+	assert(!ok && !identity.count && !probe.allocations && counter.next == model.frontier_counter.next);
+	close_output_probe(*probe);
+	test_source_registration_failures(batch_frontier = true);
+	test_source_registration_failures(batch_frontier = true, batch_pair = true);
+	test_source_registration_failures(batch_frontier = true, frontier_exhausted = true, batch_pair = true);
+	print("X5 checked final provider frontier/canonical identity/token rollback/exhaustion \e[92mPASS\e[0m\n");
+}
+
+test_source_batch_commit_storage :: () {
+	state: Service.Document_State;
+	documents: [1] *Service.Document_State = .[*state];
+	contexts: [1] Service.Admitted_Context;
+	contexts[0].identity = xx "commit-context";
+	model: Service.Provider_Model;
+	model.documents.data = documents.data;
+	model.documents.count = 1;
+	model.documents.allocated = 1;
+	model.contexts.data = contexts.data;
+	model.contexts.count = 1;
+	model.contexts.allocated = 1;
+	probe: Output_Probe;
+	allocator := open_output_probe(*probe);
+	for 1..3 {
+		probe.fail_at = it;
+		probe.allocations = 0;
+		ok, backing := Service.try_source_batch_commit(*model, 1, 1, allocator);
+		assert(probe.allocations == min(it, 2));
+		assert(model.documents.data == documents.data && model.documents.count == 1 && model.documents.allocated == 1);
+		assert(model.contexts.data == contexts.data && model.contexts.count == 1 && model.contexts.allocated == 1);
+		if it <= 2 {
+			assert(!ok && !backing.documents.count && !backing.contexts.count);
+		} else {
+			assert(ok && backing.documents.count >= 2 && backing.contexts.count >= 2);
+			assert(backing.documents[0] == *state && Service.bytes_equal(backing.contexts[0].identity, contexts[0].identity));
+		}
+
+		free(backing.documents.data,, allocator);
+		free(backing.contexts.data,, allocator);
+		assert(!probe.backing.live_bytes);
+	}
+
+	probe.allocations = 0;
+	ok, unused := Service.try_source_batch_commit(*model, 0, 0, allocator);
+	assert(ok && !unused.documents.count && !unused.contexts.count && !probe.allocations);
+	maximum :: 0x7FFFFFFFFFFFFFFF;
+	for s64.[-1, maximum, maximum - 1] {
+		ok, unused = Service.try_source_batch_commit(*model, it, 0, allocator);
+		assert(!ok && !unused.documents.count && !unused.contexts.count && !probe.allocations);
+		ok, unused = Service.try_source_batch_commit(*model, 0, it, allocator);
+		assert(!ok && !unused.documents.count && !unused.contexts.count && !probe.allocations);
+	}
+
+	close_output_probe(*probe);
+	test_source_registration_failures(batch_commit = true);
+	test_source_registration_failures(batch_commit = true, batch_pair = true);
+	print("X5 checked final provider array preparation/rollback/spare capacity/overflow \e[92mPASS\e[0m\n");
 }
 
 test_source_batch_reference_storage :: () {
@@ -3105,11 +3337,168 @@ test_source_batch_storage_admission :: (
 	retire := false,
 	batch_states := false,
 	batch_revisions := false,
-	shutdown_guard := false
+	batch_sources := false,
+	batch_source_bytes := false,
+	batch_source_identities := false,
+	batch_edits := false,
+	batch_metadata := false,
+	metadata_callback_at: s64 = 0,
+	sequential_edits := false,
+	later_event := false,
+	batch_pair := false,
+	shutdown_guard := false,
+	event_kind: Service.Event_Kind = .SET_OVERLAY,
+	batch_state_list := false,
+	batch_reference_list := false,
+	batch_context_list := false,
+	batch_paths := false,
+	new_document := false,
+	path_error := false,
+	batch_commit := false,
+	commit_callback_at: s64 = 0,
+	batch_frontier := false
 ) {
-	construction := batch_states || batch_revisions;
+	assert(
+		!batch_frontier
+		|| !batch_commit && !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes
+			&& !batch_source_identities && !batch_edits && !batch_metadata && !batch_state_list
+			&& !batch_reference_list && !batch_context_list && !batch_paths
+			&& !later_event
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(
+		!batch_commit
+		|| !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities
+			&& !batch_edits && !batch_metadata && !batch_state_list && !batch_reference_list && !batch_context_list
+			&& !batch_paths && (batch_pair || new_document) && !later_event
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(!path_error || batch_paths && !batch_pair && !later_event && event_kind == .OBSERVE_DISK);
+	assert(
+		!new_document
+		|| (batch_context_list || batch_commit || batch_frontier) && !batch_pair && !later_event
+			&& (batch_commit || batch_frontier || !receipt_retry && !retry_rejection)
+			&& event_kind == .SET_OVERLAY
+	);
+	assert(
+		!batch_paths
+		|| !batch_context_list && !batch_state_list && !batch_reference_list && !batch_states && !batch_revisions
+			&& !batch_sources && !batch_source_bytes && !batch_source_identities && !batch_edits && !batch_metadata
+			&& !later_event
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(
+		!batch_context_list
+		|| !batch_state_list && !batch_reference_list && !batch_states && !batch_revisions && !batch_sources
+			&& !batch_source_bytes && !batch_source_identities && !batch_edits && !batch_metadata
+			&& (batch_pair || new_document) && !later_event
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(!(batch_state_list && batch_reference_list));
+	assert(
+		!(batch_state_list || batch_reference_list)
+		|| !batch_states
+			&& !batch_revisions
+			&& !batch_sources
+			&& !batch_source_bytes
+			&& !batch_source_identities
+			&& !batch_edits
+			&& !batch_metadata
+			&& !later_event
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	construction := batch_states
+		|| batch_revisions
+		|| batch_sources
+		|| batch_source_bytes
+		|| batch_source_identities
+		|| batch_edits
+		|| batch_metadata
+		|| batch_state_list
+		|| batch_reference_list
+		|| batch_context_list
+		|| batch_paths
+		|| batch_commit
+		|| batch_frontier;
 	allocations_per_attempt := ifx construction then 1 else 2;
+	if path_error || batch_commit {
+		allocations_per_attempt = 2;
+	}
+
+	if batch_metadata {
+		allocations_per_attempt = ifx event_kind == .OBSERVE_DISK
+			then 4
+			else 3;
+		if later_event {
+			allocations_per_attempt += 10;
+		}
+	}
+
+	if batch_pair && !batch_state_list && !batch_reference_list && !batch_context_list && !batch_paths && !batch_frontier || sequential_edits {
+		allocations_per_attempt = 2;
+	}
+
+	assert(!metadata_callback_at || batch_metadata && metadata_callback_at >= 1 && metadata_callback_at <= allocations_per_attempt);
+	assert(!commit_callback_at || batch_commit && commit_callback_at >= 1 && commit_callback_at <= allocations_per_attempt);
+	callback_at := ifx commit_callback_at
+		then commit_callback_at
+		else ifx metadata_callback_at
+			then metadata_callback_at
+			else allocations_per_attempt;
+
+	assert(!sequential_edits || batch_edits);
+	assert(
+		!batch_metadata
+		|| !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities
+			&& !batch_edits && !batch_pair
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(
+		!later_event
+		|| (batch_edits || batch_metadata) && !sequential_edits
+			&& (!retry_rejection || batch_metadata)
+			&& (!receipt_retry || batch_metadata)
+			&& (event_kind == .EDIT_OVERLAY || batch_metadata && (event_kind == .SET_OVERLAY || event_kind == .OBSERVE_DISK))
+	);
+	assert(
+		!batch_pair
+		|| (
+			batch_sources || batch_source_bytes || batch_source_identities
+			|| batch_state_list || batch_reference_list || batch_context_list || batch_paths || batch_commit || batch_frontier
+		) && (
+			batch_context_list
+			|| batch_commit && (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+			|| batch_frontier && (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+			|| !receipt_retry && !retry_rejection
+		)
+	);
+	assert(
+		event_kind == .SET_OVERLAY
+		|| (batch_sources || batch_source_bytes || batch_source_identities || batch_metadata)
+			&& (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+		|| batch_edits && event_kind == .EDIT_OVERLAY
+		|| (batch_state_list || batch_reference_list) && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+		|| batch_context_list && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+		|| batch_paths && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+		|| (batch_commit || batch_frontier) && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(
+		!batch_edits
+		|| !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities
+			&& !batch_pair && event_kind == .EDIT_OVERLAY
+	);
 	assert(!batch_states || !batch_revisions);
+	assert(!batch_sources || !batch_states && !batch_revisions);
+	assert(
+		!batch_source_identities
+		|| !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(
+		!batch_source_bytes
+		|| !batch_states && !batch_revisions && !batch_sources
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
 	assert(!shutdown_guard || shutdown);
 	assert(!negative_control || replace || shutdown || retire);
 	assert(!shutdown || !replace);
@@ -3117,22 +3506,33 @@ test_source_batch_storage_admission :: (
 	assert(!list || receipt_retry);
 	assert(!receipt_retry || !replace && !shutdown);
 	assert(!retry_rejection || !replace && !shutdown);
-	for 0..(ifx receipt_retry then allocations_per_attempt * 2 + 1 else allocations_per_attempt + 1) {
+	for 0..(ifx receipt_retry && !path_error then allocations_per_attempt * 2 + 1 else allocations_per_attempt + 1) {
 		fail_at := it;
 		if (
 			replace && fail_at && (!construction || negative_control)
-			|| (shutdown || retire) && fail_at < allocations_per_attempt && fail_at
+			|| (replace || shutdown || retire) && fail_at < callback_at && fail_at
 		) {
 			continue;
 		}
 
 
-		if shutdown && negative_control && fail_at != allocations_per_attempt {
+		if shutdown && negative_control && fail_at != callback_at {
 			continue;
 		}
 
 
-		if retry_rejection && (fail_at < (ifx receipt_retry then allocations_per_attempt + 1 else 1) || fail_at > (ifx receipt_retry then allocations_per_attempt * 2 else allocations_per_attempt)) {
+		if (retry_rejection
+			&& (fail_at < (
+				ifx receipt_retry && !path_error
+					then allocations_per_attempt + 1
+					else 1
+				) || fail_at > (
+					ifx receipt_retry && !path_error
+						then allocations_per_attempt * 2
+						else allocations_per_attempt
+				)
+			)
+		) {
 			continue;
 		}
 
@@ -3163,10 +3563,32 @@ test_source_batch_storage_admission :: (
 		}
 
 		batch := Service.begin_batch(fixture.host);
-		assert(Service.set_overlay(*batch, "a.jai", "answer :: 77;"));
+		if later_event {
+			assert(Service.set_overlay(*batch, "added.jai", "second :: 2;"));
+		}
+
+		assert(Service.set_overlay(*batch, ifx new_document then "added.jai" else "a.jai", "answer :: 77;"));
+		if batch_pair {
+			assert(Service.set_overlay(*batch, "added.jai", "second :: 2;"));
+		}
+
+		expected_world := "answer :: 77;";
+		original_source: [] u8;
+		if new_document {
+			retained_ok, retained := Service.read_world(fixture.host.service, test.drain.world);
+			assert(retained_ok && retained.members.count == 1);
+			original_source = retained.members[0].source.bytes;
+		}
+
+		disk_revision: [] u8;
+		disk_source: *Service.Source_Backing;
+		if event_kind == .OBSERVE_DISK {
+			disk_revision = Service.source_revision_of(xx "answer :: 77;");
+		}
+
 		probe := Registration_Probe.{
 			fail_at = fail_at,
-			job_at = allocations_per_attempt,
+			job_at = callback_at,
 			direct = direct,
 			track_source = replace || shutdown || retire,
 			job = .{
@@ -3200,13 +3622,95 @@ test_source_batch_storage_admission :: (
 		before: Service.Resource_Ledger;
 		storage: [..] *Pool;
 		identities: Service.Session_Identities;
+		frontier_counter: Service.Identity_Counter;
+		edits: [2] Service.Range_Edit;
+		documents: s64;
+		contexts: s64;
+		event_index := ifx later_event then 1;
 		Service.with_lock(
 			*fixture.session.gate,
 			#code {
 				before = fixture.session.ledger;
 				storage = fixture.session.provider.batch_storage;
 				identities = fixture.session.identities;
-				if batch_revisions {
+				frontier_counter = fixture.session.provider.frontier_counter;
+				documents = fixture.session.provider.documents.count;
+				contexts = fixture.session.provider.contexts.count;
+				event := *batch.events[event_index];
+				event.kind = event_kind;
+				if event_kind == .EDIT_OVERLAY {
+					source := Service.selected_document(Service.find_document(fixture.session.provider, event.document)).source;
+					assert(!!source);
+					edits[0] = .{
+						end_byte = xx source.bytes.count,
+						replacement = xx (ifx sequential_edits then "intermediate :: 1;" else "answer :: 77;"),
+					};
+
+					if sequential_edits {
+						edits[1] = .{
+							end_byte = xx edits[0].replacement.count,
+							replacement = xx "answer :: 77;",
+						};
+					}
+
+					event.base_source_revision = source.revision;
+					event.edits = edits;
+					event.edits.count = ifx sequential_edits then 2 else 1;
+				} else if event_kind == .OBSERVE_DISK {
+					state := Service.find_document(fixture.session.provider, event.document);
+					assert(state && state.has_overlay && state.overlay.source);
+					expected_world = state.overlay.source.bytes.(string);
+					disk_source = state.disk.source;
+					event.disk = .{
+						kind = .PRESENT,
+						source = event.source,
+						source_revision = disk_revision,
+						syntax_context = event.source_context,
+						provenance = .{
+							provider_identity = fixture.session.provider.provider_namespace,
+							observation_token = xx "source-callback-test",
+						},
+					};
+				}
+
+				if path_error {
+					event.disk.syntax_context = xx "unknown-context";
+				}
+
+				if batch_frontier {
+					fixture.session.faults.source_batch_frontier_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_frontier_allocation_data = *probe;
+				} else if batch_commit {
+					fixture.session.faults.source_batch_commit_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_commit_allocation_data = *probe;
+				} else if batch_paths {
+					fixture.session.faults.source_batch_path_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_path_allocation_data = *probe;
+				} else if batch_context_list {
+					fixture.session.faults.source_batch_context_list_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_context_list_allocation_data = *probe;
+				} else if batch_state_list {
+					fixture.session.faults.source_batch_state_list_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_state_list_allocation_data = *probe;
+				} else if batch_reference_list {
+					fixture.session.faults.source_batch_reference_list_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_reference_list_allocation_data = *probe;
+				} else if batch_metadata {
+					fixture.session.faults.source_batch_metadata_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_metadata_allocation_data = *probe;
+				} else if batch_edits {
+					fixture.session.faults.source_batch_edit_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_edit_allocation_data = *probe;
+				} else if batch_source_identities {
+					fixture.session.faults.source_batch_source_identity_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_source_identity_allocation_data = *probe;
+				} else if batch_source_bytes {
+					fixture.session.faults.source_batch_source_bytes_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_source_bytes_allocation_data = *probe;
+				} else if batch_sources {
+					fixture.session.faults.source_batch_source_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_source_allocation_data = *probe;
+				} else if batch_revisions {
 					fixture.session.faults.source_batch_revisions_allocation_hook = registration_allocation_probe;
 					fixture.session.faults.source_batch_revisions_allocation_data = *probe;
 				} else if batch_states {
@@ -3232,8 +3736,8 @@ test_source_batch_storage_admission :: (
 			,, allocator
 		);
 
-		allocation_count := allocations_per_attempt * (ifx receipt_retry then 2 else 1);
-		expected_success := (!replace && !shutdown && !retire && (!fail_at || fail_at > allocation_count)) || negative_control && replace || retry_rejection;
+		allocation_count := allocations_per_attempt * (ifx receipt_retry && !path_error then 2 else 1);
+		expected_success := !path_error && ((!replace && !shutdown && !retire && (!fail_at || fail_at > allocation_count)) || negative_control && replace || retry_rejection);
 		assert(ok == expected_success, "\e[91mBatch pool-list allocation/revalidation oracle failed.\e[0m");
 		expected_allocations := ifx retry_rejection
 			then fail_at + allocations_per_attempt
@@ -3241,7 +3745,7 @@ test_source_batch_storage_admission :: (
 				then fail_at
 				else allocation_count;
 		assert(probe.allocations == expected_allocations);
-		if receipt_retry && (!fail_at || fail_at > allocations_per_attempt) {
+		if receipt_retry && (!fail_at || fail_at > allocations_per_attempt || path_error && retry_rejection) {
 			assert(output_probe.gate_progress && output_probe.job.ok);
 			assert(output_probe.allocations == (ifx ok then 2 else 1));
 		}
@@ -3255,11 +3759,33 @@ test_source_batch_storage_admission :: (
 			#code {
 				fixture.session.faults.source_batch_storage_allocation_hook = null;
 				fixture.session.faults.source_batch_storage_allocation_data = null;
+				fixture.session.faults.source_batch_commit_allocation_hook = null;
+				fixture.session.faults.source_batch_commit_allocation_data = null;
+				fixture.session.faults.source_batch_frontier_allocation_hook = null;
+				fixture.session.faults.source_batch_frontier_allocation_data = null;
+				fixture.session.faults.source_batch_context_list_allocation_hook = null;
+				fixture.session.faults.source_batch_context_list_allocation_data = null;
+				fixture.session.faults.source_batch_path_allocation_hook = null;
+				fixture.session.faults.source_batch_path_allocation_data = null;
+				fixture.session.faults.source_batch_state_list_allocation_hook = null;
+				fixture.session.faults.source_batch_state_list_allocation_data = null;
+				fixture.session.faults.source_batch_reference_list_allocation_hook = null;
+				fixture.session.faults.source_batch_reference_list_allocation_data = null;
 				fixture.session.faults.source_batch_state_allocation_hook = null;
 				fixture.session.faults.source_batch_state_allocation_data = null;
 				fixture.session.faults.source_batch_revisions_allocation_hook = null;
 				fixture.session.faults.source_batch_revisions_allocation_data = null;
+				fixture.session.faults.source_batch_source_allocation_hook = null;
+				fixture.session.faults.source_batch_source_allocation_data = null;
+				fixture.session.faults.source_batch_source_bytes_allocation_hook = null;
+				fixture.session.faults.source_batch_source_bytes_allocation_data = null;
+				fixture.session.faults.source_batch_source_identity_allocation_hook = null;
+				fixture.session.faults.source_batch_source_identity_allocation_data = null;
 				fixture.session.faults.allow_stale_source_batch_storage = false;
+				fixture.session.faults.source_batch_edit_allocation_hook = null;
+				fixture.session.faults.source_batch_edit_allocation_data = null;
+				fixture.session.faults.source_batch_metadata_allocation_hook = null;
+				fixture.session.faults.source_batch_metadata_allocation_data = null;
 				fixture.session.faults.retry_failed_source_batch_storage = false;
 				fixture.session.faults.prefer_failed_source_batch_storage = false;
 				fixture.session.faults.allow_active_session_release = false;
@@ -3270,18 +3796,91 @@ test_source_batch_storage_admission :: (
 					== before.live[Service.Limit_Name.LIVE_HANDLES] + output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + xx ok + xx retire
 				);
 				assert(fixture.session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
+				if batch_pair || later_event || new_document {
+					assert(fixture.session.provider.documents.count == documents + xx ok);
+					assert(fixture.session.provider.contexts.count == contexts + xx ok);
+					added := Service.find_document(fixture.session.provider, batch.events[ifx new_document then event_index else 1 - event_index].document);
+					if ok {
+						assert(added && added.has_overlay && Service.bytes_equal(added.overlay.source.bytes, xx (ifx new_document then expected_world else "second :: 2;")));
+						if batch_metadata {
+							added_event := batch.events[1 - event_index];
+							assert(Service.bytes_equal(added.document, added_event.document) && added.document.data != added_event.document.data);
+							assert(Service.bytes_equal(added.binding.document, added_event.binding.document));
+							assert(added.binding.absolute_path.encoding == added_event.binding.absolute_path.encoding);
+							assert(Service.bytes_equal(added.binding.absolute_path.code_units, added_event.binding.absolute_path.code_units));
+							assert(added.binding.provider_policy_version == added_event.binding.provider_policy_version);
+							assert(added.binding.document.data == added.document.data);
+							assert(added.binding.absolute_path.code_units.data != added_event.binding.absolute_path.code_units.data);
+							assert(Service.bytes_equal(added.overlay.installation_revision, added_event.resulting_provider_revision));
+							assert(added.overlay.installation_revision.data != added_event.resulting_provider_revision.data);
+							assert(Service.bytes_equal(added.overlay.syntax_context, added_event.source_context));
+							assert(added.overlay.syntax_context.data != added_event.source_context.data);
+							assert(Service.bytes_equal(added.provider_revision, added_event.resulting_provider_revision));
+							assert(added.provider_revision.data != added_event.resulting_provider_revision.data);
+							assert(added.provider_revision.data != added.overlay.installation_revision.data);
+							assert(batch.contexts.count == 1);
+							registration := batch.contexts[0];
+							admitted := Service.find_context(fixture.session.provider, registration.identity);
+							assert(!!admitted);
+							assert(Service.bytes_equal(admitted.identity, registration.identity) && admitted.identity.data != registration.identity.data);
+							assert(Service.bytes_equal(admitted.descriptor, registration.descriptor) && admitted.descriptor.data != registration.descriptor.data);
+							failure, borrowed := Service.validate_context_registration(registration.identity, registration.descriptor);
+							assert(failure == .NONE);
+							assert(Service.bytes_equal(admitted.paths.visible_filename.code_units, borrowed.paths.visible_filename.code_units));
+							assert(Service.bytes_equal(admitted.paths.visible_directory.code_units, borrowed.paths.visible_directory.code_units));
+							assert(Service.bytes_equal(admitted.paths.relative_base.code_units, borrowed.paths.relative_base.code_units));
+							assert(admitted.paths.visible_filename.code_units.data != borrowed.paths.visible_filename.code_units.data);
+							assert(admitted.paths.visible_directory.code_units.data != borrowed.paths.visible_directory.code_units.data);
+							assert(admitted.paths.relative_base.code_units.data != borrowed.paths.relative_base.code_units.data);
+						}
+
+					} else {
+						assert(!added);
+					}
+				}
+
 				if !ok && !replace {
 					assert(fixture.session.provider.batch_storage.data == storage.data && fixture.session.provider.batch_storage.count == storage.count);
 					assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, batch.description.accepted_frontier));
-					assert(fixture.session.identities.operation_counter.next == identities.operation_counter.next + xx (shutdown || retire) + xx output_probe.job.competing_tickets.count);
+					assert(
+						fixture.session.identities.operation_counter.next
+							== identities.operation_counter.next + xx (shutdown || retire) + xx output_probe.job.competing_tickets.count
+					);
 					if !shutdown && !retire {
 						assert(fixture.session.ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] == before.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS]);
 					}
 				}
 
-				if replace {
+				if batch_frontier && !retire {
+					assert(fixture.session.provider.frontier_counter.next == frontier_counter.next + xx (ok || replace));
+				}
+
+				if replace && !new_document {
 					state := Service.find_document(fixture.session.provider, Service.harness_document(fixture.host, "a.jai"));
-					assert(state && state.has_overlay && Service.bytes_equal(state.overlay.source.bytes, xx (ifx negative_control then "answer :: 77;" else "answer :: 99;")));
+					assert(state && state.has_overlay && Service.bytes_equal(state.overlay.source.bytes, xx (ifx negative_control && !path_error then expected_world else "answer :: 99;")));
+				}
+
+				if new_document && !retire {
+					state := Service.find_document(fixture.session.provider, Service.harness_document(fixture.host, "a.jai"));
+					assert(
+						state && state.has_overlay
+						&& Service.bytes_equal(state.overlay.source.bytes, ifx replace && !negative_control then xx "answer :: 99;" else original_source)
+					);
+				}
+
+				if event_kind == .OBSERVE_DISK {
+					state := Service.find_document(fixture.session.provider, batch.events[event_index].document);
+					assert(!!state);
+					if retire {
+						assert(!state.has_overlay && !state.overlay.source && !state.disk.source);
+					} else if ok {
+						assert(state.has_overlay);
+						assert(state.disk.kind == .PRESENT && state.disk.source);
+						assert(Service.bytes_equal(state.disk.source.bytes, xx "answer :: 77;"));
+						assert(Service.bytes_equal(state.disk.source.revision, disk_revision));
+					} else {
+						assert(state.has_overlay && state.disk.source == disk_source);
+					}
 				}
 			}
 		);
@@ -3292,7 +3891,29 @@ test_source_batch_storage_admission :: (
 			Service.free_observation(*observation);
 			world := world_of(fixture, accepted.ticket);
 			read_ok, description := Service.read_world(fixture.host.service, world);
-			assert(read_ok && description.members.count == 1 && Service.bytes_equal(description.members[0].source.bytes, xx "answer :: 77;"));
+			assert(read_ok);
+			if batch_pair || later_event {
+				assert(description.members.count == 2);
+				first_found: bool;
+				second_found: bool;
+				for description.members {
+					if Service.bytes_equal(it.document, batch.events[event_index].document) {
+						assert(Service.bytes_equal(it.source.bytes, xx expected_world));
+						first_found = true;
+					} else if Service.bytes_equal(it.document, batch.events[1 - event_index].document) {
+						assert(Service.bytes_equal(it.source.bytes, xx "second :: 2;"));
+						second_found = true;
+					}
+				}
+
+				assert(first_found && second_found);
+			} else {
+				assert(description.members.count == 1 && Service.bytes_equal(description.members[0].source.bytes, xx expected_world));
+				if new_document {
+					assert(Service.bytes_equal(description.members[0].document, batch.events[event_index].document));
+				}
+			}
+
 			release(fixture, world);
 			release(fixture, accepted.ticket);
 		} else {
@@ -3309,14 +3930,26 @@ test_source_batch_storage_admission :: (
 				} else {
 					assert(error.code == .SERVICE_CLOSED);
 				}
-			} else if replace {
+			} else if replace && !negative_control {
 				assert(error.code == .BASE_MISMATCH && error.scope == .FRONTIER);
+			} else if path_error && (!fail_at || fail_at > allocation_count || retry_rejection) {
+				assert(error.code == .INVALID_ARGUMENT && error.rule == .INCONSISTENT_BINDING);
+				assert(output_probe.allocations == 1 && error.path.count == 4);
+				assert(error.path[0].kind == .FIELD && error.path[0].name == "events");
+				assert(error.path[1].kind == .ELEMENT && !error.path[1].index);
+				assert(error.path[2].kind == .FIELD && error.path[2].name == "disk");
+				assert(error.path[3].kind == .FIELD && error.path[3].name == "context");
 			} else {
 				assert(error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
 			}
 		}
 
 		assert(Service.read_world(fixture.host.service, test.drain.world));
+		if event_kind == .OBSERVE_DISK {
+			read_ok, description := Service.read_world(fixture.host.service, test.drain.world);
+			assert(read_ok && description.members.count == 1 && Service.bytes_equal(description.members[0].source.bytes, xx expected_world));
+		}
+
 		if retire {
 			observation := await(fixture, probe.job.coordinator_shutdown);
 			assert(observation.kind == .SHUTDOWN);
@@ -3341,6 +3974,7 @@ test_source_batch_storage_admission :: (
 		free(error.path.data,, allocator);
 		free(error.document.data,, allocator);
 		close_output_probe(*output_probe);
+		free(disk_revision.data);
 		if retire {
 			for test.held {
 				release(fixture, it);
@@ -3355,7 +3989,14 @@ test_source_batch_storage_admission :: (
 	}
 
 	print(
-		"X5 checked batch transfer/construction allocation rejection/frontier reentry (direct = %, replace = %, negative control = %, shutdown = %, receipt retry = %, list = %, rejection control = %, retire = %, batch states = %, batch revisions = %, shutdown guard = %) \e[92mPASS\e[0m\n",
+		#run join(
+			"X5 checked batch transfer/construction allocation rejection/frontier reentry",
+			" (direct = %, replace = %, negative control = %, shutdown = %, receipt retry = %, list = %, rejection control = %, retire = %,",
+			" batch states = %, batch revisions = %, batch sources = %, batch source bytes = %, batch source identities = %,",
+			" batch edits = %, batch metadata = %, metadata callback at = %, sequential edits = %, later event = %, batch pair = %,",
+			" shutdown guard = %, event = %, state list = %, reference list = %, context list = %, path reservation = %,",
+			" new document = %, path copy = %, commit arrays = %, commit callback at = %, prepared frontier = %) \e[92mPASS\e[0m\n"
+		),
 		direct,
 		replace,
 		negative_control,
@@ -3366,13 +4007,83 @@ test_source_batch_storage_admission :: (
 		retire,
 		batch_states,
 		batch_revisions,
-		shutdown_guard
+		batch_sources,
+		batch_source_bytes,
+		batch_source_identities,
+		batch_edits,
+		batch_metadata,
+		metadata_callback_at,
+		sequential_edits,
+		later_event,
+		batch_pair,
+		shutdown_guard,
+		event_kind,
+		batch_state_list,
+		batch_reference_list,
+		batch_context_list,
+		batch_paths,
+		new_document,
+		path_error,
+		batch_commit,
+		commit_callback_at,
+		batch_frontier
 	);
 }
 
-test_source_batch_construction_reference_rollback :: () {
+test_source_batch_construction_reference_rollback :: (
+	sources := false,
+	source_bytes := false,
+	source_identities := false,
+	edits := false,
+	sequential_edits := false,
+	metadata := false,
+	event_kind: Service.Event_Kind = .SET_OVERLAY,
+	later_event := false,
+	state_list := false,
+	reference_list := false,
+	context_list := false,
+	paths := false,
+	path_error := false,
+	commit := false,
+	commit_callback_at: s64 = 1,
+	new_document := false
+) {
+	assert(
+		!commit
+		|| !sources && !source_bytes && !source_identities && !edits && !sequential_edits && !metadata
+			&& !state_list && !reference_list && !context_list && !paths && !later_event
+	);
+	assert(commit_callback_at >= 1 && commit_callback_at <= 2);
+	assert(!new_document || commit && event_kind == .SET_OVERLAY);
+	assert(!path_error || paths && event_kind == .OBSERVE_DISK);
+	list_construction_compatible := !sources
+		&& !source_bytes
+		&& !source_identities
+		&& !edits
+		&& !metadata
+		&& !later_event;
+	assert(
+		!paths
+		|| !context_list && !state_list && !reference_list && list_construction_compatible
+			&& (event_kind == .SET_OVERLAY || path_error)
+	);
+	assert(!context_list || !state_list && !reference_list && list_construction_compatible && event_kind == .SET_OVERLAY);
+	assert(!(state_list && reference_list));
+	assert(!(state_list || reference_list) || list_construction_compatible && event_kind == .SET_OVERLAY);
+	assert(!source_bytes || !sources);
+	assert(!source_identities || !sources && !source_bytes);
+	assert(!edits || !sources && !source_bytes && !source_identities);
+	assert(!sequential_edits || edits);
+	assert(!metadata || !sources && !source_bytes && !source_identities && !edits);
+	assert(event_kind == .SET_OVERLAY || (metadata || commit) && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK) || path_error);
+	assert(!later_event || metadata);
 	for bool.[false, true] {
 		revisions := it;
+		if (sources || source_bytes || source_identities || edits || metadata || state_list || reference_list || context_list || paths || commit) && revisions {
+			continue;
+		}
+
+
 		for bool.[false, true] {
 			direct := it;
 			for bool.[false, true] {
@@ -3383,22 +4094,138 @@ test_source_batch_construction_reference_rollback :: () {
 						list = it == 1,
 						reject_receipt = it == 2,
 						reference_control = reference_control,
-						batch_states = !revisions,
-						batch_revisions = revisions
+						batch_states = !revisions && list_construction_compatible && !state_list && !reference_list && !context_list && !paths && !commit,
+						batch_revisions = revisions,
+						batch_sources = sources,
+						batch_source_bytes = source_bytes,
+						batch_source_identities = source_identities,
+						batch_edits = edits,
+						sequential_edits = sequential_edits,
+						batch_metadata = metadata,
+						event_kind = event_kind,
+						later_event = later_event,
+						batch_state_list = state_list,
+						batch_reference_list = reference_list,
+						batch_context_list = context_list,
+						batch_paths = paths,
+						path_error = path_error,
+						batch_commit = commit,
+						commit_callback_at = commit_callback_at,
+						new_document = new_document
 					);
 				}
 			}
 		}
 	}
 
-	print("X5 state/revision retained-sentinel source-reference rollback/controls \e[92mPASS\e[0m\n");
+	print(
+		#run join(
+			"X5 construction retained-sentinel source-reference rollback/controls",
+			" (sources = %, source bytes = %, source identities = %, edits = %, sequential edits = %, metadata = %,",
+			" event = %, later event = %, state list = %, reference list = %, context list = %, path reservation = %, path copy = %,",
+			" commit arrays = %, commit callback at = %, new document = %)",
+			" \e[92mPASS\e[0m\n"
+		),
+		sources,
+		source_bytes,
+		source_identities,
+		edits,
+		sequential_edits,
+		metadata,
+		event_kind,
+		later_event,
+		state_list,
+		reference_list,
+		context_list,
+		paths,
+		path_error,
+		commit,
+		commit_callback_at,
+		new_document
+	);
 }
 
-test_source_batch_construction_receipt_retry :: (revisions := false) {
+test_source_batch_construction_receipt_retry :: (
+	revisions := false,
+	sources := false,
+	source_bytes := false,
+	source_identities := false,
+	edits := false,
+	sequential_edits := false,
+	state_list := false,
+	reference_list := false,
+	context_list := false,
+	paths := false,
+	path_error := false,
+	commit := false,
+	commit_callback_at: s64 = 0,
+	event_kind: Service.Event_Kind = .SET_OVERLAY,
+	new_document := false,
+	frontier := false,
+	batch_pair := false
+) {
+	assert(
+		!frontier
+		|| !commit && !revisions && !sources && !source_bytes && !source_identities && !edits && !sequential_edits
+			&& !state_list && !reference_list && !context_list && !paths
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(
+		!commit
+		|| !revisions && !sources && !source_bytes && !source_identities && !edits && !sequential_edits
+			&& !state_list && !reference_list && !context_list && !paths
+	);
+	assert(!commit_callback_at || commit && commit_callback_at >= 1 && commit_callback_at <= 2);
+	assert(!batch_pair || frontier && !new_document);
+	assert(event_kind == .SET_OVERLAY || (commit || frontier) && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK));
+	assert(!new_document || (commit || frontier) && event_kind == .SET_OVERLAY);
+	assert(!path_error || paths);
+	assert(!paths || !context_list && !state_list && !reference_list && !revisions && !sources && !source_bytes && !source_identities && !edits);
+	assert(!context_list || !state_list && !reference_list && !revisions && !sources && !source_bytes && !source_identities && !edits);
+	assert(!(state_list && reference_list));
+	assert(!(state_list || reference_list) || !revisions && !sources && !source_bytes && !source_identities && !edits);
+	assert(!sources || !revisions);
+	assert(!source_bytes || !sources && !revisions);
+	assert(!source_identities || !sources && !revisions && !source_bytes);
+	assert(!edits || !sources && !revisions && !source_bytes && !source_identities);
+	assert(!sequential_edits || edits);
+	batch_states := !revisions
+		&& !sources
+		&& !source_bytes
+		&& !source_identities
+		&& !edits
+		&& !state_list
+		&& !reference_list
+		&& !context_list
+		&& !paths
+		&& !commit
+		&& !frontier;
+	paired_batch := batch_pair || context_list || commit && !new_document;
+	batch_event_kind := ifx path_error
+		then .OBSERVE_DISK
+		else ifx edits
+			then .EDIT_OVERLAY
+			else event_kind;
 	test_source_batch_storage_admission(
 		retry_rejection = true,
-		batch_states = !revisions,
-		batch_revisions = revisions
+		batch_states = batch_states,
+		batch_revisions = revisions,
+		batch_sources = sources,
+		batch_source_bytes = source_bytes,
+		batch_source_identities = source_identities,
+		batch_edits = edits,
+		sequential_edits = sequential_edits,
+		event_kind = batch_event_kind,
+		batch_state_list = state_list,
+		batch_reference_list = reference_list,
+		batch_context_list = context_list,
+		batch_pair = paired_batch,
+		batch_paths = paths,
+		path_error = path_error,
+		batch_commit = commit,
+		commit_callback_at = commit_callback_at,
+		new_document = new_document,
+		batch_frontier = frontier
 	);
 
 	for bool.[false, true] {
@@ -3411,15 +4238,147 @@ test_source_batch_construction_receipt_retry :: (revisions := false) {
 					receipt_retry = true,
 					list = list,
 					retry_rejection = it,
-					batch_states = !revisions,
-					batch_revisions = revisions
+					batch_states = batch_states,
+					batch_revisions = revisions,
+					batch_sources = sources,
+					batch_source_bytes = source_bytes,
+					batch_source_identities = source_identities,
+					batch_edits = edits,
+					sequential_edits = sequential_edits,
+					event_kind = batch_event_kind,
+					batch_state_list = state_list,
+					batch_reference_list = reference_list,
+					batch_context_list = context_list,
+					batch_pair = paired_batch,
+					batch_paths = paths,
+					path_error = path_error,
+					batch_commit = commit,
+					commit_callback_at = commit_callback_at,
+					new_document = new_document,
+					batch_frontier = frontier
 				);
 			}
 		}
 	}
 }
 
-test_source_batch_construction_callbacks :: (revisions := false) {
+test_source_batch_construction_callbacks :: (
+	revisions := false,
+	sources := false,
+	source_bytes := false,
+	source_identities := false,
+	edits := false,
+	metadata := false,
+	metadata_callback_at: s64 = 0,
+	sequential_edits := false,
+	later_event := false,
+	batch_pair := false,
+	event_kind: Service.Event_Kind = .SET_OVERLAY,
+	state_list := false,
+	reference_list := false,
+	context_list := false,
+	paths := false,
+	new_document := false,
+	path_error := false,
+	commit := false,
+	commit_callback_at: s64 = 0,
+	frontier := false
+) {
+	assert(
+		!frontier
+		|| !commit && !revisions && !sources && !source_bytes && !source_identities && !edits && !metadata
+			&& !state_list && !reference_list && !context_list && !paths
+			&& !later_event
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(
+		!commit
+		|| !revisions && !sources && !source_bytes && !source_identities && !edits && !metadata
+			&& !state_list && !reference_list && !context_list && !paths
+			&& (batch_pair || new_document) && !later_event
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(!commit_callback_at || commit && commit_callback_at >= 1 && commit_callback_at <= 2);
+	assert(!path_error || paths && !batch_pair && !later_event && event_kind == .OBSERVE_DISK);
+	assert(!new_document || (context_list || commit || frontier) && !batch_pair && !later_event && event_kind == .SET_OVERLAY);
+	assert(
+		!paths
+		|| !context_list && !state_list && !reference_list && !revisions && !sources && !source_bytes
+			&& !source_identities && !edits && !metadata && !later_event
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(
+		!context_list
+		|| !state_list && !reference_list && !revisions && !sources && !source_bytes && !source_identities
+			&& !edits && !metadata && (batch_pair || new_document) && !later_event
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(!(state_list && reference_list));
+	assert(
+		!(state_list || reference_list)
+		|| !revisions && !sources && !source_bytes && !source_identities && !edits && !metadata
+			&& !later_event
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(!sources || !revisions);
+	assert(
+		!metadata
+		|| !sources && !revisions && !source_bytes && !source_identities && !edits && !batch_pair
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(
+		!metadata_callback_at
+		|| metadata && metadata_callback_at >= 1
+			&& metadata_callback_at <= (ifx later_event then 10 else 0) + (ifx event_kind == .OBSERVE_DISK then 4 else 3)
+	);
+	assert(!sequential_edits || edits);
+	assert(
+		!later_event
+		|| (edits || metadata) && !sequential_edits
+			&& (event_kind == .EDIT_OVERLAY || metadata && (event_kind == .SET_OVERLAY || event_kind == .OBSERVE_DISK))
+	);
+	assert(!edits || !sources && !revisions && !source_bytes && !source_identities && !batch_pair && event_kind == .EDIT_OVERLAY);
+	assert(
+		!source_identities
+		|| !sources && !revisions && !source_bytes
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	assert(
+		!source_bytes
+		|| !sources && !revisions
+			&& (event_kind == .SET_OVERLAY || event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+	);
+	if (event_kind == .OBSERVE_DISK
+		|| batch_pair
+		|| source_bytes || source_identities
+		|| edits || metadata
+		|| state_list
+		|| reference_list || context_list
+		|| paths || commit || frontier
+	) {
+		test_source_batch_storage_admission(
+			batch_sources = sources,
+			batch_source_bytes = source_bytes,
+			batch_source_identities = source_identities,
+			batch_edits = edits,
+			batch_metadata = metadata,
+			metadata_callback_at = metadata_callback_at,
+			sequential_edits = sequential_edits,
+			later_event = later_event,
+			batch_pair = batch_pair,
+			event_kind = event_kind,
+			batch_state_list = state_list,
+			batch_reference_list = reference_list,
+			batch_context_list = context_list,
+			batch_paths = paths,
+			new_document = new_document,
+			path_error = path_error,
+			batch_commit = commit,
+			commit_callback_at = commit_callback_at,
+			batch_frontier = frontier
+		);
+	}
+
 	for bool.[false, true] {
 		direct := it;
 		for Output_Action.[.REPLACE_SOURCE, .REQUEST_SHUTDOWN, .CHECK_STAGING_SHUTDOWN, .RETIRE_AND_REUSE_SESSION] {
@@ -3431,9 +4390,39 @@ test_source_batch_construction_callbacks :: (revisions := false) {
 					shutdown = action == .REQUEST_SHUTDOWN || action == .CHECK_STAGING_SHUTDOWN,
 					retire = action == .RETIRE_AND_REUSE_SESSION,
 					negative_control = it,
-					batch_states = !revisions,
+					batch_states = !revisions
+						&& !sources
+						&& !source_bytes
+						&& !source_identities
+						&& !edits
+						&& !metadata
+						&& !state_list
+						&& !reference_list
+						&& !context_list
+						&& !paths
+						&& !commit
+						&& !frontier,
 					batch_revisions = revisions,
-					shutdown_guard = action == .CHECK_STAGING_SHUTDOWN
+					batch_sources = sources,
+					batch_source_bytes = source_bytes,
+					batch_source_identities = source_identities,
+					batch_edits = edits,
+					batch_metadata = metadata,
+					metadata_callback_at = metadata_callback_at,
+					sequential_edits = sequential_edits,
+					later_event = later_event,
+					batch_pair = batch_pair,
+					shutdown_guard = action == .CHECK_STAGING_SHUTDOWN,
+					event_kind = event_kind,
+					batch_state_list = state_list,
+					batch_reference_list = reference_list,
+					batch_context_list = context_list,
+					batch_paths = paths,
+					new_document = new_document,
+					path_error = path_error,
+					batch_commit = commit,
+					commit_callback_at = commit_callback_at,
+					batch_frontier = frontier
 				);
 			}
 		}
@@ -3447,6 +4436,7 @@ Pool_Cleanup_Probe :: struct {
 	allocation_pending: bool;
 	allocation_size: s64 = size_of(Pool);
 	capture_at: s64;
+	reject_at: s64;
 	allocations: s64;
 	callbacks: s64;
 	frees: s64;
@@ -3487,7 +4477,12 @@ storage_cleanup_allocation_probe :: (size: s64, data: *void) -> bool {
 		}
 	);
 
-	return true;
+	return probe.allocations != probe.reject_at;
+}
+
+metadata_cleanup_allocation_probe :: (size: s64, data: *void) -> bool {
+	pool: Pool;
+	return storage_cleanup_allocation_probe(pool.memblock_size, data);
 }
 
 test_source_batch_storage_cleanup :: (
@@ -3743,15 +4738,68 @@ test_source_batch_pool_cleanup :: (
 	hold_heap_gate := false,
 	batch_states := false,
 	batch_revisions := false,
+	batch_sources := false,
+	batch_source_bytes := false,
+	batch_source_identities := false,
+	batch_edits := false,
+	sequential_edits := false,
+	reject_later_edit := false,
+	final_scratch := false,
 	new_document := false,
-	action: Output_Action = .NONE
+	action: Output_Action = .NONE,
+	batch_metadata := false,
+	event_kind: Service.Event_Kind = .SET_OVERLAY,
+	later_event := false,
+	metadata_reject_at: s64 = 0,
+	batch_state_list := false,
+	batch_reference_list := false,
+	batch_context_list := false,
+	batch_paths := false,
+	path_error := false
 ) {
-	assert(action == .NONE || (batch_states || batch_revisions) && (action == .CHECK_STAGING_SHUTDOWN || action == .RETIRE_AND_REUSE_SESSION));
+	assert(!path_error || batch_paths && event_kind == .OBSERVE_DISK);
+	assert(
+		!batch_paths
+		|| !batch_context_list && !batch_state_list && !batch_reference_list && !batch_states && !batch_revisions
+			&& !batch_sources && !batch_source_bytes && !batch_source_identities && !batch_edits && !batch_metadata
+			&& !later_event && !new_document && action == .NONE && (event_kind == .SET_OVERLAY || path_error)
+	);
+	assert(
+		!batch_context_list
+		|| !batch_state_list && !batch_reference_list && !batch_states && !batch_revisions && !batch_sources
+			&& !batch_source_bytes && !batch_source_identities && !batch_edits && !batch_metadata
+			&& !later_event && new_document && action == .NONE && event_kind == .SET_OVERLAY
+	);
+	assert(!(batch_state_list && batch_reference_list));
+	assert(
+		!(batch_state_list || batch_reference_list)
+		|| !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities
+			&& !batch_edits && !batch_metadata && !later_event && !new_document && action == .NONE
+			&& event_kind == .SET_OVERLAY
+	);
+	assert(
+		!metadata_reject_at
+		|| batch_metadata
+			&& !retry && !validation
+			&& metadata_reject_at >= 2
+			&& metadata_reject_at <= (ifx event_kind == .OBSERVE_DISK then 4 else 3) + (ifx later_event then 10 else 0)
+	);
+	assert(!later_event || batch_metadata);
+	assert(event_kind == .SET_OVERLAY || batch_metadata && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK) || path_error);
+	assert(!batch_metadata || !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities && !batch_edits && action == .NONE);
+	assert(action == .NONE || (batch_states || batch_revisions || batch_sources) && (action == .CHECK_STAGING_SHUTDOWN || action == .RETIRE_AND_REUSE_SESSION));
 	active_lifecycle := action != .NONE && !negative_control;
 	retired := active_lifecycle && action == .RETIRE_AND_REUSE_SESSION;
 	pre_decision := batch_states && !new_document || validation;
 	assert(!batch_states || !batch_revisions);
-	assert(!new_document || batch_states);
+	assert(!batch_sources || !batch_states && !batch_revisions);
+	assert(!batch_source_bytes || !batch_states && !batch_revisions && !batch_sources && action == .NONE);
+	assert(!batch_source_identities || !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && action == .NONE);
+	assert(!batch_edits || !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities && action == .NONE);
+	assert(!sequential_edits || batch_edits);
+	assert(!reject_later_edit || sequential_edits && !retry && !validation);
+	assert(!final_scratch || sequential_edits && !reject_later_edit);
+	assert(!new_document || batch_states || batch_context_list);
 	assert(!list || retry);
 	assert(!validation || !retry);
 	assert(!hold_heap_gate || allocate && !direct && !negative_control);
@@ -3759,10 +4807,29 @@ test_source_batch_pool_cleanup :: (
 	fixture := test.drain.fixture;
 	batch := Service.begin_batch(fixture.host);
 	filename := ifx new_document then "added.jai" else "a.jai";
+	if later_event {
+		assert(Service.set_overlay(*batch, "added.jai", "second :: 2;"));
+	}
+
 	assert(Service.set_overlay(*batch, filename, "answer :: 77;"));
 	source := receipt_source_batch(batch);
+	expected_world := "answer :: 77;";
+	disk_revision: [] u8;
+	disk_source: *Service.Source_Backing;
+	if event_kind == .OBSERVE_DISK {
+		disk_revision = Service.source_revision_of(xx "answer :: 77;");
+	}
+
 	if validation {
-		prepare_provider_error(*source, .DUPLICATE_EVENT, .{}, .[]);
+		if later_event {
+			events := NewArray(3, Service.Document_Event);
+			events[0] = source.events[0];
+			events[1] = source.events[1];
+			events[2] = source.events[1];
+			source.events = events;
+		} else {
+			prepare_provider_error(*source, .DUPLICATE_EVENT, .{}, .[]);
+		}
 	}
 
 	probe := Pool_Cleanup_Probe.{
@@ -3773,7 +4840,12 @@ test_source_batch_pool_cleanup :: (
 		allocate = allocate,
 		mutate = mutate,
 		hold_heap_gate = hold_heap_gate,
-		capture_at = 1,
+		capture_at = ifx final_scratch || path_error then 2 else 1,
+		reject_at = ifx metadata_reject_at
+			then metadata_reject_at
+			else ifx reject_later_edit
+				then 2
+				else 0,
 		job = .{
 			drain = test.drain,
 			action = action,
@@ -3802,12 +4874,100 @@ test_source_batch_pool_cleanup :: (
 
 	allocator := open_output_probe(*output_probe);
 	before: Service.Resource_Ledger;
+	edits: [2] Service.Range_Edit;
+	documents: s64;
+	contexts: s64;
+	original_source: *Service.Source_Backing;
+	original_references: s64;
+	event_index := ifx later_event
+		then 1
+		else 0;
+
 	Service.with_lock(
 		*fixture.session.gate,
 		#code {
 			before = fixture.session.ledger;
+			documents = fixture.session.provider.documents.count;
+			contexts = fixture.session.provider.contexts.count;
 			fixture.session.faults.allow_active_session_release = retired;
-			if batch_revisions {
+			if metadata_reject_at {
+				state := Service.find_document(fixture.session.provider, batch.events[event_index].document);
+				assert(state && state.has_overlay && state.overlay.source);
+				original_source = state.overlay.source;
+				original_references = original_source.references;
+			}
+
+			if batch_edits || event_kind == .EDIT_OVERLAY {
+				event := *source.events[event_index];
+				state := Service.find_document(fixture.session.provider, event.document);
+				assert(state && state.has_overlay && state.overlay.source);
+				edits[0] = .{
+					end_byte = xx state.overlay.source.bytes.count,
+					replacement = xx (ifx sequential_edits then "intermediate :: 1;" else "answer :: 77;"),
+				};
+
+				if sequential_edits {
+					edits[1] = .{
+						end_byte = xx edits[0].replacement.count,
+						replacement = xx "answer :: 77;",
+					};
+				}
+
+				event.kind = .EDIT_OVERLAY;
+				event.base_source_revision = state.overlay.source.revision;
+				event.edits = edits;
+				event.edits.count = ifx sequential_edits then 2 else 1;
+			} else if event_kind == .OBSERVE_DISK {
+				event := *source.events[event_index];
+				state := Service.find_document(fixture.session.provider, event.document);
+				assert(state && state.has_overlay && state.overlay.source);
+				expected_world = state.overlay.source.bytes.(string);
+				disk_source = state.disk.source;
+				event.kind = .OBSERVE_DISK;
+				event.disk = .{
+					kind = .PRESENT,
+					source = event.source,
+					source_revision = disk_revision,
+					syntax_context = event.source_context,
+					provenance = .{
+						provider_identity = fixture.session.provider.provider_namespace,
+						observation_token = xx "source-callback-test",
+					},
+				};
+			}
+
+			if path_error && !validation {
+				source.events[event_index].disk.syntax_context = xx "unknown-context";
+			}
+
+			if batch_paths {
+				fixture.session.faults.source_batch_path_allocation_hook = storage_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_path_allocation_data = *probe;
+			} else if batch_context_list {
+				fixture.session.faults.source_batch_context_list_allocation_hook = storage_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_context_list_allocation_data = *probe;
+			} else if batch_state_list {
+				fixture.session.faults.source_batch_state_list_allocation_hook = storage_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_state_list_allocation_data = *probe;
+			} else if batch_reference_list {
+				fixture.session.faults.source_batch_reference_list_allocation_hook = storage_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_reference_list_allocation_data = *probe;
+			} else if batch_edits {
+				fixture.session.faults.source_batch_edit_allocation_hook = storage_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_edit_allocation_data = *probe;
+			} else if batch_metadata {
+				fixture.session.faults.source_batch_metadata_allocation_hook = metadata_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_metadata_allocation_data = *probe;
+			} else if batch_source_identities {
+				fixture.session.faults.source_batch_source_identity_allocation_hook = storage_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_source_identity_allocation_data = *probe;
+			} else if batch_source_bytes {
+				fixture.session.faults.source_batch_source_bytes_allocation_hook = storage_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_source_bytes_allocation_data = *probe;
+			} else if batch_sources {
+				fixture.session.faults.source_batch_source_allocation_hook = storage_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_source_allocation_data = *probe;
+			} else if batch_revisions {
 				fixture.session.faults.source_batch_revisions_allocation_hook = storage_cleanup_allocation_probe;
 				fixture.session.faults.source_batch_revisions_allocation_data = *probe;
 			} else if batch_states {
@@ -3828,7 +4988,30 @@ test_source_batch_pool_cleanup :: (
 	);
 
 	assert(probe.memory && !probe.allocation_pending);
-	assert(probe.allocations == (ifx retry && !active_lifecycle then 2 else 1));
+	allocations_per_attempt := ifx batch_metadata
+		then ifx event_kind == .OBSERVE_DISK
+			then 4
+			else 3
+		else ifx sequential_edits
+			then 2
+			else 1;
+	if later_event {
+		allocations_per_attempt += 10;
+	}
+
+	assert(
+		probe.allocations
+			== (ifx path_error
+				then 2
+				else ifx metadata_reject_at
+					then metadata_reject_at
+					else allocations_per_attempt * (ifx retry && !active_lifecycle then 2 else 1)
+			) + xx (batch_paths && validation && !path_error)
+	);
+	if reject_later_edit || metadata_reject_at {
+		assert(!ok && !output_probe.allocations);
+	}
+
 	assert(probe.job.ok == active_lifecycle);
 	if negative_control {
 		assert(!probe.callbacks && !probe.gate_progress, "\e[91mMissing pool-root free callback negative control was not detected.\e[0m");
@@ -3838,9 +5021,11 @@ test_source_batch_pool_cleanup :: (
 		assert(probe.allocated == allocate);
 		assert(probe.mutated == mutate && probe.heap_blocked == hold_heap_gate);
 		assert(probe.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] + 1);
-		callback_handles := ifx batch_states && !new_document
-			then 1
-			else output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + xx validation;
+		callback_handles := ifx path_error
+			then output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + 1
+			else ifx batch_states && !new_document || batch_edits || metadata_reject_at || batch_state_list || batch_reference_list || batch_context_list || batch_paths
+				then 1
+				else output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + xx validation;
 		assert(probe.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + callback_handles);
 	}
 
@@ -3856,10 +5041,28 @@ test_source_batch_pool_cleanup :: (
 		#code {
 			fixture.session.faults.source_batch_pool_allocation_hook = null;
 			fixture.session.faults.source_batch_pool_allocation_data = null;
+			fixture.session.faults.source_batch_context_list_allocation_hook = null;
+			fixture.session.faults.source_batch_context_list_allocation_data = null;
+			fixture.session.faults.source_batch_path_allocation_hook = null;
+			fixture.session.faults.source_batch_path_allocation_data = null;
+			fixture.session.faults.source_batch_state_list_allocation_hook = null;
+			fixture.session.faults.source_batch_state_list_allocation_data = null;
+			fixture.session.faults.source_batch_reference_list_allocation_hook = null;
+			fixture.session.faults.source_batch_reference_list_allocation_data = null;
 			fixture.session.faults.source_batch_state_allocation_hook = null;
 			fixture.session.faults.source_batch_state_allocation_data = null;
 			fixture.session.faults.source_batch_revisions_allocation_hook = null;
 			fixture.session.faults.source_batch_revisions_allocation_data = null;
+			fixture.session.faults.source_batch_source_allocation_hook = null;
+			fixture.session.faults.source_batch_source_allocation_data = null;
+			fixture.session.faults.source_batch_source_bytes_allocation_hook = null;
+			fixture.session.faults.source_batch_source_bytes_allocation_data = null;
+			fixture.session.faults.source_batch_source_identity_allocation_hook = null;
+			fixture.session.faults.source_batch_source_identity_allocation_data = null;
+			fixture.session.faults.source_batch_edit_allocation_hook = null;
+			fixture.session.faults.source_batch_edit_allocation_data = null;
+			fixture.session.faults.source_batch_metadata_allocation_hook = null;
+			fixture.session.faults.source_batch_metadata_allocation_data = null;
 			fixture.session.faults.allow_active_session_release = false;
 			assert(!fixture.session.active_admissions);
 			assert(fixture.session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
@@ -3874,6 +5077,54 @@ test_source_batch_pool_cleanup :: (
 				}
 			}
 
+			if metadata_reject_at {
+				assert(fixture.session.provider.documents.count == documents);
+				assert(fixture.session.provider.contexts.count == contexts);
+				state := Service.find_document(fixture.session.provider, batch.events[event_index].document);
+				assert(state && state.has_overlay && state.overlay.source == original_source);
+				assert(original_source.references == original_references);
+			}
+
+			if later_event || batch_context_list {
+				assert(fixture.session.provider.documents.count == documents + xx ok);
+				assert(fixture.session.provider.contexts.count == contexts + xx ok);
+				added_event := batch.events[0];
+				added := Service.find_document(fixture.session.provider, added_event.document);
+				assert(batch.contexts.count == 1);
+				registration := batch.contexts[0];
+				admitted := Service.find_context(fixture.session.provider, registration.identity);
+				if ok {
+					assert(added && added.has_overlay && Service.bytes_equal(added.overlay.source.bytes, xx (ifx batch_context_list then expected_world else "second :: 2;")));
+					assert(Service.bytes_equal(added.document, added_event.document) && added.document.data != added_event.document.data);
+					assert(Service.bytes_equal(added.binding.document, added_event.binding.document));
+					assert(added.binding.absolute_path.encoding == added_event.binding.absolute_path.encoding);
+					assert(Service.bytes_equal(added.binding.absolute_path.code_units, added_event.binding.absolute_path.code_units));
+					assert(added.binding.provider_policy_version == added_event.binding.provider_policy_version);
+					assert(added.binding.document.data == added.document.data);
+					assert(added.binding.absolute_path.code_units.data != added_event.binding.absolute_path.code_units.data);
+					assert(Service.bytes_equal(added.overlay.installation_revision, added_event.resulting_provider_revision));
+					assert(added.overlay.installation_revision.data != added_event.resulting_provider_revision.data);
+					assert(Service.bytes_equal(added.overlay.syntax_context, added_event.source_context));
+					assert(added.overlay.syntax_context.data != added_event.source_context.data);
+					assert(Service.bytes_equal(added.provider_revision, added_event.resulting_provider_revision));
+					assert(added.provider_revision.data != added_event.resulting_provider_revision.data);
+					assert(added.provider_revision.data != added.overlay.installation_revision.data);
+					assert(!!admitted);
+					assert(Service.bytes_equal(admitted.identity, registration.identity) && admitted.identity.data != registration.identity.data);
+					assert(Service.bytes_equal(admitted.descriptor, registration.descriptor) && admitted.descriptor.data != registration.descriptor.data);
+					failure, borrowed := Service.validate_context_registration(registration.identity, registration.descriptor);
+					assert(failure == .NONE);
+					assert(Service.bytes_equal(admitted.paths.visible_filename.code_units, borrowed.paths.visible_filename.code_units));
+					assert(Service.bytes_equal(admitted.paths.visible_directory.code_units, borrowed.paths.visible_directory.code_units));
+					assert(Service.bytes_equal(admitted.paths.relative_base.code_units, borrowed.paths.relative_base.code_units));
+					assert(admitted.paths.visible_filename.code_units.data != borrowed.paths.visible_filename.code_units.data);
+					assert(admitted.paths.visible_directory.code_units.data != borrowed.paths.visible_directory.code_units.data);
+					assert(admitted.paths.relative_base.code_units.data != borrowed.paths.relative_base.code_units.data);
+				} else {
+					assert(!added && !admitted);
+				}
+			}
+
 			if new_document {
 				added := Service.find_document(fixture.session.provider, batch.events[0].document);
 				assert(!!added == ok);
@@ -3881,20 +5132,51 @@ test_source_batch_pool_cleanup :: (
 					assert(Service.bytes_equal(Service.selected_document(added).source.bytes, xx "answer :: 77;"));
 				}
 			}
+
+			if event_kind == .OBSERVE_DISK {
+				state := Service.find_document(fixture.session.provider, batch.events[event_index].document);
+				assert(state && state.has_overlay && state.overlay.source);
+				assert(Service.bytes_equal(state.overlay.source.bytes, xx expected_world));
+				if ok {
+					assert(state.disk.kind == .PRESENT && state.disk.source);
+					assert(Service.bytes_equal(state.disk.source.bytes, xx "answer :: 77;"));
+					assert(Service.bytes_equal(state.disk.source.revision, disk_revision));
+				} else {
+					assert(state.disk.source == disk_source);
+				}
+			}
 		}
 	);
 
-	if retry && !active_lifecycle {
+	if retry && !active_lifecycle && !path_error {
 		assert(ok && output_probe.gate_progress && output_probe.job.ok && output_probe.allocations == 2);
 		observation := await(fixture, accepted.ticket);
 		assert(observation.update.kind == .PUBLISHED);
 		Service.free_observation(*observation);
-		if batch_states || batch_revisions {
+		if batch_states || batch_revisions || batch_sources || batch_source_bytes || batch_source_identities || batch_edits || batch_metadata || batch_context_list || batch_paths {
 			world := world_of(fixture, accepted.ticket);
 			read_ok, description := Service.read_world(fixture.host.service, world);
-			assert(read_ok && description.members.count == 1);
-			if !new_document {
-				assert(Service.bytes_equal(description.members[0].source.bytes, xx "answer :: 77;"));
+			assert(read_ok && description.members.count == (ifx later_event then 2 else 1));
+			if later_event {
+				added_found: bool;
+				updated_found: bool;
+				for description.members {
+					if Service.bytes_equal(it.document, batch.events[0].document) {
+						assert(!added_found && Service.bytes_equal(it.source.bytes, xx "second :: 2;"));
+						added_found = true;
+					} else {
+						assert(!updated_found && Service.bytes_equal(it.document, batch.events[1].document));
+						assert(Service.bytes_equal(it.source.bytes, xx expected_world));
+						updated_found = true;
+					}
+				}
+
+				assert(added_found && updated_found);
+			} else if !new_document || batch_context_list {
+				assert(Service.bytes_equal(description.members[0].source.bytes, xx expected_world));
+				if batch_context_list {
+					assert(Service.bytes_equal(description.members[0].document, batch.events[0].document));
+				}
 			}
 
 			release(fixture, world);
@@ -3913,9 +5195,25 @@ test_source_batch_pool_cleanup :: (
 			assert(output_probe.allocations == 1);
 			assert(output_probe.job.ok == !pre_decision);
 		}
+	} else if path_error && retry {
+		assert(!ok && !accepted.ticket.owner_token && !accepted.frontier.count);
+		assert(output_probe.gate_progress && output_probe.job.ok && output_probe.allocations == 1);
+		assert(error.code == .INVALID_ARGUMENT && error.rule == .INCONSISTENT_BINDING);
+		assert(error.path.count == 4);
+		assert(error.path[0].kind == .FIELD && error.path[0].name == "events");
+		assert(error.path[1].kind == .ELEMENT && !error.path[1].index);
+		assert(error.path[2].kind == .FIELD && error.path[2].name == "disk");
+		assert(error.path[3].kind == .FIELD && error.path[3].name == "context");
 	} else if validation {
 		assert(!ok && !accepted.ticket.owner_token && !accepted.frontier.count);
-		assert_provider_error(error, .DUPLICATE_EVENT, .[]);
+		if later_event {
+			assert(error.code == .INVALID_ARGUMENT && error.rule == .DUPLICATE && !error.document.count);
+			assert(error.path.count == 3 && error.path[0].kind == .FIELD && error.path[0].name == "events");
+			assert(error.path[1].kind == .ELEMENT && error.path[1].index == 2);
+			assert(error.path[2].kind == .FIELD && error.path[2].name == "document");
+		} else {
+			assert_provider_error(error, .DUPLICATE_EVENT, .[]);
+		}
 	} else {
 		assert(!ok && !accepted.ticket.owner_token && !accepted.frontier.count && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
 	}
@@ -3954,6 +5252,7 @@ test_source_batch_pool_cleanup :: (
 		destroy(*probe.heap_entered);
 	}
 
+	free(disk_revision.data);
 	if retired {
 		for test.held {
 			release(fixture, it);
@@ -3967,7 +5266,14 @@ test_source_batch_pool_cleanup :: (
 	}
 
 	print(
-		"X5 actual root/construction free/gate progress/private charges (direct = %, retry = %, negative control = %, list = %, validation = %, allocate = %, mutate = %, held heap = %, batch states = %, batch revisions = %, new document = %, action = %) \e[92mPASS\e[0m\n",
+		#run join(
+			"X5 actual root/construction free/gate progress/private charges",
+			" (direct = %, retry = %, negative control = %, list = %, validation = %, allocate = %, mutate = %, held heap = %,",
+			" batch states = %, batch revisions = %, batch sources = %, batch source bytes = %, batch source identities = %,",
+			" batch edits = %, sequential edits = %, reject later edit = %, final scratch = %, new document = %, action = %,",
+			" batch metadata = %, event = %, later event = %, metadata reject at = %, state list = %, reference list = %,",
+			" context list = %, path reservation = %, path copy = %) \e[92mPASS\e[0m\n"
+		),
 		direct,
 		retry,
 		negative_control,
@@ -3978,8 +5284,24 @@ test_source_batch_pool_cleanup :: (
 		hold_heap_gate,
 		batch_states,
 		batch_revisions,
+		batch_sources,
+		batch_source_bytes,
+		batch_source_identities,
+		batch_edits,
+		sequential_edits,
+		reject_later_edit,
+		final_scratch,
 		new_document,
-		action
+		action,
+		batch_metadata,
+		event_kind,
+		later_event,
+		metadata_reject_at,
+		batch_state_list,
+		batch_reference_list,
+		batch_context_list,
+		batch_paths,
+		path_error
 	);
 }
 
@@ -4020,9 +5342,72 @@ test_source_batch_state_cleanup_lifecycle :: (revisions := false) {
 	}
 }
 
-test_source_batch_construction_cleanup :: (revisions := false, new_document := false) {
+test_source_batch_construction_cleanup :: (
+	revisions := false,
+	new_document := false,
+	sources := false,
+	source_bytes := false,
+	source_identities := false,
+	edits := false,
+	sequential_edits := false,
+	reject_later_edit := false,
+	final_scratch := false,
+	metadata := false,
+	event_kind: Service.Event_Kind = .SET_OVERLAY,
+	later_event := false,
+	metadata_reject_at: s64 = 0,
+	state_list := false,
+	reference_list := false,
+	context_list := false,
+	paths := false,
+	path_error := false
+) {
+	assert(!path_error || paths && event_kind == .OBSERVE_DISK);
+	list_construction_compatible := !revisions
+		&& !sources
+		&& !source_bytes
+		&& !source_identities
+		&& !edits
+		&& !metadata
+		&& !later_event;
+	assert(
+		!paths
+		|| !context_list && !state_list && !reference_list && !new_document && list_construction_compatible
+			&& (event_kind == .SET_OVERLAY || path_error)
+	);
+	assert(
+		!context_list
+		|| !state_list && !reference_list && new_document && list_construction_compatible
+			&& event_kind == .SET_OVERLAY
+	);
+	assert(!(state_list && reference_list));
+	assert(
+		!(state_list || reference_list)
+		|| !new_document && list_construction_compatible && event_kind == .SET_OVERLAY
+	);
+	assert(
+		!metadata_reject_at
+		|| metadata
+			&& metadata_reject_at >= 2
+			&& metadata_reject_at <= (ifx event_kind == .OBSERVE_DISK then 4 else 3) + (ifx later_event then 10 else 0)
+	);
+	assert(!later_event || metadata);
+	assert(event_kind == .SET_OVERLAY || metadata && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK) || path_error);
+	assert(!metadata || !revisions && !new_document && !sources && !source_bytes && !source_identities && !edits);
 	assert(!new_document || !revisions);
+	assert(!sources || !revisions && !new_document);
+	assert(!source_bytes || !sources && !revisions && !new_document);
+	assert(!source_identities || !sources && !source_bytes && !revisions && !new_document);
+	assert(!edits || !sources && !source_bytes && !source_identities && !revisions && !new_document);
+	assert(!sequential_edits || edits);
+	assert(!reject_later_edit || sequential_edits);
+	assert(!final_scratch || sequential_edits && !reject_later_edit);
 	for 0..3 {
+		if (reject_later_edit || metadata_reject_at) && it {
+			continue;
+		}
+
+
 		retry := it == 1 || it == 2;
 		list := it == 2;
 		validation := it == 3;
@@ -4037,9 +5422,25 @@ test_source_batch_construction_cleanup :: (revisions := false, new_document := f
 					allocate = true,
 					mutate = true,
 					negative_control = it,
-					batch_states = !revisions,
+					batch_states = !revisions && !sources && !source_bytes && !source_identities && !edits && !metadata && !state_list && !reference_list && !context_list && !paths,
 					batch_revisions = revisions,
-					new_document = new_document
+					batch_sources = sources,
+					batch_source_bytes = source_bytes,
+					batch_source_identities = source_identities,
+					batch_edits = edits,
+					sequential_edits = sequential_edits,
+					reject_later_edit = reject_later_edit,
+					final_scratch = final_scratch,
+					new_document = new_document,
+					batch_metadata = metadata,
+					event_kind = event_kind,
+					later_event = later_event,
+					metadata_reject_at = metadata_reject_at,
+					batch_state_list = state_list,
+					batch_reference_list = reference_list,
+					batch_context_list = context_list,
+					batch_paths = paths,
+					path_error = path_error
 				);
 			}
 		}
@@ -4051,9 +5452,25 @@ test_source_batch_construction_cleanup :: (revisions := false, new_document := f
 			allocate = true,
 			mutate = true,
 			hold_heap_gate = true,
-			batch_states = !revisions,
+			batch_states = !revisions && !sources && !source_bytes && !source_identities && !edits && !metadata && !state_list && !reference_list && !context_list && !paths,
 			batch_revisions = revisions,
-			new_document = new_document
+			batch_sources = sources,
+			batch_source_bytes = source_bytes,
+			batch_source_identities = source_identities,
+			batch_edits = edits,
+			sequential_edits = sequential_edits,
+			reject_later_edit = reject_later_edit,
+			final_scratch = final_scratch,
+			new_document = new_document,
+			batch_metadata = metadata,
+			event_kind = event_kind,
+			later_event = later_event,
+			metadata_reject_at = metadata_reject_at,
+			batch_state_list = state_list,
+			batch_reference_list = reference_list,
+			batch_context_list = context_list,
+			batch_paths = paths,
+			path_error = path_error
 		);
 	}
 }
@@ -4349,7 +5766,10 @@ test_source_registration_interleavings :: (
 			assert(probe.source_active_admissions == (ifx pool then 1 else 0));
 			retired := action == .RETIRE_AND_REUSE_SESSION || action == .RETIRE_RETAIN_OWNER;
 			if pool && !pool_retirement && negative_control {
-				assert(ok && accepted.ticket.owner_token && accepted.frontier.count && probe.allocations == 3, "\e[91mFailed pool-root retry admission negative control was not detected.\e[0m");
+				assert(
+					ok && accepted.ticket.owner_token && accepted.frontier.count && probe.allocations == 3,
+					"\e[91mFailed pool-root retry admission negative control was not detected.\e[0m"
+				);
 			} else if negative_control {
 				assert(!ok && error.code == .SERVICE_CLOSED, "\e[91mSkipped source-session revalidation negative control was not detected.\e[0m");
 			} else if retired {
@@ -4541,7 +5961,11 @@ test_source_registration_interleavings :: (
 	}
 
 	print(
-		"X3/X5 source ticket/update/list/provider backing/frontier/shutdown/quota/capacity retry/counters/session reuse/owner retirement (direct = %, negative control = %, update = %, callback = %, list = %, cleanup = %, provider = %, arrays = %, states = %, revisions = %, multiple = %, pool = %, pool retirement = %) \e[92mPASS\e[0m\n",
+		#run join(
+			"X3/X5 source ticket/update/list/provider backing/frontier/shutdown/quota/capacity retry/counters/session reuse/owner retirement",
+			" (direct = %, negative control = %, update = %, callback = %, list = %, cleanup = %, provider = %, arrays = %,",
+			" states = %, revisions = %, multiple = %, pool = %, pool retirement = %) \e[92mPASS\e[0m\n"
+		),
 		direct,
 		negative_control,
 		update,
@@ -4570,16 +5994,104 @@ test_source_registration_receipt_retry :: (
 	reference_control := false,
 	transfer := false,
 	batch_states := false,
-	batch_revisions := false
+	batch_revisions := false,
+	batch_sources := false,
+	batch_source_bytes := false,
+	batch_source_identities := false,
+	batch_edits := false,
+	sequential_edits := false,
+	batch_metadata := false,
+	event_kind: Service.Event_Kind = .SET_OVERLAY,
+	later_event := false,
+	batch_state_list := false,
+	batch_reference_list := false,
+	batch_context_list := false,
+	batch_paths := false,
+	path_error := false,
+	batch_commit := false,
+	commit_callback_at: s64 = 1,
+	new_document := false
 ) {
-	construction := batch_states || batch_revisions;
+	assert(
+		!batch_commit
+		|| !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities
+			&& !batch_edits && !sequential_edits && !batch_metadata && !batch_state_list && !batch_reference_list
+			&& !batch_context_list && !batch_paths && !later_event
+	);
+	assert(commit_callback_at >= 1 && commit_callback_at <= 2);
+	assert(!new_document || batch_commit && event_kind == .SET_OVERLAY);
+	paired_commit := batch_commit && !new_document;
+	assert(!path_error || batch_paths && event_kind == .OBSERVE_DISK);
+	list_construction_compatible := !batch_states
+		&& !batch_revisions
+		&& !batch_sources
+		&& !batch_source_bytes
+		&& !batch_source_identities
+		&& !batch_edits
+		&& !batch_metadata
+		&& !later_event;
+	assert(
+		!batch_paths
+		|| !batch_context_list && !batch_state_list && !batch_reference_list && list_construction_compatible
+			&& (event_kind == .SET_OVERLAY || path_error)
+	);
+	assert(
+		!batch_context_list
+		|| !batch_state_list && !batch_reference_list && list_construction_compatible && event_kind == .SET_OVERLAY
+	);
+	assert(!(batch_state_list && batch_reference_list));
+	assert(
+		!(batch_state_list || batch_reference_list)
+		|| list_construction_compatible && event_kind == .SET_OVERLAY
+	);
+	construction := batch_states
+		|| batch_revisions
+		|| batch_sources
+		|| batch_source_bytes
+		|| batch_source_identities
+		|| batch_edits
+		|| batch_metadata
+		|| batch_state_list
+		|| batch_reference_list
+		|| batch_context_list
+		|| batch_paths
+		|| batch_commit;
 	track_references := revisions || pool || transfer || construction;
+	assert(event_kind == .SET_OVERLAY || (batch_metadata || batch_commit) && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK) || path_error);
+	assert(!later_event || batch_metadata);
+	assert(!batch_metadata || !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities && !batch_edits);
+	assert(!batch_edits || !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities);
+	assert(!sequential_edits || batch_edits);
 	assert(!batch_states || !batch_revisions);
+	assert(!batch_sources || !batch_states && !batch_revisions);
+	assert(!batch_source_bytes || !batch_states && !batch_revisions && !batch_sources);
+	assert(!batch_source_identities || !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes);
 	assert(!construction || !pool && !transfer && !provider && !arrays && !states && !revisions);
 	assert(!reference_control || pool || transfer || construction);
 	assert(!transfer || !pool && !revisions && !states && !arrays && !provider);
-	for 0..(ifx transfer then 5 else ifx pool || construction then 3 else 6) {
+	metadata_allocations := ifx event_kind == .OBSERVE_DISK
+		then 4
+		else 3;
+	if later_event {
+		metadata_allocations += 10;
+	}
+
+	attempt_count := ifx path_error
+		then 3
+		else ifx batch_metadata
+			then metadata_allocations * 2 + 1
+			else ifx transfer || sequential_edits || batch_commit
+				then 5
+				else ifx pool || construction
+					then 3
+					else 6;
+	for 0..attempt_count {
 		fail_at := it;
+		if batch_commit && fail_at > 2 && fail_at < 2 + commit_callback_at {
+			continue;
+		}
+
+
 		if (reject_receipt || reference_control) && fail_at {
 			continue;
 		}
@@ -4626,18 +6138,33 @@ test_source_registration_receipt_retry :: (
 		}
 
 		batch := Service.begin_batch(fixture.host);
-		assert(Service.set_overlay(*batch, "a.jai", "answer :: 77;"));
+		if later_event || paired_commit {
+			assert(Service.set_overlay(*batch, "added.jai", "second :: 2;"));
+		}
+
+		assert(Service.set_overlay(*batch, ifx batch_context_list || new_document then "added.jai" else "a.jai", "answer :: 77;"));
+		expected_world := "answer :: 77;";
+		disk_revision: [] u8;
+		disk_source: *Service.Source_Backing;
+		if event_kind == .OBSERVE_DISK {
+			disk_revision = Service.source_revision_of(xx "answer :: 77;");
+		}
+
 		probe := Registration_Probe.{
 			fail_at = fail_at,
-			job_at = ifx transfer
-				then 3
-				else ifx pool || construction
-					then 2
-					else ifx arrays || revisions
+			job_at = ifx batch_commit
+				then 2 + commit_callback_at
+				else ifx batch_metadata
+					then metadata_allocations + 1
+					else ifx transfer || sequential_edits
 						then 3
-						else ifx list || provider || states
+						else ifx pool || construction
 							then 2
-							else 4,
+							else ifx arrays || revisions
+								then 3
+								else ifx list || provider || states
+									then 2
+									else 4,
 			direct = direct,
 			track_source = true,
 			source_document = source_document,
@@ -4665,11 +6192,69 @@ test_source_registration_receipt_retry :: (
 		before: Service.Resource_Ledger;
 		identities: Service.Session_Identities;
 		source_references: s64;
+		edits: [2] Service.Range_Edit;
+		documents: s64;
+		contexts: s64;
+		original_source: *Service.Source_Backing;
+		event_index := ifx later_event || paired_commit
+			then 1
+			else 0;
 		Service.with_lock(
 			*fixture.session.gate,
 			#code {
 				before = fixture.session.ledger;
 				identities = fixture.session.identities;
+				documents = fixture.session.provider.documents.count;
+				contexts = fixture.session.provider.contexts.count;
+				if new_document {
+					original := Service.find_document(fixture.session.provider, Service.harness_document(fixture.host, "a.jai"));
+					assert(original && original.has_overlay && original.overlay.source);
+					original_source = original.overlay.source;
+				}
+
+				if batch_edits || event_kind == .EDIT_OVERLAY {
+					event := *batch.events[event_index];
+					state := Service.find_document(fixture.session.provider, event.document);
+					assert(state && state.has_overlay && state.overlay.source);
+					edits[0] = .{
+						end_byte = xx state.overlay.source.bytes.count,
+						replacement = xx (ifx sequential_edits then "intermediate :: 1;" else "answer :: 77;"),
+					};
+
+					if sequential_edits {
+						edits[1] = .{
+							end_byte = xx edits[0].replacement.count,
+							replacement = xx "answer :: 77;",
+						};
+					}
+
+					event.kind = .EDIT_OVERLAY;
+					event.base_source_revision = state.overlay.source.revision;
+					event.edits = edits;
+					event.edits.count = ifx sequential_edits then 2 else 1;
+				} else if event_kind == .OBSERVE_DISK {
+					event := *batch.events[event_index];
+					state := Service.find_document(fixture.session.provider, event.document);
+					assert(state && state.has_overlay && state.overlay.source);
+					expected_world = state.overlay.source.bytes.(string);
+					disk_source = state.disk.source;
+					event.kind = .OBSERVE_DISK;
+					event.disk = .{
+						kind = .PRESENT,
+						source = event.source,
+						source_revision = disk_revision,
+						syntax_context = event.source_context,
+						provenance = .{
+							provider_identity = fixture.session.provider.provider_namespace,
+							observation_token = xx "source-callback-test",
+						},
+					};
+				}
+
+				if path_error {
+					batch.events[event_index].disk.syntax_context = xx "unknown-context";
+				}
+
 				if track_references {
 					state := Service.find_document(fixture.session.provider, source_document);
 					assert(state && state.has_overlay && state.overlay.source);
@@ -4684,7 +6269,37 @@ test_source_registration_receipt_retry :: (
 					fixture.session.operations.allocated = fixture.session.operations.count;
 				}
 
-				if batch_states {
+				if batch_commit {
+					fixture.session.faults.source_batch_commit_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_commit_allocation_data = *probe;
+				} else if batch_paths {
+					fixture.session.faults.source_batch_path_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_path_allocation_data = *probe;
+				} else if batch_context_list {
+					fixture.session.faults.source_batch_context_list_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_context_list_allocation_data = *probe;
+				} else if batch_state_list {
+					fixture.session.faults.source_batch_state_list_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_state_list_allocation_data = *probe;
+				} else if batch_reference_list {
+					fixture.session.faults.source_batch_reference_list_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_reference_list_allocation_data = *probe;
+				} else if batch_metadata {
+					fixture.session.faults.source_batch_metadata_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_metadata_allocation_data = *probe;
+				} else if batch_edits {
+					fixture.session.faults.source_batch_edit_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_edit_allocation_data = *probe;
+				} else if batch_source_identities {
+					fixture.session.faults.source_batch_source_identity_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_source_identity_allocation_data = *probe;
+				} else if batch_source_bytes {
+					fixture.session.faults.source_batch_source_bytes_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_source_bytes_allocation_data = *probe;
+				} else if batch_sources {
+					fixture.session.faults.source_batch_source_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_source_allocation_data = *probe;
+				} else if batch_states {
 					fixture.session.faults.source_batch_state_allocation_hook = registration_allocation_probe;
 					fixture.session.faults.source_batch_state_allocation_data = *probe;
 				} else if batch_revisions {
@@ -4725,16 +6340,50 @@ test_source_registration_receipt_retry :: (
 			,, allocator
 		);
 
-		initial_allocations := ifx transfer
+		initial_allocations := ifx path_error
 			then 2
-			else ifx pool || construction
-				then 1
-				else ifx arrays || revisions
+			else ifx batch_metadata
+				then metadata_allocations
+				else ifx transfer || sequential_edits || batch_commit
 					then 2
-					else ifx list || provider || states
+					else ifx pool || construction
 						then 1
-						else 3;
-		if fail_at && fail_at <= initial_allocations {
+						else ifx arrays || revisions
+							then 2
+							else ifx list || provider || states
+								then 1
+								else 3;
+		if path_error {
+			assert(!ok && !accepted.ticket.owner_token && !accepted.frontier.count);
+			assert(probe.allocations == (ifx fail_at && fail_at <= initial_allocations then fail_at else initial_allocations));
+			if fail_at && fail_at <= initial_allocations {
+				assert(!output_probe.allocations);
+				assert(error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+			} else {
+				assert(output_probe.allocations == 1);
+				assert(output_probe.source_references[0] == source_references + 1);
+				assert(output_probe.source_active_admissions[0] == 1);
+				assert(output_probe.gate_progress == !reject_receipt && output_probe.job.ok == !reject_receipt);
+				if reject_receipt {
+					assert(error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+				} else {
+					assert(error.code == .INVALID_ARGUMENT && error.rule == .INCONSISTENT_BINDING);
+					assert(error.path.count == 4);
+					assert(error.path[0].kind == .FIELD && error.path[0].name == "events");
+					assert(error.path[1].kind == .ELEMENT && !error.path[1].index);
+					assert(error.path[2].kind == .FIELD && error.path[2].name == "disk");
+					assert(error.path[3].kind == .FIELD && error.path[3].name == "context");
+				}
+			}
+
+			assert(probe.gate_progress == (fail_at != 1));
+			if probe.gate_progress {
+				assert(probe.job.ok && probe.source_active_admissions == 1);
+				assert(probe.source_references == source_references + 1);
+				assert(probe.waiter_ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] + 1);
+				assert(probe.waiter_ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] == before.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] + 1);
+			}
+		} else if fail_at && fail_at <= initial_allocations {
 			assert(!ok && probe.allocations == fail_at && !output_probe.allocations);
 		} else if reject_receipt {
 			assert(!ok && probe.allocations == initial_allocations && output_probe.allocations == 1);
@@ -4755,22 +6404,27 @@ test_source_registration_receipt_retry :: (
 
 			assert(probe.waiter_ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] + private_charge);
 			assert(probe.waiter_ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] == before.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] + private_charge);
-			assert(probe.waiter_ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + private_charge);
+			assert(
+				probe.waiter_ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES]
+					+ output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + private_charge
+			);
 			assert(probe.callback_identities.operation_counter.next == identities.operation_counter.next + xx output_probe.job.competing_tickets.count);
 			assert(output_probe.allocations == (ifx ok then 2 else 1));
-			total_allocations := ifx transfer
-				then 4
-				else ifx pool || construction
-					then 2
-					else ifx arrays || revisions
-						then 4
-						else ifx list || provider || states
-							then 2
-							else 6;
+			total_allocations := ifx batch_metadata
+				then metadata_allocations * 2
+				else ifx transfer || sequential_edits || batch_commit
+					then 4
+					else ifx pool || construction
+						then 2
+						else ifx arrays || revisions
+							then 4
+							else ifx list || provider || states
+								then 2
+								else 6;
 			assert(probe.allocations == (ifx fail_at && fail_at <= total_allocations then fail_at else total_allocations));
 		}
 
-		if !ok {
+		if !ok && !path_error {
 			assert(!accepted.ticket.owner_token && !accepted.frontier.count && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
 		}
 
@@ -4794,16 +6448,42 @@ test_source_registration_receipt_retry :: (
 				fixture.session.faults.source_batch_pool_allocation_data = null;
 				fixture.session.faults.source_batch_storage_allocation_hook = null;
 				fixture.session.faults.source_batch_storage_allocation_data = null;
+				fixture.session.faults.source_batch_context_list_allocation_hook = null;
+				fixture.session.faults.source_batch_context_list_allocation_data = null;
+				fixture.session.faults.source_batch_path_allocation_hook = null;
+				fixture.session.faults.source_batch_path_allocation_data = null;
+				fixture.session.faults.source_batch_state_list_allocation_hook = null;
+				fixture.session.faults.source_batch_state_list_allocation_data = null;
+				fixture.session.faults.source_batch_reference_list_allocation_hook = null;
+				fixture.session.faults.source_batch_reference_list_allocation_data = null;
 				fixture.session.faults.source_batch_state_allocation_hook = null;
 				fixture.session.faults.source_batch_state_allocation_data = null;
 				fixture.session.faults.source_batch_revisions_allocation_hook = null;
 				fixture.session.faults.source_batch_revisions_allocation_data = null;
+				fixture.session.faults.source_batch_source_allocation_hook = null;
+				fixture.session.faults.source_batch_source_allocation_data = null;
+				fixture.session.faults.source_batch_source_bytes_allocation_hook = null;
+				fixture.session.faults.source_batch_source_bytes_allocation_data = null;
+				fixture.session.faults.source_batch_source_identity_allocation_hook = null;
+				fixture.session.faults.source_batch_source_identity_allocation_data = null;
+				fixture.session.faults.source_batch_edit_allocation_hook = null;
+				fixture.session.faults.source_batch_edit_allocation_data = null;
+				fixture.session.faults.source_batch_metadata_allocation_hook = null;
+				fixture.session.faults.source_batch_metadata_allocation_data = null;
+				fixture.session.faults.source_batch_commit_allocation_hook = null;
+				fixture.session.faults.source_batch_commit_allocation_data = null;
 				assert(!fixture.session.active_admissions);
-				assert(fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + xx ok);
+				assert(
+					fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES]
+						+ output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + xx ok
+				);
 				assert(fixture.session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
 				if track_references {
 					state := Service.find_document(fixture.session.provider, source_document);
-					assert(state && state.overlay.source.references == source_references + xx reference_control, "\e[91mSource-reference rollback oracle did not distinguish the retained-reference control.\e[0m");
+					assert(
+						state && state.overlay.source.references == source_references + xx reference_control,
+						"\e[91mSource-reference rollback oracle did not distinguish the retained-reference control.\e[0m"
+					);
 					if reference_control {
 						assert(!fixture.session.faults.retain_source_batch_reference);
 						control_reference = state.overlay.source;
@@ -4818,7 +6498,70 @@ test_source_registration_receipt_retry :: (
 						then probe.callback_identities.world_counter.next
 						else identities.world_counter.next;
 
-					assert(fixture.session.identities.world_counter.next == expected_world_counter);
+					if !path_error || !output_probe.gate_progress {
+						assert(fixture.session.identities.world_counter.next == expected_world_counter);
+					}
+				}
+
+				if new_document {
+					original := Service.find_document(fixture.session.provider, Service.harness_document(fixture.host, "a.jai"));
+					assert(original && original.has_overlay && original.overlay.source == original_source);
+				}
+
+				if later_event || batch_context_list || batch_commit {
+					assert(fixture.session.provider.documents.count == documents + xx ok);
+					assert(fixture.session.provider.contexts.count == contexts + xx ok);
+					added_event := batch.events[0];
+					added := Service.find_document(fixture.session.provider, added_event.document);
+					if ok {
+						assert(
+							added && added.has_overlay
+							&& Service.bytes_equal(added.overlay.source.bytes, xx (ifx batch_context_list || new_document then expected_world else "second :: 2;"))
+						);
+						assert(Service.bytes_equal(added.document, added_event.document) && added.document.data != added_event.document.data);
+						assert(Service.bytes_equal(added.binding.document, added_event.binding.document));
+						assert(added.binding.absolute_path.encoding == added_event.binding.absolute_path.encoding);
+						assert(Service.bytes_equal(added.binding.absolute_path.code_units, added_event.binding.absolute_path.code_units));
+						assert(added.binding.provider_policy_version == added_event.binding.provider_policy_version);
+						assert(added.binding.document.data == added.document.data);
+						assert(added.binding.absolute_path.code_units.data != added_event.binding.absolute_path.code_units.data);
+						assert(Service.bytes_equal(added.overlay.installation_revision, added_event.resulting_provider_revision));
+						assert(added.overlay.installation_revision.data != added_event.resulting_provider_revision.data);
+						assert(Service.bytes_equal(added.overlay.syntax_context, added_event.source_context));
+						assert(added.overlay.syntax_context.data != added_event.source_context.data);
+						assert(Service.bytes_equal(added.provider_revision, added_event.resulting_provider_revision));
+						assert(added.provider_revision.data != added_event.resulting_provider_revision.data);
+						assert(added.provider_revision.data != added.overlay.installation_revision.data);
+						assert(batch.contexts.count == 1);
+						registration := batch.contexts[0];
+						admitted := Service.find_context(fixture.session.provider, registration.identity);
+						assert(!!admitted);
+						assert(Service.bytes_equal(admitted.identity, registration.identity) && admitted.identity.data != registration.identity.data);
+						assert(Service.bytes_equal(admitted.descriptor, registration.descriptor) && admitted.descriptor.data != registration.descriptor.data);
+						failure, borrowed := Service.validate_context_registration(registration.identity, registration.descriptor);
+						assert(failure == .NONE);
+						assert(Service.bytes_equal(admitted.paths.visible_filename.code_units, borrowed.paths.visible_filename.code_units));
+						assert(Service.bytes_equal(admitted.paths.visible_directory.code_units, borrowed.paths.visible_directory.code_units));
+						assert(Service.bytes_equal(admitted.paths.relative_base.code_units, borrowed.paths.relative_base.code_units));
+						assert(admitted.paths.visible_filename.code_units.data != borrowed.paths.visible_filename.code_units.data);
+						assert(admitted.paths.visible_directory.code_units.data != borrowed.paths.visible_directory.code_units.data);
+						assert(admitted.paths.relative_base.code_units.data != borrowed.paths.relative_base.code_units.data);
+					} else {
+						assert(!added);
+					}
+				}
+
+				if event_kind == .OBSERVE_DISK {
+					state := Service.find_document(fixture.session.provider, batch.events[event_index].document);
+					assert(state && state.has_overlay && state.overlay.source);
+					assert(Service.bytes_equal(state.overlay.source.bytes, xx expected_world));
+					if ok {
+						assert(state.disk.kind == .PRESENT && state.disk.source);
+						assert(Service.bytes_equal(state.disk.source.bytes, xx "answer :: 77;"));
+						assert(Service.bytes_equal(state.disk.source.revision, disk_revision));
+					} else {
+						assert(state.disk.source == disk_source);
+					}
 				}
 			}
 		);
@@ -4836,8 +6579,29 @@ test_source_registration_receipt_retry :: (
 			if track_references {
 				published := world_of(fixture, accepted.ticket);
 				read_ok, description := Service.read_world(fixture.host.service, published);
-				assert(read_ok && description.members.count == 1);
-				assert(Service.bytes_equal(description.members[0].source.bytes, xx "answer :: 77;"));
+				assert(read_ok && description.members.count == (ifx later_event || paired_commit then 2 else 1));
+				if later_event || paired_commit {
+					added_found: bool;
+					updated_found: bool;
+					for description.members {
+						if Service.bytes_equal(it.document, batch.events[0].document) {
+							assert(!added_found && Service.bytes_equal(it.source.bytes, xx "second :: 2;"));
+							added_found = true;
+						} else {
+							assert(!updated_found && Service.bytes_equal(it.document, batch.events[1].document));
+							assert(Service.bytes_equal(it.source.bytes, xx expected_world));
+							updated_found = true;
+						}
+					}
+
+					assert(added_found && updated_found);
+				} else {
+					assert(Service.bytes_equal(description.members[0].source.bytes, xx expected_world));
+					if batch_context_list || new_document {
+						assert(Service.bytes_equal(description.members[0].document, batch.events[0].document));
+					}
+				}
+
 				release(fixture, published);
 			}
 
@@ -4861,6 +6625,8 @@ test_source_registration_receipt_retry :: (
 
 		array_free(output_probe.job.competing_tickets);
 		free_records(probe.job.records);
+		free(error.path.data,, allocator);
+		free(error.document.data,, allocator);
 		close_output_probe(*output_probe);
 		if track_references {
 			read_ok, description := Service.read_world(fixture.host.service, sentinel_world);
@@ -4869,11 +6635,18 @@ test_source_registration_receipt_retry :: (
 			release(fixture, sentinel_world);
 		}
 
+		free(disk_revision.data);
 		finish_retain(test);
 	}
 
 	print(
-		"X3/X5 source receipt capacity race/private attempt cleanup/released charges/checked retry/provider atomicity (direct = %, list = %, provider = %, arrays = %, states = %, revisions = %, reject receipt = %, pool = %, reference control = %, transfer = %) \e[92mPASS\e[0m\n",
+		#run join(
+			"X3/X5 source receipt capacity race/private attempt cleanup/released charges/checked retry/provider atomicity",
+			" (direct = %, list = %, provider = %, arrays = %, states = %, revisions = %, reject receipt = %, pool = %,",
+			" reference control = %, transfer = %, batch sources = %, batch source bytes = %, batch source identities = %,",
+			" batch edits = %, sequential edits = %, batch metadata = %, event = %, later event = %, context list = %,",
+			" path reservation = %, path copy = %, commit arrays = %, commit callback at = %, new document = %) \e[92mPASS\e[0m\n"
+		),
 		direct,
 		list,
 		provider,
@@ -4883,7 +6656,21 @@ test_source_registration_receipt_retry :: (
 		reject_receipt,
 		pool,
 		reference_control,
-		transfer
+		transfer,
+		batch_sources,
+		batch_source_bytes,
+		batch_source_identities,
+		batch_edits,
+		sequential_edits,
+		batch_metadata,
+		event_kind,
+		later_event,
+		batch_context_list,
+		batch_paths,
+		path_error,
+		batch_commit,
+		commit_callback_at,
+		new_document
 	);
 }
 
@@ -4953,7 +6740,10 @@ test_source_registration_failure_control :: (update := false, list := false, pro
 		);
 
 		ok, accepted := Service.submit_source_batch(fixture.host.service, fixture.host.session, receipt_source_batch(batch));
-		assert(ok && accepted.ticket.owner_token && probe.allocations == fail_at + allocation_count, "\e[91mFailed source backing admission negative control was not detected.\e[0m");
+		assert(
+			ok && accepted.ticket.owner_token && probe.allocations == fail_at + allocation_count,
+			"\e[91mFailed source backing admission negative control was not detected.\e[0m"
+		);
 		Service.with_lock(
 			*fixture.session.gate,
 			#code {
@@ -4993,7 +6783,10 @@ test_source_registration_failure_control :: (update := false, list := false, pro
 	}
 
 	print(
-		"X5 source ticket/update/list/provider failed-backing provider-admission negative controls (update = %, list = %, provider = %, arrays = %, states = %, revisions = %, pool = %) \e[92mPASS\e[0m\n",
+		#run join(
+			"X5 source ticket/update/list/provider failed-backing provider-admission negative controls",
+			" (update = %, list = %, provider = %, arrays = %, states = %, revisions = %, pool = %) \e[92mPASS\e[0m\n"
+		),
 		update,
 		list,
 		provider,
@@ -6086,7 +7879,10 @@ test_terminal_query_failures :: (negative_control := false) {
 			);
 
 			if negative_control {
-				assert(ok && output.kind == .TERMINAL && !output.observation.operation_identity.count && probe.allocations == 1, "\e[91mFailed terminal query copy negative control was not detected.\e[0m");
+				assert(
+					ok && output.kind == .TERMINAL && !output.observation.operation_identity.count && probe.allocations == 1,
+					"\e[91mFailed terminal query copy negative control was not detected.\e[0m"
+				);
 				Service.free_observation(*output.observation,, allocator);
 				break;
 			}
@@ -6889,6 +8685,7 @@ Registration_Probe :: struct {
 	shutdown_references: s64;
 	shutdown_live: s64;
 	track_waiter: bool;
+	hold_waiter_selection: bool;
 	waiter_ledger: Service.Resource_Ledger;
 	track_source: bool;
 	source_active_admissions: s64;
@@ -6976,6 +8773,10 @@ registration_allocation_probe :: (size: s64, data: *void) -> bool {
 
 		if probe.track_waiter && probe.job.action != .RETIRE_RETAIN_OWNER {
 			session := probe.job.drain.fixture.session;
+			if probe.hold_waiter_selection {
+				Service.arm_pause(session, .SELECTED);
+			}
+
 			Service.with_lock(
 				*session.gate,
 				#code {
@@ -7460,7 +9261,10 @@ test_immediate_result_interleavings :: (direct := false, negative_control := fal
 	}
 
 	print(
-		"X3/X5 immediate result registration/object/identity callbacks/shutdown/frontier/retry/quota/competing counter/source reuse/last reference/owner retirement (direct = %, negative control = %) \e[92mPASS\e[0m\n",
+		#run join(
+			"X3/X5 immediate result registration/object/identity callbacks/shutdown/frontier/retry/quota/competing",
+			" counter/source reuse/last reference/owner retirement (direct = %, negative control = %) \e[92mPASS\e[0m\n"
+		),
 		direct,
 		negative_control
 	);
@@ -8122,11 +9926,40 @@ test_waiter_backing_quota :: ($K: Service.Handle_Kind) {
 	print("X5 waiter full operation/handle/pending/completion quota/no allocation (kind = %) \e[92mPASS\e[0m\n", K);
 }
 
-test_waiter_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, negative_control := false) {
+Waiter_Charge_Order :: enum {
+	UNCONTROLLED;
+	PENDING;
+	TERMINAL;
+}
+
+test_waiter_backing_interleavings :: (
+	$K: Service.Handle_Kind,
+	direct := false,
+	negative_control := false,
+	charge_order: Waiter_Charge_Order = .UNCONTROLLED
+) {
+	assert(charge_order == .UNCONTROLLED || K == .WORLD && !negative_control);
 	for s64.[1, 4] {
 		job_at := it;
-		for Output_Action.[.OTHER_DRAIN, .REQUEST_SHUTDOWN, .COMPLETE_WORK, .REPLACE_HELD_SOURCE, .FILL_REGISTRATION_CAPACITY, .FILL_WAITER_CAPACITY, .TAKE_RETAIN_CAPACITY, .TAKE_PENDING_CAPACITY, .TAKE_COMPLETION_CAPACITY, .RELEASE_QUERY_WORLD, .RETIRE_RETAIN_OWNER] {
+		for Output_Action.[
+			.OTHER_DRAIN,
+			.REQUEST_SHUTDOWN,
+			.COMPLETE_WORK,
+			.REPLACE_HELD_SOURCE,
+			.FILL_REGISTRATION_CAPACITY,
+			.FILL_WAITER_CAPACITY,
+			.TAKE_RETAIN_CAPACITY,
+			.TAKE_PENDING_CAPACITY,
+			.TAKE_COMPLETION_CAPACITY,
+			.RELEASE_QUERY_WORLD,
+			.RETIRE_RETAIN_OWNER
+		] {
 			action := it;
+			if charge_order != .UNCONTROLLED && action != .COMPLETE_WORK {
+				continue;
+			}
+
+
 			if K == .WORLD && action == .FILL_WAITER_CAPACITY || negative_control && action != .RELEASE_QUERY_WORLD {
 				continue;
 			}
@@ -8146,6 +9979,7 @@ test_waiter_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, 
 					job_at = job_at,
 					direct = direct,
 					track_waiter = true,
+					hold_waiter_selection = charge_order != .UNCONTROLLED,
 					job = .{drain = test.retained.drain, action = action},
 				};
 
@@ -8180,6 +10014,25 @@ test_waiter_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, 
 				);
 
 				ok, waiter, error, terminal := admit_test_waiter(test);
+				if charge_order != .UNCONTROLLED {
+					if waiter.owner_token {
+						assert(Service.await_pause(fixture.session, .SELECTED));
+						if charge_order == .TERMINAL {
+							Service.resume_pause(fixture.session, .SELECTED);
+							observation := await(fixture, waiter);
+							assert(observation.kind == .QUERY && observation.query.kind == .AVAILABLE);
+							Service.free_observation(*observation);
+						}
+					} else {
+						Service.with_lock(
+							*fixture.session.gate,
+							#code {
+								fixture.session.pauses[Service.Test_Boundary.SELECTED].enabled = false;
+							}
+						);
+					}
+				}
+
 				assert(probe.gate_progress && probe.job.ok && probe.allocations >= job_at);
 				retired := action == .RELEASE_QUERY_WORLD || action == .RETIRE_RETAIN_OWNER;
 				completion_winner := K == .TICKET && (action == .COMPLETE_WORK || action == .REQUEST_SHUTDOWN || action == .REPLACE_HELD_SOURCE);
@@ -8222,9 +10075,96 @@ test_waiter_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, 
 						#code {
 							fixture.session.faults.registration_allocation_hook = null;
 							fixture.session.faults.allow_stale_waiter_source = false;
+							waiter_live := !!waiter.owner_token;
+							waiter_pending := waiter_live;
+							waiter_undelivered := waiter_live;
+							if waiter_live {
+								assert(Service.handle_is_live(*fixture.session.registry, waiter));
+								registration := fixture.session.registrations[waiter.slot];
+								assert(registration && registration.kind == .WAITER);
+								waiter_pending = !registration.terminal;
+								waiter_undelivered = !registration.delivered;
+								if charge_order != .UNCONTROLLED {
+									assert(waiter_pending == (charge_order == .PENDING) && waiter_undelivered);
+									if charge_order == .TERMINAL {
+										assert(registration.observation.query.kind == .AVAILABLE);
+										assert(fixture.session.ledger.live[Service.Limit_Name.PENDING_REGISTRATIONS] == probe.waiter_ledger.live[Service.Limit_Name.PENDING_REGISTRATIONS]);
+									}
+								}
+
+								if registration.terminal && registration.operation.kind == .QUERY {
+									assert(registration.operation.terminal && !registration.operation.waiters.count);
+									assert(registration.observation.kind == .QUERY);
+								}
+							}
+
 							for Service.Limit_Name.[.LIVE_HANDLES, .PENDING_REGISTRATIONS, .COMPLETION_RECORDS] {
+								contribution := waiter_live;
+								if it == {
+									case .PENDING_REGISTRATIONS;
+										contribution = waiter_pending;
+									case .COMPLETION_RECORDS;
+										contribution = waiter_undelivered;
+								}
+
+								expected := probe.waiter_ledger.live[it] + xx contribution;
+								if fixture.session.ledger.live[it] != expected {
+									print(
+										"Waiter charge diagnostic: direct %, negative control %, admission ok %, returned terminal %, expected %, owner %, slot %, generation %, live %.\n",
+										direct,
+										negative_control,
+										ok,
+										terminal,
+										expected,
+										waiter.owner_token,
+										waiter.slot,
+										waiter.generation,
+										Service.handle_is_live(*fixture.session.registry, waiter)
+									);
+
+									if waiter.owner_token && waiter.slot < xx fixture.session.registry.slots.count {
+										entry := fixture.session.registry.slots[waiter.slot];
+										print(
+											"Waiter slot: generation %, kind %, live %, retired %.\n",
+											entry.generation,
+											entry.kind,
+											entry.live,
+											entry.retired
+										);
+									}
+
+									if Service.handle_is_live(*fixture.session.registry, waiter) && waiter.slot < xx fixture.session.registrations.count {
+										registration := fixture.session.registrations[waiter.slot];
+										if registration {
+											print(
+												"Waiter registration: kind %, terminal %, delivered %, observation %.\n",
+												registration.kind,
+												registration.terminal,
+												registration.delivered,
+												registration.observation.kind
+											);
+
+											operation := registration.operation;
+											if operation {
+												print(
+													"Waiter operation: kind %, terminal %, registrations %, waiters %, query outcome %.\n",
+													operation.kind,
+													operation.terminal,
+													operation.registrations,
+													operation.waiters.count,
+													operation.query.kind
+												);
+
+												if operation.task {
+													print("Waiter task phase: %.\n", operation.task.phase);
+												}
+											}
+										}
+									}
+								}
+
 								assert(
-									fixture.session.ledger.live[it] == probe.waiter_ledger.live[it] + xx !!waiter.owner_token,
+									fixture.session.ledger.live[it] == expected,
 									"\e[91mWaiter charges changed: kind %, action %, callback %, failure %, limit %, before %, after %.\e[0m",
 									K,
 									action,
@@ -8240,7 +10180,55 @@ test_waiter_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, 
 				}
 
 				if waiter.owner_token {
+					if charge_order != .UNCONTROLLED {
+						if charge_order == .PENDING {
+							Service.resume_pause(fixture.session, .SELECTED);
+							observation := await(fixture, waiter);
+							assert(observation.kind == .QUERY && observation.query.kind == .AVAILABLE);
+							Service.free_observation(*observation);
+						}
+
+						completion_charges: s64;
+						Service.with_lock(
+							*fixture.session.gate,
+							#code {
+								registration := fixture.session.registrations[waiter.slot];
+								assert(registration.terminal && !registration.delivered && !registration.operation.waiters.count);
+								assert(fixture.session.ledger.live[Service.Limit_Name.PENDING_REGISTRATIONS] == probe.waiter_ledger.live[Service.Limit_Name.PENDING_REGISTRATIONS]);
+								completion_charges = fixture.session.ledger.live[Service.Limit_Name.COMPLETION_RECORDS];
+							}
+						);
+
+						assert(completion_charges == probe.waiter_ledger.live[Service.Limit_Name.COMPLETION_RECORDS] + 1);
+						drained, records := Service.drain_completions(fixture.host.service, fixture.host.session, xx completion_charges);
+						assert(drained && records.count == completion_charges);
+						matches: s64;
+						for records {
+							if it.registration.slot == waiter.slot && it.registration.generation == waiter.generation {
+								assert(it.observation.kind == .QUERY && it.observation.query.kind == .AVAILABLE);
+								matches += 1;
+							}
+						}
+
+						assert(matches == 1);
+						free_records(records);
+						drained, records = Service.drain_completions(fixture.host.service, fixture.host.session, xx completion_charges);
+						assert(drained && !records.count);
+						free_records(records);
+					}
+
 					release(fixture, waiter);
+					if charge_order != .UNCONTROLLED {
+						Service.with_lock(
+							*fixture.session.gate,
+							#code {
+								assert(!Service.handle_is_live(*fixture.session.registry, waiter));
+								assert(fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == probe.waiter_ledger.live[Service.Limit_Name.LIVE_HANDLES]);
+								assert(fixture.session.ledger.live[Service.Limit_Name.PENDING_REGISTRATIONS] == probe.waiter_ledger.live[Service.Limit_Name.PENDING_REGISTRATIONS]);
+								assert(!fixture.session.ledger.live[Service.Limit_Name.COMPLETION_RECORDS]);
+							}
+						);
+					}
 				}
 
 				for probe.job.competing_worlds {
@@ -8279,10 +10267,14 @@ test_waiter_backing_interleavings :: ($K: Service.Handle_Kind, direct := false, 
 	}
 
 	print(
-		"X3/X5 waiter registration/list allocation/completion/frontier/quota/retry/source reuse/owner retirement (kind = %, direct = %, negative control = %) \e[92mPASS\e[0m\n",
+		#run join(
+			"X3/X5 waiter registration/list allocation/completion/frontier/quota/retry/source reuse/owner retirement",
+			" (kind = %, direct = %, negative control = %, charge order = %) \e[92mPASS\e[0m\n"
+		),
 		K,
 		direct,
-		negative_control
+		negative_control,
+		charge_order
 	);
 }
 
@@ -8755,7 +10747,10 @@ test_world_registration_interleavings :: (direct := false, negative_control := f
 	}
 
 	print(
-		"X3/X5 successful world registration selector/shutdown/head replacement/retry/quota/reuse/last reference/owner retirement (direct = %, negative control = %) \e[92mPASS\e[0m\n",
+		#run join(
+			"X3/X5 successful world registration selector/shutdown/head replacement/retry/quota/reuse/last reference/owner retirement",
+			" (direct = %, negative control = %) \e[92mPASS\e[0m\n"
+		),
 		direct,
 		negative_control
 	);
@@ -9803,7 +11798,10 @@ test_open_argument_failures :: () {
 		probe.allocations = 0;
 		cached_probe.allocations = 0;
 		cached_ok, cached, cached_error := Service.open_session(service, options,, allocator);
-		assert(!cached_ok && !cached.session.owner_token && !probe.allocations && cached_probe.allocations == 1, "\e[91mInherited pre-owner allocator misuse was not detected.\e[0m");
+		assert(
+			!cached_ok && !cached.session.owner_token && !probe.allocations && cached_probe.allocations == 1,
+			"\e[91mInherited pre-owner allocator misuse was not detected.\e[0m"
+		);
 		assert_open_argument_path(cached_error, scenario);
 		free(cached_error.path.data,, cached_allocator);
 		service.cached_open_argument_allocator = false;
@@ -10212,193 +12210,8 @@ test_world_output_revalidation_control :: () {
 	print("X3 stale world byte-export negative controls \e[92mPASS\e[0m\n");
 }
 
-main :: () {
-	init(*allocation_ledger.gate);
-	allocation_ledger.delegate = context.default_allocator;
-	Service.service_test_allocator = .{proc = spy_allocate, data = *allocation_ledger};
-	#if BATCH_POOL_ONLY {
-		test_source_batch_pool_defaults();
-		test_source_registration_failures(batch_sources = true);
-		test_source_registration_failures(batch_sources = true, batch_pair = true);
-		test_source_registration_failures(batch_source_bytes = true);
-		test_source_registration_failures(batch_source_bytes = true, batch_pair = true);
-		test_source_registration_failures(batch_source_bytes = true, empty_source = true);
-		test_source_registration_failures(batch_source_identities = true);
-		test_source_registration_failures(batch_source_identities = true, batch_pair = true);
-		test_source_registration_failures(batch_source_identities = true, empty_source = true);
-		test_source_batch_source_event_failures();
-		test_source_batch_edit_failures();
-		test_source_registration_failures(batch_state_list = true);
-		test_source_registration_failures(batch_state_list = true, batch_pair = true);
-		test_source_batch_reference_storage();
-		test_source_registration_failures(batch_context_list = true);
-		test_source_registration_failures(batch_context_list = true, batch_pair = true);
-		test_source_registration_failures(batch_paths = true);
-		test_source_registration_failures(batch_paths = true, batch_pair = true);
-		test_source_registration_failures(batch_paths = true, path_error = true, event_kind = .OBSERVE_DISK);
-		test_source_batch_construction_reference_rollback();
-		test_source_batch_construction_cleanup();
-		test_source_batch_construction_cleanup(new_document = true);
-		test_source_batch_state_cleanup_lifecycle();
-		test_source_batch_state_cleanup_lifecycle(revisions = true);
-		test_source_batch_construction_cleanup(revisions = true);
-		test_source_batch_construction_receipt_retry();
-		test_source_batch_construction_receipt_retry(revisions = true);
-		test_source_batch_construction_callbacks();
-		test_source_batch_construction_callbacks(revisions = true);
-		test_source_registration_failures(batch_states = true);
-		test_source_registration_failures(batch_revisions = true);
-		test_source_registration_failures(batch_states = true, batch_pair = true);
-		test_source_registration_failures(batch_revisions = true, batch_pair = true);
-		test_source_batch_revision_storage();
-		test_source_batch_storage_growth();
-		test_source_batch_storage_admission();
-		test_source_batch_storage_admission(replace = true);
-		test_source_batch_storage_admission(direct = true, replace = true);
-		test_source_batch_storage_admission(replace = true, negative_control = true);
-		test_source_batch_storage_admission(direct = true, replace = true, negative_control = true);
-		test_source_batch_storage_admission(shutdown = true);
-		test_source_batch_storage_admission(direct = true, shutdown = true);
-		test_source_batch_storage_admission(shutdown = true, negative_control = true);
-		test_source_batch_storage_admission(direct = true, shutdown = true, negative_control = true);
-		test_source_batch_storage_admission(retire = true);
-		test_source_batch_storage_admission(direct = true, retire = true);
-		test_source_batch_storage_admission(retire = true, negative_control = true);
-		test_source_batch_storage_admission(direct = true, retire = true, negative_control = true);
-		test_source_batch_storage_admission(retry_rejection = true);
-		test_source_batch_storage_admission(receipt_retry = true);
-		test_source_batch_storage_admission(direct = true, receipt_retry = true);
-		test_source_batch_storage_admission(receipt_retry = true, list = true);
-		test_source_batch_storage_admission(direct = true, receipt_retry = true, list = true);
-		test_source_batch_storage_admission(receipt_retry = true, retry_rejection = true);
-		test_source_batch_storage_admission(direct = true, receipt_retry = true, retry_rejection = true);
-		test_source_batch_storage_admission(receipt_retry = true, list = true, retry_rejection = true);
-		test_source_batch_storage_admission(direct = true, receipt_retry = true, list = true, retry_rejection = true);
-		test_source_batch_pool_cleanup();
-		test_source_batch_pool_cleanup(direct = true);
-		test_source_batch_pool_cleanup(retry = true);
-		test_source_batch_pool_cleanup(direct = true, retry = true);
-		test_source_batch_pool_cleanup(negative_control = true);
-		test_source_batch_pool_cleanup(retry = true, negative_control = true);
-		test_source_batch_pool_cleanup(retry = true, list = true);
-		test_source_batch_pool_cleanup(direct = true, retry = true, list = true);
-		test_source_batch_pool_cleanup(retry = true, negative_control = true, list = true);
-		test_source_batch_pool_cleanup(direct = true, retry = true, negative_control = true, list = true);
-		test_source_batch_pool_cleanup(validation = true);
-		test_source_batch_pool_cleanup(direct = true, validation = true);
-		test_source_batch_pool_cleanup(negative_control = true, validation = true);
-		test_source_batch_pool_cleanup(direct = true, negative_control = true, validation = true);
-		test_source_batch_pool_cleanup(allocate = true);
-		test_source_batch_pool_cleanup(direct = true, allocate = true);
-		test_source_batch_pool_cleanup(negative_control = true, allocate = true);
-		test_source_batch_pool_cleanup(direct = true, negative_control = true, allocate = true);
-		test_source_batch_pool_cleanup_reentry();
-		test_source_batch_storage_cleanup();
-		test_source_batch_storage_cleanup(direct = true);
-		test_source_batch_storage_cleanup(negative_control = true);
-		test_source_batch_storage_cleanup(direct = true, negative_control = true);
-		test_source_batch_storage_cleanup(action = .CHECK_STAGING_SHUTDOWN);
-		test_source_batch_storage_cleanup(direct = true, action = .CHECK_STAGING_SHUTDOWN);
-		test_source_batch_storage_cleanup(negative_control = true, action = .CHECK_STAGING_SHUTDOWN);
-		test_source_batch_storage_cleanup(direct = true, negative_control = true, action = .CHECK_STAGING_SHUTDOWN);
-		test_source_batch_storage_cleanup(action = .RETIRE_AND_REUSE_SESSION);
-		test_source_batch_storage_cleanup(direct = true, action = .RETIRE_AND_REUSE_SESSION);
-		test_source_batch_storage_cleanup(negative_control = true, action = .RETIRE_AND_REUSE_SESSION);
-		test_source_batch_storage_cleanup(direct = true, negative_control = true, action = .RETIRE_AND_REUSE_SESSION);
-		test_source_registration_failures(pool = true);
-		test_source_registration_failure_control(pool = true);
-		test_source_registration_receipt_retry(pool = true);
-		test_source_registration_receipt_retry(direct = true, pool = true);
-		test_source_registration_receipt_retry(list = true, pool = true);
-		test_source_registration_receipt_retry(direct = true, list = true, pool = true);
-		test_source_registration_receipt_retry(reject_receipt = true, pool = true);
-		test_source_registration_receipt_retry(direct = true, reject_receipt = true, pool = true);
-		test_source_registration_receipt_retry(pool = true, reference_control = true);
-		test_source_registration_receipt_retry(direct = true, pool = true, reference_control = true);
-		test_source_registration_receipt_retry(list = true, pool = true, reference_control = true);
-		test_source_registration_receipt_retry(direct = true, list = true, pool = true, reference_control = true);
-		test_source_registration_receipt_retry(reject_receipt = true, pool = true, reference_control = true);
-		test_source_registration_receipt_retry(direct = true, reject_receipt = true, pool = true, reference_control = true);
-		test_source_registration_receipt_retry(transfer = true);
-		test_source_registration_receipt_retry(direct = true, transfer = true);
-		test_source_registration_receipt_retry(list = true, transfer = true);
-		test_source_registration_receipt_retry(direct = true, list = true, transfer = true);
-		test_source_registration_receipt_retry(reject_receipt = true, transfer = true);
-		test_source_registration_receipt_retry(direct = true, reject_receipt = true, transfer = true);
-		test_source_registration_receipt_retry(transfer = true, reference_control = true);
-		test_source_registration_receipt_retry(direct = true, transfer = true, reference_control = true);
-		test_source_registration_receipt_retry(list = true, transfer = true, reference_control = true);
-		test_source_registration_receipt_retry(direct = true, list = true, transfer = true, reference_control = true);
-		test_source_registration_receipt_retry(reject_receipt = true, transfer = true, reference_control = true);
-		test_source_registration_receipt_retry(direct = true, reject_receipt = true, transfer = true, reference_control = true);
-		test_source_registration_quota();
-		test_source_registration_interleavings(pool = true);
-		test_source_registration_interleavings(direct = true, pool = true);
-		test_source_registration_interleavings(negative_control = true, pool = true);
-		test_source_registration_interleavings(direct = true, negative_control = true, pool = true);
-		test_source_registration_interleavings(pool = true, pool_retirement = true);
-		test_source_registration_interleavings(direct = true, pool = true, pool_retirement = true);
-		test_source_registration_interleavings(negative_control = true, pool = true, pool_retirement = true);
-		test_source_registration_interleavings(direct = true, negative_control = true, pool = true, pool_retirement = true);
-		assert_no_owned_allocations();
-		deinit(*allocation_ledger.sizes);
-		destroy(*allocation_ledger.gate);
-		print("Service batch Pool checks .\e[92mPASS\e[0m.\n");
-		return;
-	}
-
-
-	test_registration_and_wait();
-	test_cancel_and_completion();
-	test_retirement_while_waiting();
-	test_reentrant_dispatch();
-	test_pressure_and_reserved_shutdown();
-	test_drain_allocation_failures();
-	test_drain_output_interleavings();
-	test_drain_output_interleavings(direct = true);
-	test_observer_output_failures();
-	test_observer_output_retirement();
-	test_observer_output_retirement(direct = true);
-	test_drain_output_negative_controls();
-	test_acquisition_output_failures();
-	test_acquisition_output_retirement();
-	test_acquisition_output_retirement(direct = true);
-	test_cancellation_output_winners();
-	test_cancellation_output_winners(direct = true);
-	test_cancellation_output_negative_control();
-	test_cancellation_retry_output_failures();
-	test_cancellation_retry_output_failures(direct = true);
-	test_description_output_failures();
-	test_description_output_interleavings();
-	test_description_output_interleavings(direct = true);
-	test_description_retirement_negative_control();
-	test_directory_backing();
-	test_directory_retirement_reentry();
-	test_directory_retirement_reentry(direct = true);
-	test_directory_retirement_reentry(negative_control = true);
-	test_directory_retirement_reentry(direct = true, negative_control = true);
-	test_directory_allocation_failures();
-	test_directory_allocation_interleavings();
-	test_directory_allocation_interleavings(direct = true);
-	test_source_receipt_failures();
-	test_source_registration_failures();
-	test_source_registration_quota();
-	test_source_registration_interleavings();
-	test_source_registration_interleavings(direct = true);
-	test_source_registration_interleavings(negative_control = true);
-	test_source_registration_interleavings(direct = true, negative_control = true);
-	test_source_registration_receipt_retry();
-	test_source_registration_receipt_retry(direct = true);
-	test_source_registration_failure_control();
-	test_source_registration_failures(update = true);
-	test_source_registration_failure_control(update = true);
-	test_source_registration_failures(list = true);
-	test_source_registration_failures(provider = true);
-	test_source_registration_failures(arrays = true);
-	test_source_registration_failures(states = true);
-	test_source_registration_failures(revisions = true);
-	test_source_registration_failures(pool = true);
-	test_source_registration_failures(batch_states = true);
+test_source_batch_pool_checks :: () {
+	test_source_batch_pool_defaults();
 	test_source_registration_failures(batch_sources = true);
 	test_source_registration_failures(batch_sources = true, batch_pair = true);
 	test_source_registration_failures(batch_source_bytes = true);
@@ -10414,25 +12227,336 @@ main :: () {
 	test_source_batch_reference_storage();
 	test_source_registration_failures(batch_context_list = true);
 	test_source_registration_failures(batch_context_list = true, batch_pair = true);
+	test_source_batch_commit_storage();
+	test_source_batch_frontier_storage();
+	test_source_batch_metadata_storage();
 	test_source_registration_failures(batch_paths = true);
 	test_source_registration_failures(batch_paths = true, batch_pair = true);
 	test_source_registration_failures(batch_paths = true, path_error = true, event_kind = .OBSERVE_DISK);
 	test_source_batch_construction_reference_rollback();
+	for Service.Event_Kind.[.SET_OVERLAY, .EDIT_OVERLAY, .OBSERVE_DISK] {
+		event_kind := it;
+		for 1..2 {
+			test_source_batch_construction_reference_rollback(
+				commit = true,
+				commit_callback_at = it,
+				event_kind = event_kind
+			);
+		}
+	}
+
+	for 1..2 {
+		test_source_batch_construction_reference_rollback(
+			commit = true,
+			commit_callback_at = it,
+			new_document = true
+		);
+	}
+
+	test_source_batch_construction_reference_rollback(state_list = true);
+	test_source_batch_construction_reference_rollback(reference_list = true);
+	test_source_batch_construction_reference_rollback(context_list = true);
+	test_source_batch_construction_reference_rollback(paths = true);
+	test_source_batch_construction_reference_rollback(paths = true, path_error = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_construction_reference_rollback(sources = true);
+	test_source_batch_construction_reference_rollback(source_bytes = true);
+	test_source_batch_construction_reference_rollback(source_identities = true);
+	test_source_batch_construction_reference_rollback(edits = true);
+	test_source_batch_construction_reference_rollback(edits = true, sequential_edits = true);
+	test_source_batch_construction_reference_rollback(metadata = true);
+	test_source_batch_construction_reference_rollback(metadata = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_reference_rollback(metadata = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_construction_reference_rollback(metadata = true, later_event = true);
+	test_source_batch_construction_reference_rollback(metadata = true, event_kind = .EDIT_OVERLAY, later_event = true);
+	test_source_batch_construction_reference_rollback(metadata = true, event_kind = .OBSERVE_DISK, later_event = true);
 	test_source_batch_construction_cleanup();
+	test_source_batch_construction_cleanup(state_list = true);
+	test_source_batch_construction_cleanup(reference_list = true);
+	test_source_batch_construction_cleanup(context_list = true, new_document = true);
+	test_source_batch_construction_cleanup(paths = true);
+	test_source_batch_construction_cleanup(paths = true, path_error = true, event_kind = .OBSERVE_DISK);
 	test_source_batch_construction_cleanup(new_document = true);
 	test_source_batch_state_cleanup_lifecycle();
 	test_source_batch_state_cleanup_lifecycle(revisions = true);
 	test_source_batch_construction_cleanup(revisions = true);
+	test_source_batch_construction_cleanup(sources = true);
+	test_source_batch_construction_cleanup(source_bytes = true);
+	test_source_batch_construction_cleanup(source_identities = true);
+	test_source_batch_construction_cleanup(edits = true);
+	test_source_batch_construction_cleanup(edits = true, sequential_edits = true);
+	test_source_batch_construction_cleanup(edits = true, sequential_edits = true, reject_later_edit = true);
+	test_source_batch_construction_cleanup(edits = true, sequential_edits = true, final_scratch = true);
+	test_source_batch_construction_cleanup(metadata = true);
+	test_source_batch_construction_cleanup(metadata = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_cleanup(metadata = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_construction_cleanup(metadata = true, later_event = true);
+	test_source_batch_construction_cleanup(metadata = true, event_kind = .EDIT_OVERLAY, later_event = true);
+	test_source_batch_construction_cleanup(metadata = true, event_kind = .OBSERVE_DISK, later_event = true);
+	test_source_batch_construction_cleanup(metadata = true, metadata_reject_at = 2);
+	test_source_batch_construction_cleanup(metadata = true, metadata_reject_at = 3);
+	test_source_batch_construction_cleanup(metadata = true, event_kind = .EDIT_OVERLAY, metadata_reject_at = 2);
+	test_source_batch_construction_cleanup(metadata = true, event_kind = .EDIT_OVERLAY, metadata_reject_at = 3);
+	test_source_batch_construction_cleanup(metadata = true, event_kind = .OBSERVE_DISK, metadata_reject_at = 2);
+	test_source_batch_construction_cleanup(metadata = true, event_kind = .OBSERVE_DISK, metadata_reject_at = 3);
+	test_source_batch_construction_cleanup(metadata = true, event_kind = .OBSERVE_DISK, metadata_reject_at = 4);
+	for 2..13 {
+		test_source_batch_construction_cleanup(
+			metadata = true,
+			later_event = true,
+			metadata_reject_at = it
+		);
+	}
+
+	for 2..13 {
+		test_source_batch_construction_cleanup(
+			metadata = true,
+			event_kind = .EDIT_OVERLAY,
+			later_event = true,
+			metadata_reject_at = it
+		);
+	}
+
+	for 2..14 {
+		test_source_batch_construction_cleanup(
+			metadata = true,
+			event_kind = .OBSERVE_DISK,
+			later_event = true,
+			metadata_reject_at = it
+		);
+	}
+
 	test_source_batch_construction_receipt_retry();
+	test_source_batch_construction_receipt_retry(context_list = true);
+	test_source_batch_construction_receipt_retry(paths = true);
+	test_source_batch_construction_receipt_retry(paths = true, path_error = true);
+	test_source_batch_construction_receipt_retry(commit = true, commit_callback_at = 1);
+	test_source_batch_construction_receipt_retry(commit = true, commit_callback_at = 2);
+	test_source_batch_construction_receipt_retry(
+		commit = true,
+		commit_callback_at = 1,
+		event_kind = .EDIT_OVERLAY
+	);
+
+	test_source_batch_construction_receipt_retry(
+		commit = true,
+		commit_callback_at = 2,
+		event_kind = .EDIT_OVERLAY
+	);
+
+	test_source_batch_construction_receipt_retry(
+		commit = true,
+		commit_callback_at = 1,
+		event_kind = .OBSERVE_DISK
+	);
+
+	test_source_batch_construction_receipt_retry(
+		commit = true,
+		commit_callback_at = 2,
+		event_kind = .OBSERVE_DISK
+	);
+
+	test_source_batch_construction_receipt_retry(
+		commit = true,
+		commit_callback_at = 1,
+		new_document = true
+	);
+
+	test_source_batch_construction_receipt_retry(
+		commit = true,
+		commit_callback_at = 2,
+		new_document = true
+	);
+
+	test_source_batch_construction_receipt_retry(frontier = true);
+	test_source_batch_construction_receipt_retry(frontier = true, batch_pair = true);
+	test_source_batch_construction_receipt_retry(frontier = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_receipt_retry(frontier = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_construction_receipt_retry(frontier = true, batch_pair = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_receipt_retry(frontier = true, batch_pair = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_construction_receipt_retry(frontier = true, new_document = true);
+	test_source_batch_construction_receipt_retry(state_list = true);
+	test_source_batch_construction_receipt_retry(reference_list = true);
 	test_source_batch_construction_receipt_retry(revisions = true);
+	test_source_batch_construction_receipt_retry(sources = true);
+	test_source_batch_construction_receipt_retry(source_bytes = true);
+	test_source_batch_construction_receipt_retry(source_identities = true);
+	test_source_batch_construction_receipt_retry(edits = true);
+	test_source_batch_construction_receipt_retry(edits = true, sequential_edits = true);
+	test_source_batch_storage_admission(retry_rejection = true, batch_metadata = true);
+	test_source_batch_storage_admission(retry_rejection = true, batch_metadata = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_storage_admission(retry_rejection = true, batch_metadata = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_storage_admission(retry_rejection = true, batch_metadata = true, later_event = true);
+	test_source_batch_storage_admission(retry_rejection = true, batch_metadata = true, later_event = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_storage_admission(retry_rejection = true, batch_metadata = true, later_event = true, event_kind = .OBSERVE_DISK);
+	for bool.[false, true] {
+		direct := it;
+		for bool.[false, true] {
+			test_source_batch_storage_admission(direct = direct, receipt_retry = true, list = it, batch_metadata = true);
+			test_source_batch_storage_admission(direct = direct, receipt_retry = true, list = it, retry_rejection = true, batch_metadata = true);
+			test_source_batch_storage_admission(direct = direct, receipt_retry = true, list = it, batch_metadata = true, event_kind = .EDIT_OVERLAY);
+			test_source_batch_storage_admission(direct = direct, receipt_retry = true, list = it, retry_rejection = true, batch_metadata = true, event_kind = .EDIT_OVERLAY);
+			test_source_batch_storage_admission(direct = direct, receipt_retry = true, list = it, batch_metadata = true, event_kind = .OBSERVE_DISK);
+			test_source_batch_storage_admission(direct = direct, receipt_retry = true, list = it, retry_rejection = true, batch_metadata = true, event_kind = .OBSERVE_DISK);
+			test_source_batch_storage_admission(direct = direct, receipt_retry = true, list = it, batch_metadata = true, later_event = true);
+			test_source_batch_storage_admission(direct = direct, receipt_retry = true, list = it, retry_rejection = true, batch_metadata = true, later_event = true);
+			test_source_batch_storage_admission(direct = direct, receipt_retry = true, list = it, batch_metadata = true, later_event = true, event_kind = .EDIT_OVERLAY);
+			test_source_batch_storage_admission(
+				direct = direct,
+				receipt_retry = true,
+				list = it,
+				retry_rejection = true,
+				batch_metadata = true,
+				later_event = true,
+				event_kind = .EDIT_OVERLAY
+			);
+
+			test_source_batch_storage_admission(direct = direct, receipt_retry = true, list = it, batch_metadata = true, later_event = true, event_kind = .OBSERVE_DISK);
+			test_source_batch_storage_admission(
+				direct = direct,
+				receipt_retry = true,
+				list = it,
+				retry_rejection = true,
+				batch_metadata = true,
+				later_event = true,
+				event_kind = .OBSERVE_DISK
+			);
+		}
+	}
+
 	test_source_batch_construction_callbacks();
+	test_source_batch_construction_callbacks(context_list = true, batch_pair = true);
+	test_source_batch_construction_callbacks(context_list = true, new_document = true);
+	test_source_batch_construction_callbacks(context_list = true, batch_pair = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_callbacks(context_list = true, batch_pair = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_construction_callbacks(paths = true);
+	test_source_batch_construction_callbacks(paths = true, batch_pair = true);
+	test_source_batch_construction_callbacks(paths = true, batch_pair = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_callbacks(paths = true, batch_pair = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_construction_callbacks(paths = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_callbacks(paths = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_construction_callbacks(paths = true, event_kind = .OBSERVE_DISK, path_error = true);
+	test_source_batch_construction_callbacks(commit = true, batch_pair = true, commit_callback_at = 1);
+	test_source_batch_construction_callbacks(commit = true, batch_pair = true, commit_callback_at = 2);
+	test_source_batch_construction_callbacks(
+		commit = true,
+		batch_pair = true,
+		commit_callback_at = 1,
+		event_kind = .EDIT_OVERLAY
+	);
+
+	test_source_batch_construction_callbacks(
+		commit = true,
+		batch_pair = true,
+		commit_callback_at = 2,
+		event_kind = .EDIT_OVERLAY
+	);
+
+	test_source_batch_construction_callbacks(
+		commit = true,
+		batch_pair = true,
+		commit_callback_at = 1,
+		event_kind = .OBSERVE_DISK
+	);
+
+	test_source_batch_construction_callbacks(
+		commit = true,
+		batch_pair = true,
+		commit_callback_at = 2,
+		event_kind = .OBSERVE_DISK
+	);
+
+	test_source_batch_construction_callbacks(
+		commit = true,
+		new_document = true,
+		commit_callback_at = 1
+	);
+
+	test_source_batch_construction_callbacks(
+		commit = true,
+		new_document = true,
+		commit_callback_at = 2
+	);
+
+	test_source_batch_construction_callbacks(frontier = true);
+	test_source_batch_construction_callbacks(frontier = true, batch_pair = true);
+	test_source_batch_construction_callbacks(frontier = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_callbacks(frontier = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_construction_callbacks(frontier = true, batch_pair = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_callbacks(frontier = true, batch_pair = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_construction_callbacks(frontier = true, new_document = true);
+	test_source_batch_construction_callbacks(state_list = true);
+	test_source_batch_construction_callbacks(state_list = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_callbacks(state_list = true, event_kind = .OBSERVE_DISK);
+	for Service.Event_Kind.[.SET_OVERLAY, .EDIT_OVERLAY, .OBSERVE_DISK] {
+		test_source_batch_construction_callbacks(
+			state_list = true,
+			batch_pair = true,
+			event_kind = it
+		);
+	}
+
+	test_source_batch_construction_callbacks(reference_list = true);
+	test_source_batch_construction_callbacks(reference_list = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_callbacks(reference_list = true, event_kind = .OBSERVE_DISK);
+	for Service.Event_Kind.[.SET_OVERLAY, .EDIT_OVERLAY, .OBSERVE_DISK] {
+		test_source_batch_construction_callbacks(
+			reference_list = true,
+			batch_pair = true,
+			event_kind = it
+		);
+	}
+
 	test_source_batch_construction_callbacks(revisions = true);
+	test_source_batch_construction_callbacks(sources = true);
+	test_source_batch_construction_callbacks(source_bytes = true);
+	test_source_batch_construction_callbacks(source_identities = true);
+	test_source_batch_construction_callbacks(source_identities = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_callbacks(edits = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_callbacks(edits = true, sequential_edits = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_callbacks(edits = true, later_event = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_callbacks(metadata = true);
+	test_source_batch_construction_callbacks(metadata = true, metadata_callback_at = 1);
+	test_source_batch_construction_callbacks(metadata = true, metadata_callback_at = 2);
+	for 1..10 {
+		test_source_batch_construction_callbacks(metadata = true, metadata_callback_at = it, later_event = true);
+	}
+
+	for 1..3 {
+		test_source_batch_construction_callbacks(metadata = true, metadata_callback_at = it, event_kind = .EDIT_OVERLAY);
+	}
+
+	for 1..4 {
+		test_source_batch_construction_callbacks(metadata = true, metadata_callback_at = it, event_kind = .OBSERVE_DISK);
+	}
+
+	for 11..13 {
+		test_source_batch_construction_callbacks(metadata = true, metadata_callback_at = it, later_event = true, event_kind = .EDIT_OVERLAY);
+	}
+
+	for 11..13 {
+		test_source_batch_construction_callbacks(metadata = true, metadata_callback_at = it, later_event = true);
+	}
+
+	for 11..14 {
+		test_source_batch_construction_callbacks(metadata = true, metadata_callback_at = it, later_event = true, event_kind = .OBSERVE_DISK);
+	}
+
+	test_source_batch_construction_callbacks(source_identities = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_construction_callbacks(source_bytes = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_callbacks(source_bytes = true, event_kind = .OBSERVE_DISK);
+	test_source_batch_construction_callbacks(sources = true, event_kind = .EDIT_OVERLAY);
+	test_source_batch_construction_callbacks(sources = true, event_kind = .OBSERVE_DISK);
+	for Service.Event_Kind.[.SET_OVERLAY, .EDIT_OVERLAY, .OBSERVE_DISK] {
+		test_source_batch_construction_callbacks(sources = true, batch_pair = true, event_kind = it);
+		test_source_batch_construction_callbacks(source_bytes = true, batch_pair = true, event_kind = it);
+		test_source_batch_construction_callbacks(source_identities = true, batch_pair = true, event_kind = it);
+	}
+
+	test_source_registration_failures(batch_states = true);
 	test_source_registration_failures(batch_revisions = true);
 	test_source_registration_failures(batch_states = true, batch_pair = true);
 	test_source_registration_failures(batch_revisions = true, batch_pair = true);
 	test_source_batch_revision_storage();
-	test_source_registration_failure_control(pool = true);
-	test_source_batch_pool_defaults();
 	test_source_batch_storage_growth();
 	test_source_batch_storage_admission();
 	test_source_batch_storage_admission(replace = true);
@@ -10456,31 +12580,6 @@ main :: () {
 	test_source_batch_storage_admission(direct = true, receipt_retry = true, retry_rejection = true);
 	test_source_batch_storage_admission(receipt_retry = true, list = true, retry_rejection = true);
 	test_source_batch_storage_admission(direct = true, receipt_retry = true, list = true, retry_rejection = true);
-	test_source_registration_receipt_retry(pool = true);
-	test_source_registration_receipt_retry(direct = true, pool = true);
-	test_source_registration_receipt_retry(list = true, pool = true);
-	test_source_registration_receipt_retry(direct = true, list = true, pool = true);
-	test_source_registration_receipt_retry(reject_receipt = true, pool = true);
-	test_source_registration_receipt_retry(direct = true, reject_receipt = true, pool = true);
-	test_source_registration_receipt_retry(pool = true, reference_control = true);
-	test_source_registration_receipt_retry(direct = true, pool = true, reference_control = true);
-	test_source_registration_receipt_retry(list = true, pool = true, reference_control = true);
-	test_source_registration_receipt_retry(direct = true, list = true, pool = true, reference_control = true);
-	test_source_registration_receipt_retry(reject_receipt = true, pool = true, reference_control = true);
-	test_source_registration_receipt_retry(direct = true, reject_receipt = true, pool = true, reference_control = true);
-	test_source_registration_receipt_retry(transfer = true);
-	test_source_registration_receipt_retry(direct = true, transfer = true);
-	test_source_registration_receipt_retry(list = true, transfer = true);
-	test_source_registration_receipt_retry(direct = true, list = true, transfer = true);
-	test_source_registration_receipt_retry(reject_receipt = true, transfer = true);
-	test_source_registration_receipt_retry(direct = true, reject_receipt = true, transfer = true);
-	test_source_registration_receipt_retry(transfer = true, reference_control = true);
-	test_source_registration_receipt_retry(direct = true, transfer = true, reference_control = true);
-	test_source_registration_receipt_retry(list = true, transfer = true, reference_control = true);
-	test_source_registration_receipt_retry(direct = true, list = true, transfer = true, reference_control = true);
-	test_source_registration_receipt_retry(reject_receipt = true, transfer = true, reference_control = true);
-	test_source_registration_receipt_retry(direct = true, reject_receipt = true, transfer = true, reference_control = true);
-	test_source_registration_interleavings(pool = true);
 	test_source_batch_pool_cleanup();
 	test_source_batch_pool_cleanup(direct = true);
 	test_source_batch_pool_cleanup(retry = true);
@@ -10512,6 +12611,34 @@ main :: () {
 	test_source_batch_storage_cleanup(direct = true, action = .RETIRE_AND_REUSE_SESSION);
 	test_source_batch_storage_cleanup(negative_control = true, action = .RETIRE_AND_REUSE_SESSION);
 	test_source_batch_storage_cleanup(direct = true, negative_control = true, action = .RETIRE_AND_REUSE_SESSION);
+	test_source_registration_failures(pool = true);
+	test_source_registration_failure_control(pool = true);
+	test_source_registration_receipt_retry(pool = true);
+	test_source_registration_receipt_retry(direct = true, pool = true);
+	test_source_registration_receipt_retry(list = true, pool = true);
+	test_source_registration_receipt_retry(direct = true, list = true, pool = true);
+	test_source_registration_receipt_retry(reject_receipt = true, pool = true);
+	test_source_registration_receipt_retry(direct = true, reject_receipt = true, pool = true);
+	test_source_registration_receipt_retry(pool = true, reference_control = true);
+	test_source_registration_receipt_retry(direct = true, pool = true, reference_control = true);
+	test_source_registration_receipt_retry(list = true, pool = true, reference_control = true);
+	test_source_registration_receipt_retry(direct = true, list = true, pool = true, reference_control = true);
+	test_source_registration_receipt_retry(reject_receipt = true, pool = true, reference_control = true);
+	test_source_registration_receipt_retry(direct = true, reject_receipt = true, pool = true, reference_control = true);
+	test_source_registration_receipt_retry(transfer = true);
+	test_source_registration_receipt_retry(direct = true, transfer = true);
+	test_source_registration_receipt_retry(list = true, transfer = true);
+	test_source_registration_receipt_retry(direct = true, list = true, transfer = true);
+	test_source_registration_receipt_retry(reject_receipt = true, transfer = true);
+	test_source_registration_receipt_retry(direct = true, reject_receipt = true, transfer = true);
+	test_source_registration_receipt_retry(transfer = true, reference_control = true);
+	test_source_registration_receipt_retry(direct = true, transfer = true, reference_control = true);
+	test_source_registration_receipt_retry(list = true, transfer = true, reference_control = true);
+	test_source_registration_receipt_retry(direct = true, list = true, transfer = true, reference_control = true);
+	test_source_registration_receipt_retry(reject_receipt = true, transfer = true, reference_control = true);
+	test_source_registration_receipt_retry(direct = true, reject_receipt = true, transfer = true, reference_control = true);
+	test_source_registration_quota();
+	test_source_registration_interleavings(pool = true);
 	test_source_registration_interleavings(direct = true, pool = true);
 	test_source_registration_interleavings(negative_control = true, pool = true);
 	test_source_registration_interleavings(direct = true, negative_control = true, pool = true);
@@ -10519,215 +12646,291 @@ main :: () {
 	test_source_registration_interleavings(direct = true, pool = true, pool_retirement = true);
 	test_source_registration_interleavings(negative_control = true, pool = true, pool_retirement = true);
 	test_source_registration_interleavings(direct = true, negative_control = true, pool = true, pool_retirement = true);
-	test_source_registration_failure_control(states = true);
-	test_source_registration_failure_control(revisions = true);
-	test_source_provider_arrays_refresh(states = true);
-	test_source_provider_arrays_refresh(direct = true, states = true);
-	test_source_provider_arrays_refresh(empty = true, states = true);
-	test_source_provider_revisions_empty();
-	test_source_provider_revisions_empty(empty_provider = true);
-	test_source_provider_revisions_refresh();
-	test_source_provider_revisions_refresh(direct = true);
-	test_source_provider_revisions_refresh(surplus = true);
-	test_source_provider_revisions_refresh(direct = true, surplus = true);
-	for 1..2 {
-		test_source_registration_interleavings(states = true, multiple = true, job_at = it);
-		test_source_registration_interleavings(direct = true, states = true, multiple = true, job_at = it);
-		test_source_registration_interleavings(negative_control = true, states = true, multiple = true, job_at = it);
-		test_source_registration_interleavings(direct = true, negative_control = true, states = true, multiple = true, job_at = it);
-	}
+}
 
-	test_source_registration_interleavings(states = true);
-	test_source_registration_interleavings(direct = true, states = true);
-	test_source_registration_interleavings(negative_control = true, states = true);
-	test_source_registration_interleavings(direct = true, negative_control = true, states = true);
-	test_source_registration_interleavings(states = true, cleanup = true);
-	test_source_registration_interleavings(direct = true, states = true, cleanup = true);
-	test_source_registration_interleavings(negative_control = true, states = true, cleanup = true);
-	test_source_registration_interleavings(direct = true, negative_control = true, states = true, cleanup = true);
-	for 1..2 {
-		test_source_registration_interleavings(revisions = true, multiple = true, job_at = it);
-		test_source_registration_interleavings(direct = true, revisions = true, multiple = true, job_at = it);
-		test_source_registration_interleavings(negative_control = true, revisions = true, multiple = true, job_at = it);
-		test_source_registration_interleavings(direct = true, negative_control = true, revisions = true, multiple = true, job_at = it);
-	}
+main :: () {
+	init(*allocation_ledger.gate);
+	allocation_ledger.delegate = context.default_allocator;
+	Service.service_test_allocator = .{proc = spy_allocate, data = *allocation_ledger};
+	#if BATCH_POOL_ONLY {
+		test_source_batch_pool_checks();
 
-	test_source_registration_interleavings(revisions = true);
-	test_source_registration_interleavings(direct = true, revisions = true);
-	test_source_registration_interleavings(negative_control = true, revisions = true);
-	test_source_registration_interleavings(direct = true, negative_control = true, revisions = true);
-	test_source_registration_interleavings(revisions = true, cleanup = true);
-	test_source_registration_interleavings(direct = true, revisions = true, cleanup = true);
-	test_source_registration_interleavings(negative_control = true, revisions = true, cleanup = true);
-	test_source_registration_interleavings(direct = true, negative_control = true, revisions = true, cleanup = true);
-	test_source_registration_receipt_retry(states = true);
-	test_source_registration_receipt_retry(direct = true, states = true);
-	test_source_registration_receipt_retry(list = true, states = true);
-	test_source_registration_receipt_retry(direct = true, list = true, states = true);
-	test_source_registration_receipt_retry(revisions = true);
-	test_source_registration_receipt_retry(direct = true, revisions = true);
-	test_source_registration_receipt_retry(list = true, revisions = true);
-	test_source_registration_receipt_retry(direct = true, list = true, revisions = true);
-	test_source_registration_receipt_retry(revisions = true, reject_receipt = true);
-	test_source_registration_failure_control(arrays = true);
-	test_source_provider_arrays_refresh();
-	test_source_provider_arrays_refresh(direct = true);
-	test_source_provider_arrays_refresh(empty = true);
-	for 1..2 {
-		test_source_registration_interleavings(arrays = true, job_at = it);
-		test_source_registration_interleavings(direct = true, arrays = true, job_at = it);
-		test_source_registration_interleavings(negative_control = true, arrays = true, job_at = it);
-		test_source_registration_interleavings(direct = true, negative_control = true, arrays = true, job_at = it);
-	}
+		assert_no_owned_allocations();
 
-	test_source_registration_interleavings(arrays = true, cleanup = true);
-	test_source_registration_interleavings(direct = true, arrays = true, cleanup = true);
-	test_source_registration_interleavings(negative_control = true, arrays = true, cleanup = true);
-	test_source_registration_interleavings(direct = true, negative_control = true, arrays = true, cleanup = true);
-	test_source_registration_receipt_retry(arrays = true);
-	test_source_registration_receipt_retry(direct = true, arrays = true);
-	test_source_registration_receipt_retry(list = true, arrays = true);
-	test_source_registration_receipt_retry(direct = true, list = true, arrays = true);
-	test_source_registration_failure_control(provider = true);
-	test_source_registration_interleavings(provider = true);
-	test_source_registration_interleavings(direct = true, provider = true);
-	test_source_registration_interleavings(negative_control = true, provider = true);
-	test_source_registration_interleavings(direct = true, negative_control = true, provider = true);
-	test_source_registration_receipt_retry(provider = true);
-	test_source_registration_receipt_retry(direct = true, provider = true);
-	test_source_registration_receipt_retry(list = true, provider = true);
-	test_source_registration_receipt_retry(direct = true, list = true, provider = true);
-	test_source_registration_failure_control(list = true);
-	test_source_registration_interleavings(list = true);
-	test_source_registration_interleavings(direct = true, list = true);
-	test_source_registration_interleavings(negative_control = true, list = true);
-	test_source_registration_interleavings(direct = true, negative_control = true, list = true);
-	test_source_registration_interleavings(list = true, cleanup = true);
-	test_source_registration_interleavings(direct = true, list = true, cleanup = true);
-	test_source_registration_interleavings(negative_control = true, list = true, cleanup = true);
-	test_source_registration_interleavings(direct = true, negative_control = true, list = true, cleanup = true);
-	test_source_registration_receipt_retry(list = true);
-	test_source_registration_receipt_retry(direct = true, list = true);
-	for s64.[1, 2, 3] {
-		test_source_registration_interleavings(update = true, job_at = it);
-		test_source_registration_interleavings(direct = true, update = true, job_at = it);
-	}
+		deinit(*allocation_ledger.sizes);
+		destroy(*allocation_ledger.gate);
 
-	test_source_update_counter();
-	test_source_update_counter(last_token = true);
-	test_source_update_counter(late = true);
-	test_source_update_counter(late = true, direct = true);
-	test_source_receipt_interleavings();
-	test_source_receipt_interleavings(direct = true);
-	test_open_output_failures();
-	test_open_argument_failures();
-	test_open_context_failures();
-	test_open_context_interleavings();
-	test_open_context_interleavings(direct = true);
-	test_shutdown_reserve_failures();
-	test_repeated_shutdown_failures();
-	test_waiter_backing_failures(.TICKET);
-	test_waiter_backing_failures(.WORLD);
-	test_world_registration_failures();
-	test_world_registration_quota();
-	test_world_registration_interleavings();
-	test_world_registration_interleavings(direct = true);
-	test_world_registration_interleavings(negative_control = true);
-	test_world_registration_interleavings(direct = true, negative_control = true);
-	test_world_registration_failure_control();
-	test_retain_backing_failures(.RESULT, acquisition = true);
-	test_result_registration_quota_and_control();
-	test_result_registration_quota_and_control(negative_control = true);
-	test_result_registration_interleavings();
-	test_result_registration_interleavings(direct = true);
-	test_result_registration_interleavings(negative_control = true);
-	test_result_registration_interleavings(direct = true, negative_control = true);
-	test_immediate_result_failures();
-	test_immediate_result_limits();
-	test_immediate_result_interleavings();
-	test_immediate_result_interleavings(direct = true);
-	test_immediate_result_interleavings(negative_control = true);
-	test_immediate_result_interleavings(direct = true, negative_control = true);
-	test_immediate_result_failure_control();
-	test_immediate_result_last_token();
-	test_waiter_backing_quota(.TICKET);
-	test_waiter_backing_quota(.WORLD);
-	test_waiter_backing_interleavings(.TICKET);
-	test_waiter_backing_interleavings(.TICKET, direct = true);
-	test_waiter_backing_interleavings(.WORLD);
-	test_waiter_backing_interleavings(.WORLD, direct = true);
-	test_waiter_backing_interleavings(.TICKET, negative_control = true);
-	test_waiter_backing_interleavings(.TICKET, direct = true, negative_control = true);
-	test_waiter_backing_interleavings(.WORLD, negative_control = true);
-	test_waiter_backing_interleavings(.WORLD, direct = true, negative_control = true);
-	test_waiter_failed_backing_control(.TICKET);
-	test_waiter_failed_backing_control(.WORLD);
-	test_repeated_shutdown_quota();
-	test_repeated_shutdown_interleavings();
-	test_repeated_shutdown_interleavings(direct = true);
-	test_repeated_shutdown_interleavings(negative_control = true);
-	test_repeated_shutdown_interleavings(direct = true, negative_control = true);
-	test_retain_backing_failures(.WORLD);
-	test_retain_backing_failures(.RESULT);
-	test_retain_backing_interleavings(.WORLD);
-	test_retain_backing_interleavings(.WORLD, direct = true);
-	test_retain_backing_interleavings(.RESULT);
-	test_retain_backing_interleavings(.RESULT, direct = true);
-	test_retain_backing_interleavings(.WORLD, negative_control = true);
-	test_retain_backing_interleavings(.WORLD, direct = true, negative_control = true);
-	test_retain_backing_interleavings(.RESULT, negative_control = true);
-	test_retain_backing_interleavings(.RESULT, direct = true, negative_control = true);
-	test_shutdown_reserved_activation();
-	test_shutdown_reserved_activation(pressure = true);
-	test_shutdown_reserved_activation(negative_control = true);
-	test_shutdown_reserved_activation(pressure = true, negative_control = true);
-	test_shutdown_identity_exhaustion();
-	test_provider_error_failures();
-	test_provider_error_interleavings();
-	test_provider_error_interleavings(direct = true);
-	test_open_argument_interleavings();
-	test_open_argument_interleavings(direct = true);
-	test_analysis_receipt_failures();
-	test_analysis_argument_failures();
-	test_terminal_query_failures();
-	test_result_argument_failures();
-	test_coordinator_argument_failures();
-	test_coordinator_argument_interleavings();
-	test_coordinator_argument_interleavings(direct = true);
-	test_coordinator_argument_interleavings(negative_control = true);
-	test_coordinator_argument_interleavings(direct = true, negative_control = true);
-	test_result_argument_interleavings();
-	test_result_argument_interleavings(direct = true);
-	test_result_argument_interleavings(negative_control = true);
-	test_result_argument_interleavings(direct = true, negative_control = true);
-	test_terminal_query_failures(negative_control = true);
-	test_terminal_query_interleavings();
-	test_terminal_query_interleavings(direct = true);
-	test_terminal_query_interleavings(negative_control = true);
-	test_terminal_query_interleavings(direct = true, negative_control = true);
-	test_analysis_argument_interleavings();
-	test_analysis_argument_interleavings(direct = true);
-	test_analysis_argument_interleavings(negative_control = true);
-	test_analysis_argument_interleavings(direct = true, negative_control = true);
-	test_analysis_receipt_interleavings();
-	test_analysis_receipt_interleavings(direct = true);
-	test_analysis_receipt_interleavings(negative_control = true);
-	test_analysis_receipt_interleavings(direct = true, negative_control = true);
-	test_open_output_interleavings();
-	test_open_output_interleavings(direct = true);
-	test_world_output_failures();
-	test_world_output_retirement();
-	test_world_output_retirement(direct = true);
-	test_world_output_changes();
-	test_world_output_changes(direct = true);
-	test_world_output_revalidation_control();
-	test_provider_stall_and_shutdown();
-	test_required_fifo();
-	test_optional_fifo();
-	test_cleanup_pin();
-	test_shutdown_deadline_and_owners();
-	assert_no_owned_allocations();
-	deinit(*allocation_ledger.sizes);
-	destroy(*allocation_ledger.gate);
-	print("Service worker \e[92mPASS\e[0m.\n");
+		print("Service batch Pool checks .\e[92mPASS\e[0m.\n");
+	} else {
+		test_registration_and_wait();
+		test_cancel_and_completion();
+		test_retirement_while_waiting();
+		test_reentrant_dispatch();
+		test_pressure_and_reserved_shutdown();
+		test_drain_allocation_failures();
+		test_drain_output_interleavings();
+		test_drain_output_interleavings(direct = true);
+		test_observer_output_failures();
+		test_observer_output_retirement();
+		test_observer_output_retirement(direct = true);
+		test_drain_output_negative_controls();
+		test_acquisition_output_failures();
+		test_acquisition_output_retirement();
+		test_acquisition_output_retirement(direct = true);
+		test_cancellation_output_winners();
+		test_cancellation_output_winners(direct = true);
+		test_cancellation_output_negative_control();
+		test_cancellation_retry_output_failures();
+		test_cancellation_retry_output_failures(direct = true);
+		test_description_output_failures();
+		test_description_output_interleavings();
+		test_description_output_interleavings(direct = true);
+		test_description_retirement_negative_control();
+		test_directory_backing();
+		test_directory_retirement_reentry();
+		test_directory_retirement_reentry(direct = true);
+		test_directory_retirement_reentry(negative_control = true);
+		test_directory_retirement_reentry(direct = true, negative_control = true);
+		test_directory_allocation_failures();
+		test_directory_allocation_interleavings();
+		test_directory_allocation_interleavings(direct = true);
+		test_source_receipt_failures();
+		test_source_registration_failures();
+		test_source_registration_interleavings();
+		test_source_registration_interleavings(direct = true);
+		test_source_registration_interleavings(negative_control = true);
+		test_source_registration_interleavings(direct = true, negative_control = true);
+		test_source_registration_receipt_retry();
+		test_source_registration_receipt_retry(direct = true);
+		test_source_registration_failure_control();
+		test_source_registration_failures(update = true);
+		test_source_registration_failure_control(update = true);
+		test_source_registration_failures(list = true);
+		test_source_registration_failures(provider = true);
+		test_source_registration_failures(arrays = true);
+		test_source_registration_failures(states = true);
+		test_source_registration_failures(revisions = true);
+
+		test_source_batch_pool_checks();
+
+		test_source_registration_failure_control(states = true);
+		test_source_registration_failure_control(revisions = true);
+		test_source_provider_arrays_refresh(states = true);
+		test_source_provider_arrays_refresh(direct = true, states = true);
+		test_source_provider_arrays_refresh(empty = true, states = true);
+		test_source_provider_revisions_empty();
+		test_source_provider_revisions_empty(empty_provider = true);
+		test_source_provider_revisions_refresh();
+		test_source_provider_revisions_refresh(direct = true);
+		test_source_provider_revisions_refresh(surplus = true);
+		test_source_provider_revisions_refresh(direct = true, surplus = true);
+		for 1..2 {
+			test_source_registration_interleavings(states = true, multiple = true, job_at = it);
+			test_source_registration_interleavings(direct = true, states = true, multiple = true, job_at = it);
+			test_source_registration_interleavings(negative_control = true, states = true, multiple = true, job_at = it);
+			test_source_registration_interleavings(direct = true, negative_control = true, states = true, multiple = true, job_at = it);
+		}
+
+		test_source_registration_interleavings(states = true);
+		test_source_registration_interleavings(direct = true, states = true);
+		test_source_registration_interleavings(negative_control = true, states = true);
+		test_source_registration_interleavings(direct = true, negative_control = true, states = true);
+		test_source_registration_interleavings(states = true, cleanup = true);
+		test_source_registration_interleavings(direct = true, states = true, cleanup = true);
+		test_source_registration_interleavings(negative_control = true, states = true, cleanup = true);
+		test_source_registration_interleavings(direct = true, negative_control = true, states = true, cleanup = true);
+		for 1..2 {
+			test_source_registration_interleavings(revisions = true, multiple = true, job_at = it);
+			test_source_registration_interleavings(direct = true, revisions = true, multiple = true, job_at = it);
+			test_source_registration_interleavings(negative_control = true, revisions = true, multiple = true, job_at = it);
+			test_source_registration_interleavings(direct = true, negative_control = true, revisions = true, multiple = true, job_at = it);
+		}
+
+		test_source_registration_interleavings(revisions = true);
+		test_source_registration_interleavings(direct = true, revisions = true);
+		test_source_registration_interleavings(negative_control = true, revisions = true);
+		test_source_registration_interleavings(direct = true, negative_control = true, revisions = true);
+		test_source_registration_interleavings(revisions = true, cleanup = true);
+		test_source_registration_interleavings(direct = true, revisions = true, cleanup = true);
+		test_source_registration_interleavings(negative_control = true, revisions = true, cleanup = true);
+		test_source_registration_interleavings(direct = true, negative_control = true, revisions = true, cleanup = true);
+		test_source_registration_receipt_retry(states = true);
+		test_source_registration_receipt_retry(direct = true, states = true);
+		test_source_registration_receipt_retry(list = true, states = true);
+		test_source_registration_receipt_retry(direct = true, list = true, states = true);
+		test_source_registration_receipt_retry(revisions = true);
+		test_source_registration_receipt_retry(direct = true, revisions = true);
+		test_source_registration_receipt_retry(list = true, revisions = true);
+		test_source_registration_receipt_retry(direct = true, list = true, revisions = true);
+		test_source_registration_receipt_retry(revisions = true, reject_receipt = true);
+		test_source_registration_failure_control(arrays = true);
+		test_source_provider_arrays_refresh();
+		test_source_provider_arrays_refresh(direct = true);
+		test_source_provider_arrays_refresh(empty = true);
+		for 1..2 {
+			test_source_registration_interleavings(arrays = true, job_at = it);
+			test_source_registration_interleavings(direct = true, arrays = true, job_at = it);
+			test_source_registration_interleavings(negative_control = true, arrays = true, job_at = it);
+			test_source_registration_interleavings(direct = true, negative_control = true, arrays = true, job_at = it);
+		}
+
+		test_source_registration_interleavings(arrays = true, cleanup = true);
+		test_source_registration_interleavings(direct = true, arrays = true, cleanup = true);
+		test_source_registration_interleavings(negative_control = true, arrays = true, cleanup = true);
+		test_source_registration_interleavings(direct = true, negative_control = true, arrays = true, cleanup = true);
+		test_source_registration_receipt_retry(arrays = true);
+		test_source_registration_receipt_retry(direct = true, arrays = true);
+		test_source_registration_receipt_retry(list = true, arrays = true);
+		test_source_registration_receipt_retry(direct = true, list = true, arrays = true);
+		test_source_registration_failure_control(provider = true);
+		test_source_registration_interleavings(provider = true);
+		test_source_registration_interleavings(direct = true, provider = true);
+		test_source_registration_interleavings(negative_control = true, provider = true);
+		test_source_registration_interleavings(direct = true, negative_control = true, provider = true);
+		test_source_registration_receipt_retry(provider = true);
+		test_source_registration_receipt_retry(direct = true, provider = true);
+		test_source_registration_receipt_retry(list = true, provider = true);
+		test_source_registration_receipt_retry(direct = true, list = true, provider = true);
+		test_source_registration_failure_control(list = true);
+		test_source_registration_interleavings(list = true);
+		test_source_registration_interleavings(direct = true, list = true);
+		test_source_registration_interleavings(negative_control = true, list = true);
+		test_source_registration_interleavings(direct = true, negative_control = true, list = true);
+		test_source_registration_interleavings(list = true, cleanup = true);
+		test_source_registration_interleavings(direct = true, list = true, cleanup = true);
+		test_source_registration_interleavings(negative_control = true, list = true, cleanup = true);
+		test_source_registration_interleavings(direct = true, negative_control = true, list = true, cleanup = true);
+		test_source_registration_receipt_retry(list = true);
+		test_source_registration_receipt_retry(direct = true, list = true);
+		for s64.[1, 2, 3] {
+			test_source_registration_interleavings(update = true, job_at = it);
+			test_source_registration_interleavings(direct = true, update = true, job_at = it);
+		}
+
+		test_source_update_counter();
+		test_source_update_counter(last_token = true);
+		test_source_update_counter(late = true);
+		test_source_update_counter(late = true, direct = true);
+		test_source_receipt_interleavings();
+		test_source_receipt_interleavings(direct = true);
+		test_open_output_failures();
+		test_open_argument_failures();
+		test_open_context_failures();
+		test_open_context_interleavings();
+		test_open_context_interleavings(direct = true);
+		test_shutdown_reserve_failures();
+		test_repeated_shutdown_failures();
+		test_waiter_backing_failures(.TICKET);
+		test_waiter_backing_failures(.WORLD);
+		test_world_registration_failures();
+		test_world_registration_quota();
+		test_world_registration_interleavings();
+		test_world_registration_interleavings(direct = true);
+		test_world_registration_interleavings(negative_control = true);
+		test_world_registration_interleavings(direct = true, negative_control = true);
+		test_world_registration_failure_control();
+		test_retain_backing_failures(.RESULT, acquisition = true);
+		test_result_registration_quota_and_control();
+		test_result_registration_quota_and_control(negative_control = true);
+		test_result_registration_interleavings();
+		test_result_registration_interleavings(direct = true);
+		test_result_registration_interleavings(negative_control = true);
+		test_result_registration_interleavings(direct = true, negative_control = true);
+		test_immediate_result_failures();
+		test_immediate_result_limits();
+		test_immediate_result_interleavings();
+		test_immediate_result_interleavings(direct = true);
+		test_immediate_result_interleavings(negative_control = true);
+		test_immediate_result_interleavings(direct = true, negative_control = true);
+		test_immediate_result_failure_control();
+		test_immediate_result_last_token();
+		test_waiter_backing_quota(.TICKET);
+		test_waiter_backing_quota(.WORLD);
+		test_waiter_backing_interleavings(.TICKET);
+		test_waiter_backing_interleavings(.TICKET, direct = true);
+		test_waiter_backing_interleavings(.WORLD);
+		test_waiter_backing_interleavings(.WORLD, direct = true);
+		for Waiter_Charge_Order.[.PENDING, .TERMINAL] {
+			test_waiter_backing_interleavings(.WORLD, charge_order = it);
+			test_waiter_backing_interleavings(.WORLD, direct = true, charge_order = it);
+		}
+
+		test_waiter_backing_interleavings(.TICKET, negative_control = true);
+		test_waiter_backing_interleavings(.TICKET, direct = true, negative_control = true);
+		test_waiter_backing_interleavings(.WORLD, negative_control = true);
+		test_waiter_backing_interleavings(.WORLD, direct = true, negative_control = true);
+		test_waiter_failed_backing_control(.TICKET);
+		test_waiter_failed_backing_control(.WORLD);
+		test_repeated_shutdown_quota();
+		test_repeated_shutdown_interleavings();
+		test_repeated_shutdown_interleavings(direct = true);
+		test_repeated_shutdown_interleavings(negative_control = true);
+		test_repeated_shutdown_interleavings(direct = true, negative_control = true);
+		test_retain_backing_failures(.WORLD);
+		test_retain_backing_failures(.RESULT);
+		test_retain_backing_interleavings(.WORLD);
+		test_retain_backing_interleavings(.WORLD, direct = true);
+		test_retain_backing_interleavings(.RESULT);
+		test_retain_backing_interleavings(.RESULT, direct = true);
+		test_retain_backing_interleavings(.WORLD, negative_control = true);
+		test_retain_backing_interleavings(.WORLD, direct = true, negative_control = true);
+		test_retain_backing_interleavings(.RESULT, negative_control = true);
+		test_retain_backing_interleavings(.RESULT, direct = true, negative_control = true);
+		test_shutdown_reserved_activation();
+		test_shutdown_reserved_activation(pressure = true);
+		test_shutdown_reserved_activation(negative_control = true);
+		test_shutdown_reserved_activation(pressure = true, negative_control = true);
+		test_shutdown_identity_exhaustion();
+		test_provider_error_failures();
+		test_provider_error_interleavings();
+		test_provider_error_interleavings(direct = true);
+		test_open_argument_interleavings();
+		test_open_argument_interleavings(direct = true);
+		test_analysis_receipt_failures();
+		test_analysis_argument_failures();
+		test_terminal_query_failures();
+		test_result_argument_failures();
+		test_coordinator_argument_failures();
+		test_coordinator_argument_interleavings();
+		test_coordinator_argument_interleavings(direct = true);
+		test_coordinator_argument_interleavings(negative_control = true);
+		test_coordinator_argument_interleavings(direct = true, negative_control = true);
+		test_result_argument_interleavings();
+		test_result_argument_interleavings(direct = true);
+		test_result_argument_interleavings(negative_control = true);
+		test_result_argument_interleavings(direct = true, negative_control = true);
+		test_terminal_query_failures(negative_control = true);
+		test_terminal_query_interleavings();
+		test_terminal_query_interleavings(direct = true);
+		test_terminal_query_interleavings(negative_control = true);
+		test_terminal_query_interleavings(direct = true, negative_control = true);
+		test_analysis_argument_interleavings();
+		test_analysis_argument_interleavings(direct = true);
+		test_analysis_argument_interleavings(negative_control = true);
+		test_analysis_argument_interleavings(direct = true, negative_control = true);
+		test_analysis_receipt_interleavings();
+		test_analysis_receipt_interleavings(direct = true);
+		test_analysis_receipt_interleavings(negative_control = true);
+		test_analysis_receipt_interleavings(direct = true, negative_control = true);
+		test_open_output_interleavings();
+		test_open_output_interleavings(direct = true);
+		test_world_output_failures();
+		test_world_output_retirement();
+		test_world_output_retirement(direct = true);
+		test_world_output_changes();
+		test_world_output_changes(direct = true);
+		test_world_output_revalidation_control();
+		test_provider_stall_and_shutdown();
+		test_required_fifo();
+		test_optional_fifo();
+		test_cleanup_pin();
+		test_shutdown_deadline_and_owners();
+
+		assert_no_owned_allocations();
+
+		deinit(*allocation_ledger.sizes);
+		destroy(*allocation_ledger.gate);
+
+		print("Service worker \e[92mPASS\e[0m.\n");
+	}
 }
