@@ -4046,15 +4046,19 @@ test_source_batch_construction_reference_rollback :: (
 	path_error := false,
 	commit := false,
 	commit_callback_at: s64 = 1,
-	new_document := false
+	new_document := false,
+	frontier := false,
+	batch_pair := false
 ) {
+	assert(!(commit && frontier));
+	assert(!batch_pair || frontier && !new_document);
 	assert(
-		!commit
+		!(commit || frontier)
 		|| !sources && !source_bytes && !source_identities && !edits && !sequential_edits && !metadata
 			&& !state_list && !reference_list && !context_list && !paths && !later_event
 	);
 	assert(commit_callback_at >= 1 && commit_callback_at <= 2);
-	assert(!new_document || commit && event_kind == .SET_OVERLAY);
+	assert(!new_document || (commit || frontier) && event_kind == .SET_OVERLAY);
 	assert(!path_error || paths && event_kind == .OBSERVE_DISK);
 	list_construction_compatible := !sources
 		&& !source_bytes
@@ -4075,11 +4079,14 @@ test_source_batch_construction_reference_rollback :: (
 	assert(!edits || !sources && !source_bytes && !source_identities);
 	assert(!sequential_edits || edits);
 	assert(!metadata || !sources && !source_bytes && !source_identities && !edits);
-	assert(event_kind == .SET_OVERLAY || (metadata || commit) && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK) || path_error);
+	assert(event_kind == .SET_OVERLAY || (metadata || commit || frontier) && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK) || path_error);
 	assert(!later_event || metadata);
 	for bool.[false, true] {
 		revisions := it;
-		if (sources || source_bytes || source_identities || edits || metadata || state_list || reference_list || context_list || paths || commit) && revisions {
+		if (
+			(sources || source_bytes || source_identities || edits || metadata || state_list || reference_list || context_list || paths || commit || frontier)
+			&& revisions
+		) {
 			continue;
 		}
 
@@ -4094,7 +4101,7 @@ test_source_batch_construction_reference_rollback :: (
 						list = it == 1,
 						reject_receipt = it == 2,
 						reference_control = reference_control,
-						batch_states = !revisions && list_construction_compatible && !state_list && !reference_list && !context_list && !paths && !commit,
+						batch_states = !revisions && list_construction_compatible && !state_list && !reference_list && !context_list && !paths && !commit && !frontier,
 						batch_revisions = revisions,
 						batch_sources = sources,
 						batch_source_bytes = source_bytes,
@@ -4111,7 +4118,9 @@ test_source_batch_construction_reference_rollback :: (
 						path_error = path_error,
 						batch_commit = commit,
 						commit_callback_at = commit_callback_at,
-						new_document = new_document
+						new_document = new_document,
+						batch_frontier = frontier,
+						batch_pair = batch_pair
 					);
 				}
 			}
@@ -4123,7 +4132,7 @@ test_source_batch_construction_reference_rollback :: (
 			"X5 construction retained-sentinel source-reference rollback/controls",
 			" (sources = %, source bytes = %, source identities = %, edits = %, sequential edits = %, metadata = %,",
 			" event = %, later event = %, state list = %, reference list = %, context list = %, path reservation = %, path copy = %,",
-			" commit arrays = %, commit callback at = %, new document = %)",
+			" commit arrays = %, commit callback at = %, new document = %, frontier = %, paired = %)",
 			" \e[92mPASS\e[0m\n"
 		),
 		sources,
@@ -4141,7 +4150,9 @@ test_source_batch_construction_reference_rollback :: (
 		path_error,
 		commit,
 		commit_callback_at,
-		new_document
+		new_document,
+		frontier,
+		batch_pair
 	);
 }
 
@@ -4755,8 +4766,27 @@ test_source_batch_pool_cleanup :: (
 	batch_reference_list := false,
 	batch_context_list := false,
 	batch_paths := false,
-	path_error := false
+	path_error := false,
+	batch_commit := false,
+	commit_capture_at: s64 = 1,
+	commit_reject_at: s64 = 0,
+	batch_frontier := false,
+	batch_pair := false,
+	reject_transfer := false
 ) {
+	assert(!(batch_commit && batch_frontier));
+	assert(!batch_pair || batch_frontier && !new_document);
+	assert(!reject_transfer || batch_frontier && !retry);
+	preparation := batch_commit || batch_frontier;
+	assert(
+		!preparation
+		|| !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities
+			&& !batch_edits && !batch_metadata && !batch_state_list && !batch_reference_list && !batch_context_list
+			&& !batch_paths && !later_event && !validation && action == .NONE
+	);
+	assert(commit_capture_at >= 1 && commit_capture_at <= 2);
+	assert(!commit_reject_at || batch_commit && !retry && (commit_reject_at == 3 || commit_reject_at == 2 && commit_capture_at == 1));
+	paired_preparation := batch_pair || batch_commit && !new_document;
 	assert(!path_error || batch_paths && event_kind == .OBSERVE_DISK);
 	assert(
 		!batch_paths
@@ -4785,7 +4815,7 @@ test_source_batch_pool_cleanup :: (
 			&& metadata_reject_at <= (ifx event_kind == .OBSERVE_DISK then 4 else 3) + (ifx later_event then 10 else 0)
 	);
 	assert(!later_event || batch_metadata);
-	assert(event_kind == .SET_OVERLAY || batch_metadata && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK) || path_error);
+	assert(event_kind == .SET_OVERLAY || (batch_metadata || preparation) && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK) || path_error);
 	assert(!batch_metadata || !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities && !batch_edits && action == .NONE);
 	assert(action == .NONE || (batch_states || batch_revisions || batch_sources) && (action == .CHECK_STAGING_SHUTDOWN || action == .RETIRE_AND_REUSE_SESSION));
 	active_lifecycle := action != .NONE && !negative_control;
@@ -4799,7 +4829,7 @@ test_source_batch_pool_cleanup :: (
 	assert(!sequential_edits || batch_edits);
 	assert(!reject_later_edit || sequential_edits && !retry && !validation);
 	assert(!final_scratch || sequential_edits && !reject_later_edit);
-	assert(!new_document || batch_states || batch_context_list);
+	assert(!new_document || (batch_states || batch_context_list || preparation) && event_kind == .SET_OVERLAY);
 	assert(!list || retry);
 	assert(!validation || !retry);
 	assert(!hold_heap_gate || allocate && !direct && !negative_control);
@@ -4807,7 +4837,7 @@ test_source_batch_pool_cleanup :: (
 	fixture := test.drain.fixture;
 	batch := Service.begin_batch(fixture.host);
 	filename := ifx new_document then "added.jai" else "a.jai";
-	if later_event {
+	if later_event || paired_preparation {
 		assert(Service.set_overlay(*batch, "added.jai", "second :: 2;"));
 	}
 
@@ -4840,12 +4870,18 @@ test_source_batch_pool_cleanup :: (
 		allocate = allocate,
 		mutate = mutate,
 		hold_heap_gate = hold_heap_gate,
-		capture_at = ifx final_scratch || path_error then 2 else 1,
-		reject_at = ifx metadata_reject_at
-			then metadata_reject_at
-			else ifx reject_later_edit
+		capture_at = ifx batch_commit
+			then commit_capture_at
+			else ifx final_scratch || path_error
 				then 2
-				else 0,
+				else 1,
+		reject_at = ifx commit_reject_at == 2
+			then 2
+			else ifx metadata_reject_at
+				then metadata_reject_at
+				else ifx reject_later_edit
+					then 2
+					else 0,
 		job = .{
 			drain = test.drain,
 			action = action,
@@ -4853,6 +4889,7 @@ test_source_batch_pool_cleanup :: (
 		},
 	};
 
+	preparation_rejection := Registration_Probe.{fail_at = 1};
 	if hold_heap_gate {
 		init(*probe.heap_entered);
 	}
@@ -4879,7 +4916,8 @@ test_source_batch_pool_cleanup :: (
 	contexts: s64;
 	original_source: *Service.Source_Backing;
 	original_references: s64;
-	event_index := ifx later_event
+	frontier_counter: Service.Identity_Counter;
+	event_index := ifx later_event || paired_preparation
 		then 1
 		else 0;
 
@@ -4889,9 +4927,13 @@ test_source_batch_pool_cleanup :: (
 			before = fixture.session.ledger;
 			documents = fixture.session.provider.documents.count;
 			contexts = fixture.session.provider.contexts.count;
+			frontier_counter = fixture.session.provider.frontier_counter;
 			fixture.session.faults.allow_active_session_release = retired;
-			if metadata_reject_at {
-				state := Service.find_document(fixture.session.provider, batch.events[event_index].document);
+			if metadata_reject_at || preparation {
+				document := ifx new_document
+					then Service.harness_document(fixture.host, "a.jai")
+					else batch.events[event_index].document;
+				state := Service.find_document(fixture.session.provider, document);
 				assert(state && state.has_overlay && state.overlay.source);
 				original_source = state.overlay.source;
 				original_references = original_source.references;
@@ -4940,7 +4982,21 @@ test_source_batch_pool_cleanup :: (
 				source.events[event_index].disk.syntax_context = xx "unknown-context";
 			}
 
-			if batch_paths {
+			if batch_frontier {
+				fixture.session.faults.source_batch_frontier_allocation_hook = storage_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_frontier_allocation_data = *probe;
+				if reject_transfer {
+					fixture.session.faults.source_batch_storage_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_storage_allocation_data = *preparation_rejection;
+				}
+			} else if batch_commit {
+				fixture.session.faults.source_batch_commit_allocation_hook = storage_cleanup_allocation_probe;
+				fixture.session.faults.source_batch_commit_allocation_data = *probe;
+				if commit_reject_at == 3 {
+					fixture.session.faults.source_batch_frontier_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_frontier_allocation_data = *preparation_rejection;
+				}
+			} else if batch_paths {
 				fixture.session.faults.source_batch_path_allocation_hook = storage_cleanup_allocation_probe;
 				fixture.session.faults.source_batch_path_allocation_data = *probe;
 			} else if batch_context_list {
@@ -4992,7 +5048,7 @@ test_source_batch_pool_cleanup :: (
 		then ifx event_kind == .OBSERVE_DISK
 			then 4
 			else 3
-		else ifx sequential_edits
+		else ifx sequential_edits || batch_commit
 			then 2
 			else 1;
 	if later_event {
@@ -5003,13 +5059,19 @@ test_source_batch_pool_cleanup :: (
 		probe.allocations
 			== (ifx path_error
 				then 2
-				else ifx metadata_reject_at
-					then metadata_reject_at
-					else allocations_per_attempt * (ifx retry && !active_lifecycle then 2 else 1)
+				else ifx commit_reject_at == 2
+					then 2
+					else ifx metadata_reject_at
+						then metadata_reject_at
+						else allocations_per_attempt * (ifx retry && !active_lifecycle then 2 else 1)
 			) + xx (batch_paths && validation && !path_error)
 	);
-	if reject_later_edit || metadata_reject_at {
+	if reject_later_edit || metadata_reject_at || commit_reject_at || reject_transfer {
 		assert(!ok && !output_probe.allocations);
+	}
+
+	if commit_reject_at == 3 || reject_transfer {
+		assert(preparation_rejection.allocations == 1);
 	}
 
 	assert(probe.job.ok == active_lifecycle);
@@ -5017,15 +5079,24 @@ test_source_batch_pool_cleanup :: (
 		assert(!probe.callbacks && !probe.gate_progress, "\e[91mMissing pool-root free callback negative control was not detected.\e[0m");
 		assert(!probe.allocated && !probe.mutated);
 	} else {
-		assert(probe.callbacks == 1 && probe.gate_progress && probe.readable && probe.active_admissions == 1);
+		assert(
+			probe.callbacks == 1 && probe.gate_progress && probe.readable && probe.active_admissions == 1,
+			"\e[91mConstruction free probe: callbacks %, progress %, readable %, admissions %.\e[0m",
+			probe.callbacks,
+			probe.gate_progress,
+			probe.readable,
+			probe.active_admissions
+		);
 		assert(probe.allocated == allocate);
 		assert(probe.mutated == mutate && probe.heap_blocked == hold_heap_gate);
 		assert(probe.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] + 1);
 		callback_handles := ifx path_error
 			then output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + 1
-			else ifx batch_states && !new_document || batch_edits || metadata_reject_at || batch_state_list || batch_reference_list || batch_context_list || batch_paths
-				then 1
-				else output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + xx validation;
+			else ifx preparation
+				then output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + xx (!!commit_reject_at || reject_transfer)
+				else ifx batch_states && !new_document || batch_edits || metadata_reject_at || batch_state_list || batch_reference_list || batch_context_list || batch_paths
+					then 1
+					else output_probe.job.competing_worlds.count + output_probe.job.competing_tickets.count + xx validation;
 		assert(probe.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + callback_handles);
 	}
 
@@ -5063,6 +5134,12 @@ test_source_batch_pool_cleanup :: (
 			fixture.session.faults.source_batch_edit_allocation_data = null;
 			fixture.session.faults.source_batch_metadata_allocation_hook = null;
 			fixture.session.faults.source_batch_metadata_allocation_data = null;
+			fixture.session.faults.source_batch_commit_allocation_hook = null;
+			fixture.session.faults.source_batch_commit_allocation_data = null;
+			fixture.session.faults.source_batch_frontier_allocation_hook = null;
+			fixture.session.faults.source_batch_frontier_allocation_data = null;
+			fixture.session.faults.source_batch_storage_allocation_hook = null;
+			fixture.session.faults.source_batch_storage_allocation_data = null;
 			fixture.session.faults.allow_active_session_release = false;
 			assert(!fixture.session.active_admissions);
 			assert(fixture.session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
@@ -5072,20 +5149,33 @@ test_source_batch_pool_cleanup :: (
 			);
 			if !ok {
 				assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, batch.description.accepted_frontier));
+				if preparation {
+					assert(fixture.session.provider.frontier_counter.next == frontier_counter.next);
+				}
+
 				if !active_lifecycle {
 					assert(fixture.session.ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] == before.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS]);
 				}
 			}
 
-			if metadata_reject_at {
-				assert(fixture.session.provider.documents.count == documents);
-				assert(fixture.session.provider.contexts.count == contexts);
-				state := Service.find_document(fixture.session.provider, batch.events[event_index].document);
+			if metadata_reject_at || preparation && (!ok || new_document) {
+				assert(fixture.session.provider.documents.count == documents + xx (ok && new_document));
+				assert(fixture.session.provider.contexts.count == contexts + xx (ok && new_document));
+				document := ifx new_document
+					then Service.harness_document(fixture.host, "a.jai")
+					else batch.events[event_index].document;
+				state := Service.find_document(fixture.session.provider, document);
 				assert(state && state.has_overlay && state.overlay.source == original_source);
 				assert(original_source.references == original_references);
 			}
 
-			if later_event || batch_context_list {
+			if batch_frontier {
+				assert(fixture.session.provider.frontier_counter.next == frontier_counter.next + xx ok);
+				assert(fixture.session.provider.documents.count == documents + xx (ok && (batch_pair || new_document)));
+				assert(fixture.session.provider.contexts.count == contexts + xx (ok && (batch_pair || new_document)));
+			}
+
+			if later_event || batch_context_list || batch_commit || batch_frontier && (batch_pair || new_document) {
 				assert(fixture.session.provider.documents.count == documents + xx ok);
 				assert(fixture.session.provider.contexts.count == contexts + xx ok);
 				added_event := batch.events[0];
@@ -5094,7 +5184,10 @@ test_source_batch_pool_cleanup :: (
 				registration := batch.contexts[0];
 				admitted := Service.find_context(fixture.session.provider, registration.identity);
 				if ok {
-					assert(added && added.has_overlay && Service.bytes_equal(added.overlay.source.bytes, xx (ifx batch_context_list then expected_world else "second :: 2;")));
+					assert(
+						added && added.has_overlay
+						&& Service.bytes_equal(added.overlay.source.bytes, xx (ifx batch_context_list || new_document then expected_world else "second :: 2;"))
+					);
 					assert(Service.bytes_equal(added.document, added_event.document) && added.document.data != added_event.document.data);
 					assert(Service.bytes_equal(added.binding.document, added_event.binding.document));
 					assert(added.binding.absolute_path.encoding == added_event.binding.absolute_path.encoding);
@@ -5153,11 +5246,14 @@ test_source_batch_pool_cleanup :: (
 		observation := await(fixture, accepted.ticket);
 		assert(observation.update.kind == .PUBLISHED);
 		Service.free_observation(*observation);
-		if batch_states || batch_revisions || batch_sources || batch_source_bytes || batch_source_identities || batch_edits || batch_metadata || batch_context_list || batch_paths {
+		if (
+			batch_states || batch_revisions || batch_sources || batch_source_bytes || batch_source_identities
+			|| batch_edits || batch_metadata || batch_context_list || batch_paths || preparation
+		) {
 			world := world_of(fixture, accepted.ticket);
 			read_ok, description := Service.read_world(fixture.host.service, world);
-			assert(read_ok && description.members.count == (ifx later_event then 2 else 1));
-			if later_event {
+			assert(read_ok && description.members.count == (ifx later_event || paired_preparation then 2 else 1));
+			if later_event || paired_preparation {
 				added_found: bool;
 				updated_found: bool;
 				for description.members {
@@ -5172,9 +5268,9 @@ test_source_batch_pool_cleanup :: (
 				}
 
 				assert(added_found && updated_found);
-			} else if !new_document || batch_context_list {
+			} else if !new_document || batch_context_list || preparation {
 				assert(Service.bytes_equal(description.members[0].source.bytes, xx expected_world));
-				if batch_context_list {
+				if batch_context_list || preparation {
 					assert(Service.bytes_equal(description.members[0].document, batch.events[0].document));
 				}
 			}
@@ -5272,7 +5368,8 @@ test_source_batch_pool_cleanup :: (
 			" batch states = %, batch revisions = %, batch sources = %, batch source bytes = %, batch source identities = %,",
 			" batch edits = %, sequential edits = %, reject later edit = %, final scratch = %, new document = %, action = %,",
 			" batch metadata = %, event = %, later event = %, metadata reject at = %, state list = %, reference list = %,",
-			" context list = %, path reservation = %, path copy = %) \e[92mPASS\e[0m\n"
+			" context list = %, path reservation = %, path copy = %, commit arrays = %, commit capture at = %, commit reject at = %,",
+			" frontier = %, paired = %, reject transfer = %) \e[92mPASS\e[0m\n"
 		),
 		direct,
 		retry,
@@ -5301,7 +5398,13 @@ test_source_batch_pool_cleanup :: (
 		batch_reference_list,
 		batch_context_list,
 		batch_paths,
-		path_error
+		path_error,
+		batch_commit,
+		commit_capture_at,
+		commit_reject_at,
+		batch_frontier,
+		batch_pair,
+		reject_transfer
 	);
 }
 
@@ -5360,8 +5463,24 @@ test_source_batch_construction_cleanup :: (
 	reference_list := false,
 	context_list := false,
 	paths := false,
-	path_error := false
+	path_error := false,
+	commit := false,
+	commit_capture_at: s64 = 1,
+	commit_reject_at: s64 = 0,
+	frontier := false,
+	batch_pair := false,
+	reject_transfer := false
 ) {
+	assert(!(commit && frontier));
+	assert(!batch_pair || frontier && !new_document);
+	assert(!reject_transfer || frontier);
+	assert(
+		!(commit || frontier)
+		|| !revisions && !sources && !source_bytes && !source_identities && !edits && !metadata
+			&& !state_list && !reference_list && !context_list && !paths && !later_event
+	);
+	assert(commit_capture_at >= 1 && commit_capture_at <= 2);
+	assert(!commit_reject_at || commit && (commit_reject_at == 3 || commit_reject_at == 2 && commit_capture_at == 1));
 	assert(!path_error || paths && event_kind == .OBSERVE_DISK);
 	list_construction_compatible := !revisions
 		&& !sources
@@ -5392,7 +5511,7 @@ test_source_batch_construction_cleanup :: (
 			&& metadata_reject_at <= (ifx event_kind == .OBSERVE_DISK then 4 else 3) + (ifx later_event then 10 else 0)
 	);
 	assert(!later_event || metadata);
-	assert(event_kind == .SET_OVERLAY || metadata && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK) || path_error);
+	assert(event_kind == .SET_OVERLAY || (metadata || commit || frontier) && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK) || path_error);
 	assert(!metadata || !revisions && !new_document && !sources && !source_bytes && !source_identities && !edits);
 	assert(!new_document || !revisions);
 	assert(!sources || !revisions && !new_document);
@@ -5402,8 +5521,18 @@ test_source_batch_construction_cleanup :: (
 	assert(!sequential_edits || edits);
 	assert(!reject_later_edit || sequential_edits);
 	assert(!final_scratch || sequential_edits && !reject_later_edit);
+	batch_states := list_construction_compatible
+		&& !state_list
+		&& !reference_list
+		&& !context_list
+		&& !paths
+		&& !commit
+		&& !frontier;
 	for 0..3 {
-		if (reject_later_edit || metadata_reject_at) && it {
+		if (
+			(reject_later_edit || metadata_reject_at || commit_reject_at || reject_transfer) && it
+			|| (commit || frontier) && it == 3
+		) {
 			continue;
 		}
 
@@ -5422,7 +5551,7 @@ test_source_batch_construction_cleanup :: (
 					allocate = true,
 					mutate = true,
 					negative_control = it,
-					batch_states = !revisions && !sources && !source_bytes && !source_identities && !edits && !metadata && !state_list && !reference_list && !context_list && !paths,
+					batch_states = batch_states,
 					batch_revisions = revisions,
 					batch_sources = sources,
 					batch_source_bytes = source_bytes,
@@ -5440,7 +5569,13 @@ test_source_batch_construction_cleanup :: (
 					batch_reference_list = reference_list,
 					batch_context_list = context_list,
 					batch_paths = paths,
-					path_error = path_error
+					path_error = path_error,
+					batch_commit = commit,
+					commit_capture_at = commit_capture_at,
+					commit_reject_at = commit_reject_at,
+					batch_frontier = frontier,
+					batch_pair = batch_pair,
+					reject_transfer = reject_transfer
 				);
 			}
 		}
@@ -5452,7 +5587,7 @@ test_source_batch_construction_cleanup :: (
 			allocate = true,
 			mutate = true,
 			hold_heap_gate = true,
-			batch_states = !revisions && !sources && !source_bytes && !source_identities && !edits && !metadata && !state_list && !reference_list && !context_list && !paths,
+			batch_states = batch_states,
 			batch_revisions = revisions,
 			batch_sources = sources,
 			batch_source_bytes = source_bytes,
@@ -5470,7 +5605,13 @@ test_source_batch_construction_cleanup :: (
 			batch_reference_list = reference_list,
 			batch_context_list = context_list,
 			batch_paths = paths,
-			path_error = path_error
+			path_error = path_error,
+			batch_commit = commit,
+			commit_capture_at = commit_capture_at,
+			commit_reject_at = commit_reject_at,
+			batch_frontier = frontier,
+			batch_pair = batch_pair,
+			reject_transfer = reject_transfer
 		);
 	}
 }
@@ -6010,17 +6151,21 @@ test_source_registration_receipt_retry :: (
 	path_error := false,
 	batch_commit := false,
 	commit_callback_at: s64 = 1,
-	new_document := false
+	new_document := false,
+	batch_frontier := false,
+	batch_pair := false
 ) {
+	assert(!(batch_commit && batch_frontier));
+	assert(!batch_pair || batch_frontier && !new_document);
 	assert(
-		!batch_commit
+		!(batch_commit || batch_frontier)
 		|| !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities
 			&& !batch_edits && !sequential_edits && !batch_metadata && !batch_state_list && !batch_reference_list
 			&& !batch_context_list && !batch_paths && !later_event
 	);
 	assert(commit_callback_at >= 1 && commit_callback_at <= 2);
-	assert(!new_document || batch_commit && event_kind == .SET_OVERLAY);
-	paired_commit := batch_commit && !new_document;
+	assert(!new_document || (batch_commit || batch_frontier) && event_kind == .SET_OVERLAY);
+	paired_preparation := batch_pair || batch_commit && !new_document;
 	assert(!path_error || batch_paths && event_kind == .OBSERVE_DISK);
 	list_construction_compatible := !batch_states
 		&& !batch_revisions
@@ -6055,9 +6200,14 @@ test_source_registration_receipt_retry :: (
 		|| batch_reference_list
 		|| batch_context_list
 		|| batch_paths
-		|| batch_commit;
+		|| batch_commit
+		|| batch_frontier;
 	track_references := revisions || pool || transfer || construction;
-	assert(event_kind == .SET_OVERLAY || (batch_metadata || batch_commit) && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK) || path_error);
+	assert(
+		event_kind == .SET_OVERLAY
+		|| (batch_metadata || batch_commit || batch_frontier) && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK)
+		|| path_error
+	);
 	assert(!later_event || batch_metadata);
 	assert(!batch_metadata || !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities && !batch_edits);
 	assert(!batch_edits || !batch_states && !batch_revisions && !batch_sources && !batch_source_bytes && !batch_source_identities);
@@ -6138,7 +6288,7 @@ test_source_registration_receipt_retry :: (
 		}
 
 		batch := Service.begin_batch(fixture.host);
-		if later_event || paired_commit {
+		if later_event || paired_preparation {
 			assert(Service.set_overlay(*batch, "added.jai", "second :: 2;"));
 		}
 
@@ -6196,7 +6346,8 @@ test_source_registration_receipt_retry :: (
 		documents: s64;
 		contexts: s64;
 		original_source: *Service.Source_Backing;
-		event_index := ifx later_event || paired_commit
+		frontier_next: u64;
+		event_index := ifx later_event || paired_preparation
 			then 1
 			else 0;
 		Service.with_lock(
@@ -6206,6 +6357,7 @@ test_source_registration_receipt_retry :: (
 				identities = fixture.session.identities;
 				documents = fixture.session.provider.documents.count;
 				contexts = fixture.session.provider.contexts.count;
+				frontier_next = fixture.session.provider.frontier_counter.next;
 				if new_document {
 					original := Service.find_document(fixture.session.provider, Service.harness_document(fixture.host, "a.jai"));
 					assert(original && original.has_overlay && original.overlay.source);
@@ -6272,6 +6424,9 @@ test_source_registration_receipt_retry :: (
 				if batch_commit {
 					fixture.session.faults.source_batch_commit_allocation_hook = registration_allocation_probe;
 					fixture.session.faults.source_batch_commit_allocation_data = *probe;
+				} else if batch_frontier {
+					fixture.session.faults.source_batch_frontier_allocation_hook = registration_allocation_probe;
+					fixture.session.faults.source_batch_frontier_allocation_data = *probe;
 				} else if batch_paths {
 					fixture.session.faults.source_batch_path_allocation_hook = registration_allocation_probe;
 					fixture.session.faults.source_batch_path_allocation_data = *probe;
@@ -6472,6 +6627,8 @@ test_source_registration_receipt_retry :: (
 				fixture.session.faults.source_batch_metadata_allocation_data = null;
 				fixture.session.faults.source_batch_commit_allocation_hook = null;
 				fixture.session.faults.source_batch_commit_allocation_data = null;
+				fixture.session.faults.source_batch_frontier_allocation_hook = null;
+				fixture.session.faults.source_batch_frontier_allocation_data = null;
 				assert(!fixture.session.active_admissions);
 				assert(
 					fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES]
@@ -6508,7 +6665,13 @@ test_source_registration_receipt_retry :: (
 					assert(original && original.has_overlay && original.overlay.source == original_source);
 				}
 
-				if later_event || batch_context_list || batch_commit {
+				if batch_frontier {
+					assert(fixture.session.provider.frontier_counter.next == frontier_next + xx ok);
+					assert(fixture.session.provider.documents.count == documents + xx (ok && (batch_pair || new_document)));
+					assert(fixture.session.provider.contexts.count == contexts + xx (ok && (batch_pair || new_document)));
+				}
+
+				if later_event || batch_context_list || batch_commit || batch_frontier && (batch_pair || new_document) {
 					assert(fixture.session.provider.documents.count == documents + xx ok);
 					assert(fixture.session.provider.contexts.count == contexts + xx ok);
 					added_event := batch.events[0];
@@ -6548,6 +6711,9 @@ test_source_registration_receipt_retry :: (
 						assert(admitted.paths.relative_base.code_units.data != borrowed.paths.relative_base.code_units.data);
 					} else {
 						assert(!added);
+						if batch_frontier {
+							assert(!Service.find_context(fixture.session.provider, batch.contexts[0].identity));
+						}
 					}
 				}
 
@@ -6579,8 +6745,8 @@ test_source_registration_receipt_retry :: (
 			if track_references {
 				published := world_of(fixture, accepted.ticket);
 				read_ok, description := Service.read_world(fixture.host.service, published);
-				assert(read_ok && description.members.count == (ifx later_event || paired_commit then 2 else 1));
-				if later_event || paired_commit {
+				assert(read_ok && description.members.count == (ifx later_event || paired_preparation then 2 else 1));
+				if later_event || paired_preparation {
 					added_found: bool;
 					updated_found: bool;
 					for description.members {
@@ -6645,7 +6811,7 @@ test_source_registration_receipt_retry :: (
 			" (direct = %, list = %, provider = %, arrays = %, states = %, revisions = %, reject receipt = %, pool = %,",
 			" reference control = %, transfer = %, batch sources = %, batch source bytes = %, batch source identities = %,",
 			" batch edits = %, sequential edits = %, batch metadata = %, event = %, later event = %, context list = %,",
-			" path reservation = %, path copy = %, commit arrays = %, commit callback at = %, new document = %) \e[92mPASS\e[0m\n"
+			" path reservation = %, path copy = %, commit arrays = %, commit callback at = %, new document = %, frontier = %, paired = %) \e[92mPASS\e[0m\n"
 		),
 		direct,
 		list,
@@ -6670,7 +6836,9 @@ test_source_registration_receipt_retry :: (
 		path_error,
 		batch_commit,
 		commit_callback_at,
-		new_document
+		new_document,
+		batch_frontier,
+		batch_pair
 	);
 }
 
@@ -12234,6 +12402,28 @@ test_source_batch_pool_checks :: () {
 	test_source_registration_failures(batch_paths = true, batch_pair = true);
 	test_source_registration_failures(batch_paths = true, path_error = true, event_kind = .OBSERVE_DISK);
 	test_source_batch_construction_reference_rollback();
+	test_source_batch_construction_reference_rollback(frontier = true);
+	for Service.Event_Kind.[.SET_OVERLAY, .EDIT_OVERLAY, .OBSERVE_DISK] {
+		event_kind := it;
+		if event_kind != .SET_OVERLAY {
+			test_source_batch_construction_reference_rollback(
+				frontier = true,
+				event_kind = event_kind
+			);
+		}
+
+		test_source_batch_construction_reference_rollback(
+			frontier = true,
+			batch_pair = true,
+			event_kind = event_kind
+		);
+	}
+
+	test_source_batch_construction_reference_rollback(
+		frontier = true,
+		new_document = true
+	);
+
 	for Service.Event_Kind.[.SET_OVERLAY, .EDIT_OVERLAY, .OBSERVE_DISK] {
 		event_kind := it;
 		for 1..2 {
@@ -12270,6 +12460,76 @@ test_source_batch_pool_checks :: () {
 	test_source_batch_construction_reference_rollback(metadata = true, event_kind = .EDIT_OVERLAY, later_event = true);
 	test_source_batch_construction_reference_rollback(metadata = true, event_kind = .OBSERVE_DISK, later_event = true);
 	test_source_batch_construction_cleanup();
+	for Service.Event_Kind.[.SET_OVERLAY, .EDIT_OVERLAY, .OBSERVE_DISK] {
+		event_kind := it;
+		for bool.[false, true] {
+			batch_pair := it;
+			test_source_batch_construction_cleanup(
+				frontier = true,
+				batch_pair = batch_pair,
+				event_kind = event_kind
+			);
+			test_source_batch_construction_cleanup(
+				frontier = true,
+				batch_pair = batch_pair,
+				reject_transfer = true,
+				event_kind = event_kind
+			);
+		}
+	}
+
+	test_source_batch_construction_cleanup(
+		frontier = true,
+		new_document = true
+	);
+	test_source_batch_construction_cleanup(
+		frontier = true,
+		new_document = true,
+		reject_transfer = true
+	);
+
+	for Service.Event_Kind.[.SET_OVERLAY, .EDIT_OVERLAY, .OBSERVE_DISK] {
+		event_kind := it;
+		for 1..2 {
+			test_source_batch_construction_cleanup(
+				commit = true,
+				commit_capture_at = it,
+				event_kind = event_kind
+			);
+			test_source_batch_construction_cleanup(
+				commit = true,
+				commit_capture_at = it,
+				commit_reject_at = 3,
+				event_kind = event_kind
+			);
+		}
+
+		test_source_batch_construction_cleanup(
+			commit = true,
+			commit_reject_at = 2,
+			event_kind = event_kind
+		);
+	}
+
+	for 1..2 {
+		test_source_batch_construction_cleanup(
+			commit = true,
+			commit_capture_at = it,
+			new_document = true
+		);
+		test_source_batch_construction_cleanup(
+			commit = true,
+			commit_capture_at = it,
+			commit_reject_at = 3,
+			new_document = true
+		);
+	}
+
+	test_source_batch_construction_cleanup(
+		commit = true,
+		commit_reject_at = 2,
+		new_document = true
+	);
 	test_source_batch_construction_cleanup(state_list = true);
 	test_source_batch_construction_cleanup(reference_list = true);
 	test_source_batch_construction_cleanup(context_list = true, new_document = true);

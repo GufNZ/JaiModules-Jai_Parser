@@ -1303,7 +1303,7 @@ Exit: user decision recorded.
 														Prepared identity/array backing is discarded on later pool-capacity rejection; successful commit installs the key and advanced counter together.
 														Canonical comparison at the first/last usable token, rejection with no counter consumption and exhausted-counter rejection without allocator calls pass.
 														Real single/two-event and exhausted-frontier batches preserve live frontier/counter/source/registration/charge state on rejection, including earlier prepared-array cleanup.
-													- [ ] Qualify final provider array preparation allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+													- [x] Qualify final provider array preparation allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
 														- [x] Qualify final document-array preparation callbacks and lifecycle/session/frontier winners for two-event overlay batches.
 														Exclusive `batch_commit`/`commit` selection in `test_source_batch_storage_admission` and `test_source_batch_construction_callbacks` uses an existing-document overlay followed by a new-document overlay, forcing document and context backing preparation before provider mutation.
 														Seventeen baseline and direct/blocking frontier replacement, requested shutdown, staging-shutdown protection and session retirement/reuse action/control groups select `commit_callback_at = 1`, the document-array allocation.
@@ -1371,8 +1371,27 @@ Exit: user decision recorded.
 														Controls balance that reference before teardown; two allocations per attempt and exact rejection counts pass.
 														Paired identity publication, new-document/context absence on rejection and original-document preservation pass.
 														Disk/overlay selection, retained-world readability, restored charges and zero final caller/owner ledgers pass.
-														- [ ] Qualify actual final provider preparation-array frees with allocating/mutating reentry and discriminating controls.
-													- [ ] Qualify final provider frontier preparation allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
+														- [x] Qualify actual final provider preparation-array frees with allocating/mutating reentry and discriminating controls.
+															- [x] Qualify paired-overlay document-array frees and controls.
+															- [x] Qualify paired-overlay context-array frees and controls.
+															- [x] Qualify paired-edit document-array frees and controls.
+															- [x] Qualify paired-edit context-array frees and controls.
+															- [x] Qualify paired-disk document-array frees and controls.
+															- [x] Qualify paired-disk context-array frees and controls.
+															- [x] Qualify single-new-document document-array frees and controls.
+															- [x] Qualify single-new-document context-array frees and controls.
+														Each route selects the actual document/context backing through `source_batch_commit_allocation_hook` ordinals one/two.
+														Fifteen groups per ordinal cover caller-copy rejection and both capacity retries with direct/blocking reentry.
+														Five additional groups per ordinal reject frontier preparation after both arrays exist.
+														Five document-array groups per route reject context preparation after document backing exists.
+														All 180 groups require exactly one captured delegate free and independent allocation-ledger removal.
+														Callbacks allocate/free owner storage and retain/release a real world while private admission remains active.
+														Suppressed-callback controls still require the free; held-heap controls detect blocked allocation before unlock.
+														Early preparation failure retains the private ticket; late discard sees only competing handles, if any.
+														Exact counts, source-reference restoration, unchanged rejected frontier/counter and absent document/context pass.
+														Paired identity publication, disk/overlay selection, original-document preservation and retained-world reads pass.
+														Private charges return and final caller/owner ledgers are zero; array preparation qualification is complete.
+													- [x] Qualify final provider frontier preparation allocation callbacks, lifecycle/session/frontier winners, receipt retries and actual-free controls beyond the initial rejection sweeps.
 														- [x] Qualify single-overlay final provider frontier preparation callbacks and lifecycle/session/frontier winners.
 														Exclusive `batch_frontier`/`frontier` selection installs `source_batch_frontier_allocation_hook` after array preparation; seventeen baseline and direct/blocking winner action/control groups require one canonical frontier allocation per attempt.
 														The live frontier counter advances once for accepted publication or the callback's source replacement and remains unchanged on ordinary rejection; session retirement retains its separate lifecycle/identity checks rather than comparing counters in a retired provider.
@@ -1418,8 +1437,41 @@ Exit: user decision recorded.
 															Ordinary allocation rejection and deliberate extra-retry controls preserve exact allocation/rejection counts.
 															Frontier/provider atomicity, rejected new-document/context absence and restored operation/handle charges pass.
 															Retained-world readability and zero final caller/owner ledgers pass; all planned frontier retry routes are complete.
-														- [ ] Qualify discarded-attempt source-reference rollback with final provider frontier preparation callbacks and retained-sentinel controls.
-														- [ ] Qualify actual prepared provider-frontier frees with allocating/mutating reentry and discriminating controls.
+														- [x] Qualify discarded-attempt source-reference rollback with final provider frontier preparation callbacks and retained-sentinel controls.
+															- [x] Qualify single-overlay frontier retained-sentinel rollback and controls.
+															- [x] Qualify paired-overlay frontier retained-sentinel rollback and controls.
+															- [x] Qualify single-edit frontier retained-sentinel rollback and controls.
+															- [x] Qualify paired-edit frontier retained-sentinel rollback and controls.
+															- [x] Qualify single-disk frontier retained-sentinel rollback and controls.
+															- [x] Qualify paired-disk frontier retained-sentinel rollback and controls.
+															- [x] Qualify single-new-document frontier retained-sentinel rollback and controls.
+														Each route runs twelve direct/blocking normal/control groups across receipt rejection and both capacity races.
+														An unrelated retained source is sampled during caller export and the second private attempt's frontier allocation.
+														One frontier allocation per attempt, allocation rejection and exact retained-reference restoration pass.
+														Controls expose and then balance a deliberate extra reference retained during admission finalisation.
+														The live frontier counter advances only on publication; rejected attempts preserve provider/frontier/charge state.
+														Identity-based paired publication, absent new document/context and original-document preservation pass.
+														Disk/overlay selection, retained-sentinel readability and zero final caller/owner ledgers pass in all 84 groups.
+														- [x] Qualify actual prepared provider-frontier frees with allocating/mutating reentry and discriminating controls.
+															- [x] Release newly installed private frontiers on discarded attempts without freeing successfully adopted frontiers.
+															- [x] Qualify single-overlay frontier frees and controls.
+															- [x] Qualify paired-overlay frontier frees and controls.
+															- [x] Qualify single-edit frontier frees and controls.
+															- [x] Qualify paired-edit frontier frees and controls.
+															- [x] Qualify single-disk frontier frees and controls.
+															- [x] Qualify paired-disk frontier frees and controls.
+															- [x] Qualify single-new-document frontier frees and controls.
+														Capture the exact frontier allocation through `source_batch_frontier_allocation_hook` and intercept its delegate free.
+														Each route runs fifteen caller-copy rejection/registration-capacity retry/operation-capacity retry groups.
+														Five more groups reject private batch-storage capacity after frontier preparation, before provider installation.
+														Direct/blocking callbacks allocate/free owner storage and retain/release a real world while admission is active.
+														Suppressed-callback controls still require exactly one free; held-heap controls detect blocked allocating progress.
+														Early rejection sees one private ticket; late discard sees only competing handles, if any.
+														All 140 groups assert exact free/allocation counts, counter consumption, source-reference and private-charge restoration.
+														Publication/rollback, independent metadata, disk/overlay selection and retained-world readability pass.
+														The first late-free check exposed retention until owner-heap teardown; the approved production fix frees discarded frontiers outside the gate.
+														Successful publication clears private ownership and preserves frontier bytes shared by the live provider and worlds.
+														Final caller/owner ledgers are zero; frontier preparation qualification is complete.
 										- [x] Prepare checked provider pool-transfer capacity and qualify construction/transfer rollback before closing provider storage or combined source admission.
 											- [x] Check private batch pool-list growth before provider state mutation, preserving existing pool pointers on allocation rejection.
 											`try_source_batch_storage` checks empty/full list growth, copies only existing pool pointers and installs replacement backing only after allocation succeeds; spare capacity performs no allocation.
@@ -1544,6 +1596,36 @@ Exit: user decision recorded.
 	The subsequent callback/quota increment below passes the full worker gates on both backends; focused mode remains opt-in.
 	At that checkpoint, batch pool-object qualification, pool-block/source/document/context/revision/frontier construction, pool transfer, source candidate and combined admission, analysis and other Phase 5/`C3`/`C5` requirements remained open.
 	Broad parser and foreign-target regressions were not rerun.
+	- [x] Final provider frontier retained-sentinel rollback and actual-free qualification (2026-11-17).
+	Extend `test_source_batch_construction_reference_rollback` and `test_source_registration_receipt_retry` with exclusive `frontier`/`batch_frontier` selection and explicit `batch_pair`.
+	Seven single/paired `SET_OVERLAY`, `EDIT_OVERLAY`, `OBSERVE_DISK` and single-new-document routes pass 84 retained-sentinel rollback groups.
+	One frontier allocation per private attempt selects the retry callback at ordinal two; caller export, retry preparation and post-return snapshots distinguish the extra-reference control.
+	Extend `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup` with exact frontier capture and `reject_transfer` after frontier preparation.
+	The same seven routes pass 140 actual-free groups: 105 caller-copy rejection/capacity-retry groups and 35 later private-storage rejection groups.
+	Every route checks direct/blocking allocating/mutating callbacks, suppressed-callback controls and held-heap controls at the exact allocation's delegate free.
+	The initial caller-copy rejection probe captured live frontier backing but observed no free: `release_provider_copy` did not release a frontier newly installed in a discarded private model.
+	With explicit user approval, pass the attempt's frontier slice to `finish_source_admission`, free it outside the session gate and clear it after successful adoption in `submit_source_batch_attempt`.
+	The originally failing fifteen-group matrix then passes; successful publication retains the frontier shared by provider/operation/world state.
+	All 224 groups preserve exact counters/charges, source references, rejected document/context absence, paired publication, disk/overlay selection and original-document state.
+	Retained-world reads, restored private charges and zero final caller/owner ledgers pass.
+	Focused x64 `batch-pool` checks and all twelve scoped x64/optimised LLVM service gates pass.
+	The worker test has no lines over 175 characters; whitespace and editor diagnostics are clean.
+	Both provider preparation qualification parents are complete.
+	The broader staging-array parent and Phase 5 remain open.
+	- [x] Final provider preparation-array actual-free qualification (2026-11-17).
+	Extend `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup` with isolated `batch_commit`/`commit` selection and `commit_capture_at` ordinals one/two.
+	Paired `SET_OVERLAY`, `EDIT_OVERLAY`, `OBSERVE_DISK` and single-new-document routes pass 180 actual-free groups: 100 document captures and 80 context captures.
+	Caller-copy rejection and registration/operation-capacity retries contribute 120 groups; later frontier rejection contributes 40, and context rejection after document preparation contributes 20.
+	Every route runs direct/blocking allocating/mutating callbacks, suppressed-callback controls and held-heap controls against the exact captured allocation's delegate free.
+	The suppressed control still frees once; the held-heap control proves allocation blocks until unlock, then finishes normally.
+	Exact hook/rejection counts, active private admission and early-ticket versus late-discard handle charges pass.
+	Rejected source references, provider document/context state and frontier/counter are preserved; accepted worlds publish the requested members with independent metadata.
+	Disk/overlay selection, original-document preservation, retained-world readability, restored charges and zero final caller/owner ledgers pass.
+	Focused x64 `batch-pool` mode and all twelve scoped x64/optimised LLVM service gates pass.
+	The worker test has no lines over 175 characters; whitespace and editor diagnostics are clean.
+	No production code changed.
+	The array preparation parent is complete; frontier retained-sentinel rollback and actual-free qualification remain open.
+	The broader staging-array parent and Phase 5 remain open.
 	- [x] Final provider array preparation retained-sentinel rollback qualification (2026-11-16).
 	Extend `test_source_batch_construction_reference_rollback` and `test_source_registration_receipt_retry` with isolated commit mode.
 	Both document/context allocation ordinals run paired overlay/edit/disk and single-new-document routes.

@@ -494,6 +494,7 @@ finish_source_admission :: (
 	session: *Session,
 	staged: *Provider_Model,
 	transfer: *[..] *Pool,
+	frontier: *[] u8,
 	output: *[] u8,
 	error: *Operation_Error,
 	allocator: Allocator
@@ -514,6 +515,8 @@ finish_source_admission :: (
 				}
 			}
 
+			free(frontier.data,, owner_allocator(session));
+			frontier.* = .[];
 			release_provider_copy(staged);
 			array_free(transfer.*);
 		}

@@ -1267,7 +1267,7 @@ submit_source_batch_attempt :: (
 		}
 	);
 
-	defer finish_source_admission(session, staged, *transfer, *output, *error, allocator);
+	defer finish_source_admission(session, staged, *transfer, *frontier, *output, *error, allocator);
 
 	current := validate_session(session, handle);
 	#if TEST_HOOKS {
@@ -1372,6 +1372,7 @@ submit_source_batch_attempt :: (
 	ticket := register(session, .TICKET, .{operation = operation});
 	operation.registrations += 1;
 	accepted := Accepted.{ticket = ticket, frontier = output};
+	frontier = .[];
 	output = .[];
 	return true, accepted, .{}, false;
 }
