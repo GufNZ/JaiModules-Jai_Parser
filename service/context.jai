@@ -411,13 +411,33 @@ path_is_valid :: (path: Path_Value) -> bool {
 
 // UTF-8 spelling for the parser's filename; POSIX bytes are copied unchanged.
 path_spelling :: (path: Path_Value) -> string {
+	ok, spelling := try_path_spelling(path);
+	assert(ok);
+	return spelling;
+}
+
+try_path_spelling :: (path: Path_Value, allocator: Allocator = context.allocator) -> bool, string {
 	if path.encoding == .POSIX_BYTES {
-		return copy_string(xx path.code_units);
+		ok, storage := try_output_bytes(allocator, path.code_units);
+		return ok, xx storage;
 	}
 
 
 	units := path.code_units;
+	if units.count < 0 || units.count > S64_MAX / 2 {
+		return false, "";
+	}
+
+
+	ok, storage := try_output_array(allocator, units.count * 2, u8);
+	if !ok {
+		return false, "";
+	}
+
+
 	bytes: [..] u8;
+	bytes.data = storage.data;
+	bytes.allocated = storage.count;
 	i := 0;
 	while i + 1 < units.count {
 		code := units[i].(u32) | (units[i + 1].(u32) << 8);
@@ -441,7 +461,7 @@ path_spelling :: (path: Path_Value) -> string {
 		}
 	}
 
-	return xx bytes;
+	return true, xx bytes;
 }
 
 #scope_file

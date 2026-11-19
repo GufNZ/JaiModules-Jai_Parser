@@ -1106,6 +1106,715 @@ prepare_source_operation_backing :: (session: *Session) -> bool {
 	return true;
 }
 
+#if TEST_HOOKS {
+	source_candidate_capture_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_candidate_capture_allocation_hook;
+			if hook && !hook(size, session.faults.source_candidate_capture_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+}
+
+#if TEST_HOOKS {
+	source_candidate_world_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_candidate_world_allocation_hook;
+			if hook && !hook(size, session.faults.source_candidate_world_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+}
+
+#if TEST_HOOKS {
+	source_candidate_task_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_candidate_task_allocation_hook;
+			if hook && !hook(size, session.faults.source_candidate_task_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+}
+
+Source_Candidate_Join_Backing :: struct {
+	task: *Task;
+	operations: [] *Operation;
+	ready: [] *Task;
+}
+
+prepare_source_candidate_join_backing :: (session: *Session, key: [] u8) -> bool, Source_Candidate_Join_Backing {
+	world := find_candidate_world(session, key);
+	if !world || world.state == .PUBLISHED {
+		return true, .{};
+	}
+
+
+	task := find_candidate_task(session, world);
+	if !task {
+		return true, .{};
+	}
+
+
+	operations_capacity: s64;
+	if task.operations.count >= task.operations.allocated {
+		operations_capacity = ifx task.operations.count <= S64_MAX / 2 - 1
+			then max(8, (task.operations.count + 1) * 2)
+			else -1;
+	}
+
+	ready_capacity: s64;
+	if task.optional && task.phase == .READY && session.ready.count >= session.ready.allocated {
+		ready_capacity = ifx session.ready.count <= S64_MAX / 2 - 1
+			then max(8, (session.ready.count + 1) * 2)
+			else -1;
+	}
+
+	allocator := owner_allocator(session);
+	#if TEST_HOOKS {
+		allocator = .{proc = source_candidate_join_allocate, data = session};
+	}
+
+	ok: bool;
+	backing: Source_Candidate_Join_Backing;
+	unlock(
+		*session.gate,
+		#code {
+			ok, backing = try_source_candidate_join_backing(operations_capacity, ready_capacity, allocator);
+		}
+	);
+	backing.task = task;
+	return ok, backing;
+}
+
+source_candidate_join_backing_ready :: (session: *Session, key: [] u8, backing: *Source_Candidate_Join_Backing) -> bool {
+	world := find_candidate_world(session, key);
+	if !world || world.state == .PUBLISHED {
+		return true;
+	}
+
+
+	task := find_candidate_task(session, world);
+	if !task {
+		return !backing.task;
+	}
+
+
+	return task == backing.task
+		&& (task.operations.count < task.operations.allocated || backing.operations.count > task.operations.count)
+		&& (!task.optional || task.phase != .READY
+			|| session.ready.count < session.ready.allocated || backing.ready.count > session.ready.count);
+}
+
+adopt_source_candidate_join_backing :: (session: *Session, backing: *Source_Candidate_Join_Backing) {
+	task := backing.task;
+	if task.operations.count >= task.operations.allocated {
+		assert(backing.operations.count > task.operations.count);
+		previous := task.operations;
+		memcpy(backing.operations.data, previous.data, previous.count * size_of(*Operation));
+		task.operations.data = backing.operations.data;
+		task.operations.allocated = backing.operations.count;
+		task.operations.allocator = owner_allocator(session);
+		backing.operations = .{data = previous.data, count = previous.allocated};
+	}
+
+	if task.optional && task.phase == .READY {
+		adopt_source_candidate_task_list(*session.ready, *backing.ready, owner_allocator(session));
+	}
+}
+
+#if TEST_HOOKS {
+	source_candidate_join_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.source_candidate_join_allocation_hook;
+			if hook && !hook(size, session.faults.source_candidate_join_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+}
+
+try_source_candidate_join_backing :: (
+	operations_capacity: s64,
+	ready_capacity: s64,
+	allocator: Allocator = context.allocator
+) -> bool, Source_Candidate_Join_Backing {
+	if operations_capacity < 0 || ready_capacity < 0 {
+		return false, .{};
+	}
+
+
+	result: Source_Candidate_Join_Backing;
+	accepted := false;
+	defer {
+		if !accepted {
+			free_source_candidate_join_backing(*result, allocator);
+		}
+	}
+
+	operations_ok, operations := try_output_array(allocator, operations_capacity, *Operation);
+	if !operations_ok {
+		return false, .{};
+	}
+
+
+	result.operations = operations;
+	ready_ok, ready := try_output_array(allocator, ready_capacity, *Task);
+	if !ready_ok {
+		return false, .{};
+	}
+
+
+	result.ready = ready;
+	accepted = true;
+	return true, result;
+}
+
+finish_analysis_candidate_join_backing :: (session: *Session, backing: *Source_Candidate_Join_Backing) {
+	allocator := owner_allocator(session);
+	unlock(
+		*session.gate,
+		#code {
+			free_source_candidate_join_backing(backing, allocator);
+		}
+	);
+}
+
+free_source_candidate_join_backing :: (backing: *Source_Candidate_Join_Backing, allocator: Allocator = context.allocator) {
+	free(backing.operations.data,, allocator);
+	free(backing.ready.data,, allocator);
+	backing.* = .{};
+}
+
+Source_Candidate_Task_Backing :: struct {
+	task: *Task;
+	key: [] u8;
+	world_identity_offset: s64;
+	operations: [] *Operation;
+	tasks: [] *Task;
+	ready: [] *Task;
+}
+
+try_source_candidate_task_backing :: (
+	identity: Session_ID,
+	world_identity: World_ID,
+	tasks_capacity: s64,
+	ready_capacity: s64,
+	allocator: Allocator = context.allocator
+) -> bool, Source_Candidate_Task_Backing {
+	if tasks_capacity < 0 || ready_capacity < 0 {
+		return false, .{};
+	}
+
+
+	result: Source_Candidate_Task_Backing;
+	accepted := false;
+	defer {
+		if !accepted {
+			free_source_candidate_task_backing(*result, allocator);
+		}
+	}
+
+	task_ok, tasks := try_output_array(allocator, 1, Task);
+	if !task_ok {
+		return false, .{};
+	}
+
+
+	result.task = tasks.data;
+	key_ok, key := try_output_key(allocator, "execution-task", identity.([] u8), world_identity.([] u8), xx "PARSE_INDEX");
+	if !key_ok {
+		return false, .{};
+	}
+
+
+	result.key = key;
+	result.world_identity_offset = key.count - 8 - "PARSE_INDEX".count - world_identity.count;
+	operations_ok, operations := try_output_array(allocator, 1, *Operation);
+	if !operations_ok {
+		return false, .{};
+	}
+
+
+	result.operations = operations;
+	tasks_ok, task_storage := try_output_array(allocator, tasks_capacity, *Task);
+	if !tasks_ok {
+		return false, .{};
+	}
+
+
+	result.tasks = task_storage;
+	ready_ok, ready := try_output_array(allocator, ready_capacity, *Task);
+	if !ready_ok {
+		return false, .{};
+	}
+
+
+	result.ready = ready;
+	accepted = true;
+	return true, result;
+}
+
+source_candidate_task_backing_ready :: (session: *Session, backing: *Source_Candidate_Task_Backing) -> bool {
+	return (session.tasks.count < session.tasks.allocated || backing.tasks.count > session.tasks.count)
+		&& (session.ready.count < session.ready.allocated || backing.ready.count > session.ready.count);
+}
+
+set_source_candidate_task_world :: (backing: *Source_Candidate_Task_Backing, identity: World_ID) {
+	memcpy(backing.key.data + backing.world_identity_offset, identity.data, identity.count);
+}
+
+adopt_source_candidate_task_list :: (live: *[..] *Task, prepared: *[] *Task, allocator: Allocator) {
+	if live.count < live.allocated {
+		return;
+	}
+
+
+	assert(prepared.count > live.count);
+	previous := live.*;
+	memcpy(prepared.data, previous.data, previous.count * size_of(*Task));
+	live.data = prepared.data;
+	live.allocated = prepared.count;
+	live.allocator = allocator;
+	prepared.* = .{data = previous.data, count = previous.allocated};
+}
+
+finish_analysis_candidate_task_backing :: (session: *Session, backing: *Source_Candidate_Task_Backing) {
+	allocator := owner_allocator(session);
+	unlock(
+		*session.gate,
+		#code {
+			free_source_candidate_task_backing(backing, allocator);
+		}
+	);
+}
+
+free_source_candidate_task_backing :: (backing: *Source_Candidate_Task_Backing, allocator: Allocator = context.allocator) {
+	free(backing.task,, allocator);
+	free(backing.key.data,, allocator);
+	free(backing.operations.data,, allocator);
+	free(backing.tasks.data,, allocator);
+	free(backing.ready.data,, allocator);
+	backing.* = .{};
+}
+
+Source_Candidate_World_Backing :: struct {
+	world: *World;
+	identity: [] u8;
+	worlds: [] *World;
+}
+
+try_source_candidate_world_backing :: (
+	identity: Session_ID,
+	capacity: s64,
+	allocator: Allocator = context.allocator
+) -> bool, Source_Candidate_World_Backing {
+	if capacity < 0 {
+		return false, .{};
+	}
+
+
+	result: Source_Candidate_World_Backing;
+	accepted := false;
+	defer {
+		if !accepted {
+			free_source_candidate_world_backing(*result, allocator);
+		}
+	}
+
+	world_ok, worlds := try_output_array(allocator, 1, World);
+	if !world_ok {
+		return false, .{};
+	}
+
+
+	result.world = worlds.data;
+	token: [8] u8;
+	identity_ok, encoded := try_output_key(allocator, "world", identity.([] u8), token);
+	if !identity_ok {
+		return false, .{};
+	}
+
+
+	result.identity = encoded;
+	storage_ok, storage := try_output_array(allocator, capacity, *World);
+	if !storage_ok {
+		return false, .{};
+	}
+
+
+	result.worlds = storage;
+	accepted = true;
+	return true, result;
+}
+
+source_candidate_world_backing_ready :: (session: *Session, backing: *Source_Candidate_World_Backing) -> bool {
+	return session.worlds.count < session.worlds.allocated || backing.worlds.count > session.worlds.count;
+}
+
+finish_analysis_candidate_world_backing :: (session: *Session, backing: *Source_Candidate_World_Backing) {
+	allocator := owner_allocator(session);
+	unlock(
+		*session.gate,
+		#code {
+			free_source_candidate_world_backing(backing, allocator);
+		}
+	);
+}
+
+free_source_candidate_world_backing :: (backing: *Source_Candidate_World_Backing, allocator: Allocator = context.allocator) {
+	free(backing.world,, allocator);
+	free(backing.identity.data,, allocator);
+	free(backing.worlds.data,, allocator);
+	backing.* = .{};
+}
+
+Source_Candidate_Capture :: struct {
+	members: [] Selected_Member;
+	key: [] u8;
+	consistency: Consistency;
+	capturable: bool;
+}
+
+Analysis_Candidate_Snapshot :: struct {
+	model: Provider_Model;
+	states: [] Document_State;
+	documents: [] *Document_State;
+	contexts: [] Admitted_Context;
+	metadata: [] u8;
+}
+
+free_analysis_candidate_snapshot :: (snapshot: *Analysis_Candidate_Snapshot, allocator: Allocator = context.allocator) {
+	push_allocator(allocator);
+	for * snapshot.states {
+		source := selected_document(it).source;
+		if source {
+			release_source(source);
+		}
+	}
+
+	free(snapshot.states.data,, allocator);
+	free(snapshot.documents.data,, allocator);
+	free(snapshot.contexts.data,, allocator);
+	free(snapshot.metadata.data,, allocator);
+	snapshot.* = .{};
+}
+
+try_analysis_candidate_snapshot :: (
+	count: s64,
+	metadata_count: s64,
+	allocator: Allocator = context.allocator
+) -> bool, Analysis_Candidate_Snapshot {
+	if count < 0 || metadata_count < 0 {
+		return false, .{};
+	}
+
+
+	result: Analysis_Candidate_Snapshot;
+	accepted := false;
+	defer {
+		if !accepted {
+			free_analysis_candidate_snapshot(*result, allocator);
+		}
+	}
+
+	ok: bool;
+	ok, result.states = try_output_array(allocator, count, Document_State);
+	if !ok {
+		return false, .{};
+	}
+
+
+	ok, result.documents = try_output_array(allocator, count, *Document_State);
+	if !ok {
+		return false, .{};
+	}
+
+
+	ok, result.contexts = try_output_array(allocator, count, Admitted_Context);
+	if !ok {
+		return false, .{};
+	}
+
+
+	ok, result.metadata = try_output_array(allocator, metadata_count, u8);
+	if !ok {
+		return false, .{};
+	}
+
+
+	accepted = true;
+	return true, result;
+}
+
+analysis_candidate_metadata_count :: (model: *Provider_Model, documents: [] [] u8) -> bool, s64 {
+	count: s64;
+	for documents {
+		state := find_document(model, it);
+		if !state {
+			return false, 0;
+		}
+
+
+		selected := selected_document(state);
+		admitted := find_context(model, selected.syntax_context);
+		if !admitted {
+			return false, 0;
+		}
+
+
+		consistency: Consistency;
+		if selected.provenance {
+			consistency = selected.provenance.consistency;
+		}
+
+		counts := s64.[
+			state.document.count,
+			state.provider_revision.count,
+			selected.syntax_context.count,
+			admitted.paths.visible_filename.code_units.count,
+			consistency.provider_namespace.count,
+			consistency.capture_token.count
+		];
+		for counts {
+			if it < 0 || it > S64_MAX - count {
+				return false, 0;
+			}
+
+
+			count += it;
+		}
+	}
+
+
+	return true, count;
+}
+
+analysis_snapshot_bytes :: (snapshot: *Analysis_Candidate_Snapshot, cursor: *s64, bytes: [] u8) -> [] u8 {
+	assert(bytes.count >= 0 && bytes.count <= snapshot.metadata.count - cursor.*);
+	result := ([] u8).{data = snapshot.metadata.data + cursor.*, count = bytes.count};
+	memcpy(result.data, bytes.data, bytes.count);
+	cursor.* += bytes.count;
+	return result;
+}
+
+stage_analysis_candidate_snapshot :: (model: *Provider_Model, documents: [] [] u8, snapshot: *Analysis_Candidate_Snapshot) {
+	assert(snapshot.states.count == documents.count);
+	cursor: s64;
+	for documents {
+		state := find_document(model, it);
+		selected := selected_document(state);
+		admitted := find_context(model, selected.syntax_context);
+		context_identity := analysis_snapshot_bytes(snapshot, *cursor, selected.syntax_context);
+		copy := Document_State.{
+			document = analysis_snapshot_bytes(snapshot, *cursor, state.document),
+			provider_revision = analysis_snapshot_bytes(snapshot, *cursor, state.provider_revision),
+		};
+		consistency: Consistency;
+		if selected.provenance {
+			consistency = .{
+				kind = selected.provenance.consistency.kind,
+				provider_namespace = analysis_snapshot_bytes(snapshot, *cursor, selected.provenance.consistency.provider_namespace),
+				capture_token = analysis_snapshot_bytes(snapshot, *cursor, selected.provenance.consistency.capture_token),
+			};
+		}
+
+		if state.has_overlay {
+			copy.has_overlay = true;
+			copy.overlay = .{source = selected.source, syntax_context = context_identity};
+		} else {
+			copy.disk = .{
+				kind = state.disk.kind,
+				source = selected.source,
+				syntax_context = context_identity,
+				provenance = .{consistency = consistency},
+			};
+		}
+
+		if selected.source {
+			retain_source(selected.source);
+		}
+
+		snapshot.states[it_index] = copy;
+		snapshot.documents[it_index] = *snapshot.states[it_index];
+		snapshot.contexts[it_index] = .{
+			identity = context_identity,
+			paths = .{
+				visible_filename = .{
+					encoding = admitted.paths.visible_filename.encoding,
+					code_units = analysis_snapshot_bytes(snapshot, *cursor, admitted.paths.visible_filename.code_units),
+				},
+			},
+		};
+	}
+
+	assert(cursor == snapshot.metadata.count);
+	snapshot.model.documents.data = snapshot.documents.data;
+	snapshot.model.documents.count = snapshot.documents.count;
+	snapshot.model.documents.allocated = snapshot.documents.count;
+	snapshot.model.contexts.data = snapshot.contexts.data;
+	snapshot.model.contexts.count = snapshot.contexts.count;
+	snapshot.model.contexts.allocated = snapshot.contexts.count;
+}
+
+bind_analysis_candidate_capture :: (model: *Provider_Model, documents: [] [] u8, capture: *Source_Candidate_Capture) {
+	for * capture.members {
+		state := find_document(model, documents[it_index]);
+		selected := selected_document(state);
+		it.document = state.document;
+		it.provider_revision = state.provider_revision;
+		it.context_identity = selected.syntax_context;
+		if !it_index && capture.consistency.kind == .COHERENT_CAPTURE {
+			assert(!!selected.provenance);
+			capture.consistency = selected.provenance.consistency;
+		}
+	}
+}
+
+finish_analysis_candidate_capture :: (
+	session: *Session,
+	snapshot: *Analysis_Candidate_Snapshot,
+	capture: *Source_Candidate_Capture
+) {
+	allocator := owner_allocator(session);
+	unlock(
+		*session.gate,
+		#code {
+			free_source_candidate_capture(capture, allocator);
+			free_analysis_candidate_snapshot(snapshot, allocator);
+		}
+	);
+}
+
+try_source_candidate_capture :: (
+	model: *Provider_Model,
+	identity: Session_ID,
+	frontier: [] u8,
+	documents: [] [] u8,
+	allocator: Allocator = context.allocator
+) -> bool, Source_Candidate_Capture {
+	result := Source_Candidate_Capture.{capturable = true};
+	members_ok, members := try_output_array(allocator, documents.count, Selected_Member);
+	if !members_ok {
+		return false, .{};
+	}
+
+
+	result.members = members;
+	accepted := false;
+	defer {
+		if !accepted {
+			free_source_candidate_capture(*result, allocator);
+		}
+	}
+
+	keys_ok, member_keys := try_output_array(allocator, documents.count, [] u8);
+	if !keys_ok {
+		return false, .{};
+	}
+
+
+	defer {
+		for member_keys {
+			free(it.data,, allocator);
+		}
+
+		free(member_keys.data,, allocator);
+	}
+
+	coherent := true;
+	capture: Consistency;
+	for documents {
+		state := find_document(model, it);
+		selected := selected_document(state);
+		coherent &&= selected.provenance && selected.provenance.consistency.kind == .COHERENT_CAPTURE;
+		if coherent {
+			coherent = !capture.capture_token.count || bytes_equal(capture.capture_token, selected.provenance.consistency.capture_token);
+			capture = selected.provenance.consistency;
+		}
+
+		admitted := find_context(model, selected.syntax_context);
+		filename_ok, filename := try_path_spelling(admitted.paths.visible_filename, allocator);
+		if !filename_ok {
+			return false, .{};
+		}
+
+
+		member := Selected_Member.{
+			document = state.document,
+			provider_revision = state.provider_revision,
+			context_identity = selected.syntax_context,
+			state = xx selected.kind,
+			source = selected.source,
+			filename = filename,
+		};
+
+		members[it_index] = member;
+		result.capturable &&= member.state == .PRESENT || member.state == .ABSENT;
+		source_revision := ifx member.source then member.source.revision;
+		key_ok, key := try_output_key(allocator, "member", member.document, member.provider_revision, member.context_identity, source_revision);
+		if !key_ok {
+			return false, .{};
+		}
+
+
+		member_keys[it_index] = key;
+	}
+
+
+	members_key_ok, members_key := try_output_key(allocator, "members", ..member_keys);
+	if !members_key_ok {
+		return false, .{};
+	}
+
+
+	defer free(members_key.data,, allocator);
+	key_ok, key := try_output_key(allocator, "execution-capture", identity.([] u8), frontier, members_key, xx "SYNTAX_INDEX");
+	if !key_ok {
+		return false, .{};
+	}
+
+
+	result.key = key;
+	result.consistency = ifx coherent
+		then capture
+		else .{kind = .IMMUTABLE_CAPTURE};
+	accepted = true;
+	return true, result;
+}
+
+free_source_candidate_capture :: (capture: *Source_Candidate_Capture, allocator: Allocator = context.allocator) {
+	for capture.members {
+		free(it.filename.data,, allocator);
+	}
+
+	free(capture.members.data,, allocator);
+	free(capture.key.data,, allocator);
+	capture.* = .{};
+}
+
 Source_Update_Backing :: struct {
 	operation: *Operation;
 	documents: [] [] u8;
@@ -1154,6 +1863,34 @@ prepare_source_update_backing :: (session: *Session, count: s64, backing: *Sourc
 	return prepared;
 }
 
+prepare_analysis_document_backing :: (session: *Session, request: Analysis_Request, documents: [] [] u8, frontier: *[] u8) -> bool {
+	allocator := owner_allocator(session);
+	#if TEST_HOOKS {
+		allocator = .{proc = source_update_allocate, data = session};
+	}
+
+	ok := true;
+	unlock(
+		*session.gate,
+		#code {
+			for request.documents {
+				document_ok, storage := try_output_array(allocator, it.count, u8);
+				documents[it_index] = storage;
+				if !document_ok {
+					ok = false;
+					break;
+				}
+			}
+
+			if ok {
+				ok, frontier.* = try_output_array(allocator, request.expected_frontier.count, u8);
+			}
+		}
+	);
+
+	return ok;
+}
+
 finish_source_update_backing :: (session: *Session, backing: *Source_Update_Backing) {
 	allocator := owner_allocator(session);
 	unlock(
@@ -1166,6 +1903,20 @@ finish_source_update_backing :: (session: *Session, backing: *Source_Update_Back
 	);
 
 	backing.* = .{};
+}
+
+finish_query_operation_backing :: (session: *Session, backing: *Source_Update_Backing) {
+	if backing.operation && backing.operation.waiters.data {
+		allocator := owner_allocator(session);
+		unlock(
+			*session.gate,
+			#code {
+				free(backing.operation.waiters.data,, allocator);
+			}
+		);
+	}
+
+	finish_source_update_backing(session, backing);
 }
 
 Immediate_Result_Backing :: struct {

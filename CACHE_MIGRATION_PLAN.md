@@ -506,7 +506,7 @@ Exit: user decision recorded.
 						| Output Route | Caller Export | Remaining Allocation Boundary |
 						| --- | --- | --- |
 						| `open_session`, `describe_session` | Checked `try_output_description`; checked validation/context errors | Private `Session`/provider/control construction and `describe` owner snapshots |
-						| `submit_source_batch`, `request_analysis` | Checked `Accepted.frontier` and diagnostic copies | Source candidate backing, analysis `new_update_operation` and ticket registration; source ticket/object/document-array/identity/list, staging `Provider_Model` object/document-pointer/context-array/cloned-state/used-revision, batch state-pointer/context-reference/admitted-context lists, allocation-free bounded descriptor/path/identity field views and build-time expected compiler/adapter/fixed-tag canonical bytes, checked batch context identity/descriptor/three-path payload copies, staging diagnostic path reservation/rejection copies, final private provider document/context capacity and frontier key/token preparation, shared pooled document/path/context-reference/provenance/provider-revision copies, per-event `Document_State` object/`used_revisions` list, `Source_Backing` object/source-byte copies/source-revision keys, edit intermediate byte arrays/size arithmetic and private/live pool-list transfer backing are checked before admission/provider commit |
+						| `submit_source_batch`, `request_analysis` | Checked `Accepted.frontier` and diagnostic copies | Combined analysis admission qualification remains; analysis ticket/document/frontier/operation/capture/world/task/key/queue/join backing, source candidate backing, source ticket/object/document-array/identity/list, staging `Provider_Model` object/document-pointer/context-array/cloned-state/used-revision, batch state-pointer/context-reference/admitted-context lists, allocation-free bounded descriptor/path/identity field views and build-time expected compiler/adapter/fixed-tag canonical bytes, checked batch context identity/descriptor/three-path payload copies, staging diagnostic path reservation/rejection copies, final private provider document/context capacity and frontier key/token preparation, shared pooled document/path/context-reference/provenance/provider-revision copies, per-event `Document_State` object/`used_revisions` list, `Source_Backing` object/source-byte copies/source-revision keys, edit intermediate byte arrays/size arithmetic and private/live pool-list transfer backing are checked before admission/provider commit |
 						| `observe_ticket`, `acquire_world` | Checked observations/frontier bytes; borrowed identity in returned handles | Checked `new_waiter` registration/list backing and successful `acquire_world_handle` registration; owner terminal snapshots remain unqualified |
 						| `query`, `acquire_result` | Checked terminal/pending observations; borrowed identity in returned handles | Non-immediate `issue_operation`, diagnostic-worker `new_result` and pending `Operation`/`Task`/key/queue backing; immediate-result object/identity/registration, waiter registration/list backing and successful `acquire_result` registration are checked |
 						| `poll`, `wait`, `cancel_waiter`, `drain_completions` | Checked observations, records and diagnostic paths | Owner snapshots, `resolve_waiter` terminal observations/completion arrays and drain bookkeeping |
@@ -516,7 +516,7 @@ Exit: user decision recorded.
 
 					- [ ] Make owner snapshots recoverably fallible in `describe`, `export_bytes`, `export_observation` and `drain_completions`, preserving coherent snapshots, call pins and checked caller-copy cleanup.
 					- [ ] Stage checked identity materialisation for `issue_session`, `issue_operation`, `issue_world` and `issue_result`; their counter-exhaustion bool does not qualify `make_key` allocation failure.
-					Ignored identity failures in analysis `new_update_operation`, `start_candidate` and diagnostic-worker `new_result` also need explicit admission/failure handling without identity reuse.
+					Ignored identity failures in legacy `new_update_operation` and diagnostic-worker `new_result` also need explicit admission/failure handling without identity reuse.
 					First `request_shutdown` now checks token exhaustion before committing reservations or changing lifecycle.
 					Immediate-result `query` now stages canonical result identity backing and commits operation/result tokens only after checked allocation and exact-world revalidation; other identity routes remain unqualified.
 					- [ ] Stage checked registration backing for `register_handle`, `register` and `new_waiter` before ledger/reference/generation mutation; qualify `observe_ticket`, successful world/result acquisition, `query`, `retain` and repeated shutdown requests.
@@ -1258,7 +1258,7 @@ Exit: user decision recorded.
 															Exclusive `path_error` selection with `batch_paths`/`paths` uses a present disk event with an unknown syntax context; the path hook sees initial reservation followed by the four-step error-path copy, with callbacks targeted at ordinal two.
 															Seventeen baseline and direct/blocking frontier replacement, requested shutdown, staging-shutdown protection and session retirement/reuse action/control groups always reject, preserve exact allocation counts and distinguish final winner precedence from deliberate stale-frontier/shutdown/session controls.
 															Successful diagnostic export returns caller-owned `INVALID_ARGUMENT`/`INCONSISTENT_BINDING` with `events[0].disk.context`; allocation rejection returns `RESOURCE_EXHAUSTED` without publication, and retained disk/overlay state and worlds remain intact apart from the explicit winning callback mutation.
-															- [x] Qualify diagnostic-copy no-capacity-retry behavior and forbidden allocation-retry controls.
+															- [x] Qualify diagnostic-copy no-capacity-retry behaviour and forbidden allocation-retry controls.
 															Nine groups extend `test_source_batch_construction_receipt_retry` with `path_error`; malformed batches return their diagnostic before receipt-capacity revalidation, so registration/operation-capacity mutations during diagnostic export must not trigger a second staging attempt.
 															One attempt makes two path allocations, and ordinary allocation rejection stops at the rejected ordinal; the explicit forbidden-retry control makes three allocations after initial reservation rejection or four after copy rejection, then returns the original four-step diagnostic without a ticket.
 															Exact caller allocation counts, callback gate progress, provider/frontier/operation-counter/charge atomicity and zero final caller/owner ledgers remain asserted.
@@ -1519,13 +1519,107 @@ Exit: user decision recorded.
 											Direct/blocking callbacks allocate/free fresh owner-backed storage and retain/release a real world while one admission/acquisition remains active; handle charges already reflect the final acceptance/rejection decision.
 											Replaced headers release only list backing, not the transferred pool objects.
 											Published bytes, retained-world readability, caller-error cleanup, restored admission charges and zero final caller/owner ledgers pass in normal and suppressed-callback cases.
-								- [ ] Stage checked candidate/world/member/task/key/queue backing before source provider commit, or prepare a joined existing candidate without mutating live state.
-								- [ ] Qualify the combined provider/operation/candidate admission boundary against each remaining allocation failure, callback revalidation and rollback before closing this parent.
-								The staging `Provider_Model` object, document-pointer/context clone arrays, cloned `Document_State` objects, cloned used-revision arrays, per-event `Document_State` objects/`used_revisions` lists and private/live pool-list transfer backing are checked, including source-reference rollback; remaining batch construction and `start_candidate` recovery remain incomplete.
-								Analysis still uses unchecked `new_update_operation`; checked source ticket/object/document-array/identity/list backing does not make all source admission fallible.
-							- [ ] Stage analysis-request ticket registration alongside operation/candidate admission.
-						Analysis ticket `register` still uses infallible SDK growth.
-						Checked source ticket preparation does not qualify remaining operation/candidate/provider backing, owner allocator callbacks or aggregate byte quotas.
+								- [x] Stage checked candidate/world/member/task/key/queue backing before source provider commit, or prepare a joined existing candidate without mutating live state.
+									- [x] Prepare selected-member, filename and canonical capture-key backing outside the state gate before source provider commit.
+									`try_source_candidate_capture` builds `Source_Candidate_Capture` over the private provider model without retaining sources or mutating live state.
+									Checked member/key arrays, each filename/member key, aggregate member key and execution-capture key reject with complete partial cleanup.
+									`try_path_spelling` checks POSIX copies and reserves bounded UTF-16 conversion backing; capture cleanup releases owned filenames as well as arrays/keys.
+									Source admission sorts its prepared document backing, captures privately, and rejects before provider/counter/ticket publication on failure.
+									`start_candidate` consumes successful prepared capture; ordinary admission finalisation frees rejected or retried captures outside the gate.
+									Canonical-key/filename equality, all six allocation rejection ordinals and POSIX/UTF-16 surrogate-pair conversion checks pass.
+									Direct/blocking real submissions cover existing/new documents, exact counters/charges, source references and retained-world readability.
+									- [x] Prepare checked world identity/object and `session.worlds` capacity before source provider commit, without consuming identity tokens on rejection.
+									`try_source_candidate_world_backing` prepares an empty `World`, canonical identity storage and optional world-list backing outside the state gate.
+									Preparation writes a placeholder token without advancing counters or changing the live list.
+									After exact-session/lifecycle/frontier revalidation, admission retries if prepared/live capacity is insufficient and rejects world-counter exhaustion before provider or operation mutation.
+									`start_candidate` adopts prepared world backing, writes the accepted token and replaces list backing without allocating; unused/replaced backing is freed outside the gate.
+									Existing matching candidates do not consume a world token; their checked task/join preparation is covered below.
+									Helper rejection/canonical checks and 28 real existing/new-document submissions pass in direct/blocking callback modes.
+									Coverage includes all three growth-path allocation rejections, final usable/exhausted counters and a capacity-change retry with exact five-allocation accounting.
+									Rejected live-list/provider/counter/source/charge state is preserved; accepted canonical identities, publication and retained-world reads pass.
+									- [x] Prepare checked task object/key, operation-list backing and `session.tasks`/`session.ready` queue capacity before source provider commit.
+									`try_source_candidate_task_backing` prepares the `Task`, canonical key, one-operation backing and optional task/ready pointer arrays outside the gate.
+									The key embeds the prepared world identity; acceptance patches its placeholder token in place after world identity issuance.
+									Admission revalidates both queue capacities before consuming tokens or committing the provider; insufficient backing discards the attempt and retries.
+									`start_candidate` adopts prepared storage without growing these arrays; ordinary finalisation frees unused/replaced backing outside the gate.
+									Helper sweeps cover every allocation with spare/growth capacity in both queues, invalid capacities, canonical key replacement and zero caller-ledger retention.
+									Thirty-two real submissions cover existing/new documents, all five growth-path rejection ordinals and independent task/ready capacity retries in direct/blocking callback modes.
+									Rejections preserve both live queues, provider state, counters, source references and charges; accepted task keys, one-operation capacity, publication and retained-world reads pass.
+									- [x] Prepare and revalidate an existing candidate join, including task-operation growth and optional-task promotion, without allocation or live mutation during preparation.
+									`prepare_source_candidate_join_backing` snapshots the matching task and growth requirements under the gate, then allocates checked operation/promotion backing outside it.
+									`source_candidate_join_backing_ready` rechecks the matching task, operation capacity and optional promotion capacity before source provider/token mutation; insufficient preparation retries.
+									`start_candidate` consumes prepared join backing without growth; unused/replaced arrays are released by ordinary admission finalisation outside the gate.
+									Helper rejection sweeps and 22 real-worker candidate cases cover required/optional/running/published joins, direct/blocking reentry, independent capacity-loss retries and publication during allocation.
+									Prepared startup passes with tracked allocations rejected; task-identity controls, exact retry counts, retained-world reads and zero final owner ledgers pass.
+									Source batches always issue a new frontier, which participates in the capture key, so existing-candidate joins are qualified directly through the prepared internal boundary rather than by bypassing public frontier admission.
+									Analysis now reuses checked join preparation below; its combined admission qualification remains separate.
+									- [x] Qualify the combined provider/operation/candidate admission boundary against each remaining allocation failure, callback revalidation and rollback before closing this parent.
+									- [x] Sweep remaining combined source-admission allocation failures through the final preparation boundary, checking unpublished provider/operation/candidate state and restored charges/references.
+										- [x] Reject every shared capture/world/task allocation ordinal for existing/new single-document and paired `SET_OVERLAY`/`EDIT_OVERLAY`/`OBSERVE_DISK` submissions.
+										- [x] Reject the caller receipt after all candidate preparation succeeds, with direct/blocking caller-allocation reentry and zero caller-ledger retention.
+										- [x] Preserve an unaffected source through rollback and detect exactly one deliberate extra retain before balancing the negative control and requiring zero final owner ledgers.
+									Twenty-four combined matrices cover 182 submissions with exact fourteen/sixteen-allocation accounting, provider/list/counter/head/queue atomicity, source-reference restoration and retained-world readability.
+									- [x] Attain callback changes after final preparation and verify exact session/lifecycle/frontier and registration/operation/candidate capacity revalidation before commit or retry.
+										- [x] Remove world/task/ready spare capacity and fill registration/operation capacity in the final caller callback, requiring fresh private preparation before acceptance.
+										- [x] Attain shutdown and frontier replacement after preparation, preserving callback state and rejecting without a ticket or consumed source-operation/world identity.
+										- [x] Prove normal active-session release refusal separately from forced session-slot reuse, with exact generation/kind validation and balanced synthetic-retirement cleanup.
+									Thirty-six direct/blocking existing/new-document cases record callback-completion state and exact preparation ordinals, then verify counters, charges, source references, retained-world reads and zero caller/owner ledgers.
+									- [x] Qualify actual frees of unused/replaced candidate backing with cleanup reentry, retained-source/world reads and zero final caller/owner ledgers.
+										- [x] Capture every single-member capture/world/task allocation and require its actual free on receipt rejection, later preparation rejection or discarded capacity retry.
+										- [x] Capture replaced live world/task/ready-list backing and unused prepared arrays after final-callback capacity restoration, requiring accepted publication.
+										- [x] Capture prepared join operation/promotion backing on replacement, non-adoption, partial rejection, capacity retry and publication winners at the internal prepared boundary.
+										- [x] Require direct/blocking owner allocation/free and world retain/release reentry, retained-source bytes/reference checks, suppressed callbacks and held-heap controls before dropping the admission pin.
+									Two hundred seventy cases require one delegate free of each captured allocation, callback gate progress, exact private/public charges and zero final caller/owner ledgers.
+								Provider staging/construction/transfer and selected-member/filename/capture-key preparation are checked, including rejection cleanup and source-reference rollback.
+								Source world identity/object/list, new-task object/key/list/queue and existing-candidate join preparation, combined source admission and cleanup qualification are checked.
+								Retirement and allocator-wide requirements below remain open.
+								`request_analysis` admission backing is qualified below; the shared retirement/allocator requirements stay separate.
+							- [x] Stage analysis-request ticket registration alongside operation/candidate admission.
+								- [x] Prepare checked analysis ticket registration backing outside the gate and revalidate admission after every preparation attempt.
+								`request_analysis` reuses `prepare_registration_backing` and retries if callbacks consume prepared capacity before admission.
+								Exact session, lifecycle, frontier, caller receipt and handle/operation quotas are checked before ticket publication or operation identity issuance.
+								Failed preparation returns `RESOURCE_EXHAUSTED` without a ticket, consumed identity or private charge; analysis does not acquire a source-only acquisition charge.
+								Fourteen direct/blocking array/object/reuse cases cover every registration allocation rejection and successful slot reuse without allocation.
+								Eighty-four callback cases cover all three allocation ordinals, successful/rejected allocation, completion drain, normal active-release refusal, shutdown, frontier replacement, capacity filling, quota loss and normal session retirement.
+								Capacity loss requires exactly six preparation allocations across two attempts; callbacks record their attained identities/charges before the suspended request resumes.
+								Three quota controls reject exhausted handle/operation capacity before registration allocation and preserve analysis admission when only acquisition capacity is exhausted.
+								Retained source/world reads and zero final caller/owner ledgers pass in all 101 cases.
+								- [x] Stage checked analysis frontier/document copies and operation object/identity/list backing before consuming operation identities or charges.
+									- [x] Allocate the operation, document-pointer array and canonical placeholder identity with `prepare_source_update_backing`; allocate document/frontier byte buffers outside the gate and copy canonical bytes only after exact-session/lifecycle/frontier revalidation.
+									- [x] Reuse checked operation-list preparation and recheck ticket/list capacity, quotas and counter exhaustion after every unlocked preparation or cleanup callback.
+									- [x] Reject every private allocation ordinal for single/paired inputs and operation-list growth, preserving provider/registry/source/counter/charge state and zero final caller/owner ledgers.
+									- [x] Qualify callback winners, operation-list retries, canonical identity/document ownership and final-usable/exhausted operation-counter controls before adoption.
+								Five single-document or six paired private allocations prepare the operation, pointer array, identity, document byte buffers and frontier; list growth is checked separately.
+								Thirty failure/publication cases, 216 allocation-callback cases and two counter-edge controls pass in addition to the prior ticket/receipt regressions.
+								- [x] Stage and revalidate checked analysis world/task/key/queue and existing-candidate join backing before operation admission.
+									- [x] Prepare protected selected-member metadata, filenames and capture keys outside the gate, retaining selected sources and revalidating admission after allocation callbacks.
+										- [x] Check all four request-sized snapshot allocations and single/paired capture allocation ordinals, preserving rollback, canonical publication and source references.
+										- [x] Qualify metadata isolation for both path encodings and every selection state, with overflow rejection and callback-driven session/lifecycle/frontier/capacity/quota/counter changes.
+										- [x] Require actual frees of unused snapshot/capture backing outside the gate, with allocating/mutating reentry, suppressed callbacks and held-heap controls.
+									- [x] Prepare checked analysis world identity/object/list backing and revalidate capacity and identity exhaustion before operation admission.
+										- [x] Reuse checked world preparation outside the gate, retry lost list capacity and reject counter exhaustion before consuming operation identities or charges.
+										- [x] Sweep allocation rejection and capacity-retry ordinals, canonical world identities, exact rollback and retained-world/source readability in direct/blocking modes.
+										- [x] Qualify callback winners, concurrent matching-world creation, last-valid/exhausted world tokens and successful joins at world-counter exhaustion.
+										- [x] Require actual frees of partial, unused, counter-discarded and replaced world backing with reentry, suppressed-callback and held-heap controls.
+										- [x] Restore passing full optimised LLVM worker evidence with a fresh complete run after task qualification and source-join fixture repair.
+									- [x] Prepare checked analysis task/key/operation-list and task/ready queue backing before operation admission.
+										- [x] Prepare task object, canonical key, one-operation buffer and optional task/ready arrays outside the gate; revalidate both queue capacities before operation admission.
+										- [x] Sweep all five allocation ordinals and both seven-allocation queue-capacity retries, checking canonical keys, queue storage, references and charge rollback.
+										- [x] Restore and qualify all 200 allocation-callback cases, including exact-session/lifecycle/frontier changes, capacity/quota loss, counter exhaustion and concurrent matching-world creation.
+										- [x] Require actual frees for partial, unused, counter-discarded and replaced task/ready backing in 80 direct/blocking/suppressed/held-heap cases.
+										- [x] Repair the source-join fixture with real spare storage and pass all twelve scoped service gates on both backends.
+									- [x] Prepare and revalidate existing-candidate operation-list growth and optional-task promotion backing before analysis admission.
+										- [x] Reuse checked join preparation before operation identity issuance and charges; discard stale backing outside the gate and revalidate before preparing again.
+										- [x] Qualify required/optional/running/published public joins, all allocation rejections, independent capacity-loss retries and publication winners in direct/blocking modes.
+										- [x] Require exact actual frees of replaced, unused, partial, retry-discarded and publication-winner arrays with reentry, suppressed callbacks and held-heap controls.
+								- [x] Qualify combined analysis admission callbacks, receipt/capacity retries, rollback and actual backing frees before closing this parent.
+									- [x] Sweep combined analysis preparation failures through final admission for new and joined candidates, including caller-receipt rejection, provider/registry/counter/charge atomicity and source-reference rollback.
+									- [x] Qualify post-preparation callback winners and capacity retries with exact-session/lifecycle/frontier, quota and identity-exhaustion revalidation before publication.
+									- [x] Capture actual cross-stage backing frees on rejection, retry and non-adoption, with allocating/mutating cleanup reentry, retained-source reads and zero caller/owner ledgers.
+						Analysis ticket, document/frontier copies, operation backing, protected selected-member/filename/capture-key preparation, world backing, new-task/key/queue backing and existing-candidate joins are checked.
+						Full worker qualification now passes on both backends, closing the earlier world-backing verification gap.
+						Analysis admission backing and combined allocation-failure, callback/capacity and cross-stage actual-free qualification are complete.
+						Allocator-wide callback qualification, remaining terminal/result backing, retirement safety and aggregate byte quotas remain open.
 					- [ ] Complete allocation-free first shutdown under injected exhaustion, including pending completion and retirement pressure.
 						- [x] Physically prepare the first shutdown registration and operation-identity backing during private `open_session` admission.
 						`prepare_shutdown_backing` makes six checked owner allocations: two-slot `registry.slots`, two-entry `session.registrations`, two `Registration` objects, `shutdown_control` and canonical identity bytes.
@@ -1539,6 +1633,15 @@ Exit: user decision recorded.
 						- [ ] Prove allocation-free first shutdown with pending waiter completions and retirement queues after their remaining terminal/cleanup backing tasks below are implemented.
 						This reserve increment does not qualify `resolve_waiter`, retirement/free-slot growth, repeated shutdown registration or all owner allocator callbacks.
 					- [ ] Stage checked result/operation/candidate/task/key/queue backing before admission or provider commit in `query`, `submit_source_batch`, `request_analysis`, `new_update_operation`, `new_result` and `start_candidate`; rollback charges/references and reject without publication on failure.
+						- [x] Stage pending-query `Operation`, canonical operation-identity bytes and `session.operations` capacity before waiter publication; issue the identity token only after admission or a terminal frontier winner.
+							- [x] Sweep all three backing allocations in direct/blocking callback modes, including shutdown, frontier replacement, source-handle reuse, all four quotas and operation-counter exhaustion; require callback-relative charge/reference/queue atomicity.
+							- [x] Check late waiter-stage counter exhaustion and operation-list capacity loss, final-token encoding, private waiter-storage cleanup and zero caller/owner ledgers; pass the focused suite and all twelve service configurations on both backends.
+						Pending-query backing qualification adds 114 cases.
+						The focused `--query-operation` runner also exercises existing world-waiter interleavings, including frontier-winner shutdown.
+						`finish_query_operation_backing` owns private waiter cleanup outside the state gate; the query's deferred block calls this ordinary finaliser rather than expanding `unlock` inside a deferred block.
+						- [ ] Stage pending-query task, task-key, task-operation-list and required-ready queue backing before waiter publication, including existing-task joins and capacity-loss retries.
+						- [ ] Stage terminal-query operation identities and asynchronous `new_result` object/identity backing with recoverable failure and winner revalidation.
+						- [ ] Qualify pending-query backing actual frees with allocating/mutating cleanup reentry and held-heap controls; admission callbacks and final zero ledgers do not close this requirement.
 					- [ ] Preallocate or recoverably stage `resolve_waiter` terminal observation/completion storage before terminal/detachment mutation, including cancellation, completion and shutdown winners.
 					- [ ] Make `release_handle` free-slot growth and `retired_worlds`/`retired_outputs`/`retired_sources` queue admission allocation-safe, including shutdown/release at exhausted capacity.
 					Owner delegate allocation/free callbacks still require the outstanding no-host-callback-under-gate qualification; checked caller exporters alone do not close it.
@@ -1596,6 +1699,296 @@ Exit: user decision recorded.
 	The subsequent callback/quota increment below passes the full worker gates on both backends; focused mode remains opt-in.
 	At that checkpoint, batch pool-object qualification, pool-block/source/document/context/revision/frontier construction, pool transfer, source candidate and combined admission, analysis and other Phase 5/`C3`/`C5` requirements remained open.
 	Broad parser and foreign-target regressions were not rerun.
+	- [x] Combined analysis cross-stage actual-free increment (2026-11-19).
+	The existing world/task cleanup fixture now shares exact allocation ordinals across private operation/document/frontier copies, registration reserves, operation-list growth, protected snapshot/capture preparation and candidate world/task backing.
+	Twenty-two reclaimable allocations are captured before final-task allocation rejection; twenty-three are captured before final-preparation world-counter rejection.
+	Installed registration and operation-list reserves are not misclassified as private leaks: rejected requests still preserve live publication, provider frontier, operation/world identities, queues, charges and selected-source references.
+	Eighteen targets cover snapshot/capture and world/task backing discarded when a final allocation callback creates the matching published world; the accepted request reuses it without issuing another world identity or retaining another world-owned source reference.
+	World-list, task-list and ready-queue capacity controls reserve real storage before hiding capacity, then capture both discarded world allocations or each of four discarded task allocations before fresh preparation and publication.
+	Exact preparation totals distinguish 27-allocation rejection, 29-allocation final-competitor/world-retry paths and 31-allocation task/ready retries.
+	Combined optional-task joins additionally run all nine existing replacement, unused-array, partial-rejection, independent capacity-retry and publication-winner cleanup routes after the preceding nineteen allocations.
+	Each of 82 targets runs with direct/blocking reentry, direct/blocking suppressed callbacks and a blocking held-heap control: 410 new cases, comprising 180 accepted controls and 230 rejections across 50 shared focused/default groups.
+	Every target requires exactly one actual delegate free before teardown, a disarmed spy, retained source/world readability, phase-specific references/charges and zero final caller/owner ledgers.
+	Unsuppressed callbacks allocate/free owner storage and retain/release a real world; held-heap controls require noncompletion during the explicit heap hold and completion after release.
+	`cleanup_callback_running` separates those reentrant allocations from the suspended request's preparation ordinals without excluding them from ownership-ledger accounting.
+	A rejected join may retain precisely the recycled slot created by the cleanup callback's balanced retain/release; original live slots, operation identity, task/queue publication and charges remain unchanged.
+	`./run_all_tests.sh --analysis-ticket --repeat=3 --expect-summaries=199 --summary` passes three consecutive runs on each backend, with 199 summaries per execution.
+	`./run_all_tests.sh --service --summary` passes all twelve full worker/provider/coordinator/host/default-trace/real-worker-trace gates on `x64` and optimised LLVM, with 198 analysis summaries in each full worker.
+	Static checks and editor diagnostics are clean; no production behavior changes were needed, and broad parser/foreign-target regressions were not rerun.
+	The final combined-analysis child, its combined-analysis parent and the bounded analysis-admission-backing parent are complete.
+	Allocator-wide callback qualification, remaining terminal/result backing, retirement, aggregate byte quotas and broader Phase 5/`C3`/`C5` requirements remain open.
+	- [x] Combined analysis callback/capacity-retry increment (2026-11-19).
+	The shared worker fixtures now run one allocation/callback ordinal across private operation/document/frontier copies, registration reserves, operation-list growth, protected snapshot/capture preparation and new-world/task or existing-join backing.
+	Direct/blocking callbacks pair successful and rejected allocation with completion drain, active-release refusal, shutdown, frontier replacement, registration/operation-capacity competitors, both admission quotas, session retirement and exact-generation slot reuse, and operation/world-counter exhaustion.
+	New-candidate sweeps cover all 27 preparation allocations; stage-boundary oracles require early winners to stop later preparation, preserve error precedence and avoid consuming outer operation/world identities or charges.
+	Callbacks record their settled operation/world/task/required-ready/optional-ready counts, identities, ledgers and source references; rejected outer requests must preserve those observations rather than erase legitimate competitor work.
+	World-list, task-list and ready-queue capacity controls reserve real storage before hiding capacity, then verify exact replacement-allocation counts and rejection at the callback or first retry allocation.
+	An operation-list competitor creates the matching published world, requiring fresh operation-list capacity and reuse without another world identity.
+	Combined optional-task joins cover independent operation/promotion capacity-loss retries, both retry-allocation rejections and a publication winner after all earlier preparation stages.
+	Final-join callbacks revalidate handle/operation quotas and operation-counter exhaustion, while an exhausted world counter still permits joining an existing world.
+	Successful registration preparation may leave an unused reserve object after later quota/counter rejection; live registry slots, handles and publication remain unchanged.
+	The shared focused/default test-call matrix gains 18 groups, with documented callback-state fields, retained source/world reads and zero final caller/owner ledgers.
+	`./run_all_tests.sh --analysis-ticket --repeat=3 --expect-summaries=149 --summary` passes three consecutive runs on each backend, with 149 summaries per execution and a successful runner exit.
+	`./run_all_tests.sh --service --summary` passes all twelve full worker/provider/coordinator/host/default-trace/real-worker-trace gates on `x64` and optimised LLVM, with 148 analysis summaries in each full worker.
+	Initial verification commands passed their test executions but failed parsing trailing script text after live script edits; the runner now loads its execution/reporting body before tests and exits inside it, and both complete commands above subsequently exit successfully.
+	`./run_all_tests.sh --check` checks runner syntax, Git whitespace and the worker 175-character limit without a separate command pipeline; static checks and editor diagnostics are clean.
+	No production behaviour changes were needed; broad parser and foreign-target regressions were not rerun.
+	Only the combined callback/capacity child is newly closed.
+	Cross-stage actual-free qualification, the combined-analysis and analysis-admission parents, retirement, aggregate byte quotas and broader Phase 5/`C3`/`C5` requirements remain open.
+	- [x] Repair the shared held-heap cleanup probe handshake (2026-11-19).
+	`spy_allocate` now waits for `pool_cleanup_job` to finish its session/source/world observations before intentionally acquiring `heap.gate`.
+	This removes the harness dependency in which `read_world` could run `leave_call`/`cleanup_owned`, need the held owner heap to free retired backing, and never reach the readiness signal.
+	The existing `heap_entered` semaphore reports observation readiness; documented `heap_continue` and `heap_attempted` semaphores release and acknowledge the explicit owner-allocation attempt.
+	The shared spy initialises and destroys the new semaphores around the callback thread; existing fixture readiness-semaphore lifetimes remain unchanged.
+	After the attempt signal, the callback must remain unfinished while the heap gate is held and finish after release; the original blocking duration and exact-free/source/reference/ledger/mutation checks are preserved.
+	The spy releases the intentionally held heap gate and waits for callback completion before reporting readiness, attempt or blocking failures, with phase-specific diagnostics.
+	Three consecutive focused `x64` runs and three consecutive focused optimised LLVM runs each pass all 131 summaries, including the first execution after compilation.
+	All twelve full scoped service gates pass on their first run on both backends, including both formerly interrupted full worker gates; editor diagnostics, whitespace and the worker 175-character limit are clean.
+	This is a test-harness repair, not additional Phase 5 admission or cross-stage actual-free qualification.
+	Broad parser and foreign-target regressions were not rerun.
+	- [x] Combined analysis preparation allocation-failure increment (2026-11-19).
+	Existing worker fixtures share one `Registration_Probe` allocation ordinal across checked operation/document/frontier copies, registration reserves, operation-list growth, protected snapshot/capture preparation and world/task or existing-join backing.
+	Real retained handles exhaust registration capacity before fault injection; operation/world/task/ready capacities are clamped only to their actual live counts.
+	New single-document candidates at an advanced frontier, new paired-document candidates and existing published single-document candidates cover every owner allocation failure through successful final admission in direct/blocking modes.
+	Required, optional, running and published joins sweep the same earlier preparation boundaries plus their operation/promotion arrays; published paired-document joins require no join allocation.
+	The 346 new cases include 332 rejections and 14 accepted controls, registered in focused and default worker modes.
+	Caller-receipt rejection occurs at the actual export boundary: after five or six private operation/document/frontier allocations, before registration/list/candidate preparation.
+	Failures later in preparation reclaim an already-created caller receipt; this evidence does not claim a receipt export after all candidate preparation.
+	Rejected requests preserve provider frontier/counter, issued operation/world identities, live registry slots/generations/kinds, operation/world/task/queue publication, resource charges and selected-source references.
+	Successfully prepared registration objects and operation-list reserve storage may remain available after a later failure; the tests distinguish those legitimate reserves from issued handles and published operations.
+	Accepted controls verify canonical operation/world/task keys, private sorted document copies, exact operation attachment, matching-world reuse, optional promotion and eventual publication.
+	Both selected-source references are checked for paired requests; retained-world reads and zero final caller/owner ledgers pass in every case.
+	Focused `x64` worker `- analysis-ticket` checks pass with 131 summaries, and all twelve full scoped service gates pass on `x64` and optimised LLVM.
+	Two intermediate focused runs stopped in the existing shared held-heap cleanup semaphore probe before the new cases; unchanged repeats passed.
+	The first full `x64` worker run stopped in that same probe during older source cleanup; its unchanged repeat passed, the other five `x64` gates passed initially, and all six LLVM gates passed initially.
+	The shared probe is unchanged.
+	Whitespace, editor diagnostics and the worker 175-character limit are clean; broad parser and foreign-target regressions were not rerun.
+	Only the combined allocation-failure child is closed; post-preparation callback/capacity revalidation and cross-stage actual-free qualification remain explicit unchecked children.
+	The combined-analysis and analysis-admission parents, retirement, aggregate byte quotas and broader Phase 5/`C3`/`C5` requirements remain open.
+	- [x] Checked public analysis existing-candidate join increment (2026-11-19).
+	`request_analysis` reuses `prepare_source_candidate_join_backing` and `source_candidate_join_backing_ready` before operation identity issuance and handle/operation charges.
+	Pending candidates prepare operation-list growth and optional-ready promotion arrays outside the state gate; published candidates need no join backing.
+	If callbacks change the matching task or consume capacity, `finish_analysis_candidate_join_backing` discards stale arrays outside the gate and returns to common exact-session/lifecycle/frontier/resource revalidation before another preparation.
+	`start_candidate` receives the prepared join and adopts it without growth; finalisation frees unused or replaced join arrays before task/world/capture cleanup while the snapshot still retains selected sources.
+	Twenty-two public requests cover required, optional, running and published candidates, every join allocation rejection, independent operation/promotion capacity-loss retries and publication during allocation in direct/blocking modes.
+	Rejected requests preserve task/queue/charge state and consume no operation identity; accepted requests reuse the same world without another world token, attach exactly one operation and promote optional work with prepared ready capacity.
+	Forty-five exact-header cleanup cases cover replaced and unused operation/promotion arrays, partial operation-array rejection, both retry-discard arrays and both arrays unused after a publication winner.
+	Each of nine cleanup routes runs with direct/blocking reentry, direct/blocking suppressed callbacks and a blocking held-heap control, requiring one actual delegate free before teardown.
+	Callbacks allocate/free owner storage and retain/release a real world while proving gate progress, protected source bytes/references, unchanged acquisition semantics and phase-specific handle charges.
+	Unused-array controls restore only genuinely reserved capacity, and the spy is armed after allocating publication callbacks so unrelated owner allocations cannot become its target.
+	All 67 new cases preserve retained-world readability and zero final caller/owner ledgers; the tests run in focused and default worker modes.
+	Focused `x64` worker `- analysis-ticket` checks pass with 115 summaries, and all twelve full scoped service gates pass on `x64` and optimised LLVM.
+	An initial focused run passed the 22 join cases but later stopped in the shared task-cleanup held-heap semaphore probe; the unchanged binary passed the complete focused suite on repeat, and both final full worker gates passed without changes to that shared probe.
+	Whitespace, editor diagnostics and the worker 175-character limit are clean; broad parser and foreign-target regressions were not rerun.
+	All analysis candidate-preparation children are complete; combined analysis admission retains three explicit unchecked failure/callback/actual-free qualification children.
+	The analysis-admission parent, retirement, aggregate byte quotas and broader Phase 5/`C3`/`C5` requirements remain open.
+	- [x] Checked analysis task/key/queue increment and interrupted-work recovery (2026-11-19).
+	`request_analysis` reuses `try_source_candidate_task_backing` for checked task object, canonical task key, one-operation backing and optional task/ready arrays outside the gate, after world preparation and before operation identity issuance or handle/operation charges.
+	Only capturable new candidates need task backing; matching existing worlds skip it, and every unlocked preparation returns through the common session/lifecycle/frontier/resource/capacity checks.
+	Both live queue capacities are revalidated before adoption; lost task or ready capacity discards private task backing outside the gate and retries without consuming an operation/world identity.
+	`start_candidate` patches the prepared task key with the accepted world identity, adopts its object and operation buffer, and swaps queue backing without allocation.
+	`finish_analysis_candidate_task_backing` frees partial, unused and replaced backing outside the gate before world and protected capture/source cleanup.
+	Forty-four direct/blocking paired-document cases sweep five normal allocations and all seven allocations across each of the task-queue and ready-queue capacity retries, preserving canonical task/world identities, queue storage, provider/registry/counter/charge state and retained source/world reads.
+	The crash audit confirmed those production changes and 44 cases survived, but the previously reported callback matrix and proposed task actual-free extension were absent from the saved test file.
+	Two hundred restored callback cases cover all five allocation ordinals, allocation success/failure, both reentry modes and the same ten admission actions as world preparation.
+	Callbacks verify exact source retention and attained identity/charge state across retirement, frontier replacement, capacity/quota loss, counter exhaustion and a competing analysis that creates the matching world before outer admission.
+	Eighty restored cleanup cases capture all five unused allocations, four partial-allocation frees, five allocations discarded after counter exhaustion, and replaced task/ready queue arrays.
+	Each target requires one actual delegate free, gate progress, owner allocation/free and world retain/release reentry, phase-specific references/charges and zero final caller/owner ledgers; suppressed callbacks and held-heap controls remain discriminating.
+	The new one-entry task-operation buffer exposed a source-join fixture assumption that legacy growth had left spare capacity.
+	That fixture now uses `array_reserve` to obtain actual spare operation/ready storage before hiding capacity or arming cleanup spies; no production capacity, admission or cleanup check was weakened.
+	All 324 task-specific cases pass, the focused `x64` worker `- analysis-ticket` suite passes with 62 summaries, and all twelve full scoped service gates pass on `x64` and optimised LLVM.
+	Whitespace, editor diagnostics and the worker 175-character limit are clean; broad parser and foreign-target regressions were not rerun.
+	The task-backing child and earlier world-backing verification gap are complete; checked existing-candidate joins, combined analysis qualification, retirement, aggregate byte quotas and broader Phase 5/`C3`/`C5` requirements remain open.
+	- [x] Checked analysis world-backing increment (2026-11-19; full optimised LLVM worker evidence restored).
+		- [x] Implement checked world object/identity/list preparation, capacity revalidation and nonallocating world adoption.
+		- [x] Pass 188 new cases and the focused worker `- analysis-ticket` regressions on `x64` and optimised LLVM, with 49 summaries on each backend.
+		- [x] Pass the full `x64` worker and all provider/coordinator/host/default-trace/real-worker-trace gates on both backends.
+		- [x] Restore passing full optimised LLVM worker evidence in the fresh twelve-gate run after task qualification and source-join fixture repair.
+	`request_analysis` now reuses `try_source_candidate_world_backing` for checked world object, canonical placeholder identity and optional world-list growth outside the state gate.
+	The admission loop checks world-counter exhaustion only when no matching candidate exists, and revalidates exact session/lifecycle/frontier, quotas, operation exhaustion and registration/list/world capacity before consuming an operation identity or charge.
+	Lost world-list capacity discards private world backing outside the gate and retries; a concurrently created matching world makes the prepared backing unused without consuming another world token.
+	`start_candidate` adopts the prepared world and patches its canonical token in place; `finish_analysis_candidate_world_backing` frees partial, unused and replaced backing outside the gate before protected capture/source cleanup.
+	Twenty direct/blocking paired-document cases sweep three world-allocation ordinals and all five allocations across a lost-capacity retry, checking exact rollback, world-list storage, source references and canonical identities.
+	One hundred twenty callback cases pair every allocation ordinal with allocation success/failure, both reentry modes and ten actions: completion drain, active-release refusal, shutdown, frontier replacement, registration/operation-capacity filling, handle-quota loss, normal session retirement and operation/world-counter exhaustion.
+	The operation-capacity competitor creates the matching world before outer admission; callback identities, legitimate charges and source references remain accounted for without a duplicate world token.
+	Three counter controls verify the final valid canonical world identity, rejection without operation issuance at exhaustion, and a successful existing-world join despite world-counter exhaustion.
+	Forty-five exact-header cleanup cases cover unused object/identity/list backing, partial object/identity backing, all three allocations discarded after counter exhaustion, and the replaced live world-list allocation.
+	Each cleanup target requires one actual delegate free, retained source/world reads, phase-specific references/charges and zero final caller/owner ledgers; direct/blocking reentry, suppressed callbacks and held-heap controls pass in the focused suites on both backends.
+	At the initial world checkpoint, eleven of twelve full scoped service gates passed; the contextualised LLVM worker run stopped in the existing source-candidate held-heap semaphore assertion before analysis.
+	The subsequent task crash audit also found a source-join spare-capacity fixture assumption; that fixture now reserves real storage as recorded above.
+	Fresh full worker runs and all twelve scoped service gates now pass on both backends, closing this world-backing verification gap without changes to the shared held-heap probe.
+	Whitespace, editor diagnostics and the worker 175-character limit are clean; broad parser and foreign-target regressions were not rerun.
+	At the initial world checkpoint, task/key/queue and existing-candidate join preparation remained open; task preparation is now qualified above.
+	Existing-candidate joins, combined analysis qualification, retirement, aggregate byte quotas and broader Phase 5/`C3`/`C5` requirements remain open.
+	- [x] Protected analysis selected-member/filename/capture-key increment (2026-11-19).
+	`request_analysis` uses a request-sized `Analysis_Candidate_Snapshot` rather than borrowing live provider metadata across capture allocations or cloning the entire provider.
+	Four checked allocations prepare document states, state pointers, admitted contexts and contiguous metadata; canonical IDs, consistency metadata and encoded visible filenames are copied under the gate after exact-session/lifecycle/frontier revalidation.
+	Staging retains only selected sources; `try_source_candidate_capture` then builds checked members, filename spellings and canonical capture keys outside the gate.
+	The common admission loop revalidates session/lifecycle/frontier, allocation success, quotas, operation exhaustion and registration/list capacity after each unlocked preparation.
+	Accepted capture metadata is rebound to the current provider before adoption, so worlds do not borrow the temporary snapshot's bytes; the snapshot releases its source retains during off-gate finalisation.
+	`start_candidate` returns unused prepared capture backing to its caller rather than freeing it under the session gate; the existing source finaliser also owns that returned backing.
+	Seven snapshot allocation/invalid-size cases and ten metadata-poisoning cases cover overlay, present/absent/unknown/unavailable disk selections, POSIX/UTF-16LE filename encoding, coherent consistency bytes, canonical keys, source retention and size overflow.
+	Forty-eight public single/paired cases sweep every snapshot/capture allocation rejection and successful publication in direct/blocking reentry modes, preserving provider/registry/counter/charge state and final caller/owner ledgers.
+	Three hundred sixty callback cases pair allocation success/failure at every single-document ordinal with completion drain, active-release refusal, shutdown, frontier replacement, registration/operation-capacity loss, handle-quota loss, normal session retirement and operation-counter exhaustion.
+	Callbacks verify the source retain exists only after staging; stale-session/frontier and resource rejection release it without consuming an operation identity or private admission charge.
+	Fifty exact-header cleanup cases capture all ten snapshot/capture allocations on a published-world join, require one actual delegate free, and exercise direct/blocking owner allocation/free and world retain/release reentry, suppressed callbacks and held-heap controls.
+	Scratch cleanup occurs before ticket admission; unused capture cleanup occurs after admission with its snapshot retain intact, while snapshot backing is freed after releasing that retain.
+	All 475 new cases preserve retained source/world readability, phase-specific references/charges and zero final caller/owner ledgers.
+	Focused `x64` worker `- analysis-ticket` checks pass with 35 summaries; all twelve scoped `x64`/optimised LLVM worker/provider/coordinator/host/default-trace/real-worker-trace gates pass on their first run in this increment.
+	Whitespace, editor diagnostics and the worker 175-character limit are clean; broad parser and foreign-target regressions were not rerun.
+	Only protected capture preparation is complete: checked analysis world identity/object/list, task/key/queue and existing-candidate join backing remain explicit unchecked children.
+	Combined analysis qualification, retirement, aggregate byte quotas and broader Phase 5/`C3`/`C5` requirements remain open.
+	- [x] Checked analysis document/frontier and operation-backing increment (2026-11-19).
+	Replace infallible analysis document/frontier copies and `new_update_operation` with checked private preparation and nonallocating operation adoption.
+	Reuse `Source_Update_Backing` for the operation object, document-pointer array and placeholder identity; `prepare_analysis_document_backing` allocates checked document/frontier byte buffers outside the gate.
+	Allocation callbacks may replace the frontier, stop or release the session; canonical provider bytes are copied into private storage only after exact-session/lifecycle/frontier revalidation, without carrying provider byte pointers through those callbacks.
+	The caller receipt uses the completed private snapshot; existing unlocked receipt cleanup owns partial document/frontier allocations, while the shared backing finaliser owns the unadopted operation/identity.
+	The admission loop reuses checked operation-list preparation and rechecks session/lifecycle/frontier, allocation success, handle/operation quotas, identity exhaustion and ticket/list capacity after each unlocked preparation or cleanup.
+	Acceptance issues exactly one operation token, patches the prepared canonical identity, appends the prepared operation and transfers private document/frontier ownership without allocating that operation backing.
+	Thirty new direct/blocking cases sweep all five single-document or six paired private allocation ordinals plus operation-list growth, including reversed paired inputs and successful canonical sorting/publication.
+	Accepted identity bytes match canonical keys, document copies do not alias input identities and operation/caller frontiers do not alias; rejected attempts preserve registry/provider/source/counter/charge state.
+	Two hundred sixteen callback cases cover all private/list allocation ordinals, paired allocation success/failure, completion drain, active-release refusal, shutdown, frontier replacement, registration/operation-capacity filling, handle-quota loss, normal session retirement and operation-counter exhaustion.
+	Operation-list capacity loss requires two checked growth attempts; legitimate competing tickets and callback counter/charge changes remain accounted for and are balanced during cleanup.
+	Final-usable and exhausted counter controls verify canonical high-token identities and no wraparound or admission on exhaustion, completing 248 new cases.
+	Retained source/world readability, partial-allocation rollback and zero final caller/owner ledgers pass; candidate allocation recovery and combined analysis actual-free qualification remain separate.
+	Focused x64 `- analysis-ticket` checks pass with 23 summaries; all twelve scoped x64/optimised LLVM service gates pass after terminal recovery.
+	An earlier full worker attempt stopped in the existing source-candidate held-heap probe before analysis tests; that probe was not changed, and both full worker gates passed on retry.
+	The gate failure command closed the shared shell through `exit`; recovered verification uses a returning function, leaving the terminal open on test failure.
+	Whitespace, editor diagnostics and the worker 175-character limit are clean; broad parser and foreign-target regressions were not rerun.
+	The analysis copy/operation child is complete.
+	Checked candidate preparation, combined analysis qualification, retirement, aggregate byte quotas and broader Phase 5/`C3`/`C5` requirements remain open.
+	- [x] Checked analysis ticket-registration increment (2026-11-19).
+	`request_analysis` now prepares ticket registration with the existing checked backing helper after caller receipt export, before handle/operation charges and identity issuance.
+	Every unlocked preparation is followed by exact-session, lifecycle, frontier, receipt-success and handle/operation-quota checks; callbacks that consume the prepared capacity force another preparation attempt.
+	A failed registration allocation returns `ADMISSION_DENIED`/`RESOURCE_EXHAUSTED` without publishing a ticket or consuming an operation/world identity.
+	Analysis retains its existing acquisition-quota semantics rather than inheriting the source-only admission charge.
+	The worker tests reuse real retained-world fixtures, registration hooks, direct/blocking reentry and independent caller/owner ledgers.
+	Fourteen array/object/reuse submissions cover eight rejected allocations and six successes; 84 callback submissions cover seven actions at each of three allocation ordinals in both reentry modes, with allocation success/failure paired.
+	Callbacks attain completion drain, normal active-session release refusal, shutdown, frontier replacement, registration-capacity loss, handle-quota loss and normal session release after stopping.
+	The new shutdown fixture awaits the control operation before its callback-state snapshot, preventing asynchronous shutdown retirement from invalidating exact ledger comparisons.
+	Registration-capacity retries require three discarded plus three fresh allocations, with one final accepted operation identity and no new world identity when joining the published candidate.
+	Three further quota controls require no registration allocation on handle/operation exhaustion and successful admission with only acquisition capacity exhausted: 101 new cases total.
+	Rejections preserve caller outputs, source references, operation/world counters and charges relative to attained callback state; accepted controls publish, retained source/world reads remain valid and all caller/owner ledgers reach zero.
+	The opt-in worker `- analysis-ticket` mode includes the new cases and existing receipt failure/interleaving/negative-control regressions; default worker coverage still includes them all.
+	Focused x64 checks and all twelve scoped x64/optimised LLVM service gates pass; whitespace, editor diagnostics and the worker 175-character limit are clean.
+	One earlier full worker attempt stopped in the existing source-candidate held-heap probe before reaching analysis tests; subsequent full worker gates passed on both backends without changes to that probe.
+	Only the analysis ticket-registration child is complete.
+	Checked document/frontier/operation/candidate preparation, combined analysis qualification and broader Phase 5/`C3`/`C5` requirements remain open.
+	Broad parser and foreign-target regressions were not rerun.
+	- [x] Source candidate actual-free and cleanup-reentry qualification increment (2026-11-19).
+	Extend the existing owner-allocation spy, cleanup probe and real-worker candidate fixtures only; no production or SDK changes are needed.
+	Two hundred twenty-five public source submissions capture exact owner allocation headers across fourteen capture/world/task allocations, including temporary capture scratch.
+	Receipt rejection covers seventy cases, later preparation rejection fifty-five and discarded registration-capacity retries seventy.
+	Thirty accepted cases capture replaced live world/task/ready lists or unused prepared lists after the final caller callback restores genuinely available live capacity.
+	Early scratch/partial cleanup still holds the private ticket charge; later retry cleanup reflects legitimate competing handles, and accepted cleanup reflects the public ticket.
+	Forty-five further real-worker cases exercise prepared join operation/promotion backing: replaced and unused arrays, partial operation-array cleanup, both capacity retries and both publication-winner arrays.
+	Join qualification uses the prepared internal boundary because public source batches advance the frontier; no public frontier guard is bypassed and analysis keeps its separate unprepared path.
+	Arm prepared-allocation capture after reentrant publication completes, excluding unrelated worker allocations from the exact-header oracle.
+	All 270 cases require one actual delegate free before teardown; normal callbacks prove session-gate progress, retained world/source readability, source references and balanced owner-backed allocation/free plus world retain/release reentry.
+	Suppressed callbacks still require the actual free; held-heap controls demonstrate blocking owner allocation and subsequent progress after unlocking.
+	Admission/acquisition pins remain held through cleanup, private/public handle charges match the attained phase, outputs publish or reject as expected and all caller/owner ledgers reach zero.
+	Focused x64 `batch-pool` checks pass with 114 candidate summaries; all twelve scoped x64/optimised LLVM service gates pass.
+	The worker test has no lines over 175 characters; whitespace and editor diagnostics are clean.
+	The actual-free child and combined source-admission qualification parent are complete; analysis admission, retirement safety, aggregate byte quotas and other Phase 5/`C3`/`C5` requirements remain open.
+	Broad parser and foreign-target regressions were not rerun.
+	- [x] Final-preparation callback revalidation qualification increment (2026-11-19).
+	Add worker-only callback snapshots and world/task/ready capacity controls; preserve existing fixture edits and leave production code unchanged.
+	Thirty-six real submissions cover nine callback routes across existing/new documents and direct/blocking reentry.
+	The final caller allocation follows all eleven spare-capacity capture/world/task allocations; cumulative preparation ordinals prove that callbacks act after complete private preparation.
+	World/task/ready controls each remove one live spare capacity, requiring exactly eleven first-attempt plus twelve fresh-attempt candidate allocations and two caller allocations.
+	Real competing world registrations or analysis tickets fill registration/operation capacity; callback snapshots distinguish their legitimate identities/charges from the discarded private attempt.
+	Twenty retry cases accept with one final source operation/world identity and one provider-frontier increment beyond callback state.
+	Sixteen rejection cases cover shutdown, normal active-release refusal, frontier replacement and synthetic exact-session slot reuse, with no returned ticket/frontier or source-attempt identity consumption.
+	Normal release remains prohibited while an admission pins the draining session; `CHECK_STAGING_SHUTDOWN` asserts `ACTIVE_SESSION` and the suspended submission returns `SERVICE_CLOSED`.
+	The synthetic retirement case explicitly scopes `allow_active_session_release`, verifies callback success before interpreting the result, checks replacement slot/generation and requires `INVALID_HANDLE` for the old session handle.
+	Reset the test-only override with the other hooks; the production release guard and stale-session checks are not weakened.
+	Source tracking uses the retained protected backing after forced retirement clears provider source pointers; callback-completion snapshots verify reference rollback without dereferencing a cleared selection.
+	Discarded attempts restore private acquisition/handle/operation charges and preserve callback provider/counter state; rejected added documents/contexts remain absent.
+	Accepted bytes publish, competing handles and shutdown/replacement handles balance normally, retained worlds stay readable and caller/owner ledgers reach zero.
+	Focused x64 `batch-pool` checks pass with 54 candidate summaries; all twelve scoped x64/optimised LLVM service gates pass.
+	The worker test has no lines over 175 characters; whitespace and editor diagnostics are clean.
+	Actual-free/cleanup-reentry qualification remains open; combined admission, analysis and Phase 5 are not closed by this increment.
+	Broad parser and foreign-target regressions were not rerun.
+	- [x] Combined source-admission allocation-failure qualification increment (2026-11-19).
+	Extend the existing candidate-admission worker fixture only; no production or SDK changes are needed.
+	Share one allocation ordinal across capture, world and task preparation while forcing world/task/ready-list growth.
+	Single-document captures require fourteen allocations; paired captures require sixteen, covering each filename/member key plus the world/task keys, objects and pointer backing.
+	Twenty-four direct/blocking matrices cover 182 real submissions: existing/new single-document updates, paired `SET_OVERLAY`/`EDIT_OVERLAY`/`OBSERVE_DISK` batches, final caller-receipt rejection and paired retained-reference controls.
+	Each rejection preserves provider document/context/pool-list backing, counts/capacities, selected sources/revisions/contexts, frontier and identity counters, operation count, head targets and world/task/ready queues.
+	Private handle/operation/acquisition charges return to baseline; newly introduced documents/contexts remain absent and rejected source references are restored.
+	An unaffected `b.jai` sentinel stays outside the submitted batch; owner-allocation and final caller-allocation callbacks observe its one private-clone retain and one active admission.
+	The final caller allocation runs only after every candidate allocation succeeds; direct/blocking completion-drain reentry proves gate progress before receipt rejection or acceptance.
+	A deliberate finaliser retain exposes exactly one extra sentinel reference after rejection; balance it explicitly before normal teardown rather than weakening the baseline oracle.
+	Successful controls check canonical world/task identities, one-operation task capacity, requested bytes by document identity and retained earlier worlds.
+	Disk-observation controls check the new disk bytes/revision/context/provenance while preserving the existing overlay and its published selection.
+	All caller outputs use an independent allocation ledger and are freed with its allocator; every caller/owner ledger reaches zero after normal cleanup.
+	Focused x64 `batch-pool` checks pass with 52 candidate summaries, including 24 combined matrices; all twelve scoped x64/optimised LLVM service gates pass.
+	The worker test has no lines over 175 characters; whitespace and editor diagnostics are clean.
+	Post-preparation mutation/capacity revalidation and actual-free/cleanup-reentry qualification remain unchecked children; combined admission, analysis and Phase 5 remain open.
+	Broad parser and foreign-target regressions were not rerun.
+	- [x] Prepared existing-candidate join increment (2026-11-19).
+	Add `Source_Candidate_Join_Backing` and checked preparation, readiness, adoption, cleanup and allocation-hook helpers.
+	Snapshot the matching live task and required operation/promotion capacities under the gate; allocate replacement arrays outside it without changing live arrays, task priority or references.
+	Source admission revalidates the candidate task and both capacities before provider/token mutation; insufficient backing retries, while a publication winner uses the existing published world.
+	`start_candidate` consumes prepared join backing before operation attachment and optional-task promotion; ordinary admission finalisation releases unused/replaced arrays outside the gate.
+	Analysis retains its unprepared fallback and remains outside this checked source-admission increment.
+	Every accepted source batch issues a fresh frontier and capture keys include that frontier; ordinary source submissions therefore cannot join an older candidate.
+	Tests qualify real worker candidates directly through the prepared internal boundary without weakening public source frontier checks or changing provider state.
+	Helper sweeps cover every allocation with spare/growth operation and ready capacities, partial cleanup, invalid capacities and zero caller-ledger retention.
+	Twenty-two worker cases cover required/optional/running/published candidates, all required allocation rejections, direct/blocking reentry, independent operation/ready capacity loss and publication during allocation.
+	Capacity-loss controls require exactly one initial allocation plus two fresh-attempt allocations; task-identity controls reject mismatched preparation.
+	Rejection preserves task-operation/ready/optional queues, source/world references, provider/frontier/identity state and private handle/operation charges.
+	Accepted joins reuse the world without a new world token, attach the operation, promote optional work when required and publish with tracked allocations rejected during prepared startup.
+	Discarded/replaced backing is freed outside the gate while the admission pin remains active; retained-world reads and zero final owner ledgers pass.
+	Focused x64 `batch-pool` checks and all twelve scoped x64/optimised LLVM service gates pass.
+	The worker test has no lines over 175 characters; whitespace and editor diagnostics are clean.
+	Candidate preparation is complete; combined source admission/cleanup qualification, analysis and Phase 5 remain open.
+	Broad parser and foreign-target regressions were not rerun.
+	- [x] Precommit source candidate task/key/operation-list/queue preparation increment (2026-11-19).
+	Add `Source_Candidate_Task_Backing` and checked preparation, canonical world-key patching, readiness, adoption and cleanup helpers.
+	Prepare the `Task`, execution-task key, one-entry operation list and optional `session.tasks`/`session.ready` replacement arrays outside the gate before source provider commit.
+	Revalidate both capacities before provider/token mutation; discard and retry if concurrent changes make either live/prepared capacity insufficient.
+	On acceptance, patch the committed world identity into the key, adopt prepared arrays and append without growth; release unused/replaced storage outside the gate.
+	Helper sweeps cover every allocation across both spare/growth capacity combinations, negative capacities, canonical key equality/replacement and zero caller-ledger retention.
+	Thirty-two real existing/new-document submissions cover all five growth allocation rejections, success and independent task-list/ready-queue capacity retries in direct/blocking callback modes.
+	Each capacity retry requires exactly three initial plus four fresh-attempt allocations and consumes only one operation/world identity.
+	Rejections preserve task/ready backing, counts/capacities, provider/frontier state, counters, source references and private charges.
+	Accepted task keys encode the committed world identity; their operation list has exactly one entry/capacity, requested bytes publish and retained older worlds remain readable.
+	Focused x64 `batch-pool` checks and all twelve scoped x64/optimised LLVM service gates pass.
+	The worker test has no lines over 175 characters; whitespace and editor diagnostics are clean.
+	Safely prepared existing-candidate joins, combined candidate admission, analysis and Phase 5 remain open.
+	- [x] Precommit source candidate world identity/object/list preparation increment (2026-11-18).
+	Add `Source_Candidate_World_Backing` and checked preparation/cleanup helpers; preserve the intervening candidate-capture formatting and test-hook documentation marker.
+	Prepare the `World` object, canonical world-identity buffer with a placeholder token and optional `session.worlds` replacement capacity outside the gate with private source staging.
+	Before provider commit, revalidate world capacity and reject counter exhaustion without consuming either operation or world identity tokens.
+	Capacity changes discard the private attempt and retry with fresh sizing; normal cleanup releases the discarded capture, frontier, world object/identity and unused backing outside the gate.
+	`find_candidate_world` shares the existing equality/state predicate between admission and startup; an existing match does not require a new world token.
+	`start_candidate` consumes prepared world storage only for a new world, fills its canonical token and swaps list backing without allocating.
+	The finaliser releases replaced list storage outside the gate; it never releases adopted world objects, identities or list backing.
+	Helper tests cover spare/growth capacity, every allocation rejection, canonical placeholder bytes, invalid capacity and zero caller-ledger retention.
+	Twenty-eight real submissions cover existing/new documents, direct/blocking reentry, all three growth allocation ordinals, success, final usable/exhausted world tokens and capacity-change retries.
+	The retry control removes spare capacity after sizing, requiring two first-attempt allocations plus three fresh growth-attempt allocations without extra identity consumption.
+	Rejection preserves live world-list backing/count/capacity, provider document/context state, accepted frontier, counters, source references and private charges.
+	Accepted world identities match canonical encoding, requested bytes publish, and earlier retained worlds remain readable.
+	Focused x64 `batch-pool` checks and all twelve scoped x64/optimised LLVM service gates pass.
+	The worker test has no lines over 175 characters; whitespace and editor diagnostics are clean.
+	Task/key/operation-list/queue backing and safely prepared existing-candidate joins remain explicit open children; analysis still uses the legacy world-admission fallback.
+	Combined candidate admission and Phase 5 remain open.
+	- [x] Precommit source candidate member/filename/capture-key preparation increment (2026-11-18).
+	Add `Source_Candidate_Capture`, `try_source_candidate_capture` and `free_source_candidate_capture`; preparation borrows protected provider fields but owns member arrays, filenames and the capture key.
+	Prepare the capture with the private provider model before caller receipt export and provider commit; existing exact-session/lifecycle/frontier revalidation still precedes publication.
+	Source admission rejects capture allocation failure with `ADMISSION_DENIED`/`RESOURCE_EXHAUSTED`, without provider/frontier/identity mutation or retained private charges.
+	`finish_source_admission` releases discarded capture outside the gate; `start_candidate` consumes prepared capture on acceptance, retains sources only for a new world and frees unused capture on a join.
+	The analysis path still builds capture through the asserting fallback; its admission recovery remains open.
+	Replace infallible filename copying/growth within capture with `try_path_spelling`; preserve `path_spelling` as the existing asserting wrapper for other callers.
+	UTF-16 conversion reserves checked worst-case backing before encoding, avoiding allocator growth during conversion.
+	Helper sweeps reject all six single-member allocation ordinals, match existing published-world keys/filenames, leave source references unchanged and restore the caller allocation ledger to zero.
+	Additional POSIX/UTF-16 failure/success checks verify exact UTF-8 bytes, including a surrogate pair, with explicit fixture byte-buffer lifetimes.
+	Twenty-eight real submissions cover existing/new documents, success/all six rejection ordinals and direct/blocking allocator reentry through `source_candidate_capture_allocation_hook`.
+	Active-admission/private-ticket charges, source references, exact operation/world/frontier counters, rejected new-document/context absence, published bytes and retained-world readability pass.
+	Focused x64 `batch-pool` checks and fourteen scoped service gates pass on x64/optimised LLVM, including the context suite and both trace modes.
+	The worker test has no lines over 175 characters; whitespace and editor diagnostics are clean.
+	The candidate backing parent remains open with explicit world/task/queue/join follow-ups; combined admission, analysis and Phase 5 remain open.
 	- [x] Final provider frontier retained-sentinel rollback and actual-free qualification (2026-11-17).
 	Extend `test_source_batch_construction_reference_rollback` and `test_source_registration_receipt_retry` with exclusive `frontier`/`batch_frontier` selection and explicit `batch_pair`.
 	Seven single/paired `SET_OVERLAY`, `EDIT_OVERLAY`, `OBSERVE_DISK` and single-new-document routes pass 84 retained-sentinel rollback groups.
@@ -1765,7 +2158,7 @@ Exit: user decision recorded.
 	- [x] Diagnostic error-path copy retry-behaviour increment (2026-11-16): extend `test_source_batch_construction_receipt_retry` with `path_error` and register its nine-group matrix once.
 	All nine groups passed focused x64 `batch-pool` mode on the first attempt, confirming one staged attempt despite registration/operation-capacity mutations during diagnostic export, exact rejection ordinals and forbidden-retry controls with three/four allocations after reservation/copy rejection respectively.
 	- [x] Diagnostic error-path copy retained-sentinel rollback increment (2026-11-16): extend `test_source_registration_receipt_retry` and `test_source_batch_construction_reference_rollback` with `path_error` and register the twelve-group matrix once.
-	All twelve groups passed focused x64 `batch-pool` mode on the first attempt; callback and caller-copy snapshots see the private clone, post-return snapshots expose the finalizer-injected deliberate extra reference, and controls balance that reference before teardown.
+	All twelve groups passed focused x64 `batch-pool` mode on the first attempt; callback and caller-copy snapshots see the private clone, post-return snapshots expose the finaliser-injected deliberate extra reference, and controls balance that reference before teardown.
 	The one-attempt rejection oracle handles caller diagnostic-copy rejection and capacity mutation without imposing successful-retry snapshot timing; caller-owned diagnostic storage is explicitly freed, and existing modes retain their assertions.
 	- [x] Diagnostic error-path copy actual-free increment (2026-11-16): extend `test_source_batch_pool_cleanup` and `test_source_batch_construction_cleanup` with `path_error`, capture the second path allocation and register its twenty-case matrix once.
 	All twenty caller diagnostic-copy rejection, registration/operation-capacity mutation and duplicate-event cases passed focused x64 `batch-pool` mode on the first attempt, confirming exactly one actual copy free and late-free accounting for the private ticket plus competing callback-created handles.

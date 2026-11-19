@@ -495,6 +495,10 @@ finish_source_admission :: (
 	staged: *Provider_Model,
 	transfer: *[..] *Pool,
 	frontier: *[] u8,
+	candidate_capture: *Source_Candidate_Capture,
+	candidate_world: *Source_Candidate_World_Backing,
+	candidate_task: *Source_Candidate_Task_Backing,
+	candidate_join: *Source_Candidate_Join_Backing,
 	output: *[] u8,
 	error: *Operation_Error,
 	allocator: Allocator
@@ -517,6 +521,10 @@ finish_source_admission :: (
 
 			free(frontier.data,, owner_allocator(session));
 			frontier.* = .[];
+			free_source_candidate_task_backing(candidate_task, owner_allocator(session));
+			free_source_candidate_join_backing(candidate_join, owner_allocator(session));
+			free_source_candidate_world_backing(candidate_world, owner_allocator(session));
+			free_source_candidate_capture(candidate_capture, owner_allocator(session));
 			release_provider_copy(staged);
 			array_free(transfer.*);
 		}

@@ -12,11 +12,15 @@ Service :: #import "Jai_Parser/service"(TEST_HOOKS = true, REAL_WORKER = true);
 
 FOREVER :: 0xFFFF_FFFF_FFFF_FFFF;
 
-BATCH_POOL_ONLY :: #run -> bool {
+WORKER_TEST_MODE :: #run -> string {
 	arguments := get_build_options().compile_time_command_line;
-	assert(!arguments.count || arguments.count == 1 && arguments[0] == "batch-pool");
-	return !!arguments.count;
+	assert(!arguments.count || arguments.count == 1 && (arguments[0] == "batch-pool" || arguments[0] == "analysis-ticket" || arguments[0] == "query-operation"));
+	return (ifx arguments.count then arguments[0] else "");
 }
+
+BATCH_POOL_ONLY :: WORKER_TEST_MODE == "batch-pool";
+ANALYSIS_TICKET_ONLY :: WORKER_TEST_MODE == "analysis-ticket";
+QUERY_OPERATION_ONLY :: WORKER_TEST_MODE == "query-operation";
 
 Allocation_Ledger :: struct {
 	gate: Mutex;
@@ -77,7 +81,9 @@ spy_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *vo
 
 			heap := old_memory.(*Service.Owned_Allocation).heap;
 			if pool_cleanup.hold_heap_gate {
-				lock(*heap.gate);
+				assert(!pool_cleanup.direct && pool_cleanup.allocate);
+				init(*pool_cleanup.heap_continue);
+				init(*pool_cleanup.heap_attempted);
 			}
 
 			thread := Thread.{data = pool_cleanup};
@@ -87,16 +93,37 @@ spy_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *vo
 			} else {
 				assert(thread_init(*thread, pool_cleanup_job));
 				thread_start(*thread);
+				heap_ready := true;
+				heap_attempted := true;
 				if pool_cleanup.hold_heap_gate {
-					assert(wait_for(*pool_cleanup.heap_entered, 10_000) == .SUCCESS);
-					pool_cleanup.heap_blocked = !thread_is_done(*thread, 100);
-					unlock(*heap.gate);
-					assert(pool_cleanup.heap_blocked, "\e[91mHeld heap-gate cleanup control was not detected.\e[0m");
+					heap_ready = wait_for(*pool_cleanup.heap_entered, 10_000) == .SUCCESS;
+					if heap_ready {
+						lock(*heap.gate);
+						signal(*pool_cleanup.heap_continue);
+						heap_attempted = wait_for(*pool_cleanup.heap_attempted, 10_000) == .SUCCESS;
+						if heap_attempted {
+							pool_cleanup.heap_blocked = !thread_is_done(*thread, 100);
+						}
+
+						unlock(*heap.gate);
+					} else {
+						signal(*pool_cleanup.heap_continue);
+					}
 				}
 
 				pool_cleanup.gate_progress = thread_is_done(*thread, 10_000);
+				assert(heap_ready, "\e[91mCleanup callback did not finish observations before the heap hold.\e[0m");
+				assert(heap_attempted, "\e[91mCleanup callback did not reach the held-heap allocation attempt.\e[0m");
+				if pool_cleanup.hold_heap_gate {
+					assert(pool_cleanup.heap_blocked, "\e[91mHeld heap-gate cleanup control was not detected.\e[0m");
+				}
+
 				assert(pool_cleanup.gate_progress, "\e[91mPool-root free blocked session-gate progress.\e[0m");
 				thread_deinit(*thread);
+				if pool_cleanup.hold_heap_gate {
+					destroy(*pool_cleanup.heap_continue);
+					destroy(*pool_cleanup.heap_attempted);
+				}
 			}
 		}
 	}
@@ -892,6 +919,7 @@ Output_Action :: enum {
 	FILL_SHUTDOWN_CAPACITY;
 	COMPLETE_SHUTDOWN;
 	TAKE_RETAIN_CAPACITY;
+	TAKE_OPERATION_CAPACITY;
 	RETIRE_RETAIN_OWNER;
 	COMPLETE_WAITER_TICKET;
 	REPLACE_WAITER_TICKET;
@@ -903,7 +931,14 @@ Output_Action :: enum {
 	ISSUE_COMPETING_RESULT;
 	EXHAUST_RESULT_COUNTER;
 	EXHAUST_OPERATION_COUNTER;
+	EXHAUST_WORLD_COUNTER;
 	RETIRE_IMMEDIATE_WORLD;
+	FILL_SOURCE_WORLD_CAPACITY;
+	FILL_SOURCE_TASK_CAPACITY;
+	FILL_SOURCE_READY_CAPACITY;
+	SPARE_SOURCE_WORLD_CAPACITY;
+	SPARE_SOURCE_TASK_CAPACITY;
+	SPARE_SOURCE_READY_CAPACITY;
 }
 
 Output_Interleaving :: struct {
@@ -918,6 +953,7 @@ Output_Interleaving :: struct {
 	coordinator_case: Coordinator_Argument_Case;
 	coordinator_shutdown: Service.Handle(.SHUTDOWN);
 	active_source_retirement: bool;
+	await_shutdown: bool;
 	retirement_ticket: Service.Handle(.TICKET);
 	retirement_waiter: Service.Handle(.WAITER);
 	retirement_world: Service.Handle(.WORLD);
@@ -930,6 +966,7 @@ Output_Interleaving :: struct {
 	competing_waiters: [..] Service.Handle(.WAITER);
 	competing_tickets: [..] Service.Handle(.TICKET);
 	replacement_ticket: Service.Handle(.TICKET);
+	source_capacity: s64;
 }
 
 output_interleaving_job :: (thread: *Thread) -> s64 {
@@ -947,6 +984,16 @@ output_interleaving_job :: (thread: *Thread) -> s64 {
 				*fixture.session.gate,
 				#code {
 					fixture.session.identities.operation_counter.next = Service.U64_MAX;
+				}
+			);
+
+			job.ok = true;
+
+		case .EXHAUST_WORLD_COUNTER;
+			Service.with_lock(
+				*fixture.session.gate,
+				#code {
+					fixture.session.identities.world_counter.next = Service.U64_MAX;
 				}
 			);
 
@@ -1066,6 +1113,11 @@ output_interleaving_job :: (thread: *Thread) -> s64 {
 			ok, shutdown := Service.request_shutdown(fixture.host.service, fixture.host.session);
 			job.ok = ok;
 			if ok {
+				if job.await_shutdown {
+					observation := await(fixture, shutdown);
+					Service.free_observation(*observation);
+				}
+
 				release(fixture, shutdown);
 			}
 
@@ -1246,6 +1298,42 @@ output_interleaving_job :: (thread: *Thread) -> s64 {
 
 			job.ok = true;
 
+		case .SPARE_SOURCE_WORLD_CAPACITY; #through;
+		case .SPARE_SOURCE_TASK_CAPACITY; #through;
+		case .SPARE_SOURCE_READY_CAPACITY;
+			Service.with_lock(
+				*fixture.session.gate,
+				#code {
+					if job.action == {
+						case .SPARE_SOURCE_WORLD_CAPACITY;
+							fixture.session.worlds.allocated = job.source_capacity;
+						case .SPARE_SOURCE_TASK_CAPACITY;
+							fixture.session.tasks.allocated = job.source_capacity;
+						case .SPARE_SOURCE_READY_CAPACITY;
+							fixture.session.ready.allocated = job.source_capacity;
+					}
+				}
+			);
+			job.ok = true;
+
+		case .FILL_SOURCE_WORLD_CAPACITY; #through;
+		case .FILL_SOURCE_TASK_CAPACITY; #through;
+		case .FILL_SOURCE_READY_CAPACITY;
+			Service.with_lock(
+				*fixture.session.gate,
+				#code {
+					if job.action == {
+						case .FILL_SOURCE_WORLD_CAPACITY;
+							fixture.session.worlds.allocated = fixture.session.worlds.count;
+						case .FILL_SOURCE_TASK_CAPACITY;
+							fixture.session.tasks.allocated = fixture.session.tasks.count;
+						case .FILL_SOURCE_READY_CAPACITY;
+							fixture.session.ready.allocated = fixture.session.ready.count;
+					}
+				}
+			);
+			job.ok = true;
+
 		case .FILL_OPERATION_CAPACITY;
 			target: s64;
 			Service.with_lock(
@@ -1329,10 +1417,13 @@ output_interleaving_job :: (thread: *Thread) -> s64 {
 			job.ok = true;
 
 		case .TAKE_RETAIN_CAPACITY;		#through;
+		case .TAKE_OPERATION_CAPACITY;	#through;
 		case .TAKE_PENDING_CAPACITY;	#through;
 		case .TAKE_COMPLETION_CAPACITY;
 			name := Service.Limit_Name.LIVE_HANDLES;
 			if job.action == {
+				case .TAKE_OPERATION_CAPACITY;
+					name = .IN_FLIGHT_OPERATIONS;
 				case .TAKE_PENDING_CAPACITY;
 					name = .PENDING_REGISTRATIONS;
 				case .TAKE_COMPLETION_CAPACITY;
@@ -1387,6 +1478,18 @@ output_interleaving_job :: (thread: *Thread) -> s64 {
 	return 0;
 }
 
+Source_Revalidation_Snapshot :: struct {
+	identities: Service.Session_Identities;
+	ledger: Service.Resource_Ledger;
+	frontier_next: u64;
+	documents: s64;
+	contexts: s64;
+	next_allocations: s64;
+	preparation_allocations: [2] s64;
+	protected_source: *Service.Source_Backing;
+	protected_references: s64;
+}
+
 Output_Probe :: struct {
 	backing: Allocation_Ledger;
 	allocations: s64;
@@ -1398,6 +1501,7 @@ Output_Probe :: struct {
 	source_document: [] u8;
 	source_references: [2] s64;
 	source_active_admissions: [2] s64;
+	source_revalidation: *Source_Revalidation_Snapshot;
 }
 
 output_probe_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
@@ -1433,10 +1537,29 @@ output_probe_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_me
 				*session.gate,
 				#code {
 					state := Service.find_document(session.provider, probe.source_document);
-					assert(state && state.has_overlay && state.overlay.source);
 					assert(probe.allocations <= probe.source_references.count);
-					probe.source_references[probe.allocations - 1] = state.overlay.source.references;
+					if probe.source_revalidation && session.session_released {
+						probe.source_references[probe.allocations - 1] = probe.source_revalidation.protected_source.references;
+					} else {
+						assert(state && state.has_overlay && state.overlay.source);
+						probe.source_references[probe.allocations - 1] = state.overlay.source.references;
+					}
+
 					probe.source_active_admissions[probe.allocations - 1] = session.active_admissions;
+					if probe.source_revalidation {
+						snapshot := probe.source_revalidation;
+						snapshot.preparation_allocations[probe.allocations - 1] = probe.registration_probe.allocations;
+						if probe.allocations == 1 {
+							snapshot.identities = session.identities;
+							snapshot.ledger = session.ledger;
+							snapshot.frontier_next = session.provider.frontier_counter.next;
+							snapshot.documents = session.provider.documents.count;
+							snapshot.contexts = session.provider.contexts.count;
+							snapshot.protected_references = snapshot.protected_source.references;
+							snapshot.next_allocations = 11 + xx (session.worlds.count >= session.worlds.allocated)
+								+ xx (session.tasks.count >= session.tasks.allocated) + xx (session.ready.count >= session.ready.allocated);
+						}
+					}
 				}
 			);
 		}
@@ -3155,6 +3278,1935 @@ test_source_batch_frontier_storage :: () {
 	print("X5 checked final provider frontier/canonical identity/token rollback/exhaustion \e[92mPASS\e[0m\n");
 }
 
+Source_Candidate_Join_Case :: enum {
+	REQUIRED;
+	OPTIONAL;
+	RUNNING;
+	PUBLISHED;
+}
+
+Source_Candidate_Join_Race :: enum {
+	NONE;
+	OPERATIONS_CAPACITY;
+	READY_CAPACITY;
+	PUBLISHED;
+}
+
+Source_Candidate_Join_Probe :: struct {
+	probe: *Registration_Probe;
+	// Shared allocation ordinal of the first join backing allocation; earlier combined stages may precede it.
+	join_at: s64 = 1;
+	cleanup: *Pool_Cleanup_Probe;
+	task: *Service.Task;
+	target: Service.Handle(.TICKET);
+	race: Source_Candidate_Join_Race;
+	restore_operations_capacity: s64;
+	restore_ready_capacity: s64;
+}
+
+source_candidate_join_race_probe :: (size: s64, data: *void) -> bool {
+	probe := data.(*Source_Candidate_Join_Probe);
+	if probe.cleanup && cleanup_callback_running(probe.cleanup) {
+		return true;
+	}
+
+
+	allowed := registration_allocation_probe(size, probe.probe);
+	if probe.race != .NONE && probe.probe.allocations == probe.join_at {
+		fixture := probe.probe.job.drain.fixture;
+		if probe.race == .PUBLISHED {
+			push_allocator(context.default_allocator);
+			Service.resume_pause(fixture.session, .SELECTED);
+			observation := await(fixture, probe.target);
+			assert(observation.update.kind == .PUBLISHED);
+			Service.free_observation(*observation);
+		} else {
+			Service.with_lock(
+				*fixture.session.gate,
+				#code {
+					if probe.race == .OPERATIONS_CAPACITY {
+						probe.task.operations.allocated = probe.task.operations.count;
+					} else {
+						fixture.session.ready.allocated = fixture.session.ready.count;
+					}
+				}
+			);
+		}
+	}
+
+	if probe.probe.allocations == probe.join_at && (probe.restore_operations_capacity || probe.restore_ready_capacity) {
+		session := probe.probe.job.drain.fixture.session;
+		Service.with_lock(
+			*session.gate,
+			#code {
+				if probe.restore_operations_capacity {
+					probe.task.operations.allocated = probe.restore_operations_capacity;
+				}
+
+				if probe.restore_ready_capacity {
+					session.ready.allocated = probe.restore_ready_capacity;
+				}
+			}
+		);
+	}
+
+	if probe.cleanup {
+		assert(storage_cleanup_allocation_probe(size, probe.cleanup));
+	}
+
+	return allowed;
+}
+
+Source_Candidate_Join_Cleanup :: enum {
+	NONE;
+	REPLACED_OPERATIONS;
+	REPLACED_READY;
+	UNUSED_OPERATIONS;
+	UNUSED_READY;
+	PARTIAL_OPERATIONS;
+	RETRY_OPERATIONS;
+	RETRY_READY;
+	PUBLISHED_OPERATIONS;
+	PUBLISHED_READY;
+}
+
+test_source_candidate_join_admission :: (
+	direct := false,
+	race: Source_Candidate_Join_Race = .NONE,
+	cleanup: Source_Candidate_Join_Cleanup = .NONE,
+	control: s64 = 0
+) {
+	assert(control >= 0 && control <= 2);
+	replaced := cleanup == .REPLACED_OPERATIONS || cleanup == .REPLACED_READY;
+	unused := cleanup == .UNUSED_OPERATIONS || cleanup == .UNUSED_READY;
+	if cleanup == .RETRY_OPERATIONS {
+		race = .READY_CAPACITY;
+	} else if cleanup == .RETRY_READY {
+		race = .OPERATIONS_CAPACITY;
+	} else if cleanup == .PUBLISHED_OPERATIONS || cleanup == .PUBLISHED_READY {
+		race = .PUBLISHED;
+	}
+
+	for Source_Candidate_Join_Case.[.REQUIRED, .OPTIONAL, .RUNNING, .PUBLISHED] {
+		scenario := it;
+		if (race != .NONE || cleanup != .NONE) && scenario != .OPTIONAL {
+			continue;
+		}
+
+
+		allocations := ifx scenario == .OPTIONAL
+			then 2
+			else ifx scenario == .PUBLISHED
+				then 0
+				else 1;
+		if race == .OPERATIONS_CAPACITY || race == .READY_CAPACITY {
+			allocations = 3;
+		}
+
+		for 0..allocations {
+			if cleanup != .NONE && it {
+				continue;
+			}
+
+
+			fail_at := ifx cleanup == .PARTIAL_OPERATIONS then 2 else it;
+			if race != .NONE && fail_at {
+				continue;
+			}
+
+
+			fixture := open("X5-prepared-candidate-join");
+			session := fixture.session;
+			batch := Service.begin_batch(fixture.host);
+			for string.["a.jai", "b.jai"] {
+				assert(Service.set_overlay(*batch, it, "answer :: 77;"));
+			}
+
+			initial_ok, accepted := Service.submit_batch(*batch);
+			assert(initial_ok);
+			retained := world_of(fixture, accepted.ticket);
+			Service.arm_pause(session, .SELECTED);
+			running := analysis(fixture, "a.jai");
+			assert(Service.await_pause(session, .SELECTED));
+			target := ifx scenario == .RUNNING
+				then running
+				else ifx scenario == .PUBLISHED
+					then accepted.ticket
+					else analysis(fixture, "b.jai");
+			if scenario == .OPTIONAL {
+				demote_for_test(fixture, target);
+			}
+
+			probe := Registration_Probe.{
+				fail_at = fail_at,
+				direct = direct,
+				track_source = true,
+				job = .{drain = .{fixture = fixture}, action = .OTHER_DRAIN},
+			};
+			race_probe := Source_Candidate_Join_Probe.{probe = *probe, target = target, race = race};
+			cleanup_probe := Pool_Cleanup_Probe.{
+				fixture = fixture,
+				world = retained,
+				source_bytes = xx "answer :: 77;",
+				capture_at = ifx replaced
+					then 0
+					else ifx cleanup == .UNUSED_READY || cleanup == .PUBLISHED_READY
+						then 2
+						else 1,
+				direct = direct,
+				suppress_callback = control == 1,
+				hold_heap_gate = control == 2,
+				allocate = true,
+				mutate = true,
+			};
+			if cleanup != .NONE {
+				race_probe.cleanup = *cleanup_probe;
+				if cleanup_probe.hold_heap_gate {
+					init(*cleanup_probe.heap_entered);
+				}
+			}
+
+			capture: Service.Source_Candidate_Capture;
+			backing: Service.Source_Candidate_Join_Backing;
+			joined: Service.Handle(.TICKET);
+			cleanup_source_references: s64;
+			cleanup_ledger: Service.Resource_Ledger;
+			Service.with_lock(
+				*session.gate,
+				#code {
+					push_allocator(Service.owner_allocator(session));
+					original := session.registrations[target.slot].operation;
+					world := original.world;
+					task := Service.find_candidate_task(session, world);
+					if task {
+						array_reserve(*task.operations, task.operations.count + 1);
+					}
+
+					if scenario == .OPTIONAL {
+						array_reserve(*session.ready, session.ready.count + 1);
+					}
+
+					operations_capacity := ifx task then task.operations.allocated else 0;
+					ready_capacity := session.ready.allocated;
+					capture_ok: bool;
+					capture_ok, capture = Service.try_source_candidate_capture(session.provider, session.identities.session, world.frontier, original.documents);
+					assert(capture_ok && Service.bytes_equal(capture.key, world.capture_key));
+					if task {
+						if race == .OPERATIONS_CAPACITY {
+							assert(task.operations.count < task.operations.allocated);
+						} else {
+							task.operations.allocated = task.operations.count;
+						}
+					}
+
+					if scenario == .OPTIONAL {
+						if race == .READY_CAPACITY {
+							assert(session.ready.count < session.ready.allocated);
+						} else {
+							session.ready.allocated = session.ready.count;
+						}
+					}
+
+					operations: [..] *Service.Operation;
+					if task {
+						operations = task.operations;
+					}
+
+					ready := session.ready;
+					optional_ready := session.optional_ready;
+					identities := session.identities;
+					frontier_next := session.provider.frontier_counter.next;
+					worlds := session.worlds.count;
+					references := world.references;
+					source_references := world.members[0].source.references;
+					before := session.ledger;
+					if cleanup != .NONE {
+						cleanup_ledger = before;
+						cleanup_probe.source = world.members[0].source;
+						cleanup_source_references = cleanup_probe.source.references;
+						if replaced {
+							memory := ifx cleanup == .REPLACED_OPERATIONS
+								then task.operations.data.(*void)
+								else session.ready.data.(*void);
+							cleanup_probe.memory = memory.(*u8) - size_of(Service.Owned_Allocation);
+							Service.with_lock(
+								*allocation_ledger.gate,
+								#code {
+									assert(!allocation_ledger.pool_cleanup && table_contains(*allocation_ledger.sizes, cleanup_probe.memory));
+									allocation_ledger.pool_cleanup = *cleanup_probe;
+								}
+							);
+							assert(operations_capacity > task.operations.count && ready_capacity > session.ready.count);
+						}
+					}
+
+					assert(Service.take(session, .CONCURRENT_ACQUISITIONS));
+					session.active_admissions += 1;
+					session.faults.source_candidate_join_allocation_hook = registration_allocation_probe;
+					session.faults.source_candidate_join_allocation_data = *probe;
+					if race != .NONE || cleanup != .NONE {
+						race_probe.task = task;
+						session.faults.source_candidate_join_allocation_hook = source_candidate_join_race_probe;
+						session.faults.source_candidate_join_allocation_data = *race_probe;
+					}
+
+					ok: bool;
+					ok, backing = Service.prepare_source_candidate_join_backing(session, capture.key);
+					if race == .OPERATIONS_CAPACITY || race == .READY_CAPACITY {
+						assert(ok && probe.allocations == 1);
+						assert(!Service.source_candidate_join_backing_ready(session, capture.key, *backing));
+						Service.unlock(
+							*session.gate,
+							#code {
+								Service.free_source_candidate_join_backing(*backing, Service.owner_allocator(session));
+							}
+						);
+						ok, backing = Service.prepare_source_candidate_join_backing(session, capture.key);
+					}
+
+					session.faults.source_candidate_join_allocation_hook = null;
+					session.faults.source_candidate_join_allocation_data = null;
+					assert(ok == !fail_at && probe.allocations == (ifx fail_at then fail_at else allocations));
+					if allocations {
+						assert(probe.gate_progress && probe.job.ok && probe.source_active_admissions == 1);
+						assert(probe.waiter_ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] + 1);
+					}
+
+					assert(session.identities.operation_counter.next == identities.operation_counter.next);
+					assert(session.identities.world_counter.next == identities.world_counter.next);
+					assert(session.provider.frontier_counter.next == frontier_next && session.worlds.count == worlds);
+					if race != .PUBLISHED {
+						assert(world.references == references);
+						assert(world.members[0].source.references == source_references);
+						assert(session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES]);
+						assert(session.ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] == before.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS]);
+						assert(session.ready.data == ready.data && session.ready.count == ready.count);
+						expected_ready := ifx race == .READY_CAPACITY then ready.count else ready.allocated;
+						assert(session.ready.allocated == expected_ready);
+						assert(session.optional_ready.data == optional_ready.data && session.optional_ready.count == optional_ready.count);
+						if task {
+							assert(task.operations.data == operations.data && task.operations.count == operations.count);
+							expected_operations := ifx race == .OPERATIONS_CAPACITY then operations.count else operations.allocated;
+							assert(task.operations.allocated == expected_operations);
+							assert(task.optional == (scenario == .OPTIONAL));
+						}
+					}
+
+					if ok {
+						if unused {
+							if cleanup == .UNUSED_OPERATIONS {
+								assert(operations_capacity > task.operations.count);
+								task.operations.allocated = operations_capacity;
+							} else {
+								assert(ready_capacity > session.ready.count);
+								session.ready.allocated = ready_capacity;
+							}
+						}
+
+						assert(Service.source_candidate_join_backing_ready(session, capture.key, *backing));
+						if task && race != .PUBLISHED {
+							backing.task = null;
+							assert(!Service.source_candidate_join_backing_ready(session, capture.key, *backing));
+							backing.task = task;
+						}
+
+						assert(Service.take(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS));
+						operation := Service.new_update_operation(session, world.frontier, array_copy(original.documents));
+						joined = Service.register(session, .TICKET, .{operation = operation});
+						operation.registrations += 1;
+						Service.with_lock(
+							*allocation_ledger.gate,
+							#code {
+								allocation_ledger.reject_allocations = true;
+							}
+						);
+						Service.start_candidate(session, operation, *capture, prepared_join = *backing);
+						Service.with_lock(
+							*allocation_ledger.gate,
+							#code {
+								allocation_ledger.reject_allocations = false;
+							}
+						);
+						assert(operation.world == world && session.worlds.count == worlds);
+						assert(session.identities.world_counter.next == identities.world_counter.next);
+						if task && race != .PUBLISHED {
+							assert(task.operations.count == operations.count + 1 && task.operations[operations.count] == operation);
+							assert(!task.optional);
+							if scenario == .OPTIONAL {
+								assert(session.ready.count == ready.count + 1 && session.ready[ready.count] == task);
+								assert(session.optional_ready.count == optional_ready.count - 1);
+							}
+						}
+					}
+				}
+			);
+
+			Service.free_source_candidate_join_backing(*backing, Service.owner_allocator(session));
+			Service.free_source_candidate_capture(*capture, Service.owner_allocator(session));
+			if cleanup != .NONE {
+				assert(cleanup_probe.memory && !cleanup_probe.allocation_pending && cleanup_probe.frees == 1);
+				assert(cleanup_probe.allocations == (ifx fail_at then fail_at else allocations));
+				if control == 1 {
+					assert(!cleanup_probe.callbacks && !cleanup_probe.gate_progress && !cleanup_probe.allocated && !cleanup_probe.mutated);
+				} else {
+					assert(cleanup_probe.callbacks == 1 && cleanup_probe.gate_progress && cleanup_probe.readable);
+					assert(cleanup_probe.allocated && cleanup_probe.mutated && cleanup_probe.active_admissions == 1);
+					assert(cleanup_probe.heap_blocked == cleanup_probe.hold_heap_gate);
+					assert(cleanup_probe.source_readable && cleanup_probe.source_references == cleanup_source_references);
+					assert(cleanup_probe.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == cleanup_ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] + 1);
+					joined_charge := (replaced || unused || race == .PUBLISHED).(s64);
+					assert(cleanup_probe.ledger.live[Service.Limit_Name.LIVE_HANDLES] == cleanup_ledger.live[Service.Limit_Name.LIVE_HANDLES] + joined_charge);
+				}
+
+				Service.with_lock(
+					*allocation_ledger.gate,
+					#code {
+						assert(allocation_ledger.pool_cleanup != *cleanup_probe);
+					}
+				);
+				if cleanup_probe.hold_heap_gate {
+					destroy(*cleanup_probe.heap_entered);
+				}
+			}
+
+			Service.with_lock(
+				*session.gate,
+				#code {
+					session.active_admissions -= 1;
+					Service.give(session, .CONCURRENT_ACQUISITIONS);
+				}
+			);
+			if race != .PUBLISHED {
+				Service.resume_pause(session, .SELECTED);
+			}
+
+			observation := await(fixture, target);
+			assert(observation.update.kind == .PUBLISHED);
+			Service.free_observation(*observation);
+			if joined.owner_token {
+				observation = await(fixture, joined);
+				assert(observation.update.kind == .PUBLISHED);
+				Service.free_observation(*observation);
+				release(fixture, joined);
+			}
+
+			assert(Service.read_world(fixture.host.service, retained));
+			if cleanup != .NONE {
+				Service.with_lock(
+					*session.gate,
+					#code {
+						assert(cleanup_probe.source.references == cleanup_source_references);
+						assert(Service.bytes_equal(cleanup_probe.source.bytes, xx "answer :: 77;"));
+						assert(!session.active_admissions);
+						assert(session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == cleanup_ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
+						assert(session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == cleanup_ledger.live[Service.Limit_Name.LIVE_HANDLES]);
+					}
+				);
+			}
+
+			if scenario == .REQUIRED || scenario == .OPTIONAL {
+				release(fixture, target);
+			}
+
+			release(fixture, running);
+			release(fixture, retained);
+			release(fixture, accepted.ticket);
+			free(accepted.frontier.data);
+			free_records(probe.job.records);
+			close(fixture);
+		}
+	}
+
+	print(
+		"X5 checked source candidate prepared join rejection/promotion/publication (direct = %, race = %, cleanup = %, control = %) \e[92mPASS\e[0m\n",
+		direct,
+		race,
+		cleanup,
+		control
+	);
+}
+
+test_analysis_candidate_join :: (
+	direct := false,
+	race: Source_Candidate_Join_Race = .NONE,
+	cleanup: Source_Candidate_Join_Cleanup = .NONE,
+	control: s64 = 0,
+	combined := false,
+	receipt := false,
+	callback: Output_Action = .NONE
+) {
+	assert(control >= 0 && control <= 2 && !(direct && control == 2));
+	assert(cleanup == .NONE || !receipt && callback == .NONE);
+	assert(!receipt || combined && race == .NONE);
+	assert(callback == .NONE || combined && !receipt && race == .NONE);
+	replaced := cleanup == .REPLACED_OPERATIONS || cleanup == .REPLACED_READY;
+	unused := cleanup == .UNUSED_OPERATIONS || cleanup == .UNUSED_READY;
+	if cleanup == .RETRY_OPERATIONS {
+		race = .READY_CAPACITY;
+	} else if cleanup == .RETRY_READY {
+		race = .OPERATIONS_CAPACITY;
+	} else if cleanup == .PUBLISHED_OPERATIONS || cleanup == .PUBLISHED_READY {
+		race = .PUBLISHED;
+	}
+
+	for Source_Candidate_Join_Case.[.REQUIRED, .OPTIONAL, .RUNNING, .PUBLISHED] {
+		scenario := it;
+		if (race != .NONE || cleanup != .NONE || callback != .NONE) && scenario != .OPTIONAL {
+			continue;
+		}
+
+
+		allocations := ifx race == .OPERATIONS_CAPACITY || race == .READY_CAPACITY
+			then 3
+			else ifx scenario == .OPTIONAL
+				then 2
+				else ifx scenario == .PUBLISHED
+					then 0
+					else 1;
+		if combined {
+			allocations += 19 + (scenario == .PUBLISHED).(s64) * 3;
+		}
+
+		for 0..allocations {
+			if callback != .NONE && it && it != allocations {
+				continue;
+			}
+
+
+			if receipt && it {
+				continue;
+			}
+
+
+			if cleanup != .NONE && it {
+				continue;
+			}
+
+
+			fail_at := ifx cleanup == .PARTIAL_OPERATIONS
+				then 2 + (ifx combined then 19 else 0)
+				else it;
+			if race != .NONE && fail_at && (!combined || race == .PUBLISHED || fail_at <= 20) {
+				continue;
+			}
+
+
+			fixture := open("X5-analysis-candidate-join");
+			session := fixture.session;
+			batch := Service.begin_batch(fixture.host);
+			for string.["a.jai", "b.jai"] {
+				assert(Service.set_overlay(*batch, it, "answer :: 77;"));
+			}
+
+			seeded, seed := Service.submit_batch(*batch);
+			assert(seeded);
+			retained := world_of(fixture, seed.ticket);
+			Service.arm_pause(session, .SELECTED);
+			running := analysis(fixture, "a.jai");
+			assert(Service.await_pause(session, .SELECTED));
+			target := ifx scenario == .RUNNING
+				then running
+				else ifx scenario == .PUBLISHED
+					then seed.ticket
+					else analysis(fixture, "b.jai");
+			if scenario == .OPTIONAL {
+				demote_for_test(fixture, target);
+			}
+
+			held: [..] Service.Handle(.WORLD);
+			if combined {
+				while true {
+					room: bool;
+					Service.with_lock(
+						*session.gate,
+						#code {
+							room = !!session.registry.free_slots.count || session.registry.slots.count < session.registry.slots.allocated;
+						}
+					);
+
+					if !room {
+						break;
+					}
+
+
+					retained_ok, duplicate := Service.retain(fixture.host.service, retained);
+					assert(retained_ok);
+					array_add(*held, duplicate);
+				}
+			}
+
+			_, description := Service.describe_session(fixture.host.service, fixture.host.session);
+			probe := Registration_Probe.{
+				fail_at = fail_at,
+				job_at = ifx callback != .NONE then allocations else 1,
+				direct = direct,
+				track_source = true,
+				job = .{drain = .{fixture = fixture}, action = ifx callback != .NONE then callback else .REJECT_ACTIVE_RELEASE},
+			};
+			race_probe := Source_Candidate_Join_Probe.{
+				probe = *probe,
+				join_at = ifx combined then 20 else 1,
+				target = target,
+				race = race,
+			};
+			cleanup_probe := Pool_Cleanup_Probe.{
+				fixture = fixture,
+				world = retained,
+				source_bytes = xx "answer :: 77;",
+				capture_at = ifx replaced
+					then 0
+					else ifx cleanup == .UNUSED_READY || cleanup == .PUBLISHED_READY
+						then 2
+						else 1,
+				direct = direct,
+				suppress_callback = control == 1,
+				hold_heap_gate = control == 2,
+				allocate = true,
+				mutate = true,
+			};
+			if cleanup != .NONE {
+				race_probe.cleanup = *cleanup_probe;
+				probe.cleanup = *cleanup_probe;
+				if cleanup_probe.hold_heap_gate {
+					init(*cleanup_probe.heap_entered);
+				}
+			}
+
+			request := Service.Analysis_Request.{version = Service.INTERFACE_VERSION, expected_frontier = description.accepted_frontier};
+			world: *Service.World;
+			task: *Service.Task;
+			operations: [..] *Service.Operation;
+			ready: [..] *Service.Task;
+			optional_count: s64;
+			worlds: s64;
+			operation_count: s64;
+			registrations: s64;
+			free_slots: s64;
+			slots: [] Service.Registration_Slot;
+			frontier_next: u64;
+			identities: Service.Session_Identities;
+			before: Service.Resource_Ledger;
+			references: s64;
+			second_source: *Service.Source_Backing;
+			second_references: s64;
+			Service.with_lock(
+				*session.gate,
+				#code {
+					world = session.registrations[target.slot].operation.world;
+					request.documents = session.registrations[target.slot].operation.documents;
+					task = Service.find_candidate_task(session, world);
+					if task {
+						push_allocator(Service.owner_allocator(session));
+						array_reserve(*task.operations, task.operations.count + 1);
+						if cleanup == .UNUSED_OPERATIONS {
+							race_probe.restore_operations_capacity = task.operations.allocated;
+						}
+
+						if race != .OPERATIONS_CAPACITY {
+							task.operations.allocated = task.operations.count;
+						}
+
+						operations = task.operations;
+					}
+
+					if scenario == .OPTIONAL {
+						push_allocator(Service.owner_allocator(session));
+						array_reserve(*session.ready, session.ready.count + 1);
+						if cleanup == .UNUSED_READY {
+							race_probe.restore_ready_capacity = session.ready.allocated;
+						}
+
+						if race != .READY_CAPACITY {
+							session.ready.allocated = session.ready.count;
+						}
+					}
+
+					ready = session.ready;
+					optional_count = session.optional_ready.count;
+					worlds = session.worlds.count;
+					identities = session.identities;
+					before = session.ledger;
+					references = world.members[0].source.references;
+					if world.members.count > 1 {
+						second_source = world.members[1].source;
+						second_references = second_source.references;
+					}
+
+					operation_count = session.operations.count;
+					registrations = session.registrations.count;
+					free_slots = session.registry.free_slots.count;
+					slots = array_copy(session.registry.slots);
+					frontier_next = session.provider.frontier_counter.next;
+					if combined {
+						assert(!Service.registration_backing_ready(session));
+						assert(session.registrations.count == session.registry.slots.count);
+						assert(session.registrations.allocated == session.registrations.count);
+						session.operations.allocated = session.operations.count;
+						session.faults.source_update_allocation_hook = registration_allocation_probe;
+						session.faults.source_update_allocation_data = *probe;
+						session.faults.registration_allocation_hook = registration_allocation_probe;
+						session.faults.registration_allocation_data = *probe;
+						session.faults.source_operation_allocation_hook = registration_allocation_probe;
+						session.faults.source_operation_allocation_data = *probe;
+						session.faults.source_candidate_capture_allocation_hook = registration_allocation_probe;
+						session.faults.source_candidate_capture_allocation_data = *probe;
+						session.faults.source_candidate_world_allocation_hook = registration_allocation_probe;
+						session.faults.source_candidate_world_allocation_data = *probe;
+						session.faults.source_candidate_task_allocation_hook = registration_allocation_probe;
+						session.faults.source_candidate_task_allocation_data = *probe;
+					}
+
+					probe.track_source_backing = world.members[0].source;
+					race_probe.task = task;
+					cleanup_probe.source = world.members[0].source;
+					if replaced {
+						memory := ifx cleanup == .REPLACED_OPERATIONS
+							then task.operations.data.(*void)
+							else session.ready.data.(*void);
+						cleanup_probe.memory = memory.(*u8) - size_of(Service.Owned_Allocation);
+						Service.with_lock(
+							*allocation_ledger.gate,
+							#code {
+								assert(!allocation_ledger.pool_cleanup && table_contains(*allocation_ledger.sizes, cleanup_probe.memory));
+								allocation_ledger.pool_cleanup = *cleanup_probe;
+							}
+						);
+					}
+
+					session.faults.source_candidate_join_allocation_hook = source_candidate_join_race_probe;
+					session.faults.source_candidate_join_allocation_data = *race_probe;
+				}
+			);
+			output_probe := Output_Probe.{fail_at = ifx receipt then 1};
+			allocator := open_output_probe(*output_probe);
+			ok, accepted, error := Service.request_analysis(fixture.host.service, fixture.host.session, request,, allocator);
+			private_allocations := 5 + xx (scenario == .PUBLISHED);
+			before_output := combined && fail_at && fail_at <= private_allocations;
+			quota := callback == .TAKE_RETAIN_CAPACITY || callback == .TAKE_OPERATION_CAPACITY;
+			rejected := receipt || fail_at || quota || callback == .EXHAUST_OPERATION_COUNTER;
+			assert(ok == !rejected && output_probe.allocations == (ifx before_output then 0 else 1));
+			expected_allocations := ifx receipt then private_allocations else ifx fail_at then fail_at else allocations;
+			assert(probe.allocations == expected_allocations);
+			if allocations {
+				assert(probe.gate_progress && probe.job.ok && !probe.source_active_admissions);
+				assert(probe.source_references == references + xx (!combined || callback != .NONE));
+			}
+
+			if cleanup != .NONE {
+				assert(cleanup_probe.memory && !cleanup_probe.allocation_pending && cleanup_probe.frees == 1);
+				assert(cleanup_probe.allocations == expected_allocations - (ifx combined then 19 else 0));
+				if control == 1 {
+					assert(!cleanup_probe.callbacks && !cleanup_probe.gate_progress && !cleanup_probe.allocated && !cleanup_probe.mutated);
+				} else {
+					assert(cleanup_probe.callbacks == 1 && cleanup_probe.gate_progress && cleanup_probe.readable);
+					assert(cleanup_probe.allocated && cleanup_probe.mutated && !cleanup_probe.active_admissions);
+					assert(cleanup_probe.heap_blocked == cleanup_probe.hold_heap_gate);
+					assert(cleanup_probe.source_readable && cleanup_probe.source_references == references + 1);
+					charge := (replaced || unused || race == .PUBLISHED).(s64);
+					assert(cleanup_probe.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + charge);
+					assert(cleanup_probe.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
+				}
+
+				Service.with_lock(
+					*allocation_ledger.gate,
+					#code {
+						assert(allocation_ledger.pool_cleanup != *cleanup_probe);
+					}
+				);
+				if cleanup_probe.hold_heap_gate {
+					destroy(*cleanup_probe.heap_entered);
+				}
+			}
+
+			expected_identities := ifx callback != .NONE then probe.callback_identities else identities;
+			Service.with_lock(
+				*session.gate,
+				#code {
+					session.faults.source_candidate_join_allocation_hook = null;
+					session.faults.source_candidate_join_allocation_data = null;
+					if combined {
+						session.faults.source_update_allocation_hook = null;
+						session.faults.source_update_allocation_data = null;
+						session.faults.registration_allocation_hook = null;
+						session.faults.registration_allocation_data = null;
+						session.faults.source_operation_allocation_hook = null;
+						session.faults.source_operation_allocation_data = null;
+						session.faults.source_candidate_capture_allocation_hook = null;
+						session.faults.source_candidate_capture_allocation_data = null;
+						session.faults.source_candidate_world_allocation_hook = null;
+						session.faults.source_candidate_world_allocation_data = null;
+						session.faults.source_candidate_task_allocation_hook = null;
+						session.faults.source_candidate_task_allocation_data = null;
+					}
+
+					assert(session.identities.operation_counter.next == expected_identities.operation_counter.next + xx ok);
+					assert(session.identities.world_counter.next == expected_identities.world_counter.next && session.worlds.count == worlds);
+					assert(world.members[0].source.references == references);
+					if second_source {
+						assert(second_source.references == second_references);
+					}
+
+					if combined {
+						assert(session.operations.count == operation_count + xx ok);
+						assert(session.provider.frontier_counter.next == frontier_next);
+						assert(Service.bytes_equal(session.provider.accepted_frontier, request.expected_frontier));
+					}
+
+					if ok {
+						assert(session.registrations[accepted.ticket.slot].operation.world == world);
+					} else {
+						assert(error.code == .ADMISSION_DENIED);
+						if quota && !fail_at {
+							limit := ifx callback == .TAKE_RETAIN_CAPACITY then Service.Limit_Name.LIVE_HANDLES else .IN_FLIGHT_OPERATIONS;
+							assert(error.admission.kind == .LIMIT && error.admission.limit == limit);
+						} else {
+							assert(error.admission.kind == .RESOURCE_EXHAUSTED);
+						}
+
+						assert(!accepted.ticket.owner_token && !accepted.frontier.count);
+						if task {
+							assert(task.operations.data == operations.data && task.operations.count == operations.count);
+						}
+
+						assert(session.ready.data == ready.data && session.ready.count == ready.count);
+						if combined {
+							registration_prepared := !receipt && (!fail_at || fail_at > private_allocations + 3);
+							assert(session.registrations.count == registrations + xx registration_prepared);
+							cleanup_mutation := cleanup != .NONE && control != 1;
+							assert(session.registry.slots.count == slots.count + xx cleanup_mutation);
+							assert(session.registry.free_slots.count == free_slots + xx cleanup_mutation);
+							for slots {
+								current := session.registry.slots[it_index];
+								assert(current.live == it.live && current.generation == it.generation && current.kind == it.kind);
+							}
+						}
+
+						for before.live {
+							assert(session.ledger.live[it_index] == it && session.ledger.reserved[it_index] == before.reserved[it_index]);
+						}
+					}
+
+					if task && race != .PUBLISHED {
+						assert(task.operations.count == operations.count + xx ok);
+						assert(task.optional == (scenario == .OPTIONAL && !ok));
+						assert(session.ready.count == ready.count + xx (ok && scenario == .OPTIONAL));
+						assert(session.optional_ready.count == optional_count - xx (ok && scenario == .OPTIONAL));
+					}
+
+					if callback == .EXHAUST_OPERATION_COUNTER {
+						session.identities.operation_counter.next = identities.operation_counter.next;
+					}
+
+					if callback == .EXHAUST_WORLD_COUNTER {
+						session.identities.world_counter.next = identities.world_counter.next;
+					}
+				}
+			);
+			if race != .PUBLISHED {
+				Service.resume_pause(session, .SELECTED);
+			}
+
+			observation := await(fixture, target);
+			assert(observation.update.kind == .PUBLISHED);
+			Service.free_observation(*observation);
+			if ok {
+				observation = await(fixture, accepted.ticket);
+				assert(observation.update.kind == .PUBLISHED);
+				Service.free_observation(*observation);
+				release(fixture, accepted.ticket);
+			}
+
+			assert(Service.read_world(fixture.host.service, retained));
+			if scenario == .REQUIRED || scenario == .OPTIONAL {
+				release(fixture, target);
+			}
+
+			release(fixture, running);
+			for held {
+				release(fixture, it);
+			}
+
+			array_free(held);
+			release(fixture, retained);
+			release(fixture, seed.ticket);
+			free(seed.frontier.data);
+			free(accepted.frontier.data,, allocator);
+			free(error.path.data,, allocator);
+			free(error.document.data,, allocator);
+			free(slots.data);
+			close_output_probe(*output_probe);
+			Service.free_description(*description);
+			close(fixture);
+		}
+	}
+
+	print(
+		#run join(
+			"X5 analysis candidate checked joins/promotion/publication",
+			" (direct %, race %, cleanup %, control %, combined %, receipt %, callback %) \e[92mPASS\e[0m\n"
+		),
+		direct,
+		race,
+		cleanup,
+		control,
+		combined,
+		receipt,
+		callback
+	);
+}
+
+test_source_candidate_join_backing :: () {
+	probe: Output_Probe;
+	allocator := open_output_probe(*probe);
+	for s64.[0, 8] {
+		operations_capacity := it;
+		for s64.[0, 8] {
+			ready_capacity := it;
+			allocations := (!!operations_capacity).(s64) + xx !!ready_capacity;
+			for 1..allocations + 1 {
+				probe.fail_at = it;
+				probe.allocations = 0;
+				ok, backing := Service.try_source_candidate_join_backing(operations_capacity, ready_capacity, allocator);
+				assert(ok == (it > allocations) && probe.allocations == min(it, allocations));
+				if ok {
+					assert(backing.operations.count == operations_capacity && backing.ready.count == ready_capacity);
+				}
+
+				Service.free_source_candidate_join_backing(*backing, allocator);
+				assert(!probe.backing.live_bytes);
+			}
+		}
+	}
+
+	probe.allocations = 0;
+	ok, backing := Service.try_source_candidate_join_backing(-1, 0, allocator);
+	assert(!ok && !probe.allocations && !backing.task);
+	ok, backing = Service.try_source_candidate_join_backing(0, -1, allocator);
+	assert(!ok && !probe.allocations && !backing.task);
+	close_output_probe(*probe);
+	print("X5 checked source candidate join backing rejection cleanup \e[92mPASS\e[0m\n");
+}
+
+test_source_candidate_task_backing :: () {
+	probe: Output_Probe;
+	allocator := open_output_probe(*probe);
+	identity: Service.Session_ID = xx "candidate-task-test";
+	world: Service.World_ID = xx "candidate-world-test";
+	expected := Service.make_key("execution-task", identity.([] u8), world.([] u8), xx "PARSE_INDEX",, temp);
+	replacement: Service.World_ID = xx "candidate-world-last";
+	replaced := Service.make_key("execution-task", identity.([] u8), replacement.([] u8), xx "PARSE_INDEX",, temp);
+	assert(replacement.count == world.count);
+	for s64.[0, 8] {
+		tasks_capacity := it;
+		for s64.[0, 8] {
+			ready_capacity := it;
+			allocations := 3 + xx !!tasks_capacity + xx !!ready_capacity;
+			for 1..allocations + 1 {
+				probe.fail_at = it;
+				probe.allocations = 0;
+				ok, backing := Service.try_source_candidate_task_backing(identity, world, tasks_capacity, ready_capacity, allocator);
+				assert(ok == (it > allocations) && probe.allocations == min(it, allocations));
+				if ok {
+					assert(backing.task && backing.operations.count == 1);
+					assert(backing.tasks.count == tasks_capacity && backing.ready.count == ready_capacity);
+					assert(Service.bytes_equal(backing.key, expected));
+					Service.set_source_candidate_task_world(*backing, replacement);
+					assert(Service.bytes_equal(backing.key, replaced));
+				}
+
+				Service.free_source_candidate_task_backing(*backing, allocator);
+				assert(!probe.backing.live_bytes);
+			}
+		}
+	}
+
+	probe.allocations = 0;
+	ok, backing := Service.try_source_candidate_task_backing(identity, world, -1, 0, allocator);
+	assert(!ok && !probe.allocations && !backing.task);
+	ok, backing = Service.try_source_candidate_task_backing(identity, world, 0, -1, allocator);
+	assert(!ok && !probe.allocations && !backing.task);
+	close_output_probe(*probe);
+	print("X5 checked source candidate task/key/operation/queue backing rejection cleanup \e[92mPASS\e[0m\n");
+}
+
+test_source_candidate_world_backing :: () {
+	probe: Output_Probe;
+	allocator := open_output_probe(*probe);
+	identity: Service.Session_ID = xx "candidate-world-test";
+	token: [8] u8;
+	expected := Service.make_key("world", identity.([] u8), token,, temp);
+	for s64.[0, 8] {
+		capacity := it;
+		allocations := 2 + xx !!capacity;
+		for 1..allocations + 1 {
+			probe.fail_at = it;
+			probe.allocations = 0;
+			ok, backing := Service.try_source_candidate_world_backing(identity, capacity, allocator);
+			assert(ok == (it > allocations) && probe.allocations == min(it, allocations));
+			if ok {
+				assert(backing.world && !backing.world.references);
+				assert(backing.worlds.count == capacity);
+				assert(Service.bytes_equal(backing.identity, expected));
+			}
+
+			Service.free_source_candidate_world_backing(*backing, allocator);
+			assert(!probe.backing.live_bytes);
+		}
+	}
+
+	probe.allocations = 0;
+	ok, backing := Service.try_source_candidate_world_backing(identity, -1, allocator);
+	assert(!ok && !probe.allocations && !backing.world);
+	close_output_probe(*probe);
+	print("X5 checked source candidate world backing/rejection/canonical identity \e[92mPASS\e[0m\n");
+}
+
+test_source_candidate_capture :: () {
+	test := prepared_retain(.WORLD, .ARRAYS);
+	fixture := test.drain.fixture;
+	probe: Output_Probe;
+	allocator := open_output_probe(*probe);
+	Service.with_lock(
+		*fixture.session.gate,
+		#code {
+			world := fixture.session.head;
+			assert(world && world.members.count == 1);
+			documents := ([] u8).[world.members[0].document];
+			source := world.members[0].source;
+			references := source.references;
+			for 1..7 {
+				probe.fail_at = it;
+				probe.allocations = 0;
+				ok, capture := Service.try_source_candidate_capture(
+					fixture.session.provider,
+					fixture.session.identities.session,
+					world.frontier,
+					documents,
+					allocator
+				);
+
+				assert(ok == (it == 7) && probe.allocations == min(it, 6));
+				assert(source.references == references);
+				if ok {
+					assert(capture.capturable && capture.members.count == 1);
+					assert(capture.members[0].source == source);
+					assert(capture.members[0].filename == world.members[0].filename);
+					assert(Service.bytes_equal(capture.key, world.capture_key));
+					assert(capture.consistency.kind == world.consistency.kind);
+				}
+
+				Service.free_source_candidate_capture(*capture, allocator);
+				assert(!probe.backing.live_bytes);
+			}
+		}
+	);
+
+	utf16_units := u8.[0x41, 0x00, 0xE9, 0x00, 0x3D, 0xD8, 0x00, 0xDE];
+	utf8_spelling := u8.[0x41, 0xC3, 0xA9, 0xF0, 0x9F, 0x98, 0x80];
+	paths := Service.Path_Value.[
+		.{encoding = .POSIX_BYTES, code_units = xx "path.jai"},
+		.{encoding = .WINDOWS_UTF16LE, code_units = utf16_units},
+	];
+
+	expected := ([] u8).[
+		xx "path.jai",
+		utf8_spelling,
+	];
+
+	for paths {
+		path := it;
+		spelling := expected[it_index];
+		for 1..2 {
+			probe.fail_at = it;
+			probe.allocations = 0;
+			ok, filename := Service.try_path_spelling(path, allocator);
+			assert(ok == (it == 2) && probe.allocations == 1);
+			if ok {
+				assert(
+					Service.bytes_equal(filename.([] u8), spelling),
+					"Path spelling mismatch for %: actual count %, expected count %.",
+					path.encoding,
+					filename.count,
+					spelling.count
+				);
+			}
+
+			free(filename.data,, allocator);
+			assert(!probe.backing.live_bytes);
+		}
+	}
+
+	close_output_probe(*probe);
+	finish_retain(test);
+	print("X5 checked source candidate member/key capture/rejection cleanup \e[92mPASS\e[0m\n");
+}
+
+source_candidate_world_capacity_probe :: (size: s64, data: *void) -> bool {
+	allowed := registration_allocation_probe(size, data);
+	probe := data.(*Registration_Probe);
+	if probe.allocations == 1 {
+		session := probe.job.drain.fixture.session;
+		Service.with_lock(
+			*session.gate,
+			#code {
+				session.worlds.allocated = session.worlds.count;
+			}
+		);
+	}
+
+	return allowed;
+}
+
+source_candidate_task_capacity_probe :: (size: s64, data: *void) -> bool {
+	allowed := registration_allocation_probe(size, data);
+	probe := data.(*Registration_Probe);
+	if probe.allocations == 1 {
+		session := probe.job.drain.fixture.session;
+		Service.with_lock(
+			*session.gate,
+			#code {
+				if probe.ready_capacity_control {
+					session.ready.allocated = session.ready.count;
+				} else {
+					session.tasks.allocated = session.tasks.count;
+				}
+			}
+		);
+	}
+
+	return allowed;
+}
+
+Source_Candidate_Cleanup_Kind :: enum {
+	CAPTURE;
+	WORLD;
+	TASK;
+}
+
+Source_Candidate_Cleanup_Case :: enum {
+	RECEIPT_REJECT;
+	PARTIAL_REJECT;
+	RETRY_DISCARD;
+	REPLACED_LIST;
+	UNUSED_LIST;
+}
+
+test_source_candidate_discard_cleanup :: (scenario: Source_Candidate_Cleanup_Case = .RECEIPT_REJECT, control: s64 = 0) {
+	assert(control >= 0 && control <= 2);
+	retry := scenario == .RETRY_DISCARD;
+	partial := scenario == .PARTIAL_REJECT;
+	replaced := scenario == .REPLACED_LIST;
+	unused := scenario == .UNUSED_LIST;
+	accepted_case := retry || replaced || unused;
+	for Source_Candidate_Cleanup_Kind.[.CAPTURE, .WORLD, .TASK] {
+		kind := it;
+		allocations := ifx kind == .CAPTURE
+			then 6
+			else ifx kind == .WORLD
+				then 3
+				else 5;
+		for 1..allocations {
+			capture_at := it;
+			if (replaced || unused) && !(kind == .WORLD && capture_at == 3 || kind == .TASK && capture_at >= 4) {
+				continue;
+			}
+
+
+			if partial && capture_at == allocations {
+				continue;
+			}
+
+
+			for bool.[false, true] {
+				direct := it;
+				if control == 2 && direct {
+					continue;
+				}
+
+
+				test := prepared_retain(.WORLD, .ARRAYS);
+				fixture := test.drain.fixture;
+				batch := Service.begin_batch(fixture.host);
+				assert(Service.set_overlay(*batch, "a.jai", "answer :: 77;"));
+				probe := Pool_Cleanup_Probe.{
+					fixture = fixture,
+					world = test.drain.world,
+					source_bytes = xx "answer :: 42;",
+					capture_at = ifx replaced
+						then 0
+						else capture_at,
+					reject_at = ifx partial
+						then capture_at + 1
+						else 0,
+					direct = direct,
+					suppress_callback = control == 1,
+					hold_heap_gate = control == 2,
+					allocate = true,
+					mutate = true,
+				};
+				if probe.hold_heap_gate {
+					init(*probe.heap_entered);
+				}
+
+				output_probe := Output_Probe.{
+					fail_at = ifx scenario == .RECEIPT_REJECT
+						then 1
+						else 0,
+					direct = direct,
+					job = .{
+						drain = test.drain,
+						action = ifx retry
+							then .FILL_REGISTRATION_CAPACITY
+							else .NONE
+					},
+				};
+				allocator := open_output_probe(*output_probe);
+				before: Service.Resource_Ledger;
+				identities: Service.Session_Identities;
+				frontier_next: u64;
+				source_references: s64;
+				Service.with_lock(
+					*fixture.session.gate,
+					#code {
+						before = fixture.session.ledger;
+						identities = fixture.session.identities;
+						frontier_next = fixture.session.provider.frontier_counter.next;
+						probe.source = Service.find_document(fixture.session.provider, batch.events[0].document).overlay.source;
+						source_references = probe.source.references;
+						if replaced || unused {
+							memory: *void;
+							if kind == .WORLD {
+								memory = fixture.session.worlds.data;
+								output_probe.job.source_capacity = fixture.session.worlds.allocated;
+								output_probe.job.action = ifx unused
+									then .SPARE_SOURCE_WORLD_CAPACITY
+									else .NONE;
+								assert(fixture.session.worlds.count < fixture.session.worlds.allocated);
+							} else if capture_at == 4 {
+								memory = fixture.session.tasks.data;
+								output_probe.job.source_capacity = fixture.session.tasks.allocated;
+								output_probe.job.action = ifx unused
+									then .SPARE_SOURCE_TASK_CAPACITY
+									else .NONE;
+								assert(fixture.session.tasks.count < fixture.session.tasks.allocated);
+							} else {
+								memory = fixture.session.ready.data;
+								output_probe.job.source_capacity = fixture.session.ready.allocated;
+								output_probe.job.action = ifx unused
+									then .SPARE_SOURCE_READY_CAPACITY
+									else .NONE;
+								assert(fixture.session.ready.count < fixture.session.ready.allocated);
+							}
+
+							if replaced {
+								probe.memory = memory.(*u8) - size_of(Service.Owned_Allocation);
+							}
+						}
+
+						fixture.session.worlds.allocated = fixture.session.worlds.count;
+						fixture.session.tasks.allocated = fixture.session.tasks.count;
+						fixture.session.ready.allocated = fixture.session.ready.count;
+						if kind == {
+							case .CAPTURE;
+								fixture.session.faults.source_candidate_capture_allocation_hook = storage_cleanup_allocation_probe;
+								fixture.session.faults.source_candidate_capture_allocation_data = *probe;
+							case .WORLD;
+								fixture.session.faults.source_candidate_world_allocation_hook = storage_cleanup_allocation_probe;
+								fixture.session.faults.source_candidate_world_allocation_data = *probe;
+							case .TASK;
+								fixture.session.faults.source_candidate_task_allocation_hook = storage_cleanup_allocation_probe;
+								fixture.session.faults.source_candidate_task_allocation_data = *probe;
+						}
+					}
+				);
+
+				if replaced {
+					Service.with_lock(
+						*allocation_ledger.gate,
+						#code {
+							assert(!allocation_ledger.pool_cleanup && table_contains(*allocation_ledger.sizes, probe.memory));
+							allocation_ledger.pool_cleanup = *probe;
+						}
+					);
+				}
+
+				ok, accepted, error := Service.submit_source_batch(
+					fixture.host.service,
+					fixture.host.session,
+					receipt_source_batch(batch)
+					,, allocator
+				);
+				assert(ok == accepted_case);
+				if !ok {
+					assert(!accepted.ticket.owner_token && !accepted.frontier.count);
+					assert(error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+				}
+
+				assert(output_probe.allocations == (ifx partial then 0 else ifx retry then 2 else 1));
+				expected_allocations := ifx partial then capture_at + 1 else ifx retry then allocations * 2 else allocations;
+				assert(probe.allocations == expected_allocations);
+				assert(probe.memory && !probe.allocation_pending && probe.frees == 1);
+				if control == 1 {
+					assert(!probe.callbacks && !probe.gate_progress && !probe.allocated && !probe.mutated);
+				} else {
+					assert(probe.callbacks == 1 && probe.gate_progress && probe.readable && probe.allocated && probe.mutated);
+					assert(probe.active_admissions == 1 && probe.heap_blocked == probe.hold_heap_gate);
+					early := kind == .CAPTURE && (capture_at == 2 || capture_at == 4 || capture_at == 5);
+					private_charge := (partial || early).(s64);
+					if retry && !early {
+						private_charge += output_probe.job.competing_worlds.count;
+					} else if replaced || unused {
+						private_charge += 1;
+					}
+
+					assert(probe.source_readable && probe.source_references == source_references);
+					assert(probe.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + private_charge);
+					assert(probe.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] + 1);
+				}
+
+				Service.with_lock(
+					*allocation_ledger.gate,
+					#code {
+						assert(allocation_ledger.pool_cleanup != *probe);
+					}
+				);
+				Service.with_lock(
+					*fixture.session.gate,
+					#code {
+						fixture.session.faults.source_candidate_capture_allocation_hook = null;
+						fixture.session.faults.source_candidate_capture_allocation_data = null;
+						fixture.session.faults.source_candidate_world_allocation_hook = null;
+						fixture.session.faults.source_candidate_world_allocation_data = null;
+						fixture.session.faults.source_candidate_task_allocation_hook = null;
+						fixture.session.faults.source_candidate_task_allocation_data = null;
+						assert(!fixture.session.active_admissions);
+						assert(probe.source.references == source_references - xx ok);
+						assert(Service.bytes_equal(probe.source.bytes, xx "answer :: 42;"));
+						assert(fixture.session.identities.operation_counter.next == identities.operation_counter.next + xx ok);
+						assert(fixture.session.identities.world_counter.next == identities.world_counter.next + xx ok);
+						assert(fixture.session.provider.frontier_counter.next == frontier_next + xx ok);
+						assert(fixture.session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
+						if !ok {
+							assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, batch.description.accepted_frontier));
+						}
+					}
+				);
+
+				assert(Service.read_world(fixture.host.service, test.drain.world));
+				if ok {
+					if retry || unused {
+						assert(output_probe.gate_progress && output_probe.job.ok);
+					}
+
+					world := world_of(fixture, accepted.ticket);
+					read_ok, description := Service.read_world(fixture.host.service, world);
+					assert(read_ok && description.members.count == 1);
+					assert(Service.bytes_equal(description.members[0].source.bytes, xx "answer :: 77;"));
+					release(fixture, world);
+					release(fixture, accepted.ticket);
+				}
+
+				for output_probe.job.competing_worlds {
+					assert(Service.read_world(fixture.host.service, it));
+					release(fixture, it);
+				}
+
+				array_free(output_probe.job.competing_worlds);
+				free(accepted.frontier.data,, allocator);
+				free(error.path.data,, allocator);
+				free(error.document.data,, allocator);
+				if probe.hold_heap_gate {
+					destroy(*probe.heap_entered);
+				}
+
+				close_output_probe(*output_probe);
+				finish_retain(test);
+			}
+		}
+	}
+
+	print("X5 checked source candidate backing actual frees/reentry (case = %, control = %) \e[92mPASS\e[0m\n", scenario, control);
+}
+
+test_source_candidate_final_revalidation :: (direct := false) {
+	for Output_Action.[
+		.FILL_SOURCE_WORLD_CAPACITY,
+		.FILL_SOURCE_TASK_CAPACITY,
+		.FILL_SOURCE_READY_CAPACITY,
+		.FILL_REGISTRATION_CAPACITY,
+		.FILL_OPERATION_CAPACITY,
+		.REQUEST_SHUTDOWN,
+		.CHECK_STAGING_SHUTDOWN,
+		.REPLACE_SOURCE,
+		.RETIRE_AND_REUSE_SESSION
+	] {
+		action := it;
+		rejected := action == .REQUEST_SHUTDOWN || action == .CHECK_STAGING_SHUTDOWN
+			|| action == .REPLACE_SOURCE || action == .RETIRE_AND_REUSE_SESSION;
+		retired := action == .RETIRE_AND_REUSE_SESSION;
+		for bool.[false, true] {
+			new_document := it;
+			test := prepared_retain(.WORLD, .ARRAYS);
+			fixture := test.drain.fixture;
+			session := fixture.session;
+			batch := Service.begin_batch(fixture.host);
+			assert(Service.set_overlay(*batch, ifx new_document then "added.jai" else "a.jai", "answer :: 77;"));
+			probe := Registration_Probe.{};
+			snapshot: Source_Revalidation_Snapshot;
+			output_probe := Output_Probe.{
+				direct = direct,
+				job = .{drain = test.drain, action = action, active_source_retirement = true},
+				registration_probe = *probe,
+				source_document = Service.harness_document(fixture.host, "a.jai").([] u8),
+				source_revalidation = *snapshot,
+			};
+			allocator := open_output_probe(*output_probe);
+			identities: Service.Session_Identities;
+			before: Service.Resource_Ledger;
+			frontier_next: u64;
+			documents: s64;
+			contexts: s64;
+			source: *Service.Source_Backing;
+			references: s64;
+			Service.with_lock(
+				*session.gate,
+				#code {
+					assert(session.worlds.count < session.worlds.allocated);
+					assert(session.tasks.count < session.tasks.allocated);
+					assert(session.ready.count < session.ready.allocated);
+					identities = session.identities;
+					before = session.ledger;
+					frontier_next = session.provider.frontier_counter.next;
+					documents = session.provider.documents.count;
+					contexts = session.provider.contexts.count;
+					source = Service.find_document(session.provider, output_probe.source_document).overlay.source;
+					references = source.references;
+					snapshot.protected_source = source;
+					session.faults.allow_active_session_release = retired;
+					session.faults.source_candidate_capture_allocation_hook = registration_allocation_probe;
+					session.faults.source_candidate_capture_allocation_data = *probe;
+					session.faults.source_candidate_world_allocation_hook = registration_allocation_probe;
+					session.faults.source_candidate_world_allocation_data = *probe;
+					session.faults.source_candidate_task_allocation_hook = registration_allocation_probe;
+					session.faults.source_candidate_task_allocation_data = *probe;
+				}
+			);
+
+			ok, accepted, error := Service.submit_source_batch(
+				fixture.host.service,
+				fixture.host.session,
+				receipt_source_batch(batch)
+				,, allocator
+			);
+			assert(output_probe.gate_progress && output_probe.job.ok);
+			assert(ok == !rejected && output_probe.allocations == (ifx rejected then 1 else 2));
+			assert(snapshot.preparation_allocations[0] == 11);
+			expected_allocations := ifx rejected then 11 else 11 + snapshot.next_allocations;
+			assert(probe.allocations == expected_allocations);
+			if ok {
+				assert(snapshot.preparation_allocations[1] == expected_allocations);
+			} else {
+				assert(!accepted.ticket.owner_token && !accepted.frontier.count);
+				if action == {
+					case .REQUEST_SHUTDOWN; #through;
+					case .CHECK_STAGING_SHUTDOWN;
+						assert(error.code == .SERVICE_CLOSED);
+					case .REPLACE_SOURCE;
+						assert(error.code == .BASE_MISMATCH && error.scope == .FRONTIER);
+					case .RETIRE_AND_REUSE_SESSION;
+						assert(error.code == .INVALID_HANDLE && error.handle_kind == .SESSION, "Unexpected retired-session result: %", error);
+				}
+			}
+
+			for 0..output_probe.allocations - 1 {
+				assert(output_probe.source_active_admissions[it] == 1);
+				if action != .REPLACE_SOURCE && !retired {
+					assert(output_probe.source_references[it] == references + xx new_document);
+				}
+			}
+
+			Service.with_lock(
+				*session.gate,
+				#code {
+					session.faults.allow_active_session_release = false;
+					session.faults.source_candidate_capture_allocation_hook = null;
+					session.faults.source_candidate_capture_allocation_data = null;
+					session.faults.source_candidate_world_allocation_hook = null;
+					session.faults.source_candidate_world_allocation_data = null;
+					session.faults.source_candidate_task_allocation_hook = null;
+					session.faults.source_candidate_task_allocation_data = null;
+					assert(!session.active_admissions);
+					if retired {
+						assert(session.session_released && !Service.handle_is_live(*session.registry, fixture.host.session));
+						assert(Service.handle_is_live(*session.registry, output_probe.job.replacement_world));
+						assert(output_probe.job.replacement_world.slot == fixture.host.session.slot);
+						assert(output_probe.job.replacement_world.generation != fixture.host.session.generation);
+					}
+
+					assert(session.identities.operation_counter.next == snapshot.identities.operation_counter.next + xx ok);
+					assert(session.identities.world_counter.next == snapshot.identities.world_counter.next + xx ok);
+					assert(session.provider.frontier_counter.next == snapshot.frontier_next + xx ok);
+					assert(session.provider.documents.count == snapshot.documents + xx (ok && new_document));
+					assert(session.provider.contexts.count == snapshot.contexts + xx (ok && new_document));
+					assert(session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == snapshot.ledger.live[Service.Limit_Name.LIVE_HANDLES] - 1 + xx ok);
+					assert(session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
+					assert(source.references == snapshot.protected_references - xx (ok || new_document));
+					if !ok {
+						assert(session.ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] == snapshot.ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] - 1);
+						if new_document {
+							assert(!Service.find_document(session.provider, batch.events[0].document));
+							assert(!Service.find_context(session.provider, batch.contexts[0].identity));
+						}
+					}
+				}
+			);
+
+			if ok {
+				observation := await(fixture, accepted.ticket);
+				assert(observation.update.kind == .PUBLISHED);
+				Service.free_observation(*observation);
+				world := world_of(fixture, accepted.ticket);
+				read_ok, description := Service.read_world(fixture.host.service, world);
+				assert(read_ok && description.members.count == 1);
+				assert(Service.bytes_equal(description.members[0].source.bytes, xx "answer :: 77;"));
+				release(fixture, world);
+				release(fixture, accepted.ticket);
+			}
+
+			assert(Service.read_world(fixture.host.service, test.drain.world));
+			for output_probe.job.competing_worlds {
+				assert(Service.read_world(fixture.host.service, it));
+				release(fixture, it);
+			}
+
+			array_free(output_probe.job.competing_worlds);
+			for output_probe.job.competing_tickets {
+				observation := await(fixture, it);
+				assert(observation.update.kind == .PUBLISHED);
+				Service.free_observation(*observation);
+				release(fixture, it);
+			}
+
+			array_free(output_probe.job.competing_tickets);
+			if retired {
+				observation := await(fixture, output_probe.job.coordinator_shutdown);
+				assert(observation.kind == .SHUTDOWN);
+				Service.free_observation(*observation);
+				release(fixture, output_probe.job.coordinator_shutdown);
+				assert(Service.read_world(fixture.host.service, output_probe.job.replacement_world));
+				release(fixture, output_probe.job.replacement_world);
+			}
+
+			free(accepted.frontier.data,, allocator);
+			free(error.path.data,, allocator);
+			free(error.document.data,, allocator);
+			free_records(output_probe.job.records);
+			close_output_probe(*output_probe);
+			if retired {
+				for test.held {
+					release(fixture, it);
+				}
+
+				array_free(test.held);
+				release(fixture, test.source);
+				finish_drain(test.drain, session_released = true);
+			} else {
+				finish_retain(test);
+			}
+		}
+	}
+
+	print("X5 checked source candidate final preparation revalidation (direct = %) \e[92mPASS\e[0m\n", direct);
+}
+
+test_source_candidate_capture_admission :: (
+	direct := false,
+	world_backing := false,
+	world_token: u64 = 0,
+	capacity_retry := false,
+	task_backing := false,
+	ready_retry := false,
+	combined := false,
+	paired := false,
+	event_kind: Service.Event_Kind = .SET_OVERLAY,
+	reject_receipt := false,
+	reference_control := false
+) {
+	assert(!combined || !world_backing && !task_backing && !world_token && !capacity_retry && !ready_retry);
+	assert(!paired || combined);
+	assert(!reject_receipt || combined);
+	assert(!reference_control || reject_receipt);
+	assert(event_kind == .SET_OVERLAY || paired && (event_kind == .EDIT_OVERLAY || event_kind == .OBSERVE_DISK));
+	assert(!(world_backing && task_backing));
+	assert(!world_token || world_backing);
+	assert(!capacity_retry || (world_backing || task_backing) && !world_token);
+	assert(!ready_retry || task_backing && capacity_retry);
+	allocations := ifx combined
+		then ifx paired
+			then 16
+			else 14
+		else ifx task_backing
+			then ifx capacity_retry
+				then 7
+				else 5
+			else ifx world_backing
+				then ifx capacity_retry
+					then 5
+					else 3
+				else 6;
+	for bool.[false, true] {
+		new_document := it;
+		if paired && new_document {
+			continue;
+		}
+
+
+		for 0..allocations {
+			fail_at := it;
+			if (world_token || capacity_retry || reject_receipt) && fail_at {
+				continue;
+			}
+
+
+			test := prepared_retain(.WORLD, .ARRAYS);
+			fixture := test.drain.fixture;
+			sentinel_world: Service.Handle(.WORLD);
+			sentinel_document: [] u8;
+			if combined {
+				extra := Service.begin_batch(fixture.host);
+				assert(Service.set_overlay(*extra, "b.jai", "sentinel :: 2;"));
+				extra_ok, extra_accepted := Service.submit_batch(*extra);
+				assert(extra_ok);
+				sentinel_world = world_of(fixture, extra_accepted.ticket);
+				sentinel_document = Service.harness_document(fixture.host, "b.jai").([] u8);
+				release(fixture, extra_accepted.ticket);
+				free(extra_accepted.frontier.data);
+			}
+
+			batch := Service.begin_batch(fixture.host);
+			if paired {
+				assert(Service.set_overlay(*batch, "added.jai", "second :: 2;"));
+			}
+
+			assert(Service.set_overlay(*batch, ifx new_document then "added.jai" else "a.jai", "answer :: 77;"));
+			adds_document := new_document || paired;
+			expected_world := "answer :: 77;";
+			edit: [1] Service.Range_Edit;
+			disk_revision := ifx event_kind == .OBSERVE_DISK
+				then Service.source_revision_of(xx "answer :: 77;");
+			probe := Registration_Probe.{
+				fail_at = fail_at,
+				direct = direct,
+				ready_capacity_control = ready_retry,
+				track_source = true,
+				source_document = ifx combined then sentinel_document else Service.harness_document(fixture.host, "a.jai").([] u8),
+				job = .{drain = test.drain, action = .OTHER_DRAIN},
+			};
+			output_probe := Output_Probe.{
+				fail_at = ifx reject_receipt then 1 else 0,
+				direct = direct,
+				job = .{
+					drain = test.drain,
+					action = ifx combined
+						then .OTHER_DRAIN
+						else .NONE
+				},
+				source_document = sentinel_document,
+			};
+			allocator := open_output_probe(*output_probe);
+			before: Service.Resource_Ledger;
+			identities: Service.Session_Identities;
+			frontier_next: u64;
+			documents: s64;
+			contexts: s64;
+			source: *Service.Source_Backing;
+			references: s64;
+			original: Service.Document_State;
+			sentinel: Service.Document_State;
+			sentinel_references: s64;
+			provider: Service.Provider_Model;
+			worlds: [..] *Service.World;
+			tasks: [..] *Service.Task;
+			ready: [..] *Service.Task;
+			operations: s64;
+			head: *Service.World;
+			head_target: *Service.World;
+			Service.with_lock(
+				*fixture.session.gate,
+				#code {
+					original = Service.find_document(fixture.session.provider, Service.harness_document(fixture.host, "a.jai")).*;
+					if event_kind == .EDIT_OVERLAY {
+						edit[0] = .{end_byte = xx original.overlay.source.bytes.count, replacement = xx "answer :: 77;"};
+						event := *batch.events[1];
+						event.kind = .EDIT_OVERLAY;
+						event.base_source_revision = original.overlay.source.revision;
+						event.edits = edit;
+					} else if event_kind == .OBSERVE_DISK {
+						expected_world = original.overlay.source.bytes.(string);
+						event := *batch.events[1];
+						event.kind = .OBSERVE_DISK;
+						event.disk = .{
+							kind = .PRESENT,
+							source = event.source,
+							source_revision = disk_revision,
+							syntax_context = event.source_context,
+							provenance = .{
+								provider_identity = fixture.session.provider.provider_namespace,
+								observation_token = xx "combined-candidate-test",
+							},
+						};
+					}
+
+					if combined {
+						sentinel = Service.find_document(fixture.session.provider, sentinel_document).*;
+						sentinel_references = sentinel.overlay.source.references;
+						if reference_control {
+							fixture.session.faults.retain_source_batch_reference = sentinel.overlay.source;
+						}
+					}
+
+					if combined {
+						fixture.session.worlds.allocated = fixture.session.worlds.count;
+						fixture.session.tasks.allocated = fixture.session.tasks.count;
+						fixture.session.ready.allocated = fixture.session.ready.count;
+					} else if task_backing {
+						if capacity_retry {
+							assert(fixture.session.tasks.count < fixture.session.tasks.allocated);
+							assert(fixture.session.ready.count < fixture.session.ready.allocated);
+						} else {
+							fixture.session.tasks.allocated = fixture.session.tasks.count;
+							fixture.session.ready.allocated = fixture.session.ready.count;
+						}
+					} else if capacity_retry {
+						assert(fixture.session.worlds.count < fixture.session.worlds.allocated);
+					} else if world_backing {
+						fixture.session.worlds.allocated = fixture.session.worlds.count;
+					}
+
+					if world_token {
+						fixture.session.identities.world_counter.next = world_token;
+					}
+
+					before = fixture.session.ledger;
+					identities = fixture.session.identities;
+					frontier_next = fixture.session.provider.frontier_counter.next;
+					documents = fixture.session.provider.documents.count;
+					contexts = fixture.session.provider.contexts.count;
+					source = original.overlay.source;
+					references = source.references;
+					worlds = fixture.session.worlds;
+					tasks = fixture.session.tasks;
+					ready = fixture.session.ready;
+					operations = fixture.session.operations.count;
+					head = fixture.session.head;
+					head_target = fixture.session.head_target;
+					provider = fixture.session.provider.*;
+					if combined {
+						fixture.session.faults.source_candidate_capture_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_candidate_capture_allocation_data = *probe;
+						fixture.session.faults.source_candidate_world_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_candidate_world_allocation_data = *probe;
+						fixture.session.faults.source_candidate_task_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_candidate_task_allocation_data = *probe;
+					} else if task_backing {
+						fixture.session.faults.source_candidate_task_allocation_hook = ifx capacity_retry
+							then source_candidate_task_capacity_probe
+							else registration_allocation_probe;
+						fixture.session.faults.source_candidate_task_allocation_data = *probe;
+					} else if world_backing {
+						fixture.session.faults.source_candidate_world_allocation_hook = ifx capacity_retry
+							then source_candidate_world_capacity_probe
+							else registration_allocation_probe;
+						fixture.session.faults.source_candidate_world_allocation_data = *probe;
+					} else {
+						fixture.session.faults.source_candidate_capture_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_candidate_capture_allocation_data = *probe;
+					}
+				}
+			);
+
+			ok, accepted, error := Service.submit_source_batch(
+				fixture.host.service,
+				fixture.host.session,
+				receipt_source_batch(batch)
+				,, allocator
+			);
+			assert(ok == (!fail_at && !reject_receipt && world_token != 0xFFFFFFFFFFFFFFFF));
+			assert(probe.allocations == (ifx fail_at then fail_at else allocations));
+			assert(probe.gate_progress && probe.job.ok && probe.source_active_admissions == 1);
+			if combined {
+				assert(probe.source_references == sentinel_references + 1);
+				assert(output_probe.allocations == xx !fail_at);
+				if output_probe.allocations {
+					assert(output_probe.source_references[0] == sentinel_references + 1 && output_probe.source_active_admissions[0] == 1);
+					assert(output_probe.gate_progress && output_probe.job.ok);
+				}
+			} else {
+				assert(probe.source_references == references + xx new_document);
+			}
+
+			assert(probe.waiter_ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] + 1);
+			assert(probe.waiter_ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + 1);
+			Service.with_lock(
+				*fixture.session.gate,
+				#code {
+					fixture.session.faults.source_candidate_capture_allocation_hook = null;
+					fixture.session.faults.source_candidate_capture_allocation_data = null;
+					fixture.session.faults.source_candidate_world_allocation_hook = null;
+					fixture.session.faults.source_candidate_world_allocation_data = null;
+					fixture.session.faults.source_candidate_task_allocation_hook = null;
+					fixture.session.faults.source_candidate_task_allocation_data = null;
+					assert(!fixture.session.active_admissions);
+					assert(fixture.session.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
+					assert(fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + xx ok);
+					assert(fixture.session.provider.frontier_counter.next == frontier_next + xx ok);
+					assert(fixture.session.provider.documents.count == documents + xx (ok && adds_document));
+					assert(fixture.session.provider.contexts.count == contexts + xx (ok && adds_document));
+					assert(fixture.session.identities.operation_counter.next == identities.operation_counter.next + xx ok);
+					assert(fixture.session.identities.world_counter.next == identities.world_counter.next + xx ok);
+					if combined {
+						current := Service.find_document(fixture.session.provider, sentinel_document);
+						assert(current && current.overlay.source == sentinel.overlay.source && current.disk.source == sentinel.disk.source);
+						assert(Service.bytes_equal(current.provider_revision, sentinel.provider_revision));
+						assert(Service.bytes_equal(current.overlay.installation_revision, sentinel.overlay.installation_revision));
+						assert(Service.bytes_equal(current.overlay.syntax_context, sentinel.overlay.syntax_context));
+						assert(sentinel.overlay.source.references == sentinel_references + xx reference_control);
+						if reference_control {
+							assert(!fixture.session.faults.retain_source_batch_reference);
+							Service.release_source(sentinel.overlay.source);
+							assert(sentinel.overlay.source.references == sentinel_references);
+						}
+					}
+
+					if !ok {
+						if task_backing || combined {
+							assert(fixture.session.tasks.data == tasks.data && fixture.session.ready.data == ready.data);
+							assert(fixture.session.tasks.count == tasks.count && fixture.session.tasks.allocated == tasks.allocated);
+							assert(fixture.session.ready.count == ready.count && fixture.session.ready.allocated == ready.allocated);
+						}
+
+						if combined {
+							assert(fixture.session.operations.count == operations);
+							assert(fixture.session.head == head && fixture.session.head_target == head_target);
+							assert(fixture.session.provider.documents.data == provider.documents.data);
+							assert(fixture.session.provider.documents.allocated == provider.documents.allocated);
+							assert(fixture.session.provider.contexts.data == provider.contexts.data);
+							assert(fixture.session.provider.contexts.allocated == provider.contexts.allocated);
+							assert(fixture.session.provider.batch_storage.data == provider.batch_storage.data);
+							assert(fixture.session.provider.batch_storage.count == provider.batch_storage.count);
+							assert(fixture.session.provider.batch_storage.allocated == provider.batch_storage.allocated);
+							current := Service.find_document(fixture.session.provider, original.document);
+							assert(current && current.overlay.source == source && current.disk.source == original.disk.source);
+							assert(current.disk.kind == original.disk.kind && current.has_overlay == original.has_overlay);
+							assert(current.used_revisions.data == original.used_revisions.data && current.used_revisions.count == original.used_revisions.count);
+							assert(Service.bytes_equal(current.provider_revision, original.provider_revision));
+							assert(Service.bytes_equal(current.overlay.installation_revision, original.overlay.installation_revision));
+							assert(Service.bytes_equal(current.overlay.syntax_context, original.overlay.syntax_context));
+						}
+
+						assert(fixture.session.worlds.data == worlds.data);
+						assert(fixture.session.worlds.count == worlds.count && fixture.session.worlds.allocated == worlds.allocated);
+						assert(!accepted.ticket.owner_token && !accepted.frontier.count);
+						assert(error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+						assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, batch.description.accepted_frontier));
+						assert(source.references == references);
+						assert(fixture.session.ledger.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS] == before.live[Service.Limit_Name.IN_FLIGHT_OPERATIONS]);
+						if adds_document {
+							assert(!Service.find_document(fixture.session.provider, batch.events[0].document));
+							assert(!Service.find_context(fixture.session.provider, batch.contexts[0].identity));
+						}
+					} else if event_kind == .OBSERVE_DISK {
+						current := Service.find_document(fixture.session.provider, original.document);
+						assert(current.has_overlay && current.overlay.source == source && current.disk.kind == .PRESENT);
+						assert(current.disk.source && current.disk.source != original.disk.source);
+						assert(Service.bytes_equal(current.disk.source.bytes, xx "answer :: 77;"));
+						assert(Service.bytes_equal(current.disk.source.revision, disk_revision));
+						assert(Service.bytes_equal(current.disk.syntax_context, batch.events[1].disk.syntax_context));
+						assert(Service.bytes_equal(current.disk.provenance.observation_token, xx "combined-candidate-test"));
+					}
+				}
+			);
+
+			if ok {
+				token_bytes: [8] u8;
+				for 0..7 {
+					token_bytes[it] = xx ((identities.world_counter.next >> (it * 8)) & 0xFF);
+				}
+
+				expected := Service.make_key("world", identities.session.([] u8), token_bytes,, temp);
+				observation := await(fixture, accepted.ticket);
+				assert(observation.update.kind == .PUBLISHED);
+				assert(Service.bytes_equal(observation.update.world_identity.([] u8), expected));
+				if task_backing || combined {
+					expected_task := Service.make_key("execution-task", identities.session.([] u8), expected, xx "PARSE_INDEX",, temp);
+					matched := false;
+					Service.with_lock(
+						*fixture.session.gate,
+						#code {
+							for fixture.session.tasks {
+								if it.kind == .PARSE_INDEX && Service.bytes_equal(it.world.identity.([] u8), expected) {
+									assert(Service.bytes_equal(it.key, expected_task));
+									assert(it.operations.count == 1 && it.operations.allocated == 1);
+									assert(it.operations[0].world == it.world);
+									matched = true;
+								}
+							}
+						}
+					);
+					assert(matched);
+				}
+
+				Service.free_observation(*observation);
+				world := world_of(fixture, accepted.ticket);
+				read_ok, description := Service.read_world(fixture.host.service, world);
+				assert(read_ok && description.members.count == 1 + xx paired);
+				for description.members {
+					expected_bytes := ifx paired && Service.bytes_equal(it.document.([] u8), batch.events[0].document)
+						then "second :: 2;"
+						else expected_world;
+					assert(Service.bytes_equal(it.source.bytes, expected_bytes.([] u8)));
+				}
+
+				release(fixture, world);
+				release(fixture, accepted.ticket);
+			}
+
+			assert(Service.read_world(fixture.host.service, test.drain.world));
+			if combined {
+				assert(Service.read_world(fixture.host.service, sentinel_world));
+				release(fixture, sentinel_world);
+			}
+
+			free(accepted.frontier.data,, allocator);
+			free(error.path.data,, allocator);
+			free(error.document.data,, allocator);
+			close_output_probe(*output_probe);
+			free_records(probe.job.records);
+			free_records(output_probe.job.records);
+			finish_retain(test);
+		}
+	}
+
+	print(
+		#run join(
+			"X5 checked source candidate capture admission/rejection/provider atomicity",
+			" (direct = %, world backing = %, world token = %, capacity retry = %, task backing = %, ready retry = %,",
+			" combined = %, paired = %, event = %, receipt rejection = %, reference control = %) \e[92mPASS\e[0m\n"
+		),
+		direct,
+		world_backing,
+		world_token,
+		capacity_retry,
+		task_backing,
+		ready_retry,
+		combined,
+		paired,
+		event_kind,
+		reject_receipt,
+		reference_control
+	);
+}
+
 test_source_batch_commit_storage :: () {
 	state: Service.Document_State;
 	documents: [1] *Service.Document_State = .[*state];
@@ -4441,29 +6493,69 @@ test_source_batch_construction_callbacks :: (
 }
 
 Pool_Cleanup_Probe :: struct {
+	// Borrowed service/session fixture whose owner allocation is being freed.
 	fixture: Fixture;
+	// Fixture-retained world used to verify reentrant reads and handle mutations.
 	world: Service.Handle(.WORLD);
+	// Optional protected source whose bytes and reference count are inspected by the callback.
+	source: *Service.Source_Backing;
+	// Observed `source.references` before the callback's allocation and mutation steps.
+	source_references: s64;
+	// Expected bytes for the optional `source` readability check; borrowed from the fixture.
+	source_bytes: [] u8;
+	// Whether the callback found `source.bytes` equal to `source_bytes`.
+	source_readable: bool;
+
+	// Exact delegate allocation address, including its `Owned_Allocation` header, targeted by the free spy.
 	memory: *void;
+	// Arm the delegate spy to capture the next owner allocation into `memory`.
 	allocation_pending: bool;
+	// Expected owner payload size, excluding the `Owned_Allocation` header.
 	allocation_size: s64 = size_of(Pool);
+	// One-based hook allocation ordinal to capture; zero leaves targeting to fixture setup.
 	capture_at: s64;
+	// One-based hook allocation ordinal to reject; zero disables injected rejection.
 	reject_at: s64;
+	// Allocation-hook invocations observed for the selected backing stage.
 	allocations: s64;
+	// Cleanup callbacks that completed all enabled observations and actions.
 	callbacks: s64;
+	// Frees of the exact `memory` allocation, counted only after the delegate returns.
 	frees: s64;
+
+	// Run the cleanup callback inline instead of on a separate progress-checking thread.
 	direct: bool;
+	// Negative control that skips callback execution while retaining exact-free accounting.
 	suppress_callback: bool;
+	// Whether the callback completed inline or its thread finished within the progress deadline.
 	gate_progress: bool;
+	// Whether the callback could read the retained `world` through the public service API.
 	readable: bool;
+	// Exercise owner allocation/free reentry from the cleanup callback.
 	allocate: bool;
+	// Whether the requested owner allocation/free step completed.
 	allocated: bool;
+	// Exercise public world-handle retain/release reentry after the allocation step.
 	mutate: bool;
+	// Whether the requested handle retain/release step completed successfully.
 	mutated: bool;
+
+	// Blocking-thread control that intentionally holds the heap only after callback observations finish.
 	hold_heap_gate: bool;
+	// Whether the callback remained unfinished while its explicit allocation faced the held heap gate.
 	heap_blocked: bool;
+	// Fixture-owned readiness semaphore: session/source/world observations have finished before the heap hold.
 	heap_entered: Semaphore;
+	// Spy-owned semaphore releasing the callback after the probe acquires the heap gate.
+	heap_continue: Semaphore;
+	// Spy-owned semaphore signaled immediately before the callback's explicit owner allocation.
+	heap_attempted: Semaphore;
+
+	// Session admission pins observed under the session gate before callback allocation/mutation.
 	active_admissions: s64;
+	// Resource charges observed alongside `active_admissions`, before any callback actions change them.
 	ledger: Service.Resource_Ledger;
+	// Optional additional lifecycle/frontier/retirement action, run after allocation and handle mutation.
 	job: Output_Interleaving;
 }
 
@@ -4471,6 +6563,18 @@ Storage_Cleanup_Case :: enum {
 	PRIVATE_LIST;
 	DISCARDED_TRANSFER;
 	REPLACED_LIST;
+}
+
+cleanup_callback_running :: (probe: *Pool_Cleanup_Probe) -> bool {
+	running: bool;
+	Service.with_lock(
+		*allocation_ledger.gate,
+		#code {
+			running = probe.memory && !probe.frees && allocation_ledger.pool_cleanup != probe;
+		}
+	);
+
+	return running;
 }
 
 storage_cleanup_allocation_probe :: (size: s64, data: *void) -> bool {
@@ -4706,16 +6810,25 @@ pool_cleanup_job :: (thread: *Thread) -> s64 {
 		#code {
 			probe.active_admissions = probe.fixture.session.active_admissions;
 			probe.ledger = probe.fixture.session.ledger;
+			if probe.source {
+				probe.source_references = probe.source.references;
+				probe.source_readable = Service.bytes_equal(probe.source.bytes, probe.source_bytes);
+			}
 		}
 	);
 
 	probe.readable = Service.read_world(probe.fixture.host.service, probe.world);
 	if probe.hold_heap_gate {
 		signal(*probe.heap_entered);
+		assert(wait_for(*probe.heap_continue, 10_000) == .SUCCESS, "\e[91mCleanup callback was not released to attempt its owner allocation.\e[0m");
 	}
 
 	if probe.allocate {
 		allocator := Service.owner_allocator(probe.fixture.session);
+		if probe.hold_heap_gate {
+			signal(*probe.heap_attempted);
+		}
+
 		storage := Service.try_source_batch_pool(allocator);
 		assert(!!storage);
 		free(storage,, allocator);
@@ -7486,6 +9599,1521 @@ test_source_receipt_interleavings :: (direct := false) {
 	print("X3/X5 source receipt frontier/shutdown/release/drain/failure interleavings (direct = %) \e[92mPASS\e[0m\n", direct);
 }
 
+test_analysis_candidate_snapshot :: () {
+	probe: Output_Probe;
+	allocator := open_output_probe(*probe);
+	for 1..5 {
+		probe.fail_at = it;
+		probe.allocations = 0;
+		ok, snapshot := Service.try_analysis_candidate_snapshot(2, 64, allocator);
+		assert(ok == (it == 5) && probe.allocations == min(it, 4));
+		if ok {
+			assert(snapshot.states.count == 2 && snapshot.documents.count == 2 && snapshot.contexts.count == 2 && snapshot.metadata.count == 64);
+		}
+
+		Service.free_analysis_candidate_snapshot(*snapshot, allocator);
+		assert(!probe.backing.live_bytes && !probe.backing.sizes.count);
+	}
+
+	probe.allocations = 0;
+	ok, snapshot := Service.try_analysis_candidate_snapshot(-1, 0, allocator);
+	assert(!ok && !probe.allocations);
+	ok, snapshot = Service.try_analysis_candidate_snapshot(1, -1, allocator);
+	assert(!ok && !probe.allocations);
+	probe.fail_at = 0;
+	for 0..4 {
+		selection := it;
+		for bool.[false, true] {
+			windows := it;
+			test := prepared_retain(.WORLD, .REUSE);
+			fixture := test.drain.fixture;
+			document := Service.harness_document(fixture.host, "a.jai");
+			source: *Service.Source_Backing;
+			references: s64;
+			Service.with_lock(
+				*fixture.session.gate,
+				#code {
+					source = Service.find_document(fixture.session.provider, document).overlay.source;
+					references = source.references;
+				}
+			);
+
+			posix := u8.[0x41];
+			utf16 := u8.[0x41, 0x00];
+			namespace := array_copy("provider".([] u8));
+			token := array_copy("capture".([] u8));
+			state := Service.Document_State.{document = xx "document", provider_revision = xx "revision"};
+			if !selection {
+				state.has_overlay = true;
+				state.overlay = .{source = source, syntax_context = xx "context"};
+			} else {
+				state.disk = .{
+					kind = .PRESENT,
+					source = source,
+					syntax_context = xx "context",
+					provenance = .{consistency = .{kind = .COHERENT_CAPTURE, provider_namespace = namespace, capture_token = token}},
+				};
+				if selection > 1 {
+					state.disk.source = null;
+					if selection == {
+						case 2;
+							state.disk.kind = .ABSENT;
+						case 3;
+							state.disk.kind = .UNKNOWN;
+						case 4;
+							state.disk.kind = .UNAVAILABLE;
+					}
+				}
+			}
+
+			contexts := Service.Admitted_Context.[.{
+				identity = xx "context",
+				paths = .{visible_filename = .{encoding = .POSIX_BYTES, code_units = posix}},
+			}];
+			if windows {
+				contexts[0].paths.visible_filename = .{encoding = .WINDOWS_UTF16LE, code_units = utf16};
+			}
+
+			states := (*Service.Document_State).[*state];
+			documents := ([] u8).[state.document];
+			model: Service.Provider_Model;
+			model.documents.data = states.data;
+			model.documents.count = states.count;
+			model.contexts.data = contexts.data;
+			model.contexts.count = contexts.count;
+			sized, metadata_count := Service.analysis_candidate_metadata_count(*model, documents);
+			assert(sized);
+			snapshot_ok, protected := Service.try_analysis_candidate_snapshot(1, metadata_count, allocator);
+			assert(snapshot_ok);
+			Service.stage_analysis_candidate_snapshot(*model, documents, *protected);
+			assert(source.references == references + xx (selection <= 1));
+			assert(protected.states[0].document.data != state.document.data);
+			assert(protected.contexts[0].paths.visible_filename.code_units.data != contexts[0].paths.visible_filename.code_units.data);
+			expected_ok, expected := Service.try_source_candidate_capture(*model, xx "session", xx "frontier", documents, allocator);
+			assert(expected_ok);
+			contexts[0].paths.visible_filename.code_units[0] ^= 0x20;
+			namespace[0] ^= 0x20;
+			token[0] ^= 0x20;
+			capture_ok, capture := Service.try_source_candidate_capture(*protected.model, xx "session", xx "frontier", documents, allocator);
+			assert(capture_ok && Service.bytes_equal(capture.key, expected.key));
+			assert(capture.capturable == (selection <= 2));
+			assert(capture.members[0].filename == "A" && capture.members[0].filename == expected.members[0].filename);
+			if selection == 1 || selection == 2 {
+				assert(capture.consistency.kind == .COHERENT_CAPTURE);
+				assert(Service.bytes_equal(capture.consistency.provider_namespace, xx "provider"));
+				assert(Service.bytes_equal(capture.consistency.capture_token, xx "capture"));
+			} else {
+				assert(capture.consistency.kind == .IMMUTABLE_CAPTURE);
+			}
+
+			contexts[0].paths.visible_filename.code_units.count = Service.S64_MAX;
+			sized, metadata_count = Service.analysis_candidate_metadata_count(*model, documents);
+			assert(!sized && !metadata_count);
+			Service.free_source_candidate_capture(*capture, allocator);
+			Service.free_source_candidate_capture(*expected, allocator);
+			Service.free_analysis_candidate_snapshot(*protected, allocator);
+			assert(source.references == references);
+			free(namespace.data);
+			free(token.data);
+			finish_retain(test);
+			assert(!probe.backing.live_bytes && !probe.backing.sizes.count);
+		}
+	}
+
+	close_output_probe(*probe);
+	print("X5 analysis candidate snapshot rollback/metadata isolation/selection/encoding \e[92mPASS\e[0m\n");
+}
+
+Analysis_World_Cleanup :: enum {
+	UNUSED;
+	PARTIAL;
+	COUNTER;
+	REPLACED_LIST;
+	REPLACED_READY;
+	RETRY_WORLD;
+	RETRY_TASK;
+	RETRY_READY;
+}
+
+Analysis_World_Cleanup_Probe :: struct {
+	registration: Registration_Probe;
+	cleanup: *Pool_Cleanup_Probe;
+}
+
+analysis_world_cleanup_allocate :: (size: s64, data: *void) -> bool {
+	probe := data.(*Analysis_World_Cleanup_Probe);
+	if probe.registration.running || cleanup_callback_running(probe.cleanup) {
+		return true;
+	}
+
+
+	if !registration_allocation_probe(size, *probe.registration) {
+		return false;
+	}
+
+
+	return storage_cleanup_allocation_probe(size, probe.cleanup);
+}
+
+test_analysis_world_cleanup :: (direct := false, control: s64 = 0, task := false, combined := false) {
+	assert(control >= 0 && control <= 2 && !(direct && control == 2));
+	assert(!combined || !task);
+	for Analysis_World_Cleanup.[.UNUSED, .PARTIAL, .COUNTER, .REPLACED_LIST, .REPLACED_READY, .RETRY_WORLD, .RETRY_TASK, .RETRY_READY] {
+		scenario := it;
+		retry_world := scenario == .RETRY_WORLD;
+		retry_task := scenario == .RETRY_TASK;
+		retry_ready := scenario == .RETRY_READY;
+		retry := retry_world || retry_task || retry_ready;
+		if retry && !combined || combined && scenario != .PARTIAL && scenario != .UNUSED && scenario != .COUNTER && !retry {
+			continue;
+		}
+
+
+		if scenario == .REPLACED_READY && !task {
+			continue;
+		}
+
+
+		replaced := scenario == .REPLACED_LIST || scenario == .REPLACED_READY;
+		allocations := ifx combined
+			then ifx retry_world
+				then 29
+				else ifx retry
+					then 31
+					else 27
+			else ifx task
+				then 5
+				else 3;
+		targets := ifx retry
+			then ifx retry_world then 21 else 26
+			else ifx scenario == .PARTIAL
+				then allocations - 1
+				else ifx replaced
+					then 1
+					else allocations;
+		for 1..targets {
+			if combined && (it >= 6 && it <= 9 || scenario == .UNUSED && it < 10 || retry && it < (ifx retry_world then 20 else 23)) {
+				continue;
+			}
+
+
+			test := prepared_retain(.WORLD, .REUSE);
+			fixture := test.drain.fixture;
+			session := fixture.session;
+			batch := Service.begin_batch(fixture.host);
+			assert(Service.set_overlay(*batch, "b.jai", "second :: 2;"));
+			seeded, seed := Service.submit_batch(*batch);
+			assert(seeded);
+			observation := await(fixture, seed.ticket);
+			assert(observation.update.kind == .PUBLISHED);
+			Service.free_observation(*observation);
+			release(fixture, seed.ticket);
+			free(seed.frontier.data);
+			if combined {
+				while true {
+					room: bool;
+					Service.with_lock(
+						*session.gate,
+						#code {
+							room = !!session.registry.free_slots.count || session.registry.slots.count < session.registry.slots.allocated;
+						}
+					);
+
+					if !room {
+						break;
+					}
+
+
+					retained, duplicate := Service.retain(fixture.host.service, test.source);
+					assert(retained);
+					array_add(*test.held, duplicate);
+				}
+			}
+
+			_, description := Service.describe_session(fixture.host.service, fixture.host.session);
+			documents := ([] u8).[Service.harness_document(fixture.host, "a.jai")];
+			request := Service.Analysis_Request.{
+				version = Service.INTERFACE_VERSION,
+				expected_frontier = description.accepted_frontier,
+				documents = documents,
+			};
+			probe := Pool_Cleanup_Probe.{
+				fixture = fixture,
+				world = test.drain.world,
+				source_bytes = xx "answer :: 42;",
+				capture_at = ifx replaced
+					then 0
+					else it,
+				direct = direct,
+				suppress_callback = control == 1,
+				hold_heap_gate = control == 2,
+				allocate = true,
+				mutate = true,
+			};
+			hook := Analysis_World_Cleanup_Probe.{
+				cleanup = *probe,
+				registration = .{
+					direct = direct,
+					track_source = true,
+					job_at = ifx retry
+						then ifx retry_world
+							then 20
+							else 23
+						else ifx scenario == .COUNTER || combined && scenario == .UNUSED
+							then allocations
+							else 1,
+					fail_at = ifx scenario == .PARTIAL
+						then allocations
+						else 0,
+					job = .{
+						drain = test.drain,
+						action = ifx scenario == .UNUSED
+							then .FILL_OPERATION_CAPACITY
+							else ifx retry_world
+								then .FILL_SOURCE_WORLD_CAPACITY
+								else ifx retry_task
+									then .FILL_SOURCE_TASK_CAPACITY
+									else ifx retry_ready
+										then .FILL_SOURCE_READY_CAPACITY
+							else ifx scenario == .COUNTER
+								then .EXHAUST_WORLD_COUNTER
+								else .REJECT_ACTIVE_RELEASE,
+					},
+				},
+			};
+			if probe.hold_heap_gate {
+				init(*probe.heap_entered);
+			}
+
+			output_probe: Output_Probe;
+			allocator := open_output_probe(*output_probe);
+			references: s64;
+			world_next: u64;
+			before: Service.Resource_Ledger;
+			identities: Service.Session_Identities;
+			operations: s64;
+			worlds: s64;
+			tasks: s64;
+			ready: s64;
+			optional_ready: s64;
+			Service.with_lock(
+				*session.gate,
+				#code {
+					world_next = session.identities.world_counter.next;
+					before = session.ledger;
+					identities = session.identities;
+					operations = session.operations.count;
+					worlds = session.worlds.count;
+					tasks = session.tasks.count;
+					ready = session.ready.count;
+					optional_ready = session.optional_ready.count;
+					probe.source = Service.find_document(session.provider, documents[0]).overlay.source;
+					references = probe.source.references;
+					if replaced {
+						memory := ifx task
+							then (ifx scenario == .REPLACED_READY then session.ready.data else session.tasks.data).(*void)
+							else session.worlds.data.(*void);
+						probe.memory = memory.(*u8) - size_of(Service.Owned_Allocation);
+					}
+
+					if combined {
+						assert(!Service.registration_backing_ready(session));
+						session.operations.allocated = session.operations.count;
+						session.worlds.allocated = session.worlds.count;
+						session.tasks.allocated = session.tasks.count;
+						session.ready.allocated = session.ready.count;
+						push_allocator(Service.owner_allocator(session));
+						if retry_world {
+							array_reserve(*session.worlds, session.worlds.count + 1);
+						} else if retry_task {
+							array_reserve(*session.tasks, session.tasks.count + 1);
+						} else if retry_ready {
+							array_reserve(*session.ready, session.ready.count + 1);
+						}
+
+						session.faults.source_update_allocation_hook = analysis_world_cleanup_allocate;
+						session.faults.source_update_allocation_data = *hook;
+						session.faults.registration_allocation_hook = analysis_world_cleanup_allocate;
+						session.faults.registration_allocation_data = *hook;
+						session.faults.source_operation_allocation_hook = analysis_world_cleanup_allocate;
+						session.faults.source_operation_allocation_data = *hook;
+						session.faults.source_candidate_capture_allocation_hook = analysis_world_cleanup_allocate;
+						session.faults.source_candidate_capture_allocation_data = *hook;
+						session.faults.source_candidate_world_allocation_hook = analysis_world_cleanup_allocate;
+						session.faults.source_candidate_world_allocation_data = *hook;
+						session.faults.source_candidate_task_allocation_hook = analysis_world_cleanup_allocate;
+						session.faults.source_candidate_task_allocation_data = *hook;
+					} else if task {
+						session.tasks.allocated = session.tasks.count;
+						session.ready.allocated = session.ready.count;
+						session.faults.source_candidate_task_allocation_hook = analysis_world_cleanup_allocate;
+						session.faults.source_candidate_task_allocation_data = *hook;
+					} else {
+						session.worlds.allocated = session.worlds.count;
+						session.faults.source_candidate_world_allocation_hook = analysis_world_cleanup_allocate;
+						session.faults.source_candidate_world_allocation_data = *hook;
+					}
+				}
+			);
+			if replaced {
+				Service.with_lock(
+					*allocation_ledger.gate,
+					#code {
+						assert(!allocation_ledger.pool_cleanup);
+						allocation_ledger.pool_cleanup = *probe;
+					}
+				);
+			}
+
+			ok, accepted, error := Service.request_analysis(fixture.host.service, fixture.host.session, request,, allocator);
+			assert(ok == (scenario == .UNUSED || replaced || retry));
+			expected_allocations := allocations + (ifx combined && scenario == .UNUSED then 2 else 0);
+			assert(
+				output_probe.allocations == 1 && hook.registration.allocations == expected_allocations,
+				tprint(
+					"Cleanup scenario %, target %: expected % preparation allocations, observed % (receipt %).",
+					scenario,
+					probe.capture_at,
+					expected_allocations,
+					hook.registration.allocations,
+					output_probe.allocations
+				)
+			);
+			assert(probe.allocations == expected_allocations - xx (scenario == .PARTIAL));
+			assert(hook.registration.gate_progress && hook.registration.job.ok);
+			assert(probe.memory && !probe.allocation_pending && probe.frees == 1);
+			if control == 1 {
+				assert(!probe.callbacks && !probe.gate_progress && !probe.allocated && !probe.mutated);
+			} else {
+				assert(probe.callbacks == 1 && probe.gate_progress && probe.readable && probe.source_readable);
+				assert(probe.allocated && probe.mutated && !probe.active_admissions && probe.heap_blocked == probe.hold_heap_gate);
+				early := combined && (probe.capture_at == 15 || probe.capture_at == 17 || probe.capture_at == 18);
+				if combined {
+					retained := probe.capture_at >= 14;
+					competitor := scenario == .UNUSED && !early;
+					assert(probe.source_references == references + xx retained + xx competitor);
+				} else {
+					assert(probe.source_references == references + 1 + xx ok);
+				}
+
+				callback_ledger := ifx early then before else hook.registration.waiter_ledger;
+				assert(probe.ledger.live[Service.Limit_Name.LIVE_HANDLES] == callback_ledger.live[Service.Limit_Name.LIVE_HANDLES] + xx (ok && !early && !retry));
+				assert(probe.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == 0);
+			}
+
+			Service.with_lock(
+				*session.gate,
+				#code {
+					if combined {
+						session.faults.source_update_allocation_hook = null;
+						session.faults.source_update_allocation_data = null;
+						session.faults.registration_allocation_hook = null;
+						session.faults.registration_allocation_data = null;
+						session.faults.source_operation_allocation_hook = null;
+						session.faults.source_operation_allocation_data = null;
+						session.faults.source_candidate_capture_allocation_hook = null;
+						session.faults.source_candidate_capture_allocation_data = null;
+					}
+
+					session.faults.source_candidate_world_allocation_hook = null;
+					session.faults.source_candidate_world_allocation_data = null;
+					session.faults.source_candidate_task_allocation_hook = null;
+					session.faults.source_candidate_task_allocation_data = null;
+					assert(probe.source.references == references + xx ok);
+					if scenario == .COUNTER {
+						session.identities.world_counter.next = world_next;
+					}
+
+					if combined && !ok {
+						assert(!session.active_admissions);
+						assert(Service.bytes_equal(session.provider.accepted_frontier, request.expected_frontier));
+						assert(session.identities.operation_counter.next == identities.operation_counter.next);
+						assert(session.identities.world_counter.next == identities.world_counter.next);
+						assert(session.operations.count == operations && session.worlds.count == worlds);
+						assert(session.tasks.count == tasks && session.ready.count == ready && session.optional_ready.count == optional_ready);
+						for before.live {
+							assert(session.ledger.live[it_index] == it && session.ledger.reserved[it_index] == before.reserved[it_index]);
+						}
+					}
+				}
+			);
+			Service.with_lock(
+				*allocation_ledger.gate,
+				#code {
+					assert(allocation_ledger.pool_cleanup != *probe);
+				}
+			);
+			if ok {
+				observation = await(fixture, accepted.ticket);
+				assert(observation.update.kind == .PUBLISHED);
+				Service.free_observation(*observation);
+				release(fixture, accepted.ticket);
+			} else {
+				assert(error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+				assert(!accepted.ticket.owner_token && !accepted.frontier.count);
+			}
+
+			for hook.registration.job.competing_tickets {
+				observation = await(fixture, it);
+				assert(observation.update.kind == .PUBLISHED);
+				Service.free_observation(*observation);
+				release(fixture, it);
+			}
+
+			array_free(hook.registration.job.competing_tickets);
+			assert(Service.read_world(fixture.host.service, test.drain.world));
+			free(accepted.frontier.data,, allocator);
+			free(error.path.data,, allocator);
+			free(error.document.data,, allocator);
+			close_output_probe(*output_probe);
+			if probe.hold_heap_gate {
+				destroy(*probe.heap_entered);
+			}
+
+			Service.free_description(*description);
+			finish_retain(test);
+		}
+	}
+
+	print(
+		"X5 analysis candidate world/task actual frees/reentry (direct = %, control = %, task = %, combined = %) \e[92mPASS\e[0m\n",
+		direct,
+		control,
+		task,
+		combined
+	);
+}
+
+test_analysis_candidate_cleanup :: (direct := false, control: s64 = 0) {
+	assert(control >= 0 && control <= 2 && !(direct && control == 2));
+	for 1..10 {
+		test := prepared_retain(.WORLD, .REUSE);
+		fixture := test.drain.fixture;
+		session := fixture.session;
+		_, description := Service.describe_session(fixture.host.service, fixture.host.session);
+		documents := ([] u8).[Service.harness_document(fixture.host, "a.jai")];
+		request := Service.Analysis_Request.{
+			version = Service.INTERFACE_VERSION,
+			expected_frontier = description.accepted_frontier,
+			documents = documents,
+		};
+		probe := Pool_Cleanup_Probe.{
+			fixture = fixture,
+			world = test.drain.world,
+			source_bytes = xx "answer :: 42;",
+			capture_at = it,
+			direct = direct,
+			suppress_callback = control == 1,
+			hold_heap_gate = control == 2,
+			allocate = true,
+			mutate = true,
+		};
+		if probe.hold_heap_gate {
+			init(*probe.heap_entered);
+		}
+
+		output_probe: Output_Probe;
+		allocator := open_output_probe(*output_probe);
+		before: Service.Resource_Ledger;
+		references: s64;
+		Service.with_lock(
+			*session.gate,
+			#code {
+				before = session.ledger;
+				probe.source = Service.find_document(session.provider, documents[0]).overlay.source;
+				references = probe.source.references;
+				session.faults.source_candidate_capture_allocation_hook = storage_cleanup_allocation_probe;
+				session.faults.source_candidate_capture_allocation_data = *probe;
+			}
+		);
+
+		ok, accepted, error := Service.request_analysis(fixture.host.service, fixture.host.session, request,, allocator);
+		assert(ok && output_probe.allocations == 1 && probe.allocations == 10);
+		assert(probe.memory && !probe.allocation_pending && probe.frees == 1);
+		if control == 1 {
+			assert(!probe.callbacks && !probe.gate_progress && !probe.allocated && !probe.mutated);
+		} else {
+			assert(probe.callbacks == 1 && probe.gate_progress && probe.readable && probe.source_readable);
+			assert(probe.allocated && probe.mutated && !probe.active_admissions && probe.heap_blocked == probe.hold_heap_gate);
+			assert(probe.source_references == references + xx (probe.capture_at > 4));
+			early := probe.capture_at == 6 || probe.capture_at == 8 || probe.capture_at == 9;
+			charge := (!early).(s64);
+			assert(probe.ledger.live[Service.Limit_Name.LIVE_HANDLES] == before.live[Service.Limit_Name.LIVE_HANDLES] + charge);
+			assert(probe.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS] == before.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
+		}
+
+		Service.with_lock(
+			*session.gate,
+			#code {
+				session.faults.source_candidate_capture_allocation_hook = null;
+				session.faults.source_candidate_capture_allocation_data = null;
+				assert(probe.source.references == references);
+			}
+		);
+		Service.with_lock(
+			*allocation_ledger.gate,
+			#code {
+				assert(allocation_ledger.pool_cleanup != *probe);
+			}
+		);
+		observation := await(fixture, accepted.ticket);
+		assert(observation.update.kind == .PUBLISHED);
+		Service.free_observation(*observation);
+		release(fixture, accepted.ticket);
+		assert(Service.read_world(fixture.host.service, test.drain.world));
+		free(accepted.frontier.data,, allocator);
+		free(error.path.data,, allocator);
+		free(error.document.data,, allocator);
+		close_output_probe(*output_probe);
+		if probe.hold_heap_gate {
+			destroy(*probe.heap_entered);
+		}
+
+		Service.free_description(*description);
+		finish_retain(test);
+	}
+
+	print("X5 analysis candidate capture actual frees/reentry (direct = %, control = %) \e[92mPASS\e[0m\n", direct, control);
+}
+
+test_analysis_ticket_backing_failures :: (
+	direct := false,
+	update := false,
+	list := false,
+	paired := false,
+	capture := false,
+	world := false,
+	retry := false,
+	task := false,
+	ready_retry := false,
+	combined := false,
+	receipt := false,
+	fresh := false
+) {
+	assert(!(update && list) && !(capture && (update || list)) && (!paired || update || capture || world || task || combined));
+	assert(!combined || !update && !list && !capture && !world && !task && !retry);
+	assert(!receipt || combined);
+	assert(!fresh || combined && !paired);
+	new_world := paired || fresh;
+	assert(!world || paired && !update && !list && !capture);
+	assert(!task || paired && !world && !update && !list && !capture);
+	assert(!retry || world || task);
+	assert(!ready_retry || task && retry);
+	for Retain_Backing_Case.[.ARRAYS, .OBJECT, .REUSE] {
+		scenario := it;
+		if update && scenario != .ARRAYS || (list || capture || world || task || combined) && scenario != .REUSE {
+			continue;
+		}
+
+
+		allocations := ifx combined
+			then ifx paired
+				then 30
+				else ifx fresh
+					then 27
+					else 19
+			else ifx task
+				then ifx retry
+					then 7
+					else 5
+				else ifx world
+					then ifx retry
+						then 5
+						else 3
+					else ifx capture
+						then 10 + paired.(s64) * 2
+						else ifx update
+							then 5 + xx paired
+							else ifx list
+								then 1
+								else ifx scenario == .ARRAYS
+							then 3
+							else ifx scenario == .OBJECT
+								then 1
+								else 0;
+		for 1..allocations + 1 {
+			fail_at := it;
+			if receipt && fail_at != allocations + 1 {
+				continue;
+			}
+
+
+			test := prepared_retain(.WORLD, scenario);
+			fixture := test.drain.fixture;
+			session := fixture.session;
+			if new_world {
+				batch := Service.begin_batch(fixture.host);
+				assert(Service.set_overlay(*batch, "b.jai", "second :: 2;"));
+				seeded, seed := Service.submit_batch(*batch);
+				assert(seeded);
+				observation := await(fixture, seed.ticket);
+				assert(observation.update.kind == .PUBLISHED);
+				Service.free_observation(*observation);
+				release(fixture, seed.ticket);
+				free(seed.frontier.data);
+			}
+
+			if combined {
+				while true {
+					room: bool;
+					Service.with_lock(
+						*session.gate,
+						#code {
+							room = !!session.registry.free_slots.count || session.registry.slots.count < session.registry.slots.allocated;
+						}
+					);
+
+					if !room {
+						break;
+					}
+
+
+					retained, duplicate := Service.retain(fixture.host.service, test.source);
+					assert(retained);
+					array_add(*test.held, duplicate);
+				}
+			}
+
+			_, description := Service.describe_session(fixture.host.service, fixture.host.session);
+			documents := ([] u8).[Service.harness_document(fixture.host, "a.jai")];
+			paired_documents: [2] [] u8;
+			request := Service.Analysis_Request.{
+				version = Service.INTERFACE_VERSION,
+				expected_frontier = description.accepted_frontier,
+				documents = documents,
+			};
+			if paired {
+				paired_documents = .[Service.harness_document(fixture.host, "b.jai"), documents[0]];
+				request.documents = paired_documents;
+			}
+
+			probe := Registration_Probe.{
+				fail_at = fail_at,
+				direct = direct,
+				track_source = true,
+				source_document = documents[0],
+				ready_capacity_control = ready_retry,
+				job = .{drain = test.drain, action = .REJECT_ACTIVE_RELEASE},
+			};
+			output_probe := Output_Probe.{fail_at = ifx receipt then 1};
+			allocator := open_output_probe(*output_probe);
+			before: Service.Resource_Ledger;
+			identities: Service.Session_Identities;
+			slots: [] Service.Registration_Slot;
+			registrations: s64;
+			free_slots: s64;
+			operations: s64;
+			operation_storage: [..] *Service.Operation;
+			world_storage: [..] *Service.World;
+			task_storage: [..] *Service.Task;
+			ready_storage: [..] *Service.Task;
+			worlds: s64;
+			frontier_next: u64;
+			source: *Service.Source_Backing;
+			source_references: s64;
+			second_source: *Service.Source_Backing;
+			second_references: s64;
+			Service.with_lock(
+				*session.gate,
+				#code {
+					before = session.ledger;
+					identities = session.identities;
+					slots = array_copy(session.registry.slots);
+					registrations = session.registrations.count;
+					free_slots = session.registry.free_slots.count;
+					operations = session.operations.count;
+					worlds = session.worlds.count;
+					frontier_next = session.provider.frontier_counter.next;
+					source = Service.find_document(session.provider, documents[0]).overlay.source;
+					source_references = source.references;
+					if combined {
+						if new_world {
+							second_source = Service.find_document(session.provider, Service.harness_document(fixture.host, "b.jai")).overlay.source;
+							second_references = second_source.references;
+						}
+
+						assert(!Service.registration_backing_ready(session));
+						assert(session.registrations.count == session.registry.slots.count);
+						assert(session.registrations.allocated == session.registrations.count);
+						session.operations.allocated = session.operations.count;
+						session.worlds.allocated = session.worlds.count;
+						session.tasks.allocated = session.tasks.count;
+						session.ready.allocated = session.ready.count;
+						session.faults.source_update_allocation_hook = registration_allocation_probe;
+						session.faults.source_update_allocation_data = *probe;
+						session.faults.registration_allocation_hook = registration_allocation_probe;
+						session.faults.registration_allocation_data = *probe;
+						session.faults.source_operation_allocation_hook = registration_allocation_probe;
+						session.faults.source_operation_allocation_data = *probe;
+						session.faults.source_candidate_capture_allocation_hook = registration_allocation_probe;
+						session.faults.source_candidate_capture_allocation_data = *probe;
+						session.faults.source_candidate_world_allocation_hook = registration_allocation_probe;
+						session.faults.source_candidate_world_allocation_data = *probe;
+						session.faults.source_candidate_task_allocation_hook = registration_allocation_probe;
+						session.faults.source_candidate_task_allocation_data = *probe;
+					} else if task {
+						if !retry {
+							session.tasks.allocated = session.tasks.count;
+							session.ready.allocated = session.ready.count;
+						}
+
+						session.faults.source_candidate_task_allocation_hook = ifx retry
+							then source_candidate_task_capacity_probe
+							else registration_allocation_probe;
+						session.faults.source_candidate_task_allocation_data = *probe;
+					} else if world {
+						assert(Service.source_operation_backing_ready(session));
+						if !retry {
+							session.worlds.allocated = session.worlds.count;
+						}
+
+						session.faults.source_candidate_world_allocation_hook = ifx retry
+							then source_candidate_world_capacity_probe
+							else registration_allocation_probe;
+						session.faults.source_candidate_world_allocation_data = *probe;
+					} else if capture {
+						assert(Service.source_operation_backing_ready(session));
+						session.faults.source_candidate_capture_allocation_hook = registration_allocation_probe;
+						session.faults.source_candidate_capture_allocation_data = *probe;
+					} else if update {
+						session.faults.source_update_allocation_hook = registration_allocation_probe;
+						session.faults.source_update_allocation_data = *probe;
+					} else if list {
+						session.operations.allocated = session.operations.count;
+						session.faults.source_operation_allocation_hook = registration_allocation_probe;
+						session.faults.source_operation_allocation_data = *probe;
+					} else {
+						session.faults.registration_allocation_hook = registration_allocation_probe;
+						session.faults.registration_allocation_data = *probe;
+					}
+
+					operation_storage = session.operations;
+					world_storage = session.worlds;
+					task_storage = session.tasks;
+					ready_storage = session.ready;
+				}
+			);
+
+			ok, accepted, error := Service.request_analysis(fixture.host.service, fixture.host.session, request,, allocator);
+			expected_allocations := ifx receipt then 5 + xx paired else min(fail_at, allocations);
+			assert(ok == (!receipt && fail_at > allocations) && probe.allocations == expected_allocations);
+			before_output := update && !ok || combined && fail_at <= 5 + xx paired;
+			assert(output_probe.allocations == (ifx before_output then 0 else 1));
+			if allocations {
+				assert(probe.gate_progress && probe.job.ok && !probe.source_active_admissions);
+				assert(probe.source_references == source_references + xx (world || task));
+				for before.live {
+					assert(probe.waiter_ledger.live[it_index] == it && probe.waiter_ledger.reserved[it_index] == before.reserved[it_index]);
+				}
+			}
+
+			Service.with_lock(
+				*session.gate,
+				#code {
+					session.faults.registration_allocation_hook = null;
+					session.faults.registration_allocation_data = null;
+					session.faults.source_update_allocation_hook = null;
+					session.faults.source_update_allocation_data = null;
+					session.faults.source_operation_allocation_hook = null;
+					session.faults.source_operation_allocation_data = null;
+					session.faults.source_candidate_capture_allocation_hook = null;
+					session.faults.source_candidate_capture_allocation_data = null;
+					session.faults.source_candidate_world_allocation_hook = null;
+					session.faults.source_candidate_world_allocation_data = null;
+					session.faults.source_candidate_task_allocation_hook = null;
+					session.faults.source_candidate_task_allocation_data = null;
+					assert(session.identities.operation_counter.next == identities.operation_counter.next + xx ok);
+					assert(session.identities.world_counter.next == identities.world_counter.next + xx (ok && new_world));
+					assert(session.provider.frontier_counter.next == frontier_next);
+					assert(Service.bytes_equal(session.provider.accepted_frontier, request.expected_frontier));
+					assert(session.worlds.count == worlds + xx (ok && new_world));
+					assert(source.references == source_references + xx (ok && new_world));
+					if second_source {
+						assert(second_source.references == second_references + xx (ok && paired));
+					}
+
+					assert(!session.registry.slots[session.shutdown_registration.slot].live);
+					if !ok {
+						assert(error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+						assert(!accepted.ticket.owner_token && !accepted.frontier.count);
+						assert(session.operations.count == operations && session.registry.slots.count == slots.count);
+						if !combined || receipt || fail_at <= 9 + xx paired {
+							assert(session.operations.data == operation_storage.data && session.operations.allocated == operation_storage.allocated);
+						} else {
+							assert(session.operations.data != operation_storage.data && session.operations.allocated > operations);
+						}
+
+						assert(session.worlds.data == world_storage.data);
+						assert(session.worlds.allocated == (ifx world && retry then worlds else world_storage.allocated));
+						assert(session.tasks.data == task_storage.data && session.tasks.count == task_storage.count);
+						assert(session.ready.data == ready_storage.data && session.ready.count == ready_storage.count);
+						expected_tasks := ifx task && retry && !ready_retry then task_storage.count else task_storage.allocated;
+						expected_ready := ifx ready_retry then ready_storage.count else ready_storage.allocated;
+						assert(session.tasks.allocated == expected_tasks && session.ready.allocated == expected_ready);
+						registration_prepared := combined && !receipt && fail_at > 8 + xx paired;
+						assert(session.registrations.count == registrations + xx registration_prepared && session.registry.free_slots.count == free_slots);
+						for slots {
+							current := session.registry.slots[it_index];
+							assert(current.live == it.live && current.generation == it.generation && current.kind == it.kind);
+						}
+
+						for before.live {
+							assert(session.ledger.live[it_index] == it && session.ledger.reserved[it_index] == before.reserved[it_index]);
+						}
+					}
+				}
+			);
+
+			if ok {
+				assert(Service.bytes_equal(accepted.frontier, request.expected_frontier));
+				Service.with_lock(
+					*session.gate,
+					#code {
+						operation := session.registrations[accepted.ticket.slot].operation;
+						token: [8] u8;
+						for 0..7 {
+							token[it] = xx ((identities.operation_counter.next >> (it * 8)) & 0xFF);
+						}
+
+						expected := Service.make_key("operation", session.identities.session.([] u8), token,, temp);
+						assert(Service.bytes_equal(operation.identity.([] u8), expected));
+						assert(operation.documents.count == request.documents.count && operation.frontier.data != accepted.frontier.data);
+						assert(Service.bytes_equal(operation.documents[0], documents[0]) && operation.documents[0].data != documents[0].data);
+						if world || task || combined && new_world {
+							for 0..7 {
+								token[it] = xx ((identities.world_counter.next >> (it * 8)) & 0xFF);
+							}
+
+							expected_world := Service.make_key("world", session.identities.session.([] u8), token,, temp);
+							assert(Service.bytes_equal(operation.world.identity.([] u8), expected_world));
+							if task || combined {
+								found := false;
+								for session.tasks {
+									if it.world == operation.world && it.kind == .PARSE_INDEX {
+										found = true;
+										expected_task := Service.make_key(
+											"execution-task",
+											session.identities.session.([] u8),
+											operation.world.identity.([] u8),
+											xx "PARSE_INDEX",,
+											temp
+										);
+										assert(Service.bytes_equal(it.key, expected_task));
+										assert(it.operations.count == 1 && it.operations.allocated == 1 && it.operations[0] == operation);
+									}
+								}
+
+								assert(found);
+							}
+						}
+
+						if paired {
+							assert(Service.compare_canonical(operation.documents[0], operation.documents[1]) < 0);
+							assert(Service.bytes_equal(operation.documents[1], paired_documents[0]));
+							assert(operation.documents[1].data != paired_documents[0].data);
+						}
+					}
+				);
+
+				observation := await(fixture, accepted.ticket);
+				assert(observation.update.kind == .PUBLISHED);
+				Service.free_observation(*observation);
+				release(fixture, accepted.ticket);
+			}
+
+			assert(Service.read_world(fixture.host.service, test.drain.world));
+			free(accepted.frontier.data,, allocator);
+			free(error.path.data,, allocator);
+			free(error.document.data,, allocator);
+			free(slots.data);
+			free_records(probe.job.records);
+			close_output_probe(*output_probe);
+			Service.free_description(*description);
+			finish_retain(test);
+		}
+	}
+
+	print(
+		#run join(
+			"X5 analysis ticket backing rejection (direct %, update %, list %, paired %, capture %, world %,",
+			" retry %, task %, ready %, combined %, receipt %, fresh %) \e[92mPASS\e[0m\n"
+		),
+		direct,
+		update,
+		list,
+		paired,
+		capture,
+		world,
+		retry,
+		task,
+		ready_retry,
+		combined,
+		receipt,
+		fresh
+	);
+}
+
+test_analysis_ticket_backing_interleavings :: (
+	direct := false,
+	update := false,
+	list := false,
+	capture := false,
+	world := false,
+	task := false,
+	combined := false
+) {
+	assert(!(update && list) && !(capture && (update || list)));
+	assert(!world || !update && !list && !capture);
+	assert(!task || !update && !list && !capture && !world);
+	assert(!combined || !update && !list && !capture && !world && !task);
+	allocations := ifx combined
+		then 27
+		else ifx task
+			then 5
+			else ifx world
+				then 3
+				else ifx capture
+					then 10
+					else ifx update
+						then 5
+						else ifx list
+							then 1
+							else 3;
+	for Output_Action.[
+		.OTHER_DRAIN,
+		.REJECT_ACTIVE_RELEASE,
+		.REQUEST_SHUTDOWN,
+		.REPLACE_SOURCE,
+		.FILL_REGISTRATION_CAPACITY,
+		.TAKE_RETAIN_CAPACITY,
+		.TAKE_OPERATION_CAPACITY,
+		.STOP_AND_RELEASE_SESSION,
+		.RETIRE_AND_REUSE_SESSION,
+		.FILL_OPERATION_CAPACITY,
+		.EXHAUST_OPERATION_COUNTER,
+		.EXHAUST_WORLD_COUNTER,
+		.FILL_SOURCE_WORLD_CAPACITY,
+		.FILL_SOURCE_TASK_CAPACITY,
+		.FILL_SOURCE_READY_CAPACITY
+	] {
+		action := it;
+		capacity_retry := action == .FILL_SOURCE_WORLD_CAPACITY || action == .FILL_SOURCE_TASK_CAPACITY || action == .FILL_SOURCE_READY_CAPACITY;
+		if !combined && (action == .RETIRE_AND_REUSE_SESSION || action == .TAKE_OPERATION_CAPACITY || capacity_retry) {
+			continue;
+		}
+
+
+		if action == .EXHAUST_WORLD_COUNTER && !world && !task && !combined {
+			continue;
+		}
+
+
+		if !update && !list && !capture && !world && !task && !combined && (action == .FILL_OPERATION_CAPACITY || action == .EXHAUST_OPERATION_COUNTER) {
+			continue;
+		}
+
+
+		for 1..allocations {
+			job_at := it;
+			if combined && action == .FILL_OPERATION_CAPACITY && job_at != allocations {
+				continue;
+			}
+
+
+			if capacity_retry && job_at != (ifx action == .FILL_SOURCE_WORLD_CAPACITY then 20 else 23) {
+				continue;
+			}
+
+
+			for 0..(ifx capacity_retry then 2 else 1) {
+				fail_allocation := !!it;
+				fail_at := ifx it == 2
+					then ifx action == .FILL_SOURCE_WORLD_CAPACITY
+						then 22
+						else 27
+					else ifx fail_allocation
+						then job_at;
+				test := prepared_retain(.WORLD, .ARRAYS);
+				fixture := test.drain.fixture;
+				session := fixture.session;
+				if world || task || combined {
+					batch := Service.begin_batch(fixture.host);
+					assert(Service.set_overlay(*batch, "b.jai", "second :: 2;"));
+					seeded, seed := Service.submit_batch(*batch);
+					assert(seeded);
+					observation := await(fixture, seed.ticket);
+					assert(observation.update.kind == .PUBLISHED);
+					Service.free_observation(*observation);
+					release(fixture, seed.ticket);
+					free(seed.frontier.data);
+				}
+
+				if combined {
+					while true {
+						room: bool;
+						Service.with_lock(
+							*session.gate,
+							#code {
+								room = !!session.registry.free_slots.count || session.registry.slots.count < session.registry.slots.allocated;
+							}
+						);
+
+						if !room {
+							break;
+						}
+
+
+						retained, duplicate := Service.retain(fixture.host.service, test.source);
+						assert(retained);
+						array_add(*test.held, duplicate);
+					}
+				}
+
+				_, description := Service.describe_session(fixture.host.service, fixture.host.session);
+				documents := ([] u8).[Service.harness_document(fixture.host, "a.jai")];
+				request := Service.Analysis_Request.{
+					version = Service.INTERFACE_VERSION,
+					expected_frontier = description.accepted_frontier,
+					documents = documents,
+				};
+				probe := Registration_Probe.{
+					fail_at = fail_at,
+					job_at = job_at,
+					direct = direct,
+					track_source = true,
+					job = .{drain = test.drain, action = action, await_shutdown = true},
+				};
+				output_probe: Output_Probe;
+				allocator := open_output_probe(*output_probe);
+				source: *Service.Source_Backing;
+				source_references: s64;
+				frontier_next: u64;
+				operation_next: u64;
+				world_next: u64;
+				Service.with_lock(
+					*session.gate,
+					#code {
+						source = Service.find_document(session.provider, documents[0]).overlay.source;
+						source_references = source.references;
+						frontier_next = session.provider.frontier_counter.next;
+						operation_next = session.identities.operation_counter.next;
+						world_next = session.identities.world_counter.next;
+						if combined {
+							probe.track_source_backing = source;
+							assert(!Service.registration_backing_ready(session));
+							assert(session.registrations.allocated == session.registry.slots.count);
+							session.operations.allocated = session.operations.count;
+							push_allocator(Service.owner_allocator(session));
+							if action == .FILL_SOURCE_WORLD_CAPACITY {
+								array_reserve(*session.worlds, session.worlds.count + 1);
+							} else {
+								session.worlds.allocated = session.worlds.count;
+							}
+
+							if action == .FILL_SOURCE_TASK_CAPACITY {
+								array_reserve(*session.tasks, session.tasks.count + 1);
+							} else {
+								session.tasks.allocated = session.tasks.count;
+							}
+
+							if action == .FILL_SOURCE_READY_CAPACITY {
+								array_reserve(*session.ready, session.ready.count + 1);
+							} else {
+								session.ready.allocated = session.ready.count;
+							}
+
+							session.faults.source_update_allocation_hook = registration_allocation_probe;
+							session.faults.source_update_allocation_data = *probe;
+							session.faults.registration_allocation_hook = registration_allocation_probe;
+							session.faults.registration_allocation_data = *probe;
+							session.faults.source_operation_allocation_hook = registration_allocation_probe;
+							session.faults.source_operation_allocation_data = *probe;
+							session.faults.source_candidate_capture_allocation_hook = registration_allocation_probe;
+							session.faults.source_candidate_capture_allocation_data = *probe;
+							session.faults.source_candidate_world_allocation_hook = registration_allocation_probe;
+							session.faults.source_candidate_world_allocation_data = *probe;
+							session.faults.source_candidate_task_allocation_hook = registration_allocation_probe;
+							session.faults.source_candidate_task_allocation_data = *probe;
+						} else if task {
+							probe.track_source_backing = source;
+							session.tasks.allocated = session.tasks.count;
+							session.ready.allocated = session.ready.count;
+							session.faults.source_candidate_task_allocation_hook = registration_allocation_probe;
+							session.faults.source_candidate_task_allocation_data = *probe;
+						} else if world {
+							probe.track_source_backing = source;
+							session.worlds.allocated = session.worlds.count;
+							session.faults.source_candidate_world_allocation_hook = registration_allocation_probe;
+							session.faults.source_candidate_world_allocation_data = *probe;
+						} else if capture {
+							probe.track_source_backing = source;
+							session.faults.source_candidate_capture_allocation_hook = registration_allocation_probe;
+							session.faults.source_candidate_capture_allocation_data = *probe;
+						} else if update {
+							session.faults.source_update_allocation_hook = registration_allocation_probe;
+							session.faults.source_update_allocation_data = *probe;
+						} else if list {
+							session.operations.allocated = session.operations.count;
+							session.faults.source_operation_allocation_hook = registration_allocation_probe;
+							session.faults.source_operation_allocation_data = *probe;
+						} else {
+							session.faults.registration_allocation_hook = registration_allocation_probe;
+							session.faults.registration_allocation_data = *probe;
+						}
+					}
+				);
+
+				ok, accepted, error := Service.request_analysis(fixture.host.service, fixture.host.session, request,, allocator);
+				assert(probe.gate_progress && probe.job.ok && !probe.source_active_admissions);
+				retired := action == .STOP_AND_RELEASE_SESSION || action == .RETIRE_AND_REUSE_SESSION;
+				reject_before_output := update && (fail_allocation || retired || action == .REQUEST_SHUTDOWN || action == .REPLACE_SOURCE);
+				reject_before_output ||= combined && job_at <= 5 && (fail_allocation || retired || action == .REQUEST_SHUTDOWN || action == .REPLACE_SOURCE);
+				assert(output_probe.allocations == (ifx reject_before_output then 0 else 1));
+				if combined {
+					callback_references := source_references - xx (retired || action == .REPLACE_SOURCE);
+					callback_references += (job_at > 13).(s64) + xx (action == .FILL_OPERATION_CAPACITY);
+					assert(probe.source_references == callback_references);
+				} else if capture || world || task {
+					callback_references := source_references - xx (retired || action == .REPLACE_SOURCE) + xx (world || task || job_at > 4);
+					callback_references += xx ((world || task) && action == .FILL_OPERATION_CAPACITY);
+					assert(probe.source_references == callback_references);
+				}
+
+				if retired {
+					assert(!ok && error.code == .INVALID_HANDLE && error.handle_kind == .SESSION);
+				} else if action == .REQUEST_SHUTDOWN {
+					assert(!ok && error.code == .SERVICE_CLOSED);
+				} else if action == .REPLACE_SOURCE {
+					assert(!ok && error.code == .BASE_MISMATCH && error.scope == .FRONTIER);
+				} else if fail_allocation || action == .EXHAUST_OPERATION_COUNTER || action == .EXHAUST_WORLD_COUNTER {
+					assert(!ok && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+				} else if action == .TAKE_RETAIN_CAPACITY || action == .TAKE_OPERATION_CAPACITY {
+					limit := ifx action == .TAKE_RETAIN_CAPACITY then Service.Limit_Name.LIVE_HANDLES else .IN_FLIGHT_OPERATIONS;
+					assert(!ok && error.code == .ADMISSION_DENIED && error.admission.kind == .LIMIT && error.admission.limit == limit);
+				} else {
+					assert(ok && Service.bytes_equal(accepted.frontier, request.expected_frontier));
+				}
+
+				expected_allocations := ifx fail_allocation
+					then fail_at
+					else ifx capture && job_at <= 4 && (
+						retired || action == .REQUEST_SHUTDOWN || action == .REPLACE_SOURCE
+						|| action == .TAKE_RETAIN_CAPACITY || action == .EXHAUST_OPERATION_COUNTER
+					)
+						then 4
+					else ifx !update && !list && !capture && !world && !task && action == .FILL_REGISTRATION_CAPACITY || list && action == .FILL_OPERATION_CAPACITY
+						then allocations * 2
+						else allocations;
+				if combined && !fail_allocation {
+					stage_end := ifx job_at <= 5
+						then 5
+						else ifx job_at <= 8
+							then 8
+							else ifx job_at <= 9
+								then 9
+								else ifx job_at <= 13
+									then 13
+									else ifx job_at <= 19
+										then 19
+										else ifx job_at <= 22
+											then 22
+											else 27;
+					if (
+						retired || action == .REQUEST_SHUTDOWN || action == .REPLACE_SOURCE
+						|| action == .TAKE_RETAIN_CAPACITY || action == .TAKE_OPERATION_CAPACITY || action == .EXHAUST_OPERATION_COUNTER
+					) {
+						expected_allocations = stage_end;
+					} else if action == .EXHAUST_WORLD_COUNTER {
+						expected_allocations = max(19, stage_end);
+					} else if action == .FILL_REGISTRATION_CAPACITY {
+						expected_allocations = allocations + 3 * (job_at > 5).(s64);
+					} else if action == .FILL_OPERATION_CAPACITY {
+						expected_allocations = allocations + 2;
+					} else if capacity_retry {
+						expected_allocations = allocations + (ifx action == .FILL_SOURCE_WORLD_CAPACITY then 2 else 4);
+					}
+				}
+
+				assert(probe.allocations == expected_allocations);
+				if (world || task || combined) && ok {
+					observation := await(fixture, accepted.ticket);
+					assert(observation.update.kind == .PUBLISHED);
+					Service.free_observation(*observation);
+				}
+
+				Service.with_lock(
+					*session.gate,
+					#code {
+						session.faults.registration_allocation_hook = null;
+						session.faults.registration_allocation_data = null;
+						session.faults.source_update_allocation_hook = null;
+						session.faults.source_update_allocation_data = null;
+						session.faults.source_operation_allocation_hook = null;
+						session.faults.source_operation_allocation_data = null;
+						session.faults.source_candidate_capture_allocation_hook = null;
+						session.faults.source_candidate_capture_allocation_data = null;
+						session.faults.source_candidate_world_allocation_hook = null;
+						session.faults.source_candidate_world_allocation_data = null;
+						session.faults.source_candidate_task_allocation_hook = null;
+						session.faults.source_candidate_task_allocation_data = null;
+						assert(session.identities.operation_counter.next == probe.callback_identities.operation_counter.next + xx ok);
+						created := (world || task || combined) && ok && action != .FILL_OPERATION_CAPACITY;
+						assert(session.identities.world_counter.next == probe.callback_identities.world_counter.next + xx created);
+						expected_references := source_references - xx (retired || action == .REPLACE_SOURCE);
+						expected_references += xx ((world || task || combined) && (ok || action == .FILL_OPERATION_CAPACITY));
+						assert(source.references == expected_references);
+						assert(Service.bytes_equal(source.bytes, xx "answer :: 42;"));
+						if combined && !ok {
+							assert(session.operations.count == probe.callback_operations && session.worlds.count == probe.callback_worlds);
+							assert(session.tasks.count == probe.callback_tasks && session.ready.count == probe.callback_ready);
+							assert(session.optional_ready.count == probe.callback_optional_ready);
+						}
+
+						for probe.waiter_ledger.live {
+							charge := ifx it_index == Service.Limit_Name.LIVE_HANDLES.(s64)
+								then ok.(s64)
+								else 0;
+							assert(
+								session.ledger.live[it_index] == it + charge,
+								"Analysis registration callback %, ordinal %, fail %, resource %: live %, expected %.",
+								action,
+								job_at,
+								fail_allocation,
+								it_index,
+								session.ledger.live[it_index],
+								it + charge
+							);
+							assert(session.ledger.reserved[it_index] == probe.waiter_ledger.reserved[it_index]);
+						}
+
+						if !retired {
+							assert(session.provider.frontier_counter.next == frontier_next + xx (action == .REPLACE_SOURCE));
+						}
+
+						if action == .EXHAUST_OPERATION_COUNTER {
+							session.identities.operation_counter.next = operation_next;
+						}
+
+						if action == .EXHAUST_WORLD_COUNTER {
+							session.identities.world_counter.next = world_next;
+						}
+					}
+				);
+
+				if ok {
+					observation := await(fixture, accepted.ticket);
+					assert(observation.update.kind == .PUBLISHED);
+					Service.free_observation(*observation);
+					release(fixture, accepted.ticket);
+				} else {
+					assert(!accepted.ticket.owner_token && !accepted.frontier.count);
+				}
+
+				assert(Service.read_world(fixture.host.service, test.drain.world));
+				if action == .RETIRE_AND_REUSE_SESSION {
+					assert(Service.read_world(fixture.host.service, probe.job.replacement_world));
+					release(fixture, probe.job.replacement_world);
+				}
+
+				for probe.job.competing_worlds {
+					assert(Service.read_world(fixture.host.service, it));
+					release(fixture, it);
+				}
+
+				array_free(probe.job.competing_worlds);
+				for probe.job.competing_tickets {
+					observation := await(fixture, it);
+					assert(observation.update.kind == .PUBLISHED);
+					Service.free_observation(*observation);
+					release(fixture, it);
+				}
+
+				array_free(probe.job.competing_tickets);
+				free(accepted.frontier.data,, allocator);
+				free(error.path.data,, allocator);
+				free(error.document.data,, allocator);
+				free_records(probe.job.records);
+				close_output_probe(*output_probe);
+				Service.free_description(*description);
+				if retired {
+					for test.held {
+						release(fixture, it);
+					}
+
+					array_free(test.held);
+					release(fixture, test.source);
+					finish_drain(test.drain, session_released = true);
+				} else {
+					finish_retain(test);
+				}
+			}
+		}
+	}
+
+	print(
+		"X5 analysis ticket callback winners (direct %, update %, list %, capture %, world %, task %, combined %) \e[92mPASS\e[0m\n",
+		direct,
+		update,
+		list,
+		capture,
+		world,
+		task,
+		combined
+	);
+}
+
+test_analysis_ticket_backing_limits :: (counter := false, exhausted := false, world := false, join := false) {
+	assert(!exhausted || counter);
+	assert(!world || counter);
+	assert(!join || world);
+	for Service.Limit_Name.[.LIVE_HANDLES, .IN_FLIGHT_OPERATIONS, .CONCURRENT_ACQUISITIONS] {
+		name := it;
+		if counter && name != .LIVE_HANDLES {
+			continue;
+		}
+
+
+		test := prepared_retain(.WORLD, .ARRAYS);
+		fixture := test.drain.fixture;
+		session := fixture.session;
+		if world && !join {
+			batch := Service.begin_batch(fixture.host);
+			assert(Service.set_overlay(*batch, "b.jai", "second :: 2;"));
+			seeded, seed := Service.submit_batch(*batch);
+			assert(seeded);
+			observation := await(fixture, seed.ticket);
+			assert(observation.update.kind == .PUBLISHED);
+			Service.free_observation(*observation);
+			release(fixture, seed.ticket);
+			free(seed.frontier.data);
+		}
+
+		_, description := Service.describe_session(fixture.host.service, fixture.host.session);
+		documents := ([] u8).[Service.harness_document(fixture.host, "a.jai")];
+		request := Service.Analysis_Request.{
+			version = Service.INTERFACE_VERSION,
+			expected_frontier = description.accepted_frontier,
+			documents = documents,
+		};
+		probe: Registration_Probe;
+		output_probe: Output_Probe;
+		allocator := open_output_probe(*output_probe);
+		before: Service.Resource_Ledger;
+		identities: Service.Session_Identities;
+		operation_next: u64;
+		world_next: u64;
+		Service.with_lock(
+			*session.gate,
+			#code {
+				before = session.ledger;
+				operation_next = session.identities.operation_counter.next;
+				world_next = session.identities.world_counter.next;
+				if world {
+					session.identities.world_counter.next = Service.U64_MAX - xx !exhausted;
+				} else if counter {
+					session.identities.operation_counter.next = Service.U64_MAX - xx !exhausted;
+				} else {
+					session.ledger.limits.values[name] = before.live[name] + before.reserved[name];
+				}
+
+				identities = session.identities;
+				session.faults.registration_allocation_hook = registration_allocation_probe;
+				session.faults.registration_allocation_data = *probe;
+			}
+		);
+
+		ok, accepted, error := Service.request_analysis(fixture.host.service, fixture.host.session, request,, allocator);
+		assert(ok == (ifx counter then !exhausted || join else name == .CONCURRENT_ACQUISITIONS));
+		expected_allocations := ifx ok && (!world || join)
+			then 3
+			else 0;
+		assert(output_probe.allocations == 1 && probe.allocations == expected_allocations);
+		if world && ok {
+			observation := await(fixture, accepted.ticket);
+			assert(observation.update.kind == .PUBLISHED);
+			Service.free_observation(*observation);
+		}
+
+		if !ok {
+			assert(error.code == .ADMISSION_DENIED);
+			if counter {
+				assert(error.admission.kind == .RESOURCE_EXHAUSTED);
+			} else {
+				assert(error.admission.kind == .LIMIT && error.admission.limit == name);
+			}
+
+			assert(!accepted.ticket.owner_token && !accepted.frontier.count);
+		}
+
+		Service.with_lock(
+			*session.gate,
+			#code {
+				session.ledger.limits = before.limits;
+				session.faults.registration_allocation_hook = null;
+				session.faults.registration_allocation_data = null;
+				assert(session.identities.operation_counter.next == identities.operation_counter.next + xx ok);
+				assert(session.identities.world_counter.next == identities.world_counter.next + xx (world && ok && !join));
+				if counter {
+					if ok {
+						operation := session.registrations[accepted.ticket.slot].operation;
+						token: [8] u8;
+						for 0..7 {
+							token[it] = xx ((identities.operation_counter.next >> (it * 8)) & 0xFF);
+						}
+
+						expected := Service.make_key("operation", session.identities.session.([] u8), token,, temp);
+						assert(Service.bytes_equal(operation.identity.([] u8), expected));
+						if world && !join {
+							for 0..7 {
+								token[it] = xx ((identities.world_counter.next >> (it * 8)) & 0xFF);
+							}
+
+							expected_world := Service.make_key("world", session.identities.session.([] u8), token,, temp);
+							assert(Service.bytes_equal(operation.world.identity.([] u8), expected_world));
+						}
+					}
+
+					if world {
+						session.identities.world_counter.next = world_next;
+					} else {
+						session.identities.operation_counter.next = operation_next;
+					}
+				}
+
+				for before.live {
+					charge := ifx it_index == Service.Limit_Name.LIVE_HANDLES.(s64)
+						then ok.(s64)
+						else 0;
+					assert(session.ledger.live[it_index] == it + charge && session.ledger.reserved[it_index] == before.reserved[it_index]);
+				}
+			}
+		);
+
+		if ok {
+			observation := await(fixture, accepted.ticket);
+			assert(observation.update.kind == .PUBLISHED);
+			Service.free_observation(*observation);
+			release(fixture, accepted.ticket);
+		}
+
+		assert(Service.read_world(fixture.host.service, test.drain.world));
+		free(accepted.frontier.data,, allocator);
+		free(error.path.data,, allocator);
+		free(error.document.data,, allocator);
+		close_output_probe(*output_probe);
+		Service.free_description(*description);
+		finish_retain(test);
+	}
+
+	print(
+		"X5 analysis ticket quota/counter and independent acquisition quota (counter %, exhausted %, world %, join %) \e[92mPASS\e[0m\n",
+		counter,
+		exhausted,
+		world,
+		join
+	);
+}
+
 test_analysis_receipt_failures :: () {
 	for bool.[false, true] {
 		negative_control := it;
@@ -8840,13 +12468,15 @@ finish_retain :: (test: Retain_Fixture($K), source_released := false, owner_rele
 	finish_drain(test.drain, held = held);
 }
 
-Registration_Probe :: struct {
+Registration_Probe :: struct {//FIXME: document all fields:
 	allocations: s64;
 	fail_at: s64;
 	job_at: s64 = 1;
 	direct: bool;
 	running: bool;
 	guard: *Registration_Probe;
+	// Optional exact-free probe whose callback allocations are excluded from preparation ordinals.
+	cleanup: *Pool_Cleanup_Probe;
 	gate_progress: bool;
 	job: Output_Interleaving;
 	track_shutdown: bool;
@@ -8856,19 +12486,31 @@ Registration_Probe :: struct {
 	hold_waiter_selection: bool;
 	waiter_ledger: Service.Resource_Ledger;
 	track_source: bool;
+	track_source_backing: *Service.Source_Backing;
 	source_active_admissions: s64;
 	source_document: [] u8;
 	source_references: s64;
 	track_world: *Service.World;
 	world_references: s64;
 	callback_identities: Service.Session_Identities;
+	// Published operation count after the injected callback, excluding any later outer admission.
+	callback_operations: s64;
+	// Live world count after the callback's own lifecycle/frontier or competing admission actions.
+	callback_worlds: s64;
+	// Session task count after the injected callback has completed.
+	callback_tasks: s64;
+	// Required-ready queue count after the injected callback has completed.
+	callback_ready: s64;
+	// Optional-ready queue count after the injected callback has completed.
+	callback_optional_ready: s64;
+	ready_capacity_control: bool;
 	track_result: *Service.Query_Result;
 	result_references: s64;
 }
 
 registration_allocation_probe :: (size: s64, data: *void) -> bool {
 	probe := data.(*Registration_Probe);
-	if probe.running || (probe.guard && probe.guard.running) {
+	if probe.running || (probe.guard && probe.guard.running) || (probe.cleanup && cleanup_callback_running(probe.cleanup)) {
 		return true;
 	}
 
@@ -8897,7 +12539,16 @@ registration_allocation_probe :: (size: s64, data: *void) -> bool {
 				#code {
 					probe.waiter_ledger = session.ledger;
 					probe.callback_identities = session.identities;
+					probe.callback_operations = session.operations.count;
+					probe.callback_worlds = session.worlds.count;
+					probe.callback_tasks = session.tasks.count;
+					probe.callback_ready = session.ready.count;
+					probe.callback_optional_ready = session.optional_ready.count;
 					probe.source_active_admissions = session.active_admissions;
+					if probe.track_source_backing {
+						probe.source_references = probe.track_source_backing.references;
+					}
+
 					if probe.source_document.count {
 						state := Service.find_document(session.provider, probe.source_document);
 						assert(state && state.has_overlay && state.overlay.source);
@@ -9952,6 +13603,264 @@ finish_waiter_admission :: (test: Waiter_Admission_Fixture($K), source_released 
 	);
 }
 
+query_operation_capacity_probe :: (size: s64, data: *void) -> bool {
+	probe := data.(*Registration_Probe);
+	allowed := registration_allocation_probe(size, data);
+	if probe.allocations == 1 {
+		session := probe.job.drain.fixture.session;
+		Service.with_lock(
+			*session.gate,
+			#code {
+				session.operations.allocated = session.operations.count;
+			}
+		);
+	}
+
+	return allowed;
+}
+
+test_query_operation_backing :: (
+	direct := false,
+	counter: s64 = 0,
+	action: Output_Action = .REJECT_ACTIVE_RELEASE,
+	late_counter := false,
+	late_capacity := false
+) {
+	assert(counter >= 0 && counter <= 2);
+	assert(!late_counter || !counter && action == .EXHAUST_OPERATION_COUNTER);
+	assert(!late_capacity || !counter && !late_counter && action == .REJECT_ACTIVE_RELEASE);
+	late := late_counter || late_capacity;
+	for 1..3 {
+		job_at := it;
+		for bool.[false, true] {
+			fail := it;
+			if (counter || late) && (job_at != 1 || fail) {
+				continue;
+			}
+
+
+			test := prepared_waiter_admission(.WORLD, .REUSE);
+			fixture := test.retained.drain.fixture;
+			session := fixture.session;
+			probe := Registration_Probe.{
+				fail_at = ifx fail
+					then job_at
+					else 0,
+				job_at = job_at,
+				direct = direct,
+				track_source = true,
+				job = .{
+					drain = test.retained.drain,
+					action = ifx counter || late
+						then .NONE
+						else action
+				},
+			};
+			late_probe := Registration_Probe.{
+				direct = direct,
+				track_source = true,
+				job = .{
+					drain = test.retained.drain,
+					action = ifx late_capacity
+						then .REJECT_ACTIVE_RELEASE
+						else .EXHAUST_OPERATION_COUNTER
+				},
+			};
+			observed := ifx late
+				then *late_probe
+				else *probe;
+			if action == .RELEASE_QUERY_WORLD {
+				probe.job.drain.world = test.source;
+				probe.job.surviving_world = test.retained.drain.world;
+			}
+
+			before: Service.Resource_Ledger;
+			identities: Service.Session_Identities;
+			operations: s64;
+			tasks: s64;
+			ready: s64;
+			optional_ready: s64;
+			worlds: s64;
+			world: *Service.World;
+			references: s64;
+			Service.with_lock(
+				*session.gate,
+				#code {
+					before = session.ledger;
+					identities = session.identities;
+					operations = session.operations.count;
+					tasks = session.tasks.count;
+					ready = session.ready.count;
+					optional_ready = session.optional_ready.count;
+					worlds = session.worlds.count;
+					world = session.registrations[test.source.slot].world;
+					references = world.references;
+					probe.track_world = world;
+					late_probe.track_world = world;
+					session.operations.allocated = session.operations.count;
+					if counter {
+						session.identities.operation_counter.next = Service.U64_MAX - xx (counter == 1);
+					}
+
+					session.faults.source_update_allocation_hook = registration_allocation_probe;
+					session.faults.source_update_allocation_data = *probe;
+					session.faults.source_operation_allocation_hook = registration_allocation_probe;
+					session.faults.source_operation_allocation_data = *probe;
+					if late {
+						session.faults.registration_allocation_hook = ifx late_capacity
+							then query_operation_capacity_probe
+							else registration_allocation_probe;
+						session.faults.registration_allocation_data = *late_probe;
+					}
+				}
+			);
+
+			ok, waiter, error, terminal := admit_test_waiter(test);
+			retired := action == .RELEASE_QUERY_WORLD;
+			closed := action == .REQUEST_SHUTDOWN;
+			frontier := action == .REPLACE_HELD_SOURCE;
+			quota := action == .TAKE_RETAIN_CAPACITY || action == .TAKE_OPERATION_CAPACITY || action == .TAKE_PENDING_CAPACITY || action == .TAKE_COMPLETION_CAPACITY;
+			exhausted := counter == 2 || action == .EXHAUST_OPERATION_COUNTER;
+			admitted := !!waiter.owner_token;
+			assert(terminal == frontier && ok == (frontier || !fail && !retired && !closed && !quota && !exhausted));
+			assert(admitted == (ok && !terminal));
+			stopped := fail || retired || closed || frontier || quota || exhausted;
+			expected_allocations := ifx counter == 2
+				then 0
+				else ifx late
+					then 3 + xx late_capacity
+				else ifx fail
+					then job_at
+					else ifx stopped
+						then max(2, job_at)
+						else 3;
+			assert(probe.allocations == expected_allocations);
+			if !counter {
+				assert(observed.gate_progress && observed.job.ok && observed.world_references > 0);
+			}
+
+			Service.with_lock(
+				*session.gate,
+				#code {
+					session.faults.source_update_allocation_hook = null;
+					session.faults.source_update_allocation_data = null;
+					session.faults.source_operation_allocation_hook = null;
+					session.faults.source_operation_allocation_data = null;
+					if late {
+						session.faults.registration_allocation_hook = null;
+						session.faults.registration_allocation_data = null;
+						assert(late_probe.allocations == 1);
+					}
+
+					assert(!session.active_admissions);
+					baseline_identities := ifx counter
+						then identities
+						else observed.callback_identities;
+					assert(session.identities.world_counter.next == baseline_identities.world_counter.next);
+					if counter {
+						assert(session.identities.operation_counter.next == Service.U64_MAX);
+						session.identities.operation_counter = identities.operation_counter;
+					} else {
+						assert(session.identities.operation_counter.next == baseline_identities.operation_counter.next + xx ok);
+					}
+
+					if admitted {
+						operation := session.registrations[waiter.slot].operation;
+						assert(operation.world == world && operation.kind == .QUERY && operation.query_kind == .SYNTAX_DIAGNOSTICS);
+						assert(session.operations.count == operations + 1 && operation.task);
+						push_allocator(context.default_allocator);
+						token := ifx counter
+							then Service.U64_MAX - 1
+							else identities.operation_counter.next;
+						token_bytes := Service.little_endian(token, 8);
+						expected := Service.make_key("operation", session.identities.session.([] u8), token_bytes);
+						assert(Service.bytes_equal(operation.identity.([] u8), expected));
+						free(expected.data);
+						free(token_bytes.data);
+					} else {
+						if retired {
+							assert(error.code == .INVALID_HANDLE && error.handle_kind == .WORLD);
+						} else if closed {
+							assert(error.code == .SERVICE_CLOSED);
+						} else if !terminal {
+							assert(error.code == .ADMISSION_DENIED);
+							if quota && !fail {
+								assert(error.admission.kind == .LIMIT);
+								limit := ifx action == .TAKE_RETAIN_CAPACITY
+									then Service.Limit_Name.LIVE_HANDLES
+									else ifx action == .TAKE_OPERATION_CAPACITY
+										then .IN_FLIGHT_OPERATIONS
+										else ifx action == .TAKE_PENDING_CAPACITY
+											then .PENDING_REGISTRATIONS
+											else .COMPLETION_RECORDS;
+								assert(error.admission.limit == limit);
+							} else {
+								assert(error.admission.kind == .RESOURCE_EXHAUSTED);
+							}
+						}
+
+						baseline := ifx counter
+							then before
+							else observed.waiter_ledger;
+						assert(session.operations.count == (ifx counter then operations else observed.callback_operations));
+						assert(session.worlds.count == (ifx counter then worlds else observed.callback_worlds));
+						assert(session.tasks.count == (ifx counter then tasks else observed.callback_tasks));
+						assert(session.ready.count == (ifx counter then ready else observed.callback_ready));
+						assert(session.optional_ready.count == (ifx counter then optional_ready else observed.callback_optional_ready));
+						assert(world.references == (ifx counter then references else observed.world_references - (ifx late then 2 else 1)));
+						for baseline.live {
+							assert(session.ledger.live[it_index] == it && session.ledger.reserved[it_index] == baseline.reserved[it_index]);
+						}
+					}
+
+					if action == .EXHAUST_OPERATION_COUNTER {
+						session.identities.operation_counter = identities.operation_counter;
+					}
+				}
+			);
+
+			if admitted {
+				release(fixture, waiter);
+			}
+
+			assert(Service.read_world(fixture.host.service, test.retained.drain.world));
+			if probe.job.replacement_world.owner_token {
+				assert(Service.read_world(fixture.host.service, probe.job.replacement_world));
+				release(fixture, probe.job.replacement_world);
+			}
+
+			finish_waiter_admission(test, source_released = retired);
+		}
+	}
+
+	print("X5 query operation backing failure/identity/list/counter atomicity (direct %, counter %, action %) \e[92mPASS\e[0m\n", direct, counter, action);
+}
+
+test_query_operation_checks :: () {
+	for bool.[false, true] {
+		direct := it;
+		for Output_Action.[
+			.REJECT_ACTIVE_RELEASE,
+			.REQUEST_SHUTDOWN,
+			.REPLACE_HELD_SOURCE,
+			.RELEASE_QUERY_WORLD,
+			.TAKE_RETAIN_CAPACITY,
+			.TAKE_OPERATION_CAPACITY,
+			.TAKE_PENDING_CAPACITY,
+			.TAKE_COMPLETION_CAPACITY,
+			.EXHAUST_OPERATION_COUNTER
+		] {
+			test_query_operation_backing(direct = direct, action = it);
+		}
+
+		test_query_operation_backing(direct = direct, action = .EXHAUST_OPERATION_COUNTER, late_counter = true);
+		test_query_operation_backing(direct = direct, late_capacity = true);
+	}
+
+	test_query_operation_backing(counter = 1);
+	test_query_operation_backing(counter = 2);
+}
+
 test_waiter_backing_failures :: ($K: Service.Handle_Kind) {
 	for Retain_Backing_Case.[.ARRAYS, .OBJECT, .REUSE] {
 		scenario := it;
@@ -10035,7 +13944,7 @@ test_waiter_backing_failures :: ($K: Service.Handle_Kind) {
 						assert(session.identities.operation_counter.next == before_counter);
 					} else {
 						assert(session.registrations[test.source.slot].world.references == before_references + xx ok);
-						assert(session.identities.operation_counter.next == before_counter + 1);
+						assert(session.identities.operation_counter.next == before_counter + xx ok);
 					}
 				}
 			);
@@ -12396,6 +16305,109 @@ test_source_batch_pool_checks :: () {
 	test_source_registration_failures(batch_context_list = true);
 	test_source_registration_failures(batch_context_list = true, batch_pair = true);
 	test_source_batch_commit_storage();
+	test_source_candidate_capture();
+	test_source_candidate_world_backing();
+	test_source_candidate_task_backing();
+	test_source_candidate_join_backing();
+	test_source_candidate_join_admission();
+	for Source_Candidate_Join_Cleanup.[
+		.REPLACED_OPERATIONS,
+		.REPLACED_READY,
+		.UNUSED_OPERATIONS,
+		.UNUSED_READY,
+		.PARTIAL_OPERATIONS,
+		.RETRY_OPERATIONS,
+		.RETRY_READY,
+		.PUBLISHED_OPERATIONS,
+		.PUBLISHED_READY
+	] {
+		cleanup := it;
+		for 0..2 {
+			control := it;
+			for bool.[false, true] {
+				if control == 2 && it {
+					continue;
+				}
+
+
+				test_source_candidate_join_admission(direct = it, cleanup = cleanup, control = control);
+			}
+		}
+	}
+
+	test_source_candidate_join_admission(direct = true);
+	for bool.[false, true] {
+		direct := it;
+		for Source_Candidate_Join_Race.[.OPERATIONS_CAPACITY, .READY_CAPACITY, .PUBLISHED] {
+			test_source_candidate_join_admission(direct = direct, race = it);
+		}
+	}
+	test_source_candidate_capture_admission();
+	test_source_candidate_final_revalidation();
+	test_source_candidate_discard_cleanup();
+	for Source_Candidate_Cleanup_Case.[.RECEIPT_REJECT, .PARTIAL_REJECT, .RETRY_DISCARD, .REPLACED_LIST, .UNUSED_LIST] {
+		scenario := it;
+		for 0..2 {
+			if scenario == .RECEIPT_REJECT && !it {
+				continue;
+			}
+
+
+			test_source_candidate_discard_cleanup(scenario = scenario, control = it);
+		}
+	}
+	test_source_candidate_final_revalidation(direct = true);
+	test_source_candidate_capture_admission(direct = true);
+	test_source_candidate_capture_admission(combined = true);
+	test_source_candidate_capture_admission(direct = true, combined = true);
+	for bool.[false, true] {
+		direct := it;
+		test_source_candidate_capture_admission(direct = direct, combined = true, reject_receipt = true);
+		test_source_candidate_capture_admission(direct = direct, combined = true, reject_receipt = true, reference_control = true);
+		for Service.Event_Kind.[.SET_OVERLAY, .EDIT_OVERLAY, .OBSERVE_DISK] {
+			event_kind := it;
+			test_source_candidate_capture_admission(direct = direct, combined = true, paired = true, event_kind = event_kind);
+			for bool.[false, true] {
+				test_source_candidate_capture_admission(
+					direct = direct,
+					combined = true,
+					paired = true,
+					event_kind = event_kind,
+					reject_receipt = true,
+					reference_control = it
+				);
+			}
+		}
+	}
+	for bool.[false, true] {
+		direct := it;
+		test_source_candidate_capture_admission(direct = direct, task_backing = true);
+		for bool.[false, true] {
+			test_source_candidate_capture_admission(
+				direct = direct,
+				task_backing = true,
+				capacity_retry = true,
+				ready_retry = it
+			);
+		}
+	}
+
+	for bool.[false, true] {
+		direct := it;
+		test_source_candidate_capture_admission(direct = direct, world_backing = true);
+		test_source_candidate_capture_admission(
+			direct = direct,
+			world_backing = true,
+			capacity_retry = true
+		);
+		for u64.[0xFFFFFFFFFFFFFFFE, 0xFFFFFFFFFFFFFFFF] {
+			test_source_candidate_capture_admission(
+				direct = direct,
+				world_backing = true,
+				world_token = it
+			);
+		}
+	}
 	test_source_batch_frontier_storage();
 	test_source_batch_metadata_storage();
 	test_source_registration_failures(batch_paths = true);
@@ -12908,11 +16920,114 @@ test_source_batch_pool_checks :: () {
 	test_source_registration_interleavings(direct = true, negative_control = true, pool = true, pool_retirement = true);
 }
 
+test_analysis_ticket_checks :: () {
+	test_analysis_candidate_snapshot();
+	for bool.[false, true] {
+		direct := it;
+		for Source_Candidate_Join_Race.[.NONE, .OPERATIONS_CAPACITY, .READY_CAPACITY, .PUBLISHED] {
+			test_analysis_candidate_join(direct = direct, race = it);
+			if it != .NONE {
+				test_analysis_candidate_join(direct = direct, race = it, combined = true);
+			}
+		}
+
+		test_analysis_candidate_join(direct = direct, combined = true);
+		test_analysis_candidate_join(direct = direct, combined = true, receipt = true);
+		for Output_Action.[.REJECT_ACTIVE_RELEASE, .TAKE_RETAIN_CAPACITY, .TAKE_OPERATION_CAPACITY, .EXHAUST_OPERATION_COUNTER, .EXHAUST_WORLD_COUNTER] {
+			test_analysis_candidate_join(direct = direct, combined = true, callback = it);
+		}
+	}
+
+	for 0..2 {
+		control := it;
+		for bool.[false, true] {
+			if control == 2 && it {
+				continue;
+			}
+
+
+			test_analysis_candidate_cleanup(direct = it, control = control);
+			test_analysis_world_cleanup(direct = it, control = control);
+			test_analysis_world_cleanup(direct = it, control = control, task = true);
+			test_analysis_world_cleanup(direct = it, control = control, combined = true);
+			cleanup_direct := it;
+			for Source_Candidate_Join_Cleanup.[
+				.REPLACED_OPERATIONS,
+				.REPLACED_READY,
+				.UNUSED_OPERATIONS,
+				.UNUSED_READY,
+				.PARTIAL_OPERATIONS,
+				.RETRY_OPERATIONS,
+				.RETRY_READY,
+				.PUBLISHED_OPERATIONS,
+				.PUBLISHED_READY
+			] {
+				test_analysis_candidate_join(direct = cleanup_direct, cleanup = it, control = control);
+				test_analysis_candidate_join(direct = cleanup_direct, cleanup = it, control = control, combined = true);
+			}
+		}
+	}
+
+	test_analysis_ticket_backing_failures();
+	test_analysis_ticket_backing_failures(direct = true);
+	for bool.[false, true] {
+		test_analysis_ticket_backing_failures(direct = it, update = true);
+		test_analysis_ticket_backing_failures(direct = it, update = true, paired = true);
+		test_analysis_ticket_backing_failures(direct = it, list = true);
+		test_analysis_ticket_backing_failures(direct = it, capture = true);
+		test_analysis_ticket_backing_failures(direct = it, capture = true, paired = true);
+		test_analysis_ticket_backing_failures(direct = it, world = true, paired = true);
+		test_analysis_ticket_backing_failures(direct = it, world = true, paired = true, retry = true);
+		test_analysis_ticket_backing_failures(direct = it, task = true, paired = true);
+		test_analysis_ticket_backing_failures(direct = it, task = true, paired = true, retry = true);
+		test_analysis_ticket_backing_failures(direct = it, task = true, paired = true, retry = true, ready_retry = true);
+		test_analysis_ticket_backing_failures(direct = it, combined = true);
+		test_analysis_ticket_backing_failures(direct = it, combined = true, paired = true);
+		test_analysis_ticket_backing_failures(direct = it, combined = true, receipt = true);
+		test_analysis_ticket_backing_failures(direct = it, combined = true, paired = true, receipt = true);
+		test_analysis_ticket_backing_failures(direct = it, combined = true, fresh = true);
+		test_analysis_ticket_backing_failures(direct = it, combined = true, fresh = true, receipt = true);
+	}
+
+	test_analysis_ticket_backing_interleavings();
+	test_analysis_ticket_backing_interleavings(direct = true);
+	for bool.[false, true] {
+		test_analysis_ticket_backing_interleavings(direct = it, update = true);
+		test_analysis_ticket_backing_interleavings(direct = it, list = true);
+		test_analysis_ticket_backing_interleavings(direct = it, capture = true);
+		test_analysis_ticket_backing_interleavings(direct = it, world = true);
+		test_analysis_ticket_backing_interleavings(direct = it, task = true);
+		test_analysis_ticket_backing_interleavings(direct = it, combined = true);
+	}
+
+	test_analysis_ticket_backing_limits();
+	test_analysis_ticket_backing_limits(counter = true);
+	test_analysis_ticket_backing_limits(counter = true, exhausted = true);
+	test_analysis_ticket_backing_limits(counter = true, world = true);
+	test_analysis_ticket_backing_limits(counter = true, world = true, exhausted = true);
+	test_analysis_ticket_backing_limits(counter = true, world = true, exhausted = true, join = true);
+	test_analysis_receipt_failures();
+}
+
+test_analysis_receipt_interleaving_checks :: () {
+	test_analysis_receipt_interleavings();
+	test_analysis_receipt_interleavings(direct = true);
+	test_analysis_receipt_interleavings(negative_control = true);
+	test_analysis_receipt_interleavings(direct = true, negative_control = true);
+}
+
 main :: () {
 	init(*allocation_ledger.gate);
 	allocation_ledger.delegate = context.default_allocator;
 	Service.service_test_allocator = .{proc = spy_allocate, data = *allocation_ledger};
-	#if BATCH_POOL_ONLY {
+	#if ANALYSIS_TICKET_ONLY {
+		test_analysis_ticket_checks();
+		test_analysis_receipt_interleaving_checks();
+		assert_no_owned_allocations();
+		deinit(*allocation_ledger.sizes);
+		destroy(*allocation_ledger.gate);
+		print("Service analysis ticket checks \e[92mPASS\e[0m.\n");
+	} else #if BATCH_POOL_ONLY {
 		test_source_batch_pool_checks();
 
 		assert_no_owned_allocations();
@@ -12921,6 +17036,13 @@ main :: () {
 		destroy(*allocation_ledger.gate);
 
 		print("Service batch Pool checks .\e[92mPASS\e[0m.\n");
+	} else #if QUERY_OPERATION_ONLY {
+		test_query_operation_checks();
+		test_waiter_backing_interleavings(.WORLD);
+		assert_no_owned_allocations();
+		deinit(*allocation_ledger.sizes);
+		destroy(*allocation_ledger.gate);
+		print("Service query operation checks \e[92mPASS\e[0m.\n");
 	} else {
 		test_registration_and_wait();
 		test_cancel_and_completion();
@@ -13080,6 +17202,7 @@ main :: () {
 		test_open_context_interleavings(direct = true);
 		test_shutdown_reserve_failures();
 		test_repeated_shutdown_failures();
+		test_query_operation_checks();
 		test_waiter_backing_failures(.TICKET);
 		test_waiter_backing_failures(.WORLD);
 		test_world_registration_failures();
@@ -13146,7 +17269,7 @@ main :: () {
 		test_provider_error_interleavings(direct = true);
 		test_open_argument_interleavings();
 		test_open_argument_interleavings(direct = true);
-		test_analysis_receipt_failures();
+		test_analysis_ticket_checks();
 		test_analysis_argument_failures();
 		test_terminal_query_failures();
 		test_result_argument_failures();
@@ -13168,10 +17291,7 @@ main :: () {
 		test_analysis_argument_interleavings(direct = true);
 		test_analysis_argument_interleavings(negative_control = true);
 		test_analysis_argument_interleavings(direct = true, negative_control = true);
-		test_analysis_receipt_interleavings();
-		test_analysis_receipt_interleavings(direct = true);
-		test_analysis_receipt_interleavings(negative_control = true);
-		test_analysis_receipt_interleavings(direct = true, negative_control = true);
+		test_analysis_receipt_interleaving_checks();
 		test_open_output_interleavings();
 		test_open_output_interleavings(direct = true);
 		test_world_output_failures();

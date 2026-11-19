@@ -1115,6 +1115,28 @@ submit_source_batch_attempt :: (
 	session.active_admissions += 1;
 	ok: bool;
 	frontier: [] u8;
+	candidate_capture: Source_Candidate_Capture;
+	candidate_world: Source_Candidate_World_Backing;
+	candidate_task: Source_Candidate_Task_Backing;
+	candidate_join: Source_Candidate_Join_Backing;
+	world_capacity: s64;
+	if session.worlds.count >= session.worlds.allocated {
+		world_capacity = ifx session.worlds.count <= S64_MAX / 2 - 1
+			then max(8, (session.worlds.count + 1) * 2)
+			else -1;
+	}
+
+	tasks_capacity := ifx session.tasks.count < session.tasks.allocated
+		then 0
+		else ifx session.tasks.count <= S64_MAX / 2 - 1
+			then max(8, (session.tasks.count + 1) * 2)
+			else -1;
+	ready_capacity := ifx session.ready.count < session.ready.allocated
+		then 0
+		else ifx session.ready.count <= S64_MAX / 2 - 1
+			then max(8, (session.ready.count + 1) * 2)
+			else -1;
+
 	allocator := output_allocator();
 	output_ok: bool;
 	output: [] u8;
@@ -1251,6 +1273,67 @@ submit_source_batch_attempt :: (
 			}
 
 			if ok {
+				documents := backing.documents;
+				for batch.events {
+					documents[it_index] = find_document(staged, it.document).document;
+				}
+
+				sort_canonical(documents);
+				capture_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					capture_allocator = .{proc = source_candidate_capture_allocate, data = session};
+				}
+
+				ok, candidate_capture = try_source_candidate_capture(staged, session.identities.session, frontier, documents, capture_allocator);
+				if !ok {
+					error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+				}
+			}
+
+			if ok {
+				world_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					world_allocator = .{proc = source_candidate_world_allocate, data = session};
+				}
+
+				ok, candidate_world = try_source_candidate_world_backing(session.identities.session, world_capacity, world_allocator);
+				if !ok {
+					error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+				}
+			}
+
+			if ok && candidate_capture.capturable {
+				task_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					task_allocator = .{proc = source_candidate_task_allocate, data = session};
+				}
+
+				ok, candidate_task = try_source_candidate_task_backing(
+					session.identities.session,
+					xx candidate_world.identity,
+					tasks_capacity,
+					ready_capacity,
+					task_allocator
+				);
+
+				if !ok {
+					error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+				}
+			}
+
+			if ok {
+				lock(
+					*session.gate,
+					#code {
+						ok, candidate_join = prepare_source_candidate_join_backing(session, candidate_capture.key);
+					}
+				);
+				if !ok {
+					error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+				}
+			}
+
+			if ok {
 				output_ok, output = try_output_bytes(allocator, frontier);
 			} else {
 				staged_error := error;
@@ -1267,7 +1350,19 @@ submit_source_batch_attempt :: (
 		}
 	);
 
-	defer finish_source_admission(session, staged, *transfer, *frontier, *output, *error, allocator);
+	defer finish_source_admission(
+		session,
+		staged,
+		*transfer,
+		*frontier,
+		*candidate_capture,
+		*candidate_world,
+		*candidate_task,
+		*candidate_join,
+		*output,
+		*error,
+		allocator
+	);
 
 	current := validate_session(session, handle);
 	#if TEST_HOOKS {
@@ -1338,6 +1433,32 @@ submit_source_batch_attempt :: (
 	}
 
 
+	if !source_candidate_join_backing_ready(session, candidate_capture.key, *candidate_join) {
+		give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
+		return false, .{}, .{}, true;
+	}
+
+
+	if !find_candidate_world(session, candidate_capture.key) {
+		if !source_candidate_world_backing_ready(session, *candidate_world) {
+			give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
+			return false, .{}, .{}, true;
+		}
+
+
+		if candidate_capture.capturable && !source_candidate_task_backing_ready(session, *candidate_task) {
+			give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
+			return false, .{}, .{}, true;
+		}
+
+
+		if session.identities.world_counter.next == U64_MAX {
+			give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
+			return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}}, false;
+		}
+	}
+
+
 	if session.identities.operation_counter.next == U64_MAX {
 		give(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS);
 		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}}, false;
@@ -1350,25 +1471,19 @@ submit_source_batch_attempt :: (
 		backing.identity[backing.identity.count - 8 + it] = xx ((token >> (it * 8)) & 0xFF);
 	}
 
-	documents := backing.documents;
-	for batch.events {
-		documents[it_index] = find_document(staged, it.document).document;
-	}
-
-	sort_canonical(documents);
 	operation := backing.operation;
 	operation.* = .{
 		identity = xx backing.identity,
 		kind = .UPDATE,
 		frontier = frontier,
-		documents = documents,
+		documents = backing.documents,
 	};
 
 	commit_provider_copy(session.provider, staged, *transfer);
 	array_add(*session.operations, operation);
 	backing.* = .{};
 	supersede_obsolete(session);
-	start_candidate(session, operation);
+	start_candidate(session, operation, *candidate_capture, *candidate_world, *candidate_task, *candidate_join);
 	ticket := register(session, .TICKET, .{operation = operation});
 	operation.registrations += 1;
 	accepted := Accepted.{ticket = ticket, frontier = output};
@@ -1427,50 +1542,234 @@ request_analysis :: (service: *Service, handle: Handle(.SESSION), request: Analy
 
 	}
 
-	documents := NewArray(request.documents.count, [] u8);
-	for request.documents {
-		documents[it_index] = array_copy(find_document(session.provider, it).document);
-	}
+	backing: Source_Update_Backing;
+	defer finish_source_update_backing(session, *backing);
 
-	frontier := array_copy(session.provider.accepted_frontier);
+	documents: [] [] u8;
+	frontier: [] u8;
 	allocator := output_allocator();
 	output: [] u8;
-	output_ok: bool;
+	output_ok := true;
+	output_attempted := false;
 	defer finish_analysis_receipt(session, *frontier, *documents, *output, allocator);
 
-	unlock(
-		*session.gate,
-		#code {
-			output_ok, output = try_output_bytes(allocator, frontier);
+	preparation_ok := prepare_source_update_backing(session, request.documents.count, *backing);
+	documents = backing.documents;
+	backing.documents = .[];
+	if preparation_ok {
+		preparation_ok = prepare_analysis_document_backing(session, request, documents, *frontier);
+	}
+
+	registration_ok := true;
+	operation_ok := true;
+	candidate_ok := true;
+	capture_prepared := false;
+	candidate_snapshot: Analysis_Candidate_Snapshot;
+	candidate_capture: Source_Candidate_Capture;
+	defer finish_analysis_candidate_capture(session, *candidate_snapshot, *candidate_capture);
+
+	candidate_world: Source_Candidate_World_Backing;
+	defer finish_analysis_candidate_world_backing(session, *candidate_world);
+
+	candidate_task: Source_Candidate_Task_Backing;
+	defer finish_analysis_candidate_task_backing(session, *candidate_task);
+
+	candidate_join: Source_Candidate_Join_Backing;
+	defer finish_analysis_candidate_join_backing(session, *candidate_join);
+
+	while true {
+		if !validate_session(session, handle) {
+			return false, .{}, stale(.SESSION);
 		}
-	);
-
-	if !validate_session(session, handle) {
-		return false, .{}, stale(.SESSION);
-	}
 
 
-	if session.lifecycle != .OPEN {
-		return false, .{}, .{code = .SERVICE_CLOSED};
-	}
+		if session.lifecycle != .OPEN {
+			return false, .{}, .{code = .SERVICE_CLOSED};
+		}
 
 
-	frontier_matches := bytes_equal(frontier, session.provider.accepted_frontier);
-	#if TEST_HOOKS {
-		frontier_matches ||= session.faults.skip_analysis_frontier_check;
-	}
+		frontier_matches := bytes_equal(request.expected_frontier, session.provider.accepted_frontier);
+		#if TEST_HOOKS {
+			frontier_matches ||= session.faults.skip_analysis_frontier_check;
+		}
 
-	if !frontier_matches {
-		return false, .{}, .{code = .BASE_MISMATCH, scope = .FRONTIER};
-	}
+		if !frontier_matches {
+			return false, .{}, .{code = .BASE_MISMATCH, scope = .FRONTIER};
+		}
 
 
-	#if TEST_HOOKS {
-		output_ok ||= session.faults.allow_failed_analysis_output;
-	}
+		#if TEST_HOOKS {
+			output_ok ||= session.faults.allow_failed_analysis_output;
+		}
 
-	if !output_ok {
-		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		if !preparation_ok || !output_ok || !registration_ok || !operation_ok || !candidate_ok {
+			return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		}
+
+
+		if !output_attempted {
+			for request.documents {
+				state := find_document(session.provider, it);
+				assert(state && state.document.count == documents[it_index].count);
+				memcpy(documents[it_index].data, state.document.data, state.document.count);
+			}
+
+			memcpy(frontier.data, request.expected_frontier.data, frontier.count);
+			sort_canonical(documents);
+			output_attempted = true;
+			unlock(
+				*session.gate,
+				#code {
+					output_ok, output = try_output_bytes(allocator, frontier);
+				}
+			);
+			continue;
+		}
+
+
+		for Limit_Name.[.LIVE_HANDLES, .IN_FLIGHT_OPERATIONS] {
+			if session.ledger.live[it] >= session.ledger.limits.values[it] - session.ledger.reserved[it] {
+				return false, .{}, limit(it);
+			}
+		}
+
+
+		if session.identities.operation_counter.next == U64_MAX {
+			return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		}
+
+
+		if !registration_backing_ready(session) {
+			registration_ok = prepare_registration_backing(session);
+			continue;
+		}
+
+
+		if !source_operation_backing_ready(session) {
+			operation_ok = prepare_source_operation_backing(session);
+			continue;
+		}
+
+
+		if !candidate_snapshot.states.count {
+			sized, metadata_count := analysis_candidate_metadata_count(session.provider, documents);
+			if !sized {
+				return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+			}
+
+
+			candidate_allocator := owner_allocator(session);
+			#if TEST_HOOKS {
+				candidate_allocator = .{proc = source_candidate_capture_allocate, data = session};
+			}
+
+			unlock(
+				*session.gate,
+				#code {
+					candidate_ok, candidate_snapshot = try_analysis_candidate_snapshot(documents.count, metadata_count, candidate_allocator);
+				}
+			);
+			continue;
+		}
+
+
+		if !capture_prepared {
+			stage_analysis_candidate_snapshot(session.provider, documents, *candidate_snapshot);
+			capture_prepared = true;
+			candidate_allocator := owner_allocator(session);
+			#if TEST_HOOKS {
+				candidate_allocator = .{proc = source_candidate_capture_allocate, data = session};
+			}
+
+			unlock(
+				*session.gate,
+				#code {
+					candidate_ok, candidate_capture = try_source_candidate_capture(
+						*candidate_snapshot.model,
+						session.identities.session,
+						frontier,
+						documents,
+						candidate_allocator
+					);
+				}
+			);
+			continue;
+		}
+
+
+		if !find_candidate_world(session, candidate_capture.key) {
+			if session.identities.world_counter.next == U64_MAX {
+				return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+			}
+
+
+			if !candidate_world.world || !source_candidate_world_backing_ready(session, *candidate_world) {
+				capacity: s64;
+				if session.worlds.count >= session.worlds.allocated {
+					capacity = ifx session.worlds.count <= S64_MAX / 2 - 1
+						then max(8, (session.worlds.count + 1) * 2)
+						else -1;
+				}
+
+				world_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					world_allocator = .{proc = source_candidate_world_allocate, data = session};
+				}
+
+				unlock(
+					*session.gate,
+					#code {
+						free_source_candidate_world_backing(*candidate_world, world_allocator);
+						candidate_ok, candidate_world = try_source_candidate_world_backing(session.identities.session, capacity, world_allocator);
+					}
+				);
+				continue;
+			}
+
+			if candidate_capture.capturable && (!candidate_task.task || !source_candidate_task_backing_ready(session, *candidate_task)) {
+				tasks_capacity := ifx session.tasks.count < session.tasks.allocated
+					then 0
+					else ifx session.tasks.count <= S64_MAX / 2 - 1
+						then max(8, (session.tasks.count + 1) * 2)
+						else -1;
+				ready_capacity := ifx session.ready.count < session.ready.allocated
+					then 0
+					else ifx session.ready.count <= S64_MAX / 2 - 1
+						then max(8, (session.ready.count + 1) * 2)
+						else -1;
+				task_allocator := owner_allocator(session);
+				#if TEST_HOOKS {
+					task_allocator = .{proc = source_candidate_task_allocate, data = session};
+				}
+
+				unlock(
+					*session.gate,
+					#code {
+						free_source_candidate_task_backing(*candidate_task, task_allocator);
+						candidate_ok, candidate_task = try_source_candidate_task_backing(
+							session.identities.session,
+							xx candidate_world.identity,
+							tasks_capacity,
+							ready_capacity,
+							task_allocator
+						);
+					}
+				);
+				continue;
+			}
+		} else if !source_candidate_join_backing_ready(session, candidate_capture.key, *candidate_join) {
+			if candidate_join.task {
+				finish_analysis_candidate_join_backing(session, *candidate_join);
+				continue;
+			}
+
+
+			candidate_ok, candidate_join = prepare_source_candidate_join_backing(session, candidate_capture.key);
+			continue;
+		}
+
+
+		break;
 	}
 
 
@@ -1480,9 +1779,23 @@ request_analysis :: (service: *Service, handle: Handle(.SESSION), request: Analy
 	}
 
 
-	sort_canonical(documents);
-	operation := new_update_operation(session, frontier, documents);
-	start_candidate(session, operation);
+	ok_token, token := issue_token(*session.identities.operation_counter);
+	assert(ok_token);
+	for 0..7 {
+		backing.identity[backing.identity.count - 8 + it] = xx ((token >> (it * 8)) & 0xFF);
+	}
+
+	operation := backing.operation;
+	operation.* = .{
+		identity = xx backing.identity,
+		kind = .UPDATE,
+		frontier = frontier,
+		documents = documents,
+	};
+	array_add(*session.operations, operation);
+	backing = .{};
+	bind_analysis_candidate_capture(session.provider, documents, *candidate_capture);
+	start_candidate(session, operation, *candidate_capture, *candidate_world, *candidate_task, *candidate_join);
 	ticket := register(session, .TICKET, .{operation = operation});
 	operation.registrations += 1;
 	accepted := Accepted.{ticket = ticket, frontier = output};
@@ -1701,9 +2014,83 @@ query :: (service: *Service, request: Query_Request) -> (ok: bool, started: Quer
 
 
 	// Every query gets its own operation identity, even when it is answered at once or shares a task.
-	ok, identity := issue_operation(*session.identities);
-	if !ok {
-		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	pending := member >= 0
+		&& request.kind != .SEMANTIC_QUERY
+		&& request.kind != .COMPILER_EVALUATION
+		&& world.members[member].state == .PRESENT
+		&& bytes_equal(world.frontier, session.provider.accepted_frontier);
+	backing: Source_Update_Backing;
+	if pending {
+		world.references += 1;
+	}
+
+	defer {
+		if pending {
+			release_world(session, world);
+		}
+	}
+
+	defer {
+		if backing.operation || backing.identity.data {
+			finish_query_operation_backing(session, *backing);
+		}
+	}
+
+	prepared := false;
+	backing_ok := true;
+	while pending {
+		if !lookup_pinned(session, request.world) {
+			return false, .{}, stale(.WORLD);
+		}
+
+
+		if session.lifecycle != .OPEN {
+			return false, .{}, .{code = .SERVICE_CLOSED};
+		}
+
+
+		if !bytes_equal(world.frontier, session.provider.accepted_frontier) {
+			break;
+		}
+
+
+		if !backing_ok || session.identities.operation_counter.next == U64_MAX {
+			return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		}
+
+
+		for Limit_Name.[.IN_FLIGHT_OPERATIONS, .LIVE_HANDLES, .PENDING_REGISTRATIONS, .COMPLETION_RECORDS] {
+			if session.ledger.live[it] >= session.ledger.limits.values[it] - session.ledger.reserved[it] {
+				return false, .{}, limit(it);
+			}
+		}
+
+		if !prepared {
+			prepared = true;
+			backing_ok = prepare_source_update_backing(session, 0, *backing);
+			continue;
+		}
+
+
+		if !source_operation_backing_ready(session) {
+			backing_ok = prepare_source_operation_backing(session);
+			continue;
+		}
+
+
+		break;
+	}
+
+
+	identity: Operation_ID;
+	if !pending || !bytes_equal(world.frontier, session.provider.accepted_frontier) {
+		ok, issued := issue_operation(*session.identities);
+		if !ok {
+			return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		}
+
+
+		identity = issued;
 	}
 
 
@@ -1746,28 +2133,46 @@ query :: (service: *Service, request: Query_Request) -> (ok: bool, started: Quer
 	}
 
 
-	operation := New(Operation);
-	operation.identity = identity;
-	operation.kind = .QUERY;
-	operation.world = world;
-	operation.member = member;
-	operation.query_kind = request.kind;
+	operation := backing.operation;
+	operation.* = .{
+		kind = .QUERY,
+		world = world,
+		member = member,
+		query_kind = request.kind,
+	};
+
 	world.references += 1;
 	waiter, error, terminal_winner := new_waiter(session, request.world, operation);
 	if !waiter.generation {
 		release_world(session, world);
-		free(operation);
-		if terminal_winner {
-			immediate.query = .{kind = .CANCELLED, cancellation = .WORLD_SUPERSEDED};
-			exported, output, terminal_error := export_query_terminal(session, request.world, immediate);
-			return exported, output, terminal_error;
+		if !terminal_winner {
+			return false, .{}, error;
 		}
-
-
-		return false, .{}, error;
 	}
 
 
+	issued, token := issue_token(*session.identities.operation_counter);
+	assert(!waiter.generation || issued);
+	if !issued {
+		return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+	}
+
+
+	for 0..7 {
+		backing.identity[backing.identity.count - 8 + it] = xx ((token >> (it * 8)) & 0xFF);
+	}
+
+	operation.identity = xx backing.identity;
+	if terminal_winner {
+		immediate.operation_identity = operation.identity;
+		immediate.query = .{kind = .CANCELLED, cancellation = .WORLD_SUPERSEDED};
+		exported, output, terminal_error := export_query_terminal(session, request.world, immediate);
+		return exported, output, terminal_error;
+	}
+
+
+	backing.operation = null;
+	backing.identity = .[];
 	array_add(*session.operations, operation);
 	key := make_key("execution-task", session.identities.session.([] u8), world.identity.([] u8), xx "QUERY_PAYLOAD", world.members[member].document, xx "SYNTAX_DIAGNOSTICS");
 	task: *Task;
@@ -2680,6 +3085,8 @@ Delivery :: enum u8 {
 	// - storage = `test_source_batch_storage_admission`, `test_source_batch_storage_cleanup`,
 	//    `test_source_registration_receipt_retry` (private pool-transfer backing).
 	Test_Faults :: struct {
+		// Allocation hooks reject the attempted allocation when they return `false`; `null` disables interception.
+		// Hook data pointers borrow test-owned probe state; installing a hook does not transfer ownership.
 		// == Output copying and revalidation ==
 		// Ignore terminal query copy failure; `test_terminal_query_failures` negative control:
 		allow_failed_terminal_query: bool;
@@ -2725,7 +3132,7 @@ Delivery :: enum u8 {
 		allow_active_session_release: bool;
 
 		// == Shared registration backing and handle revalidation ==
-		// Shared registration-slot/list backing hook; retain, waiter, world, result, immediate-result, source and repeated-shutdown tests:
+		// Registration-slot/list/object allocation; retain, waiter, world, result, source, analysis and repeated-shutdown tests:
 		registration_allocation_hook: (size: s64, data: *void) -> bool;
 		// State passed to `registration_allocation_hook` in those backing failure/quota/interleaving/retry tests:
 		registration_allocation_data: *void;
@@ -2757,7 +3164,7 @@ Delivery :: enum u8 {
 		retry_failed_source_registration: bool;
 
 		// == Source-update backing ==
-		// Source-update backing allocation; source admission failure/interleaving controls and `test_source_update_counter`:
+		// Private update operation/identity backing and analysis document/frontier copies; source/analysis failure and interleaving tests:
 		source_update_allocation_hook: (size: s64, data: *void) -> bool;
 		// State passed to `source_update_allocation_hook`:
 		source_update_allocation_data: *void;
@@ -2765,7 +3172,7 @@ Delivery :: enum u8 {
 		retry_failed_source_update: bool;
 
 		// == Source-operation backing ==
-		// Source-operation backing allocation; source admission failure/interleaving and receipt-retry tests:
+		// Session operation-list growth; source/analysis admission failure/interleaving and source receipt-retry tests:
 		source_operation_allocation_hook: (size: s64, data: *void) -> bool;
 		// State for `source_operation_allocation_hook` and `source_operation_cleanup_hook`:
 		source_operation_allocation_data: *void;
@@ -2911,6 +3318,24 @@ Delivery :: enum u8 {
 		// == Discarded-attempt source-reference rollback ==
 		// Deliberately keep an extra source reference during discarded-attempt cleanup; source receipt-retry retained-sentinel control:
 		retain_source_batch_reference: *Source_Backing;
+
+		// == Candidate capture, world, task and join backing ==
+		// Selected-member, filename and capture-key backing, including protected analysis snapshots; source/analysis candidate tests:
+		source_candidate_capture_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_candidate_capture_allocation_hook` for rejection, callback, retry and cleanup probes:
+		source_candidate_capture_allocation_data: *void;
+		// Candidate `World`, canonical world key and world-list growth; source/analysis admission and actual-free tests:
+		source_candidate_world_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_candidate_world_allocation_hook` for rejection, capacity-loss and cleanup probes:
+		source_candidate_world_allocation_data: *void;
+		// Candidate `Task`, key, initial operation buffer and task/ready queue growth; source/analysis task-backing tests:
+		source_candidate_task_allocation_hook: (size: s64, data: *void) -> bool;
+		// Existing-task operation-list growth and optional-ready promotion; source/analysis join and publication-winner tests:
+		source_candidate_join_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `source_candidate_join_allocation_hook` for rejection, capacity/publication races and cleanup probes:
+		source_candidate_join_allocation_data: *void;
+		// State passed to `source_candidate_task_allocation_hook` for rejection, queue-capacity retries and cleanup probes:
+		source_candidate_task_allocation_data: *void;
 
 		// == Parse failure containment ==
 		// Fail conversion of the named member in its candidate parse task; `service_traces_test.jai` `trace_v6` failure containment:
@@ -3401,56 +3826,79 @@ new_update_operation :: (session: *Session, frontier: [] u8, documents: [] [] u8
 	return operation;
 }
 
-// Captures the selected state of `operation.documents`, joining an equal pending or published candidate, and makes it the head target.
-start_candidate :: (session: *Session, operation: *Operation) {
-	members := NewArray(operation.documents.count, Selected_Member);
-	member_keys := NewArray(members.count, [] u8,, temp);
-	capturable := true;
-	coherent := true;
-	capture: Consistency;
-	for operation.documents {
-		state := find_document(session.provider, it);
-		selected := selected_document(state);
-		coherent &&= selected.provenance && selected.provenance.consistency.kind == .COHERENT_CAPTURE;
-		if coherent {
-			coherent = !capture.capture_token.count || bytes_equal(capture.capture_token, selected.provenance.consistency.capture_token);
-			capture = selected.provenance.consistency;
-		}
-
-		member := *members[it_index];
-		member.document = state.document;
-		member.provider_revision = state.provider_revision;
-		member.context_identity = selected.syntax_context;
-		member.state = xx selected.kind;
-		member.source = selected.source;
-		capturable &&= member.state == .PRESENT || member.state == .ABSENT;
-		admitted := find_context(session.provider, selected.syntax_context);
-		member.filename = path_spelling(admitted.paths.visible_filename);
-		source_revision := ifx member.source then member.source.revision;
-		member_keys[it_index] = make_key("member", member.document, member.provider_revision, member.context_identity, source_revision,, temp);
-	}
-
-	key := make_key("execution-capture", session.identities.session.([] u8), operation.frontier, make_key("members", ..member_keys,, temp), xx "SYNTAX_INDEX");
+find_candidate_world :: (session: *Session, key: [] u8) -> *World {
 	for session.worlds {
 		if (it.state == .PENDING || it.state == .PUBLISHED) && bytes_equal(it.capture_key, key) {
-			free(members.data);
-			operation.world = it;
-			it.references += 1;
-			session.head_target = it;
-			if it.state == .PUBLISHED {
-				finish_update(session, operation, .{kind = .PUBLISHED, world_identity = it.identity});
-				install_head(session, it);
-			} else {
-				for task: session.tasks {
-					if task.world == it && task.kind == .PARSE_INDEX && task.phase != .TERMINAL {
-						require_task(session, task);
-						array_add(*task.operations, operation);
-					}
-				}
-			}
-
-			return;
+			return it;
 		}
+	}
+
+
+	return null;
+}
+
+find_candidate_task :: (session: *Session, world: *World) -> *Task {
+	for session.tasks {
+		if it.world == world && it.kind == .PARSE_INDEX && it.phase != .TERMINAL {
+			return it;
+		}
+	}
+
+
+	return null;
+}
+
+// Captures the selected state of `operation.documents`, joining an equal pending or published candidate, and makes it the head target.
+start_candidate :: (
+	session: *Session,
+	operation: *Operation,
+	prepared: *Source_Candidate_Capture = null,
+	prepared_world: *Source_Candidate_World_Backing = null,
+	prepared_task: *Source_Candidate_Task_Backing = null,
+	prepared_join: *Source_Candidate_Join_Backing = null
+) {
+	capture: Source_Candidate_Capture;
+	if prepared {
+		capture = prepared.*;
+		prepared.* = .{};
+	} else {
+		ok: bool;
+		ok, capture = try_source_candidate_capture(session.provider, session.identities.session, operation.frontier, operation.documents);
+		assert(ok);
+	}
+
+	defer {
+		if prepared {
+			prepared.* = capture;
+		} else {
+			free_source_candidate_capture(*capture);
+		}
+	}
+
+	members := capture.members;
+	key := capture.key;
+	existing := find_candidate_world(session, key);
+	if existing {
+		operation.world = existing;
+		existing.references += 1;
+		session.head_target = existing;
+		if existing.state == .PUBLISHED {
+			finish_update(session, operation, .{kind = .PUBLISHED, world_identity = existing.identity});
+			install_head(session, existing);
+		} else {
+			task := find_candidate_task(session, existing);
+			if task {
+				if prepared_join {
+					assert(source_candidate_join_backing_ready(session, key, prepared_join));
+					adopt_source_candidate_join_backing(session, prepared_join);
+				}
+
+				require_task(session, task);
+				array_add(*task.operations, operation);
+			}
+		}
+
+		return;
 	}
 
 
@@ -3460,18 +3908,48 @@ start_candidate :: (session: *Session, operation: *Operation) {
 		}
 	}
 
-	_, identity := issue_world(*session.identities);
-	world := New(World);
-	world.identity = identity;
-	world.frontier = operation.frontier;
-	world.capture_key = key;
-	world.members = members;
-	world.consistency = ifx coherent then capture else .{kind = .IMMUTABLE_CAPTURE};
-	world.references = 2;
+	world: *World;
+	identity: World_ID;
+	if prepared_world {
+		ok, token := issue_token(*session.identities.world_counter);
+		assert(ok && prepared_world.world && source_candidate_world_backing_ready(session, prepared_world));
+		for 0..7 {
+			prepared_world.identity[prepared_world.identity.count - 8 + it] = xx ((token >> (it * 8)) & 0xFF);
+		}
+
+		world = prepared_world.world;
+		identity = xx prepared_world.identity;
+		prepared_world.world = null;
+		prepared_world.identity = .[];
+		if session.worlds.count >= session.worlds.allocated {
+			previous := session.worlds;
+			memcpy(prepared_world.worlds.data, previous.data, previous.count * size_of(*World));
+			session.worlds.data = prepared_world.worlds.data;
+			session.worlds.allocated = prepared_world.worlds.count;
+			session.worlds.allocator = owner_allocator(session);
+			prepared_world.worlds = .{data = previous.data, count = previous.allocated};
+		}
+	} else {
+		_, generated := issue_world(*session.identities);
+		identity = generated;
+		world = New(World);
+	}
+
+	world.* = .{
+		identity = identity,
+		frontier = operation.frontier,
+		capture_key = key,
+		members = members,
+		consistency = capture.consistency,
+		references = 2,
+	};
+
+	capture.members = .[];
+	capture.key = .[];
 	array_add(*session.worlds, world);
 	operation.world = world;
 	session.head_target = world;
-	if !capturable {
+	if !capture.capturable {
 		world.state = .FAILED;
 		world.references -= 1;
 		finish_update(session, operation, .{kind = .FAILED, failure = .{stage = .PROVIDER, code = .REVISION_UNAVAILABLE}});
@@ -3479,11 +3957,38 @@ start_candidate :: (session: *Session, operation: *Operation) {
 	}
 
 
-	task := New(Task);
-	task.kind = .PARSE_INDEX;
-	task.key = make_key("execution-task", session.identities.session.([] u8), world.identity.([] u8), xx "PARSE_INDEX");
-	task.world = world;
-	task.attempt = 1;
+	task: *Task;
+	if prepared_task {
+		assert(prepared_task.task && source_candidate_task_backing_ready(session, prepared_task));
+		set_source_candidate_task_world(prepared_task, world.identity);
+		adopt_source_candidate_task_list(*session.tasks, *prepared_task.tasks, owner_allocator(session));
+		adopt_source_candidate_task_list(*session.ready, *prepared_task.ready, owner_allocator(session));
+		task = prepared_task.task;
+		operations: [..] *Operation;
+		operations.data = prepared_task.operations.data;
+		operations.allocated = prepared_task.operations.count;
+		operations.allocator = owner_allocator(session);
+		task.* = .{
+			kind = .PARSE_INDEX,
+			key = prepared_task.key,
+			world = world,
+			attempt = 1,
+			operations = operations,
+		};
+
+		prepared_task.task = null;
+		prepared_task.key = .[];
+		prepared_task.operations = .[];
+	} else {
+		task = New(Task);
+		task.* = .{
+			kind = .PARSE_INDEX,
+			key = make_key("execution-task", session.identities.session.([] u8), world.identity.([] u8), xx "PARSE_INDEX"),
+			world = world,
+			attempt = 1,
+		};
+	}
+
 	array_add(*task.operations, operation);
 	array_add(*session.tasks, task);
 	array_add(*session.ready, task);
@@ -3605,8 +4110,13 @@ finish_query :: (session: *Session, operation: *Operation, outcome: Query_Termin
 
 new_waiter :: (session: *Session, source: Handle($K), operation: *Operation) -> (waiter: Handle(.WAITER), error: Operation_Error, terminal_winner: bool) {
 	#assert K == .TICKET || K == .WORLD;
-	while !registration_backing_ready(session) || operation.waiters.count >= operation.waiters.allocated {
+	while !registration_backing_ready(session) || operation.waiters.count >= operation.waiters.allocated || (K == .WORLD && !source_operation_backing_ready(session)) {
 		#if K == .WORLD {
+			if session.identities.operation_counter.next == U64_MAX {
+				return .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}}, false;
+			}
+
+
 			name := Limit_Name.IN_FLIGHT_OPERATIONS;
 			if session.ledger.live[name] >= session.ledger.limits.values[name] - session.ledger.reserved[name] {
 				return .{}, limit(name), false;
@@ -3621,9 +4131,14 @@ new_waiter :: (session: *Session, source: Handle($K), operation: *Operation) -> 
 		}
 
 
-		backing_ok := ifx registration_backing_ready(session)
-			then prepare_waiter_backing(session, source, operation)
-			else prepare_registration_backing(session);
+		backing_ok: bool;
+		if !registration_backing_ready(session) {
+			backing_ok = prepare_registration_backing(session);
+		} else if K == .WORLD && !source_operation_backing_ready(session) {
+			backing_ok = prepare_source_operation_backing(session);
+		} else {
+			backing_ok = prepare_waiter_backing(session, source, operation);
+		}
 
 		current, registration := lookup_waiter_source(session, source);
 		if !current {
@@ -3662,6 +4177,12 @@ new_waiter :: (session: *Session, source: Handle($K), operation: *Operation) -> 
 		}
 	}
 
+
+	#if K == .WORLD {
+		if session.identities.operation_counter.next == U64_MAX {
+			return .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}}, false;
+		}
+	}
 
 	taken: bool;
 	missing: Limit_Name;
