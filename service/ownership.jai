@@ -1317,6 +1317,156 @@ Source_Candidate_Task_Backing :: struct {
 	ready: [] *Task;
 }
 
+prepare_query_task_key :: (session: *Session, world: *World, member: s64, backing: *Source_Candidate_Task_Backing) -> bool {
+	allocator := owner_allocator(session);
+	#if TEST_HOOKS {
+		allocator = .{proc = source_candidate_task_allocate, data = session};
+	}
+
+	ok: bool;
+	unlock(
+		*session.gate,
+		#code {
+			ok, backing.key = try_output_key(
+				allocator,
+				"execution-task",
+				session.identities.session.([] u8),
+				world.identity.([] u8),
+				xx "QUERY_PAYLOAD",
+				world.members[member].document,
+				xx "SYNTAX_DIAGNOSTICS"
+			);
+		}
+	);
+
+	return ok;
+}
+
+find_query_task :: (session: *Session, key: [] u8) -> *Task {
+	result: *Task;
+	for session.tasks {
+		if it.phase != .TERMINAL && bytes_equal(it.key, key) {
+			result = it;
+		}
+	}
+
+	return result;
+}
+
+query_new_task_backing_ready :: (session: *Session, backing: *Source_Candidate_Task_Backing) -> bool {
+	return !!find_query_task(session, backing.key)
+		|| backing.task && backing.operations.count && source_candidate_task_backing_ready(session, backing);
+}
+
+query_task_backing_ready :: (
+	session: *Session,
+	backing: *Source_Candidate_Task_Backing,
+	join: *Source_Candidate_Join_Backing
+) -> bool {
+	task := find_query_task(session, backing.key);
+	if task {
+		return task.operations.count < task.operations.allocated
+			|| join && join.task == task && join.operations.count > task.operations.count;
+	}
+
+	return query_new_task_backing_ready(session, backing);
+}
+
+prepare_query_task_backing :: (
+	session: *Session,
+	backing: *Source_Candidate_Task_Backing,
+	join: *Source_Candidate_Join_Backing
+) -> bool {
+	task := find_query_task(session, backing.key);
+	if !task {
+		return prepare_query_new_task_backing(session, backing);
+	}
+
+
+	assert(!!join);
+	if join.task {
+		finish_analysis_candidate_join_backing(session, join);
+		return true;
+	}
+
+
+	capacity := ifx task.operations.count <= S64_MAX / 2 - 1
+		then max(8, (task.operations.count + 1) * 2)
+		else -1;
+	allocator := owner_allocator(session);
+	#if TEST_HOOKS {
+		allocator = .{proc = source_candidate_join_allocate, data = session};
+	}
+
+	ok: bool;
+	unlock(
+		*session.gate,
+		#code {
+			ok, join.* = try_source_candidate_join_backing(capacity, 0, allocator);
+		}
+	);
+	join.task = task;
+	return ok;
+}
+
+prepare_query_new_task_backing :: (session: *Session, backing: *Source_Candidate_Task_Backing) -> bool {
+	if session.tasks.count == S64_MAX || session.ready.count == S64_MAX {
+		return false;
+	}
+
+
+	allocator := owner_allocator(session);
+	#if TEST_HOOKS {
+		allocator = .{proc = source_candidate_task_allocate, data = session};
+	}
+
+	tasks_capacity := ifx session.tasks.count < session.tasks.allocated
+		then 0
+		else max(8, session.tasks.count + 1);
+	ready_capacity := ifx session.ready.count < session.ready.allocated
+		then 0
+		else max(8, session.ready.count + 1);
+	ok := true;
+	unlock(
+		*session.gate,
+		#code {
+			if !backing.task {
+				ok, storage := try_output_array(allocator, 1, Task);
+				backing.task = storage.data;
+				if !ok {
+					return false;
+				}
+			}
+
+
+			if !backing.operations.count {
+				ok, backing.operations = try_output_array(allocator, 1, *Operation);
+				if !ok {
+					return false;
+				}
+			}
+
+
+			if tasks_capacity > backing.tasks.count {
+				free(backing.tasks.data,, allocator);
+				ok, backing.tasks = try_output_array(allocator, tasks_capacity, *Task);
+				if !ok {
+					return false;
+				}
+			}
+
+
+			if ready_capacity > backing.ready.count {
+				free(backing.ready.data,, allocator);
+				ok, backing.ready = try_output_array(allocator, ready_capacity, *Task);
+			}
+		}
+	);
+
+
+	return ok;
+}
+
 try_source_candidate_task_backing :: (
 	identity: Session_ID,
 	world_identity: World_ID,
@@ -1837,6 +1987,24 @@ Source_Update_Backing :: struct {
 	}
 }
 
+prepare_query_operation_identity :: (session: *Session, backing: *Source_Update_Backing) -> bool {
+	allocator := owner_allocator(session);
+	#if TEST_HOOKS {
+		allocator = .{proc = source_update_allocate, data = session};
+	}
+
+	prepared := false;
+	unlock(
+		*session.gate,
+		#code {
+			token: [8] u8;
+			prepared, backing.identity = try_output_key(allocator, "operation", session.identities.session.([] u8), token);
+		}
+	);
+
+	return prepared;
+}
+
 prepare_source_update_backing :: (session: *Session, count: s64, backing: *Source_Update_Backing) -> bool {
 	allocator := owner_allocator(session);
 	#if TEST_HOOKS {
@@ -1924,10 +2092,12 @@ Immediate_Result_Backing :: struct {
 	identity: [] u8;
 }
 
-prepare_immediate_result_backing :: (session: *Session, backing: *Immediate_Result_Backing) -> bool {
+prepare_immediate_result_backing :: (session: *Session, backing: *Immediate_Result_Backing, asynchronous := false) -> bool {
 	allocator := owner_allocator(session);
 	#if TEST_HOOKS {
-		allocator = .{proc = registration_backing_allocate, data = session};
+		allocator = ifx asynchronous
+			then Allocator.{proc = query_result_allocate, data = session}
+			else .{proc = registration_backing_allocate, data = session};
 	}
 
 	prepared := false;
@@ -1944,6 +2114,22 @@ prepare_immediate_result_backing :: (session: *Session, backing: *Immediate_Resu
 	);
 
 	return prepared;
+}
+
+#if TEST_HOOKS {
+	query_result_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.query_result_allocation_hook;
+			if hook && !hook(size, session.faults.query_result_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
 }
 
 finish_immediate_result_backing :: (session: *Session, backing: *Immediate_Result_Backing) {

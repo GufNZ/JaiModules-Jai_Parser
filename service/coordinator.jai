@@ -2020,19 +2020,29 @@ query :: (service: *Service, request: Query_Request) -> (ok: bool, started: Quer
 		&& world.members[member].state == .PRESENT
 		&& bytes_equal(world.frontier, session.provider.accepted_frontier);
 	backing: Source_Update_Backing;
-	if pending {
-		world.references += 1;
-	}
+	world.references += 1;
 
 	defer {
-		if pending {
-			release_world(session, world);
-		}
+		release_world(session, world);
 	}
 
 	defer {
 		if backing.operation || backing.identity.data {
 			finish_query_operation_backing(session, *backing);
+		}
+	}
+
+	task_backing: Source_Candidate_Task_Backing;
+	defer {
+		if pending {
+			finish_analysis_candidate_task_backing(session, *task_backing);
+		}
+	}
+
+	join_backing: Source_Candidate_Join_Backing;
+	defer {
+		if pending {
+			finish_analysis_candidate_join_backing(session, *join_backing);
 		}
 	}
 
@@ -2078,19 +2088,58 @@ query :: (service: *Service, request: Query_Request) -> (ok: bool, started: Quer
 		}
 
 
+		if !task_backing.key.data {
+			backing_ok = prepare_query_task_key(session, world, member, *task_backing);
+			continue;
+		}
+
+
+		if !query_task_backing_ready(session, *task_backing, *join_backing) {
+			backing_ok = prepare_query_task_backing(session, *task_backing, *join_backing);
+			continue;
+		}
+
+
 		break;
 	}
 
 
 	identity: Operation_ID;
 	if !pending || !bytes_equal(world.frontier, session.provider.accepted_frontier) {
-		ok, issued := issue_operation(*session.identities);
+		if session.identities.operation_counter.next == U64_MAX {
+			return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+		}
+
+
+		if !backing.identity.data {
+			prepared := prepare_query_operation_identity(session, *backing);
+			if !lookup_pinned(session, request.world) {
+				return false, .{}, stale(.WORLD);
+			}
+
+
+			if session.lifecycle != .OPEN {
+				return false, .{}, .{code = .SERVICE_CLOSED};
+			}
+
+
+			if !prepared {
+				return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
+			}
+		}
+
+
+		ok, token := issue_token(*session.identities.operation_counter);
 		if !ok {
 			return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
 		}
 
 
-		identity = issued;
+		for 0..7 {
+			backing.identity[backing.identity.count - 8 + it] = xx ((token >> (it * 8)) & 0xFF);
+		}
+
+		identity = xx backing.identity;
 	}
 
 
@@ -2142,7 +2191,7 @@ query :: (service: *Service, request: Query_Request) -> (ok: bool, started: Quer
 	};
 
 	world.references += 1;
-	waiter, error, terminal_winner := new_waiter(session, request.world, operation);
+	waiter, error, terminal_winner := new_waiter(session, request.world, operation, *task_backing, *join_backing);
 	if !waiter.generation {
 		release_world(session, world);
 		if !terminal_winner {
@@ -2174,24 +2223,36 @@ query :: (service: *Service, request: Query_Request) -> (ok: bool, started: Quer
 	backing.operation = null;
 	backing.identity = .[];
 	array_add(*session.operations, operation);
-	key := make_key("execution-task", session.identities.session.([] u8), world.identity.([] u8), xx "QUERY_PAYLOAD", world.members[member].document, xx "SYNTAX_DIAGNOSTICS");
-	task: *Task;
-	for session.tasks {
-		if it.phase != .TERMINAL && bytes_equal(it.key, key) {
-			task = it;
-		}
-	}
-
+	key := task_backing.key;
+	task := find_query_task(session, key);
 	if !task {
-		task = New(Task);
-		task.kind = .QUERY_PAYLOAD;
-		task.key = key;
-		task.world = world;
-		task.member = member;
-		task.attempt = 1;
+		assert(query_new_task_backing_ready(session, *task_backing));
+		allocator := owner_allocator(session);
+		adopt_source_candidate_task_list(*session.tasks, *task_backing.tasks, allocator);
+		adopt_source_candidate_task_list(*session.ready, *task_backing.ready, allocator);
+		operations: [..] *Operation;
+		operations.data = task_backing.operations.data;
+		operations.allocated = task_backing.operations.count;
+		operations.allocator = allocator;
+		task = task_backing.task;
+		task.* = .{
+			kind = .QUERY_PAYLOAD,
+			key = key,
+			world = world,
+			member = member,
+			attempt = 1,
+			operations = operations,
+		};
+
+		task_backing.task = null;
+		task_backing.key = .[];
+		task_backing.operations = .[];
 		world.references += 1;
 		array_add(*session.tasks, task);
 		array_add(*session.ready, task);
+	} else if task.operations.count >= task.operations.allocated {
+		assert(join_backing.task == task && join_backing.operations.count > task.operations.count);
+		adopt_source_candidate_join_backing(session, *join_backing);
 	}
 
 	array_add(*task.operations, operation);
@@ -3013,6 +3074,7 @@ Delivery :: enum u8 {
 		SELECTED;
 		PARSED;
 		PUBLICATION;
+		QUERY_RESULT;
 		WAIT_ARMING;
 	}
 
@@ -3136,6 +3198,10 @@ Delivery :: enum u8 {
 		registration_allocation_hook: (size: s64, data: *void) -> bool;
 		// State passed to `registration_allocation_hook` in those backing failure/quota/interleaving/retry tests:
 		registration_allocation_data: *void;
+		// Private asynchronous result object/identity allocation; query publication failure and interleaving tests:
+		query_result_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `query_result_allocation_hook` during worker result preparation:
+		query_result_allocation_data: *void;
 		// Reuse a stale retained-handle source after backing allocation; `test_retain_backing_interleavings` control:
 		allow_stale_retain_registration: bool;
 		// Reuse a stale session after repeated-shutdown backing allocation; `test_repeated_shutdown_interleavings` control:
@@ -3164,7 +3230,7 @@ Delivery :: enum u8 {
 		retry_failed_source_registration: bool;
 
 		// == Source-update backing ==
-		// Private update operation/identity backing and analysis document/frontier copies; source/analysis failure and interleaving tests:
+		// Private update/query operation/identity backing and analysis document/frontier copies; failure and interleaving tests:
 		source_update_allocation_hook: (size: s64, data: *void) -> bool;
 		// State passed to `source_update_allocation_hook`:
 		source_update_allocation_data: *void;
@@ -3328,9 +3394,9 @@ Delivery :: enum u8 {
 		source_candidate_world_allocation_hook: (size: s64, data: *void) -> bool;
 		// State passed to `source_candidate_world_allocation_hook` for rejection, capacity-loss and cleanup probes:
 		source_candidate_world_allocation_data: *void;
-		// Candidate `Task`, key, initial operation buffer and task/ready queue growth; source/analysis task-backing tests:
+		// Candidate/query `Task`, key, initial operation buffer and task/ready growth; source/analysis/query backing tests:
 		source_candidate_task_allocation_hook: (size: s64, data: *void) -> bool;
-		// Existing-task operation-list growth and optional-ready promotion; source/analysis join and publication-winner tests:
+		// Existing-task operation-list growth and optional-ready promotion; source/analysis/query join and winner tests:
 		source_candidate_join_allocation_hook: (size: s64, data: *void) -> bool;
 		// State passed to `source_candidate_join_allocation_hook` for rejection, capacity/publication races and cleanup probes:
 		source_candidate_join_allocation_data: *void;
@@ -3539,11 +3605,51 @@ deliver_mailbox :: (session: *Session, mailbox: *Mailbox) -> Delivery {
 		}
 	}
 
+	result_backing: Immediate_Result_Backing;
+	result_prepared := true;
+	consumed := !!task.operations.count;
+	#if TEST_HOOKS {
+		consumed ||= session.faults.keep_unconsumed_work;
+	}
+
+	if task.kind == .QUERY_PAYLOAD && mailbox.ok && !stopped && consumed {
+		result_prepared = session.identities.result_counter.next != U64_MAX;
+		if result_prepared {
+			result_prepared = prepare_immediate_result_backing(session, *result_backing, asynchronous = true);
+		}
+
+		if task.attempt != mailbox.attempt || (task.phase != .RUNNING && task.phase != .STOP_REQUESTED) {
+			release_mailbox_output(mailbox);
+			finish_immediate_result_backing(session, *result_backing);
+			return .REJECTED;
+		}
+
+
+		stopped = task.phase == .STOP_REQUESTED || session.lifecycle != .OPEN || !bytes_equal(world.frontier, session.provider.accepted_frontier);
+		#if TEST_HOOKS {
+			if session.faults.skip_publication_frontier_check {
+				stopped = task.phase == .STOP_REQUESTED || session.lifecycle != .OPEN;
+			}
+		}
+	}
+
 	task.phase = .TERMINAL;
 	defer {
 		release_world(session, world);
 		reap_all(session);
 		check_stopped(session);
+	}
+
+	defer {
+		if result_backing.result || result_backing.identity.data {
+			finish_immediate_result_backing(session, *result_backing);
+		}
+
+		#if TEST_HOOKS {
+			if task.kind == .QUERY_PAYLOAD {
+				pause_locked(session, .QUERY_RESULT);
+			}
+		}
 	}
 
 	if stopped {
@@ -3597,9 +3703,19 @@ deliver_mailbox :: (session: *Session, mailbox: *Mailbox) -> Delivery {
 	}
 
 
+	if !result_prepared || session.identities.result_counter.next == U64_MAX {
+		release_mailbox_output(mailbox);
+		for array_copy(task.operations,, temp) {
+			finish_query(session, it, .{kind = .FAILED, failure = .{stage = .PUBLICATION, code = .RESOURCE_LIMIT}});
+		}
+
+		return .FAILED;
+	}
+
+
+	result := new_result(session, world, task.member, .SYNTAX_DIAGNOSTICS, *result_backing);
 	world.syntax[task.member].diagnostics = mailbox.diagnostics;
 	mailbox.diagnostics = null;
-	result := new_result(session, world, task.member, .SYNTAX_DIAGNOSTICS);
 	for array_copy(task.operations,, temp) {
 		if !it.terminal {
 			it.result = result;
@@ -4108,9 +4224,20 @@ finish_query :: (session: *Session, operation: *Operation, outcome: Query_Termin
 	}
 }
 
-new_waiter :: (session: *Session, source: Handle($K), operation: *Operation) -> (waiter: Handle(.WAITER), error: Operation_Error, terminal_winner: bool) {
+new_waiter :: (
+	session: *Session,
+	source: Handle($K),
+	operation: *Operation,
+	task_backing: *Source_Candidate_Task_Backing = null,
+	join_backing: *Source_Candidate_Join_Backing = null
+) -> (waiter: Handle(.WAITER), error: Operation_Error, terminal_winner: bool) {
 	#assert K == .TICKET || K == .WORLD;
-	while !registration_backing_ready(session) || operation.waiters.count >= operation.waiters.allocated || (K == .WORLD && !source_operation_backing_ready(session)) {
+	while (
+		!registration_backing_ready(session)
+		|| operation.waiters.count >= operation.waiters.allocated
+		|| (K == .WORLD && !source_operation_backing_ready(session))
+		|| (task_backing && !query_task_backing_ready(session, task_backing, join_backing))
+	) {
 		#if K == .WORLD {
 			if session.identities.operation_counter.next == U64_MAX {
 				return .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}}, false;
@@ -4136,6 +4263,8 @@ new_waiter :: (session: *Session, source: Handle($K), operation: *Operation) -> 
 			backing_ok = prepare_registration_backing(session);
 		} else if K == .WORLD && !source_operation_backing_ready(session) {
 			backing_ok = prepare_source_operation_backing(session);
+		} else if task_backing && !query_task_backing_ready(session, task_backing, join_backing) {
+			backing_ok = prepare_query_task_backing(session, task_backing, join_backing);
 		} else {
 			backing_ok = prepare_waiter_backing(session, source, operation);
 		}
@@ -4458,13 +4587,28 @@ start_immediate_result :: (session: *Session, source: Handle(.WORLD), world: *Wo
 	return false, .{}, error;
 }
 
-new_result :: (session: *Session, world: *World, member: s64, kind: Query_Kind) -> *Query_Result {
-	_, identity := issue_result(*session.identities);
-	result := New(Query_Result);
-	result.identity = identity;
-	result.world = world;
-	result.member = member;
-	result.kind = kind;
+new_result :: (
+	session: *Session,
+	world: *World,
+	member: s64,
+	kind: Query_Kind,
+	backing: *Immediate_Result_Backing
+) -> *Query_Result {
+	ok, token := issue_token(*session.identities.result_counter);
+	assert(ok && backing.result && backing.identity.count);
+	for 0..7 {
+		backing.identity[backing.identity.count - 8 + it] = xx ((token >> (it * 8)) & 0xFF);
+	}
+
+	result := backing.result;
+	result.* = .{
+		identity = xx backing.identity,
+		world = world,
+		member = member,
+		kind = kind,
+	};
+
+	backing.* = .{};
 	world.references += 1;
 	return result;
 }

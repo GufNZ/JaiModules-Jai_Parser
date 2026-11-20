@@ -1639,9 +1639,53 @@ Exit: user decision recorded.
 						Pending-query backing qualification adds 114 cases.
 						The focused `--query-operation` runner also exercises existing world-waiter interleavings, including frontier-winner shutdown.
 						`finish_query_operation_backing` owns private waiter cleanup outside the state gate; the query's deferred block calls this ordinary finaliser rather than expanding `unlock` inside a deferred block.
-						- [ ] Stage pending-query task, task-key, task-operation-list and required-ready queue backing before waiter publication, including existing-task joins and capacity-loss retries.
+						- [x] Stage pending-query task, task-key, task-operation-list and required-ready queue backing before waiter publication, including existing-task joins and capacity-loss retries.
+							- [x] Prepare canonical query task keys with checked off-gate allocation before waiter publication; adopt the key only for a new task and free unused join/winner/rejection keys through the ordinary task-backing finaliser.
+							`prepare_query_task_key` reuses `try_output_key` and the task-allocation hook, then returns through the common source/lifecycle/frontier/counter/quota checks before admission.
+							Verification (2026-11-20): 42 new direct/blocking failure, callback-winner, quota/counter and fresh-task adoption/rejection cases pass on x64 and optimised LLVM, alongside existing world-waiter interleavings and all twelve service configurations.
+							- [x] Stage new query `Task` objects, initial task-operation buffers and task/required-ready list capacity, with capacity-loss retries before waiter publication.
+								- [x] Reuse `Source_Candidate_Task_Backing` for checked private task/buffer/list preparation and nonallocating adoption; revalidate new-task readiness after both task preparation and unlocked waiter preparation.
+								- [x] Sweep key/task/buffer/task-list/ready-list allocation rejection and direct/blocking callbacks for shutdown, frontier replacement, source-handle reuse, all four quotas and operation-counter exhaustion before publication.
+								- [x] Qualify task/ready capacity loss during preparation and waiter allocation, retry rejection and competing-query non-adoption/task sharing, with canonical keys, callback-relative charges/references and zero caller/owner ledgers.
+							Verification (2026-11-20): the shared fresh-task fixture now runs 236 cases, adding 232 to the earlier four key-adoption cases.
+							Focused query checks and all twelve service configurations pass on x64 and optimised LLVM.
+							Shutdown rejection permits only the reaper's exact reserved-operation release when it reaches `.STOPPED` after the callback snapshot; other charge and reservation checks remain unchanged.
+							- [x] Stage existing query-task operation-list growth and revalidate task selection after unlocked preparation, including completion/frontier winners and competing joins.
+								- [x] Reuse `Source_Candidate_Join_Backing` for checked off-gate operation buffers; revalidate task identity/capacity in both the query loop and `new_waiter`, and adopt only for the matching live task before appending.
+								- [x] Qualify failure, source-handle reuse, lifecycle/frontier, all four quotas and counter edges, real competing-join capacity exhaustion/retry rejection, and waiter-stage capacity loss in direct/blocking modes.
+								- [x] Qualify completion during join preparation and later waiter preparation; discard unused join backing and preserve the existing checked new-task fallback without attaching to the terminal task.
+							Verification (2026-11-20): 52 new shared join cases pass on x64 and optimised LLVM, alongside all twelve service configurations.
+							Canonical identities/keys, exact task selection/append, callback-relative charges/references, retry allocation counts and zero final caller/owner ledgers are checked.
+							This closes task/key/list/queue admission staging, not pending-query actual-free callback qualification or terminal/result backing below.
 						- [ ] Stage terminal-query operation identities and asynchronous `new_result` object/identity backing with recoverable failure and winner revalidation.
-						- [ ] Qualify pending-query backing actual frees with allocating/mutating cleanup reentry and held-heap controls; admission callbacks and final zero ledgers do not close this requirement.
+							- [x] Prepare terminal-query operation identity bytes outside the state gate with checked owner allocation, a pinned world and handle/lifecycle/counter revalidation before token issuance.
+							Verification (2026-11-20): 215 shared scenarios cover five owner-failure/retry cases, 200 direct/blocking allocation success/failure winner interleavings and ten operation-counter boundary cases across all five terminal outcomes.
+							Checks include canonical identity bytes, no token consumption on owner-preparation failure, handle reuse/owner retirement, shutdown, frontier replacement, all four admission quotas and unchanged callback-relative charges/publication/reference state.
+							Pending-query frontier winners reuse already prepared identity bytes or recoverably prepare a missing identity after partial failure; caller-export failure and export-time interleaving semantics remain unchanged.
+							Both focused backends and all twelve service configurations pass, including independent zero caller/owner ledgers.
+							- [ ] Recoverably stage asynchronous `new_result` object/identity backing and revalidate completion, cancellation, lifecycle and counter winners before publishing a result.
+						- [x] Qualify pending-query backing actual frees with allocating/mutating cleanup reentry and held-heap controls; admission callbacks and final zero ledgers do not close this requirement.
+							- [x] Qualify existing-query-task join buffers: replaced live arrays, unused prepared arrays, counter-rejected admission, retry-discarded arrays and completion-obsolete arrays during join and waiter preparation.
+							Verification (2026-11-20): 30 shared exact-free cases cover six paths in direct/blocking, callback-suppressed and held-heap modes.
+							Each target's actual delegate free occurs exactly once before fixture teardown; callbacks read retained worlds/sources, allocate/free owner storage, retain/release world handles and observe exact pre/post-admission charges.
+							Both focused backends and all twelve service configurations pass.
+							Preparation ordinals exclude nested callback activity, while independent caller/owner ledgers still track every allocation and finish at zero.
+							No production change was needed for this bounded qualification.
+							- [x] Qualify pending-query operation objects, operation-identity bytes, private waiter arrays and operation-list capacity frees on rejection, retry and non-adoption.
+							Verification (2026-11-20): 40 shared exact-free cases cover eight paths in direct/blocking, callback-suppressed and held-heap modes.
+							Partial preparation failures free the private `Operation` or identity; waiter-stage counter exhaustion frees the private `Operation`, identity or installed waiter array.
+							Session `operations` tests cover the replaced live array, unused prepared capacity and the first discarded candidate before a checked retry forced by real competing queries.
+							Each target's actual delegate free occurs exactly once before teardown; callbacks read retained worlds/sources, allocate/free owner storage, retain/release world handles and observe exact pre-admission charges.
+							Both focused backends and all twelve service configurations pass, including independent zero caller/owner ledgers.
+							No production change was needed.
+							- [x] Qualify task-key, new-task object/initial-operation-buffer and task/ready-list replacement frees with allocating/mutating cleanup reentry and held-heap controls before closing this parent.
+							Verification (2026-11-20): 100 shared exact-free cases cover twenty paths in direct/blocking, callback-suppressed and held-heap modes.
+							All five private allocations are checked after a late counter winner; four partial-preparation failures and five competing-task non-adoption paths check each retained prepared allocation.
+							Both task/ready arrays are checked on replacement, restored-capacity non-adoption and replacement after waiter-stage capacity loss.
+							Each target's actual delegate free occurs exactly once before teardown; callbacks read retained worlds/sources, allocate/free owner storage, retain/release world handles and observe exact pre/post-admission charges.
+							The task and operation fixtures share `assert_query_backing_cleanup`; preparation hooks exclude cleanup reentry while independent caller/owner ledgers still track every allocation and finish at zero.
+							Both focused backends and all twelve service configurations pass.  No production change was needed.
+							This closes pending-query backing cleanup qualification, not terminal-query/result recovery, completion/retirement staging or the service-wide allocator callback contract.
 					- [ ] Preallocate or recoverably stage `resolve_waiter` terminal observation/completion storage before terminal/detachment mutation, including cancellation, completion and shutdown winners.
 					- [ ] Make `release_handle` free-slot growth and `retired_worlds`/`retired_outputs`/`retired_sources` queue admission allocation-safe, including shutdown/release at exhausted capacity.
 					Owner delegate allocation/free callbacks still require the outstanding no-host-callback-under-gate qualification; checked caller exporters alone do not close it.

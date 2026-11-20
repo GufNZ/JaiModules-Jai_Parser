@@ -924,6 +924,13 @@ Output_Action :: enum {
 	COMPLETE_WAITER_TICKET;
 	REPLACE_WAITER_TICKET;
 	FILL_WAITER_CAPACITY;
+	START_QUERY_TASK;
+	FILL_QUERY_TASK_OPERATIONS;
+	JOIN_QUERY_PUBLICATION;
+	CANCEL_QUERY_PUBLICATION;
+	REPLACE_QUERY_PUBLICATION;
+	FILL_QUERY_OPERATION_CAPACITY;
+	SPARE_QUERY_OPERATION_CAPACITY;
 	TAKE_PENDING_CAPACITY;
 	TAKE_COMPLETION_CAPACITY;
 	RETIRE_SELECTED_WORLD;
@@ -1296,6 +1303,84 @@ output_interleaving_job :: (thread: *Thread) -> s64 {
 				}
 			);
 
+			job.ok = true;
+
+		case .FILL_QUERY_OPERATION_CAPACITY; #through;
+		case .FILL_QUERY_TASK_OPERATIONS;
+			target: s64;
+			Service.with_lock(
+				*fixture.session.gate,
+				#code {
+					operation := fixture.session.registrations[job.drain.first.slot].operation;
+					target = max(8, (operation.task.operations.count + 1) * 2);
+				}
+			);
+
+			while true {
+				filled: bool;
+				Service.with_lock(
+					*fixture.session.gate,
+					#code {
+						operation := fixture.session.registrations[job.drain.first.slot].operation;
+						filled = operation.task.operations.count >= target;
+					}
+				);
+
+				if filled {
+					break;
+				}
+
+
+				started := query(fixture, job.drain.world, .SYNTAX_DIAGNOSTICS);
+				assert(started.kind == .PENDING);
+				array_add(*job.competing_waiters, started.waiter);
+			}
+
+			if job.action == .FILL_QUERY_OPERATION_CAPACITY {
+				Service.with_lock(
+					*fixture.session.gate,
+					#code {
+						fixture.session.operations.allocated = fixture.session.operations.count;
+					}
+				);
+			}
+
+			job.ok = true;
+
+		case .SPARE_QUERY_OPERATION_CAPACITY;
+			Service.with_lock(
+				*fixture.session.gate,
+				#code {
+					assert(job.source_capacity > fixture.session.operations.count);
+					fixture.session.operations.allocated = job.source_capacity;
+				}
+			);
+			job.ok = true;
+
+		case .JOIN_QUERY_PUBLICATION;
+			started := query(fixture, job.drain.world, .SYNTAX_DIAGNOSTICS);
+			assert(started.kind == .PENDING);
+			array_add(*job.competing_waiters, started.waiter);
+			job.ok = true;
+
+		case .CANCEL_QUERY_PUBLICATION;
+			for Service.Handle(.WAITER).[job.drain.first, job.drain.second] {
+				ok, cancelled := Service.cancel_waiter(fixture.host.service, it);
+				assert(ok && !cancelled.already_terminal && cancelled.observation.query.kind == .CANCELLED);
+				Service.free_observation(*cancelled.observation);
+			}
+
+			job.ok = true;
+
+		case .REPLACE_QUERY_PUBLICATION;
+			job.replacement_ticket = submit(fixture, "answer :: 99;");
+			job.ok = true;
+
+		case .START_QUERY_TASK;
+			Service.arm_pause(fixture.session, .SELECTED);
+			started := query(fixture, job.drain.world, .SYNTAX_DIAGNOSTICS);
+			assert(started.kind == .PENDING && Service.await_pause(fixture.session, .SELECTED));
+			array_add(*job.competing_waiters, started.waiter);
 			job.ok = true;
 
 		case .SPARE_SOURCE_WORLD_CAPACITY; #through;
@@ -3306,7 +3391,7 @@ Source_Candidate_Join_Probe :: struct {
 
 source_candidate_join_race_probe :: (size: s64, data: *void) -> bool {
 	probe := data.(*Source_Candidate_Join_Probe);
-	if probe.cleanup && cleanup_callback_running(probe.cleanup) {
+	if probe.probe.running || (probe.cleanup && cleanup_callback_running(probe.cleanup)) {
 		return true;
 	}
 
@@ -11640,7 +11725,219 @@ finish_terminal_query :: (test: Terminal_Query_Fixture, world_released := false,
 	close(test.fixture);
 }
 
-test_terminal_query_failures :: (negative_control := false) {
+assert_terminal_query_identity :: (test: Terminal_Query_Fixture, started: Service.Query_Start, identities: Service.Session_Identities) {
+	assert_terminal_query(test, started);
+	expected := Service.make_key(
+		"operation",
+		identities.session.([] u8),
+		Service.little_endian(identities.operation_counter.next, 8,, temp)
+	);
+
+	assert(Service.bytes_equal(started.observation.operation_identity.([] u8), expected));
+	free(expected.data);
+}
+
+test_terminal_query_identity_interleavings :: (direct := false, counter: s64 = 0) {
+	assert(counter >= 0 && counter <= 2);
+	for Terminal_Query_Case.[.NOT_CAPTURED, .SEMANTIC, .EVALUATION, .SOURCE_ABSENT, .OBSOLETE] {
+		scenario := it;
+		for Output_Action.[
+			.REJECT_ACTIVE_RELEASE,
+			.REPLACE_SOURCE,
+			.REQUEST_SHUTDOWN,
+			.RELEASE_QUERY_WORLD,
+			.RETIRE_QUERY_OWNER,
+			.EXHAUST_OPERATION_COUNTER,
+			.TAKE_RETAIN_CAPACITY,
+			.TAKE_OPERATION_CAPACITY,
+			.TAKE_PENDING_CAPACITY,
+			.TAKE_COMPLETION_CAPACITY
+		] {
+			action := it;
+			if counter && action != .REJECT_ACTIVE_RELEASE {
+				continue;
+			}
+
+
+			for bool.[false, true] {
+				fail := it;
+				if counter && fail {
+					continue;
+				}
+
+
+				test := prepared_terminal_query(scenario);
+				fixture := test.fixture;
+				probe := Registration_Probe.{
+					fail_at = (ifx fail then 1),
+					direct = direct,
+					track_source = true,
+					job = .{
+						drain = .{fixture = fixture, ticket = test.ticket, world = test.request.world},
+						action = action,
+						retirement_ticket = test.newer_ticket,
+					},
+				};
+
+				if action == .RELEASE_QUERY_WORLD {
+					retained, surviving := Service.retain(fixture.host.service, test.request.world);
+					assert(retained);
+					probe.job.surviving_world = surviving;
+				}
+
+				identities: Service.Session_Identities;
+				before: Service.Resource_Ledger;
+				captured: *Service.World;
+				references: s64;
+				Service.with_lock(
+					*fixture.session.gate,
+					#code {
+						identities = fixture.session.identities;
+						before = fixture.session.ledger;
+						captured = fixture.session.registrations[test.request.world.slot].world;
+						references = captured.references;
+						probe.track_world = captured;
+						if counter {
+							fixture.session.identities.operation_counter.next = Service.U64_MAX - xx (counter == 1);
+						}
+
+						fixture.session.faults.source_update_allocation_hook = registration_allocation_probe;
+						fixture.session.faults.source_update_allocation_data = *probe;
+					}
+				);
+
+				ok, started, error := Service.query(fixture.host.service, test.request);
+				retired := action == .RELEASE_QUERY_WORLD || action == .RETIRE_QUERY_OWNER;
+				closed := action == .REQUEST_SHUTDOWN;
+				exhausted := action == .EXHAUST_OPERATION_COUNTER || counter == 2;
+				assert(ok == (!retired && !closed && !exhausted && !fail));
+				assert(probe.allocations == (ifx counter == 2 then 0 else 1));
+				if counter != 2 {
+					assert(probe.gate_progress && probe.job.ok && !probe.source_active_admissions);
+				}
+
+				if !ok {
+					assert(!started.waiter.owner_token && !started.result.owner_token && !started.observation.operation_identity.count);
+					if retired {
+						assert(error.code == .INVALID_HANDLE && error.handle_kind == .WORLD);
+					} else if closed {
+						assert(error.code == .SERVICE_CLOSED);
+					} else {
+						assert(error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+					}
+				}
+
+				if action != .RETIRE_QUERY_OWNER {
+					Service.with_lock(
+						*fixture.session.gate,
+						#code {
+							fixture.session.faults.source_update_allocation_hook = null;
+							fixture.session.faults.source_update_allocation_data = null;
+							expected_token := ifx counter == 2
+								then Service.U64_MAX
+								else probe.callback_identities.operation_counter.next;
+							assert(fixture.session.identities.operation_counter.next == expected_token + xx ok);
+							assert(!fixture.session.active_admissions);
+							assert(captured.references == (ifx counter == 2 then references else probe.world_references - 1));
+							if counter != 2 {
+								assert(fixture.session.identities.world_counter.next == probe.callback_identities.world_counter.next);
+								assert(fixture.session.operations.count == probe.callback_operations);
+								assert(fixture.session.tasks.count == probe.callback_tasks);
+								assert(fixture.session.worlds.count == probe.callback_worlds);
+								assert(fixture.session.ready.count == probe.callback_ready);
+								assert(fixture.session.optional_ready.count == probe.callback_optional_ready);
+							}
+
+							baseline := ifx counter == 2 then before else probe.waiter_ledger;
+							for baseline.live {
+								assert(fixture.session.ledger.live[it_index] == it);
+								expected_reserved := ifx (
+									closed && fixture.session.lifecycle == .STOPPED
+									&& it_index == Service.Limit_Name.IN_FLIGHT_OPERATIONS.(s64)
+								)
+									then 0
+									else baseline.reserved[it_index];
+								assert(fixture.session.ledger.reserved[it_index] == expected_reserved);
+							}
+
+							if exhausted || counter {
+								fixture.session.identities.operation_counter = identities.operation_counter;
+							}
+						}
+					);
+				}
+
+				if ok {
+					assert_terminal_query_identity(test, started, probe.callback_identities);
+				}
+
+				Service.free_observation(*started.observation);
+				if probe.job.replacement_world.owner_token {
+					release(fixture, probe.job.replacement_world);
+					release(fixture, probe.job.surviving_world);
+				}
+
+				finish_terminal_query(
+					test,
+					world_released = action == .RELEASE_QUERY_WORLD,
+					owner_released = action == .RETIRE_QUERY_OWNER
+				);
+			}
+		}
+	}
+
+	print("X5 terminal query owner identity winners (direct %, counter %) \e[92mPASS\e[0m\n", direct, counter);
+}
+
+test_terminal_query_owner_backing :: () {
+	for Terminal_Query_Case.[.NOT_CAPTURED, .SEMANTIC, .EVALUATION, .SOURCE_ABSENT, .OBSOLETE] {
+		test := prepared_terminal_query(it);
+		fixture := test.fixture;
+		probe := Registration_Probe.{fail_at = 1, job_at = 0};
+		identities: Service.Session_Identities;
+		before: Service.Resource_Ledger;
+		operations: s64;
+		slots: s64;
+		Service.with_lock(
+			*fixture.session.gate,
+			#code {
+				identities = fixture.session.identities;
+				before = fixture.session.ledger;
+				operations = fixture.session.operations.count;
+				slots = fixture.session.registry.slots.count;
+				fixture.session.faults.source_update_allocation_hook = registration_allocation_probe;
+				fixture.session.faults.source_update_allocation_data = *probe;
+			}
+		);
+
+		ok, started, error := Service.query(fixture.host.service, test.request);
+		assert(!ok && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
+		assert(!started.waiter.owner_token && !started.result.owner_token && !started.observation.operation_identity.count);
+		assert(probe.allocations == 1);
+		Service.with_lock(
+			*fixture.session.gate,
+			#code {
+				fixture.session.faults.source_update_allocation_hook = null;
+				fixture.session.faults.source_update_allocation_data = null;
+				assert(fixture.session.identities.operation_counter.next == identities.operation_counter.next);
+				assert(fixture.session.operations.count == operations && fixture.session.registry.slots.count == slots);
+				for before.live {
+					assert(fixture.session.ledger.live[it_index] == it && fixture.session.ledger.reserved[it_index] == before.reserved[it_index]);
+				}
+			}
+		);
+
+		retry_ok, retried := Service.query(fixture.host.service, test.request);
+		assert(retry_ok);
+		assert_terminal_query_identity(test, retried, identities);
+		Service.free_observation(*retried.observation);
+		finish_terminal_query(test);
+	}
+
+	print("X5 terminal query owner identity failure/retry \e[92mPASS\e[0m\n");
+}
+
+	test_terminal_query_failures :: (negative_control := false) {
 	for Terminal_Query_Case.[.NOT_CAPTURED, .SEMANTIC, .EVALUATION, .SOURCE_ABSENT, .OBSOLETE] {
 		test := prepared_terminal_query(it);
 		fixture := test.fixture;
@@ -13619,21 +13916,131 @@ query_operation_capacity_probe :: (size: s64, data: *void) -> bool {
 	return allowed;
 }
 
+query_join_capacity_probe :: (size: s64, data: *void) -> bool {
+	probe := data.(*Registration_Probe);
+	allowed := registration_allocation_probe(size, data);
+	if probe.allocations == 1 {
+		session := probe.job.drain.fixture.session;
+		Service.with_lock(
+			*session.gate,
+			#code {
+				operation := session.registrations[probe.job.drain.first.slot].operation;
+				operation.task.operations.allocated = operation.task.operations.count;
+			}
+		);
+	}
+
+	return allowed;
+}
+
+assert_query_backing_cleanup :: (
+	probe: *Pool_Cleanup_Probe,
+	observed: *Registration_Probe,
+	allocations: s64,
+	admitted: bool,
+	source_references: s64
+) {
+	assert(probe.memory && !probe.allocation_pending && probe.frees == 1);
+	assert(probe.allocations == allocations);
+	if probe.suppress_callback {
+		assert(!probe.callbacks && !probe.gate_progress && !probe.allocated && !probe.mutated);
+	} else {
+		assert(probe.callbacks == 1 && probe.gate_progress && probe.readable && probe.source_readable);
+		assert(probe.allocated && probe.mutated && !probe.active_admissions);
+		assert(probe.heap_blocked == probe.hold_heap_gate && probe.source_references == source_references);
+		for Service.Limit_Name.[.LIVE_HANDLES, .IN_FLIGHT_OPERATIONS, .PENDING_REGISTRATIONS, .COMPLETION_RECORDS] {
+			assert(probe.ledger.live[it] == observed.waiter_ledger.live[it] + xx admitted);
+			assert(probe.ledger.reserved[it] == observed.waiter_ledger.reserved[it]);
+		}
+
+		assert(!probe.ledger.live[Service.Limit_Name.CONCURRENT_ACQUISITIONS]);
+	}
+
+	Service.with_lock(
+		*allocation_ledger.gate,
+		#code {
+			assert(!allocation_ledger.pool_cleanup);
+		}
+	);
+	if probe.hold_heap_gate {
+		destroy(*probe.heap_entered);
+	}
+}
+
+Query_Operation_Cleanup :: enum {
+	NONE;
+	PARTIAL;
+	PRIVATE;
+	REPLACED;
+	UNUSED;
+	RETRY;
+}
+
 test_query_operation_backing :: (
 	direct := false,
 	counter: s64 = 0,
 	action: Output_Action = .REJECT_ACTIVE_RELEASE,
 	late_counter := false,
-	late_capacity := false
+	late_capacity := false,
+	task_key := false,
+	task_join := false,
+	late_join := false,
+	retry_failure := false,
+	late_completion := false,
+	cleanup: Source_Candidate_Join_Cleanup = .NONE,
+	cleanup_control: s64 = 0,
+	operation_cleanup: Query_Operation_Cleanup = .NONE,
+	cleanup_target: s64 = 1
 ) {
 	assert(counter >= 0 && counter <= 2);
 	assert(!late_counter || !counter && action == .EXHAUST_OPERATION_COUNTER);
 	assert(!late_capacity || !counter && !late_counter && action == .REJECT_ACTIVE_RELEASE);
-	late := late_counter || late_capacity;
-	for 1..3 {
+	assert(!task_key || !late_counter && !late_capacity);
+	assert(!task_join || !task_key && !late_counter && !late_capacity);
+	assert(!late_join || task_join && !counter && action == .REJECT_ACTIVE_RELEASE);
+	assert(!retry_failure || task_join && action == .FILL_QUERY_TASK_OPERATIONS);
+	assert(!late_completion || task_join && !counter && !late_join && action == .COMPLETE_WORK);
+	assert(cleanup_control >= 0 && cleanup_control <= 2 && !(direct && cleanup_control == 2));
+	assert(cleanup == .NONE || task_join && !counter && !late_join && !retry_failure);
+	operation_tracking := operation_cleanup != .NONE;
+	cleanup_enabled := cleanup != .NONE || operation_tracking;
+	assert(!operation_tracking || cleanup_target >= 1 && cleanup_target <= 4);
+	assert(
+		cleanup == .NONE || cleanup == .REPLACED_OPERATIONS || cleanup == .UNUSED_OPERATIONS
+		|| cleanup == .PARTIAL_OPERATIONS || cleanup == .RETRY_OPERATIONS || cleanup == .PUBLISHED_OPERATIONS
+	);
+	late := late_counter || late_capacity || late_join || late_completion;
+	assert(!operation_tracking || cleanup == .NONE && !task_join && !task_key && !counter && !late_capacity && !late_join && !late_completion);
+	allocations := ifx task_key || task_join
+		then 1
+		else 3;
+	for 1..allocations {
 		job_at := it;
+		cleanup_job := ifx operation_cleanup == .PARTIAL
+			then cleanup_target + 1
+			else ifx operation_cleanup == .REPLACED || operation_cleanup == .PRIVATE then 1 else 3;
+		if operation_tracking && job_at != cleanup_job {
+			continue;
+		}
+
+
 		for bool.[false, true] {
 			fail := it;
+			if operation_tracking && fail != (operation_cleanup == .PARTIAL) {
+				continue;
+			}
+
+
+			if cleanup != .NONE && fail {
+				continue;
+			}
+
+
+			if retry_failure && !fail {
+				continue;
+			}
+
+
 			if (counter || late) && (job_at != 1 || fail) {
 				continue;
 			}
@@ -13643,12 +14050,16 @@ test_query_operation_backing :: (
 			fixture := test.retained.drain.fixture;
 			session := fixture.session;
 			probe := Registration_Probe.{
-				fail_at = ifx fail
-					then job_at
-					else 0,
+				fail_at = ifx retry_failure
+					then 2
+					else ifx fail
+						then job_at
+						else 0,
 				job_at = job_at,
 				direct = direct,
 				track_source = true,
+				track_waiter = task_join && action == .COMPLETE_WORK,
+				hold_waiter_selection = task_join && action == .COMPLETE_WORK,
 				job = .{
 					drain = test.retained.drain,
 					action = ifx counter || late
@@ -13659,16 +14070,48 @@ test_query_operation_backing :: (
 			late_probe := Registration_Probe.{
 				direct = direct,
 				track_source = true,
+				track_waiter = late_completion,
+				hold_waiter_selection = late_completion,
 				job = .{
 					drain = test.retained.drain,
-					action = ifx late_capacity
-						then .REJECT_ACTIVE_RELEASE
-						else .EXHAUST_OPERATION_COUNTER
+					action = ifx late_completion
+						then .COMPLETE_WORK
+						else ifx late_capacity || late_join
+							then .REJECT_ACTIVE_RELEASE
+							else .EXHAUST_OPERATION_COUNTER
 				},
 			};
 			observed := ifx late
 				then *late_probe
 				else *probe;
+			free_probe := Pool_Cleanup_Probe.{
+				fixture = fixture,
+				world = test.retained.drain.world,
+				source_bytes = xx "answer :: 42;",
+				capture_at = ifx operation_tracking
+					then ifx operation_cleanup == .REPLACED
+						then 0
+						else cleanup_target
+					else ifx cleanup == .REPLACED_OPERATIONS
+						then 0
+						else 1,
+				direct = direct,
+				suppress_callback = cleanup_control == 1,
+				hold_heap_gate = cleanup_control == 2,
+				allocate = true,
+				mutate = true,
+			};
+
+			race_probe := Source_Candidate_Join_Probe.{probe = *probe, cleanup = *free_probe};
+			late_race_probe := Source_Candidate_Join_Probe.{probe = *late_probe, cleanup = *free_probe};
+			if cleanup_enabled {
+				probe.cleanup = *free_probe;
+				late_probe.cleanup = *free_probe;
+				if free_probe.hold_heap_gate {
+					init(*free_probe.heap_entered);
+				}
+			}
+
 			if action == .RELEASE_QUERY_WORLD {
 				probe.job.drain.world = test.source;
 				probe.job.surviving_world = test.retained.drain.world;
@@ -13683,6 +14126,7 @@ test_query_operation_backing :: (
 			worlds: s64;
 			world: *Service.World;
 			references: s64;
+			source_references: s64;
 			Service.with_lock(
 				*session.gate,
 				#code {
@@ -13697,25 +14141,103 @@ test_query_operation_backing :: (
 					references = world.references;
 					probe.track_world = world;
 					late_probe.track_world = world;
+					if operation_tracking {
+						free_probe.source = world.members[0].source;
+						source_references = free_probe.source.references;
+						push_allocator(Service.owner_allocator(session));
+						array_reserve(*session.operations, session.operations.count + 1);
+						probe.job.source_capacity = session.operations.allocated;
+						if operation_cleanup == .REPLACED {
+							free_probe.memory = session.operations.data.(*u8) - size_of(Service.Owned_Allocation);
+						}
+					}
+
 					session.operations.allocated = session.operations.count;
 					if counter {
 						session.identities.operation_counter.next = Service.U64_MAX - xx (counter == 1);
 					}
 
-					session.faults.source_update_allocation_hook = registration_allocation_probe;
-					session.faults.source_update_allocation_data = *probe;
-					session.faults.source_operation_allocation_hook = registration_allocation_probe;
-					session.faults.source_operation_allocation_data = *probe;
+					if task_join {
+						push_allocator(Service.owner_allocator(session));
+						operation := session.registrations[test.retained.drain.first.slot].operation;
+						array_reserve(*operation.task.operations, operation.task.operations.count + 1);
+						if cleanup != .NONE {
+							race_probe.task = operation.task;
+							free_probe.source = world.members[0].source;
+							source_references = free_probe.source.references;
+							if cleanup == .REPLACED_OPERATIONS {
+								free_probe.memory = operation.task.operations.data.(*u8) - size_of(Service.Owned_Allocation);
+							} else if cleanup == .UNUSED_OPERATIONS {
+								race_probe.restore_operations_capacity = operation.task.operations.allocated;
+							}
+						}
+
+						if !late_join {
+							operation.task.operations.allocated = operation.task.operations.count;
+						}
+
+						session.faults.source_candidate_join_allocation_hook = registration_allocation_probe;
+						session.faults.source_candidate_join_allocation_data = *probe;
+						if cleanup != .NONE {
+							session.faults.source_candidate_join_allocation_hook = source_candidate_join_race_probe;
+							session.faults.source_candidate_join_allocation_data = *race_probe;
+						}
+					} else if task_key {
+						session.faults.source_candidate_task_allocation_hook = registration_allocation_probe;
+						session.faults.source_candidate_task_allocation_data = *probe;
+					} else {
+						session.faults.source_update_allocation_hook = registration_allocation_probe;
+						session.faults.source_update_allocation_data = *probe;
+						session.faults.source_operation_allocation_hook = registration_allocation_probe;
+						session.faults.source_operation_allocation_data = *probe;
+						if operation_tracking {
+							session.faults.source_update_allocation_hook = source_candidate_join_race_probe;
+							session.faults.source_update_allocation_data = *race_probe;
+							session.faults.source_operation_allocation_hook = source_candidate_join_race_probe;
+							session.faults.source_operation_allocation_data = *race_probe;
+						}
+					}
 					if late {
-						session.faults.registration_allocation_hook = ifx late_capacity
-							then query_operation_capacity_probe
-							else registration_allocation_probe;
+						session.faults.registration_allocation_hook = ifx late_join
+							then query_join_capacity_probe
+							else ifx late_capacity
+								then query_operation_capacity_probe
+								else registration_allocation_probe;
 						session.faults.registration_allocation_data = *late_probe;
+						if operation_tracking {
+							session.faults.registration_allocation_hook = source_candidate_join_race_probe;
+							session.faults.registration_allocation_data = *late_race_probe;
+						}
 					}
 				}
 			);
 
+			if cleanup == .REPLACED_OPERATIONS || operation_cleanup == .REPLACED {
+				Service.with_lock(
+					*allocation_ledger.gate,
+					#code {
+						assert(!allocation_ledger.pool_cleanup);
+						allocation_ledger.pool_cleanup = *free_probe;
+					}
+				);
+			}
+
 			ok, waiter, error, terminal := admit_test_waiter(test);
+			if cleanup_enabled {
+				expected_free_allocations := probe.allocations + (
+					ifx operation_tracking && late
+						then late_probe.allocations
+						else 0
+				);
+				assert_query_backing_cleanup(
+					*free_probe,
+					observed,
+					expected_free_allocations,
+					ok && !operation_tracking && cleanup != .RETRY_OPERATIONS,
+					source_references
+				);
+			}
+
 			retired := action == .RELEASE_QUERY_WORLD;
 			closed := action == .REQUEST_SHUTDOWN;
 			frontier := action == .REPLACE_HELD_SOURCE;
@@ -13727,13 +14249,24 @@ test_query_operation_backing :: (
 			stopped := fail || retired || closed || frontier || quota || exhausted;
 			expected_allocations := ifx counter == 2
 				then 0
-				else ifx late
-					then 3 + xx late_capacity
-				else ifx fail
-					then job_at
-					else ifx stopped
-						then max(2, job_at)
-						else 3;
+				else ifx operation_cleanup == .RETRY
+					then 4
+					else ifx retry_failure
+						then 2
+						else ifx task_join
+							then ifx !fail && action == .FILL_QUERY_TASK_OPERATIONS
+								then 2
+								else 1
+							else ifx task_key
+								then 1
+								else ifx late
+									then 3 + xx late_capacity
+									else ifx fail
+										then job_at
+										else ifx stopped
+											then max(2, job_at)
+											else 3;
+			expected_allocations += xx (frontier && fail && !task_key && !task_join && job_at <= 2);
 			assert(probe.allocations == expected_allocations);
 			if !counter {
 				assert(observed.gate_progress && observed.job.ok && observed.world_references > 0);
@@ -13746,6 +14279,15 @@ test_query_operation_backing :: (
 					session.faults.source_update_allocation_data = null;
 					session.faults.source_operation_allocation_hook = null;
 					session.faults.source_operation_allocation_data = null;
+					if task_join {
+						session.faults.source_candidate_join_allocation_hook = null;
+						session.faults.source_candidate_join_allocation_data = null;
+					}
+
+					if task_key {
+						session.faults.source_candidate_task_allocation_hook = null;
+						session.faults.source_candidate_task_allocation_data = null;
+					}
 					if late {
 						session.faults.registration_allocation_hook = null;
 						session.faults.registration_allocation_data = null;
@@ -13767,16 +14309,35 @@ test_query_operation_backing :: (
 					if admitted {
 						operation := session.registrations[waiter.slot].operation;
 						assert(operation.world == world && operation.kind == .QUERY && operation.query_kind == .SYNTAX_DIAGNOSTICS);
-						assert(session.operations.count == operations + 1 && operation.task);
+						expected_operations := ifx (task_join || operation_tracking) && !counter
+							then observed.callback_operations
+							else operations;
+						assert(session.operations.count == expected_operations + 1 && operation.task);
 						push_allocator(context.default_allocator);
 						token := ifx counter
 							then Service.U64_MAX - 1
-							else identities.operation_counter.next;
+							else observed.callback_identities.operation_counter.next;
 						token_bytes := Service.little_endian(token, 8);
 						expected := Service.make_key("operation", session.identities.session.([] u8), token_bytes);
 						assert(Service.bytes_equal(operation.identity.([] u8), expected));
 						free(expected.data);
 						free(token_bytes.data);
+						if task_key {
+							assert(session.tasks.count == tasks && session.ready.count == ready);
+							assert_query_task_key(session, world, operation.task);
+						}
+						if task_join {
+							original := session.registrations[test.retained.drain.first.slot].operation.task;
+							if action == .COMPLETE_WORK {
+								assert(original.phase == .TERMINAL && operation.task != original && session.tasks.count == tasks + 1);
+							} else {
+								assert(operation.task == original && session.tasks.count == tasks);
+							}
+
+							assert_query_task_key(session, world, operation.task);
+							assert(operation.task.operations.count <= operation.task.operations.allocated);
+							assert(operation.task.operations[operation.task.operations.count - 1] == operation);
+						}
 					} else {
 						if retired {
 							assert(error.code == .INVALID_HANDLE && error.handle_kind == .WORLD);
@@ -13820,9 +14381,22 @@ test_query_operation_backing :: (
 			);
 
 			if admitted {
+				if task_join && action == .COMPLETE_WORK {
+					assert(Service.await_pause(session, .SELECTED));
+					Service.resume_pause(session, .SELECTED);
+					observation := await(fixture, waiter);
+					assert(observation.query.kind == .AVAILABLE);
+					Service.free_observation(*observation);
+				}
+
 				release(fixture, waiter);
 			}
 
+			for probe.job.competing_waiters {
+				release(fixture, it);
+			}
+
+			array_free(probe.job.competing_waiters);
 			assert(Service.read_world(fixture.host.service, test.retained.drain.world));
 			if probe.job.replacement_world.owner_token {
 				assert(Service.read_world(fixture.host.service, probe.job.replacement_world));
@@ -13833,12 +14407,658 @@ test_query_operation_backing :: (
 		}
 	}
 
-	print("X5 query operation backing failure/identity/list/counter atomicity (direct %, counter %, action %) \e[92mPASS\e[0m\n", direct, counter, action);
+	print(
+		#run join(
+			"X5 query backing (direct %, counter %, action %, key %, join %, late join %, retry %, cleanup %, control %,",
+			" operation cleanup %, target %) \e[92mPASS\e[0m\n"
+		),
+		direct,
+		counter,
+		action,
+		task_key,
+		task_join,
+		late_join,
+		retry_failure,
+		cleanup,
+		cleanup_control,
+		operation_cleanup,
+		cleanup_target
+	);
+}
+
+assert_query_task_key :: (session: *Service.Session, world: *Service.World, task: *Service.Task) {
+	assert(task && task.kind == .QUERY_PAYLOAD && task.world == world);
+	push_allocator(context.default_allocator);
+	expected := Service.make_key(
+		"execution-task",
+		session.identities.session.([] u8),
+		world.identity.([] u8),
+		xx "QUERY_PAYLOAD",
+		world.members[task.member].document,
+		xx "SYNTAX_DIAGNOSTICS"
+	);
+
+	assert(Service.bytes_equal(task.key, expected));
+	free(expected.data);
+}
+
+query_new_task_capacity_probe :: (size: s64, data: *void) -> bool {
+	probe := data.(*Registration_Probe);
+	if probe.running || (probe.cleanup && cleanup_callback_running(probe.cleanup)) {
+		return true;
+	}
+
+
+	allowed := registration_allocation_probe(size, data);
+	if probe.allocations == 1 {
+		session := probe.job.drain.fixture.session;
+		Service.with_lock(
+			*session.gate,
+			#code {
+				if probe.ready_capacity_control {
+					session.ready.allocated = session.ready.count;
+				} else {
+					session.tasks.allocated = session.tasks.count;
+				}
+			}
+		);
+	}
+
+	return allowed;
+}
+
+test_query_task_key_new_task :: (
+	direct := false,
+	full := false,
+	action: Output_Action = .REJECT_ACTIVE_RELEASE,
+	job_at: s64 = 1,
+	late_capacity := false,
+	ready_capacity := false,
+	retry_failure := false,
+	cleanup: Query_Operation_Cleanup = .NONE,
+	cleanup_target: s64 = 1,
+	cleanup_control: s64 = 0
+) {
+	assert(!late_capacity || !full && job_at == 4 && action == .REJECT_ACTIVE_RELEASE);
+	assert(cleanup_control >= 0 && cleanup_control <= 2 && !(direct && cleanup_control == 2));
+	assert(cleanup_target >= 1 && cleanup_target <= 5);
+	assert(cleanup == .NONE || !retry_failure);
+	assert(cleanup == .NONE || cleanup == .PRIVATE || cleanup == .PARTIAL || cleanup == .REPLACED || cleanup == .UNUSED);
+	assert(cleanup != .PRIVATE || full && action == .EXHAUST_OPERATION_COUNTER && job_at == 5);
+	assert(cleanup != .PARTIAL || full && cleanup_target < 5 && job_at == cleanup_target + 1 && action == .REJECT_ACTIVE_RELEASE);
+	assert(cleanup != .REPLACED || cleanup_target >= 4 && (full || late_capacity) && action == .REJECT_ACTIVE_RELEASE);
+	assert(
+		cleanup != .UNUSED || full && job_at == cleanup_target
+		&& (action == .START_QUERY_TASK || cleanup_target == 4 && action == .SPARE_SOURCE_TASK_CAPACITY
+			|| cleanup_target == 5 && action == .SPARE_SOURCE_READY_CAPACITY)
+	);
+	retry := action == .FILL_SOURCE_TASK_CAPACITY || action == .FILL_SOURCE_READY_CAPACITY;
+	assert(!retry_failure || retry && !full);
+	allocations := ifx full
+		then 5
+		else ifx late_capacity || retry
+			then 4
+			else 3;
+	for 0..allocations {
+		fail_at := it;
+		if cleanup != .NONE && !!fail_at != (cleanup == .PARTIAL) {
+			continue;
+		}
+
+
+		if (retry_failure && fail_at != allocations) || (fail_at && fail_at != (ifx retry_failure then allocations else job_at)) {
+			continue;
+		}
+
+
+		fixture := open("X5-query-task-key");
+		ticket := submit(fixture, "answer :: 42;");
+		world := world_of(fixture, ticket);
+		retained_ok, retained := Service.retain(fixture.host.service, world);
+		assert(retained_ok);
+		probe := Registration_Probe.{
+			fail_at = fail_at,
+			job_at = job_at,
+			direct = direct,
+			track_source = true,
+			track_waiter = true,
+			hold_waiter_selection = !late_capacity,
+			job = .{
+				drain = .{
+					fixture = fixture,
+					world = world,
+					ticket = ticket
+				},
+				surviving_world = retained,
+				action = ifx late_capacity
+					then .NONE
+					else action,
+			},
+		};
+
+		late_probe := Registration_Probe.{
+			direct = direct,
+			track_source = true,
+			track_waiter = true,
+			hold_waiter_selection = true,
+			ready_capacity_control = ready_capacity,
+			job = .{
+				drain = .{fixture = fixture, world = world, ticket = ticket},
+				action = .REJECT_ACTIVE_RELEASE,
+			},
+		};
+
+		observed := ifx late_capacity
+			then *late_probe
+			else *probe;
+		free_probe := Pool_Cleanup_Probe.{
+			fixture = fixture,
+			world = retained,
+			source_bytes = xx "answer :: 42;",
+			capture_at = ifx cleanup == .REPLACED
+				then 0
+				else cleanup_target,
+			direct = direct,
+			suppress_callback = cleanup_control == 1,
+			hold_heap_gate = cleanup_control == 2,
+			allocate = true,
+			mutate = true,
+		};
+
+		race_probe := Source_Candidate_Join_Probe.{probe = *probe, cleanup = *free_probe};
+		if cleanup != .NONE {
+			probe.cleanup = *free_probe;
+			late_probe.cleanup = *free_probe;
+			if free_probe.hold_heap_gate {
+				init(*free_probe.heap_entered);
+			}
+		}
+
+		identities: Service.Session_Identities;
+		captured: *Service.World;
+		source_references: s64;
+		Service.with_lock(
+			*fixture.session.gate,
+			#code {
+				identities = fixture.session.identities;
+				captured = fixture.session.registrations[world.slot].world;
+				probe.track_world = captured;
+				late_probe.track_world = captured;
+				if cleanup != .NONE {
+					free_probe.source = captured.members[0].source;
+					source_references = free_probe.source.references;
+				}
+
+				push_allocator(Service.owner_allocator(fixture.session));
+				array_reserve(*fixture.session.tasks, fixture.session.tasks.count + 1);
+				array_reserve(*fixture.session.ready, fixture.session.ready.count + 1);
+				if cleanup == .REPLACED {
+					storage := ifx cleanup_target == 4
+						then fixture.session.tasks.data
+						else fixture.session.ready.data;
+					free_probe.memory = storage.(*u8) - size_of(Service.Owned_Allocation);
+				}
+
+				if cleanup == .UNUSED {
+					probe.job.source_capacity = ifx cleanup_target == 4
+						then fixture.session.tasks.allocated
+						else fixture.session.ready.allocated;
+				}
+
+				if full {
+					fixture.session.tasks.allocated = fixture.session.tasks.count;
+					fixture.session.ready.allocated = fixture.session.ready.count;
+				}
+
+				fixture.session.faults.source_candidate_task_allocation_hook = registration_allocation_probe;
+				fixture.session.faults.source_candidate_task_allocation_data = *probe;
+				if cleanup != .NONE {
+					fixture.session.faults.source_candidate_task_allocation_hook = source_candidate_join_race_probe;
+					fixture.session.faults.source_candidate_task_allocation_data = *race_probe;
+				}
+
+				if late_capacity {
+					fixture.session.faults.registration_allocation_hook = query_new_task_capacity_probe;
+					fixture.session.faults.registration_allocation_data = *late_probe;
+				}
+			}
+		);
+
+		if cleanup == .REPLACED {
+			Service.with_lock(
+				*allocation_ledger.gate,
+				#code {
+					assert(!allocation_ledger.pool_cleanup);
+					allocation_ledger.pool_cleanup = *free_probe;
+				}
+			);
+		}
+
+		ok, started, error := Service.query(
+			fixture.host.service,
+			.{
+				version = Service.INTERFACE_VERSION,
+				world = world,
+				document = Service.harness_document(fixture.host, "a.jai"),
+				kind = .SYNTAX_DIAGNOSTICS,
+			}
+		);
+
+		if cleanup != .NONE {
+			assert_query_backing_cleanup(*free_probe, observed, probe.allocations, ok && started.kind == .PENDING, source_references);
+		}
+
+		retired := action == .RELEASE_QUERY_WORLD;
+		closed := action == .REQUEST_SHUTDOWN;
+		frontier := action == .REPLACE_HELD_SOURCE;
+		quota := action == .TAKE_RETAIN_CAPACITY || action == .TAKE_OPERATION_CAPACITY || action == .TAKE_PENDING_CAPACITY || action == .TAKE_COMPLETION_CAPACITY;
+		exhausted := action == .EXHAUST_OPERATION_COUNTER;
+		admitted := !!started.waiter.owner_token;
+		terminal := ok && started.kind == .TERMINAL;
+		assert(terminal == frontier && ok == (frontier || !fail_at && !retired && !closed && !quota && !exhausted));
+		assert(admitted == (ok && !terminal));
+		stopped := retired || closed || frontier || quota || exhausted;
+		expected_allocations := ifx fail_at
+			then fail_at
+			else ifx job_at == 1 && (stopped || action == .START_QUERY_TASK)
+				then 1
+				else allocations;
+		assert(probe.allocations == expected_allocations && observed.gate_progress && observed.job.ok);
+		Service.with_lock(
+			*fixture.session.gate,
+			#code {
+				fixture.session.faults.source_candidate_task_allocation_hook = null;
+				fixture.session.faults.source_candidate_task_allocation_data = null;
+				fixture.session.faults.registration_allocation_hook = null;
+				fixture.session.faults.registration_allocation_data = null;
+				assert(fixture.session.identities.operation_counter.next == observed.callback_identities.operation_counter.next + xx ok);
+				assert(fixture.session.identities.world_counter.next == observed.callback_identities.world_counter.next);
+				assert(fixture.session.operations.count == observed.callback_operations + xx admitted);
+				assert(fixture.session.tasks.count == observed.callback_tasks + xx (admitted && action != .START_QUERY_TASK));
+				if late_capacity {
+					assert(late_probe.allocations >= 1);
+				}
+
+				if admitted {
+					assert(started.kind == .PENDING);
+					operation := fixture.session.registrations[started.waiter.slot].operation;
+					if action == .START_QUERY_TASK {
+						competing := fixture.session.registrations[probe.job.competing_waiters[0].slot].operation;
+						assert(competing.task == operation.task && operation.task.operations.count == 2);
+					} else {
+						assert(operation.task.operations.count == 1 && operation.task.operations[0] == operation);
+					}
+
+					assert_query_task_key(fixture.session, operation.world, operation.task);
+				} else {
+					if retired {
+						assert(error.code == .INVALID_HANDLE && error.handle_kind == .WORLD);
+					} else if closed {
+						assert(error.code == .SERVICE_CLOSED);
+					} else if terminal {
+						assert(started.observation.query.kind == .CANCELLED && started.observation.query.cancellation == .WORLD_SUPERSEDED);
+					} else {
+						assert(error.code == .ADMISSION_DENIED);
+						assert(error.admission.kind == (ifx quota && !fail_at then .LIMIT else .RESOURCE_EXHAUSTED));
+					}
+
+					assert(captured.references == observed.world_references - (ifx late_capacity then 2 else 1));
+					assert(fixture.session.ready.count == observed.callback_ready);
+					assert(fixture.session.optional_ready.count == observed.callback_optional_ready);
+					for observed.waiter_ledger.live {
+						assert(fixture.session.ledger.live[it_index] == it);
+						expected_reserved := ifx (
+							closed && fixture.session.lifecycle == .STOPPED
+							&& it_index == Service.Limit_Name.IN_FLIGHT_OPERATIONS.(s64)
+						)
+							then 0
+							else observed.waiter_ledger.reserved[it_index];
+						assert(fixture.session.ledger.reserved[it_index] == expected_reserved);
+					}
+				}
+
+				if exhausted {
+					fixture.session.identities.operation_counter = identities.operation_counter;
+				}
+			}
+		);
+
+		if admitted || probe.job.competing_waiters.count {
+			if action != .START_QUERY_TASK {
+				assert(Service.await_pause(fixture.session, .SELECTED));
+			}
+
+			Service.resume_pause(fixture.session, .SELECTED);
+		}
+
+		if admitted {
+			observation := await(fixture, started.waiter);
+			assert(observation.query.kind == .AVAILABLE);
+			Service.free_observation(*observation);
+			release(fixture, started.waiter);
+		}
+
+		for probe.job.competing_waiters {
+			observation := await(fixture, it);
+			assert(observation.query.kind == .AVAILABLE);
+			Service.free_observation(*observation);
+			release(fixture, it);
+		}
+
+		array_free(probe.job.competing_waiters);
+		if terminal {
+			Service.free_observation(*started.observation);
+		}
+
+		if probe.job.replacement_world.owner_token {
+			assert(Service.read_world(fixture.host.service, probe.job.replacement_world));
+			release(fixture, probe.job.replacement_world);
+		}
+
+		assert(Service.read_world(fixture.host.service, retained));
+		release(fixture, retained);
+		if !retired {
+			release(fixture, world);
+		}
+
+		release(fixture, ticket);
+		close(fixture);
+	}
+
+	print(
+		#run join(
+			"X5 query new-task backing (direct %, full %, action %, callback %, late %, ready %, retry failure %,",
+			" cleanup %, target %, control %) \e[92mPASS\e[0m\n"
+		),
+		direct,
+		full,
+		action,
+		job_at,
+		late_capacity,
+		ready_capacity,
+		retry_failure,
+		cleanup,
+		cleanup_target,
+		cleanup_control
+	);
+}
+
+assert_query_result_identity :: (observation: Service.Observation, identities: Service.Session_Identities) {
+	assert(observation.query.kind == .AVAILABLE);
+	expected := Service.make_key(
+		"result",
+		identities.session.([] u8),
+		Service.little_endian(identities.result_counter.next, 8,, temp)
+	);
+
+	assert(Service.bytes_equal(observation.query.result_identity.([] u8), expected));
+	free(expected.data);
+}
+
+query_result_allocation_probe :: (size: s64, data: *void) -> bool {
+	probe := data.(*Registration_Probe);
+	if probe.running {
+		return true;
+	}
+
+
+	allowed := registration_allocation_probe(size, data);
+	session := probe.job.drain.fixture.session;
+	Service.with_lock(
+		*session.gate,
+		#code {
+			assert(!probe.track_world.syntax[0].diagnostics);
+			for session.tasks {
+				if it.world == probe.track_world && it.kind == .QUERY_PAYLOAD {
+					assert(it.phase == .RUNNING || it.phase == .STOP_REQUESTED);
+				}
+			}
+		}
+	);
+
+	return allowed;
+}
+
+test_query_result_interleavings :: (direct := false) {
+	for Output_Action.[
+		.REJECT_ACTIVE_RELEASE,
+		.CANCEL_WAITER,
+		.CANCEL_QUERY_PUBLICATION,
+		.JOIN_QUERY_PUBLICATION,
+		.REPLACE_QUERY_PUBLICATION,
+		.REQUEST_SHUTDOWN,
+		.EXHAUST_RESULT_COUNTER,
+		.RELEASE_QUERY_WORLD,
+		.TAKE_RETAIN_CAPACITY,
+		.TAKE_OPERATION_CAPACITY,
+		.TAKE_PENDING_CAPACITY,
+		.TAKE_COMPLETION_CAPACITY
+	] {
+		action := it;
+		for 1..2 {
+			job_at := it;
+			for bool.[false, true] {
+				fail := it;
+				fixture := open("X5-query-result-interleaving");
+				ticket := submit(fixture, "answer :: 42;");
+				world := world_of(fixture, ticket);
+				Service.arm_pause(fixture.session, .PUBLICATION);
+				first := query(fixture, world, .SYNTAX_DIAGNOSTICS);
+				assert(first.kind == .PENDING && Service.await_pause(fixture.session, .PUBLICATION));
+				second := query(fixture, world, .SYNTAX_DIAGNOSTICS);
+				assert(second.kind == .PENDING);
+				probe := Registration_Probe.{
+					fail_at = (ifx fail then job_at),
+					job_at = job_at,
+					direct = direct,
+					track_source = true,
+					job = .{
+						drain = .{
+							fixture = fixture,
+							ticket = ticket,
+							world = world,
+							first = first.waiter,
+							second = second.waiter
+						},
+						action = action,
+					},
+				};
+
+				if action == .RELEASE_QUERY_WORLD {
+					retained, surviving := Service.retain(fixture.host.service, world);
+					assert(retained);
+					probe.job.surviving_world = surviving;
+				}
+
+				result_counter: Service.Identity_Counter;
+				Service.with_lock(
+					*fixture.session.gate,
+					#code {
+						result_counter = fixture.session.identities.result_counter;
+						probe.track_world = fixture.session.registrations[world.slot].world;
+						fixture.session.faults.query_result_allocation_hook = query_result_allocation_probe;
+						fixture.session.faults.query_result_allocation_data = *probe;
+					}
+				);
+
+				Service.arm_pause(fixture.session, .QUERY_RESULT);
+				Service.resume_pause(fixture.session, .PUBLICATION);
+				assert(Service.await_pause(fixture.session, .QUERY_RESULT));
+				assert(probe.gate_progress && probe.job.ok && !probe.source_active_admissions);
+				discarded := action == .CANCEL_QUERY_PUBLICATION || action == .REPLACE_QUERY_PUBLICATION || action == .REQUEST_SHUTDOWN;
+				failed := fail || action == .EXHAUST_RESULT_COUNTER;
+				published := !discarded && !failed;
+				Service.with_lock(
+					*fixture.session.gate,
+					#code {
+						fixture.session.faults.query_result_allocation_hook = null;
+						fixture.session.faults.query_result_allocation_data = null;
+						assert(probe.allocations == (ifx fail then job_at else 2));
+						assert(!!probe.track_world.syntax[0].diagnostics == published);
+						assert(probe.track_world.references == probe.world_references + xx published);
+						assert(fixture.session.identities.result_counter.next == probe.callback_identities.result_counter.next + xx published);
+						assert(fixture.session.identities.operation_counter.next == probe.callback_identities.operation_counter.next);
+						assert(fixture.session.operations.count == probe.callback_operations);
+						assert(fixture.session.tasks.count == probe.callback_tasks);
+						assert(!fixture.session.active_admissions);
+						if action == .EXHAUST_RESULT_COUNTER {
+							fixture.session.identities.result_counter = result_counter;
+						}
+					}
+				);
+
+				Service.resume_pause(fixture.session, .QUERY_RESULT);
+				waiters: [..] Service.Handle(.WAITER);
+				array_add(*waiters, first.waiter);
+				array_add(*waiters, second.waiter);
+				for probe.job.competing_waiters {
+					array_add(*waiters, it);
+				}
+
+				for waiters {
+					observation := await(fixture, it);
+					cancelled := discarded || action == .CANCEL_WAITER && it.slot == first.waiter.slot;
+					if cancelled {
+						assert(observation.query.kind == .CANCELLED && !observation.query.result_identity.count);
+						reason := ifx action == .REPLACE_QUERY_PUBLICATION
+							then Service.Cancellation_Reason.WORLD_SUPERSEDED
+							else ifx action == .REQUEST_SHUTDOWN
+								then .SHUTDOWN
+								else .CALLER;
+						assert(observation.query.cancellation == reason);
+					} else if failed {
+						assert(observation.query.kind == .FAILED && !observation.query.result_identity.count);
+						assert(observation.query.failure.stage == .PUBLICATION && observation.query.failure.code == .RESOURCE_LIMIT);
+					} else {
+						assert_query_result_identity(observation, probe.callback_identities);
+					}
+
+					Service.free_observation(*observation);
+					release(fixture, it);
+				}
+
+				array_free(waiters);
+				array_free(probe.job.competing_waiters);
+				if probe.job.replacement_ticket.owner_token {
+					observation := await(fixture, probe.job.replacement_ticket);
+					assert(observation.update.kind == .PUBLISHED);
+					Service.free_observation(*observation);
+					release(fixture, probe.job.replacement_ticket);
+				}
+
+				if action == .RELEASE_QUERY_WORLD {
+					release(fixture, probe.job.replacement_world);
+					release(fixture, probe.job.surviving_world);
+				} else {
+					release(fixture, world);
+				}
+
+				release(fixture, ticket);
+				close(fixture);
+			}
+		}
+	}
+
+	print("X5 asynchronous query result winners (direct %) \e[92mPASS\e[0m\n", direct);
+}
+
+test_query_result_backing :: (counter: s64 = 0) {
+	assert(counter >= 0 && counter <= 2);
+	for 0..2 {
+		fail_at := it;
+		if counter && fail_at {
+			continue;
+		}
+
+
+		fixture := open("X5-query-result-backing");
+		ticket := submit(fixture, "answer :: 42;");
+		world := world_of(fixture, ticket);
+		Service.arm_pause(fixture.session, .PUBLICATION);
+		first := query(fixture, world, .SYNTAX_DIAGNOSTICS);
+		assert(first.kind == .PENDING && Service.await_pause(fixture.session, .PUBLICATION));
+		second := query(fixture, world, .SYNTAX_DIAGNOSTICS);
+		assert(second.kind == .PENDING);
+		probe := Registration_Probe.{fail_at = fail_at, job_at = 0};
+		identities: Service.Session_Identities;
+		result_counter: Service.Identity_Counter;
+		captured: *Service.World;
+		Service.with_lock(
+			*fixture.session.gate,
+			#code {
+				result_counter = fixture.session.identities.result_counter;
+				if counter {
+					fixture.session.identities.result_counter.next = Service.U64_MAX - xx (counter == 1);
+				}
+
+				identities = fixture.session.identities;
+				captured = fixture.session.registrations[world.slot].world;
+				assert(!captured.syntax[0].diagnostics);
+				fixture.session.faults.query_result_allocation_hook = registration_allocation_probe;
+				fixture.session.faults.query_result_allocation_data = *probe;
+			}
+		);
+
+		Service.resume_pause(fixture.session, .PUBLICATION);
+		for Service.Handle(.WAITER).[first.waiter, second.waiter] {
+			observation := await(fixture, it);
+			if fail_at || counter == 2 {
+				assert(observation.query.kind == .FAILED);
+				assert(observation.query.failure.stage == .PUBLICATION && observation.query.failure.code == .RESOURCE_LIMIT);
+			} else {
+				assert_query_result_identity(observation, identities);
+			}
+
+			Service.free_observation(*observation);
+		}
+
+		Service.with_lock(
+			*fixture.session.gate,
+			#code {
+				fixture.session.faults.query_result_allocation_hook = null;
+				fixture.session.faults.query_result_allocation_data = null;
+				published := !fail_at && counter != 2;
+				assert(probe.allocations == (ifx counter == 2 then 0 else ifx fail_at then fail_at else 2));
+				assert(fixture.session.identities.result_counter.next == identities.result_counter.next + xx published);
+				assert(!!captured.syntax[0].diagnostics == published && captured.state == .PUBLISHED);
+				if counter {
+					fixture.session.identities.result_counter = result_counter;
+				}
+			}
+		);
+
+		if fail_at {
+			retried := query(fixture, world, .SYNTAX_DIAGNOSTICS);
+			assert(retried.kind == .PENDING);
+			observation := await(fixture, retried.waiter);
+			assert(observation.query.kind == .AVAILABLE);
+			Service.free_observation(*observation);
+			release(fixture, retried.waiter);
+		}
+
+		release(fixture, first.waiter);
+		release(fixture, second.waiter);
+		release(fixture, world);
+		release(fixture, ticket);
+		close(fixture);
+	}
+
+	print("X5 asynchronous query result backing failure/retry (counter %) \e[92mPASS\e[0m\n", counter);
 }
 
 test_query_operation_checks :: () {
+	test_query_result_backing();
+	test_query_result_backing(counter = 1);
+	test_query_result_backing(counter = 2);
+	test_query_result_interleavings();
+	test_query_result_interleavings(direct = true);
+	test_terminal_query_owner_backing();
+	test_terminal_query_identity_interleavings(counter = 1);
+	test_terminal_query_identity_interleavings(counter = 2);
+
 	for bool.[false, true] {
 		direct := it;
+		test_terminal_query_identity_interleavings(direct = direct);
 		for Output_Action.[
 			.REJECT_ACTIVE_RELEASE,
 			.REQUEST_SHUTDOWN,
@@ -13851,6 +15071,156 @@ test_query_operation_checks :: () {
 			.EXHAUST_OPERATION_COUNTER
 		] {
 			test_query_operation_backing(direct = direct, action = it);
+			test_query_operation_backing(direct = direct, action = it, task_key = true);
+			test_query_operation_backing(direct = direct, action = it, task_join = true);
+			action := it;
+			for 1..5 {
+				test_query_task_key_new_task(direct = direct, full = true, action = action, job_at = it);
+			}
+		}
+
+		test_query_operation_backing(direct = direct, action = .COMPLETE_WORK, task_join = true);
+		test_query_operation_backing(direct = direct, action = .COMPLETE_WORK, task_join = true, late_completion = true);
+		test_query_operation_backing(direct = direct, action = .FILL_QUERY_TASK_OPERATIONS, task_join = true);
+		test_query_operation_backing(direct = direct, action = .FILL_QUERY_TASK_OPERATIONS, task_join = true, retry_failure = true);
+		test_query_operation_backing(direct = direct, task_join = true, late_join = true);
+		for s64.[0, 1, 2] {
+			if direct && it == 2 {
+				continue;
+			}
+
+
+			control := it;
+			for 1..5 {
+				test_query_task_key_new_task(
+					direct = direct,
+					full = true,
+					action = .EXHAUST_OPERATION_COUNTER,
+					job_at = 5,
+					cleanup = .PRIVATE,
+					cleanup_target = it,
+					cleanup_control = control
+				);
+				test_query_task_key_new_task(
+					direct = direct,
+					full = true,
+					action = .START_QUERY_TASK,
+					job_at = it,
+					cleanup = .UNUSED,
+					cleanup_target = it,
+					cleanup_control = control
+				);
+			}
+
+			for 1..4 {
+				test_query_task_key_new_task(
+					direct = direct,
+					full = true,
+					job_at = it + 1,
+					cleanup = .PARTIAL,
+					cleanup_target = it,
+					cleanup_control = control
+				);
+			}
+
+			for 4..5 {
+				test_query_task_key_new_task(
+					direct = direct,
+					full = true,
+					cleanup = .REPLACED,
+					cleanup_target = it,
+					cleanup_control = control
+				);
+				test_query_task_key_new_task(
+					direct = direct,
+					full = true,
+					action = ifx it == 4
+						then .SPARE_SOURCE_TASK_CAPACITY
+						else .SPARE_SOURCE_READY_CAPACITY,
+					job_at = it,
+					cleanup = .UNUSED,
+					cleanup_target = it,
+					cleanup_control = control
+				);
+				test_query_task_key_new_task(
+					direct = direct,
+					job_at = 4,
+					late_capacity = true,
+					ready_capacity = it == 5,
+					cleanup = .REPLACED,
+					cleanup_target = it,
+					cleanup_control = control
+				);
+			}
+
+			for 1..2 {
+				test_query_operation_backing(direct = direct, operation_cleanup = .PARTIAL, cleanup_target = it, cleanup_control = control);
+			}
+
+			for s64.[1, 2, 4] {
+				test_query_operation_backing(
+					direct = direct,
+					action = .EXHAUST_OPERATION_COUNTER,
+					late_counter = true,
+					operation_cleanup = .PRIVATE,
+					cleanup_target = it,
+					cleanup_control = control
+				);
+			}
+
+			test_query_operation_backing(direct = direct, operation_cleanup = .REPLACED, cleanup_control = control);
+			test_query_operation_backing(
+				direct = direct,
+				action = .SPARE_QUERY_OPERATION_CAPACITY,
+				operation_cleanup = .UNUSED,
+				cleanup_target = 3,
+				cleanup_control = control
+			);
+			test_query_operation_backing(
+				direct = direct,
+				action = .FILL_QUERY_OPERATION_CAPACITY,
+				operation_cleanup = .RETRY,
+				cleanup_target = 3,
+				cleanup_control = control
+			);
+
+			for Source_Candidate_Join_Cleanup.[.REPLACED_OPERATIONS, .UNUSED_OPERATIONS, .PARTIAL_OPERATIONS, .RETRY_OPERATIONS, .PUBLISHED_OPERATIONS] {
+				cleanup := it;
+				action := ifx cleanup == .PARTIAL_OPERATIONS
+					then Output_Action.EXHAUST_OPERATION_COUNTER
+					else ifx cleanup == .RETRY_OPERATIONS
+						then .FILL_QUERY_TASK_OPERATIONS
+						else ifx cleanup == .PUBLISHED_OPERATIONS
+							then .COMPLETE_WORK
+							else .REJECT_ACTIVE_RELEASE;
+				test_query_operation_backing(direct = direct, action = action, task_join = true, cleanup = cleanup, cleanup_control = control);
+			}
+
+			test_query_operation_backing(
+				direct = direct,
+				action = .COMPLETE_WORK,
+				task_join = true,
+				late_completion = true,
+				cleanup = .PUBLISHED_OPERATIONS,
+				cleanup_control = control
+			);
+		}
+
+		for 1..5 {
+			test_query_task_key_new_task(direct = direct, full = true, action = .START_QUERY_TASK, job_at = it);
+		}
+
+		for Output_Action.[.FILL_SOURCE_TASK_CAPACITY, .FILL_SOURCE_READY_CAPACITY] {
+			action := it;
+			for 2..3 {
+				test_query_task_key_new_task(direct = direct, action = action, job_at = it);
+				test_query_task_key_new_task(direct = direct, action = action, job_at = it, retry_failure = true);
+			}
+		}
+
+		test_query_task_key_new_task(direct = direct);
+		for bool.[false, true] {
+			test_query_task_key_new_task(direct = direct, job_at = 4, late_capacity = true, ready_capacity = it);
 		}
 
 		test_query_operation_backing(direct = direct, action = .EXHAUST_OPERATION_COUNTER, late_counter = true);
@@ -13859,6 +15229,10 @@ test_query_operation_checks :: () {
 
 	test_query_operation_backing(counter = 1);
 	test_query_operation_backing(counter = 2);
+	test_query_operation_backing(counter = 1, task_key = true);
+	test_query_operation_backing(counter = 2, task_key = true);
+	test_query_operation_backing(counter = 1, task_join = true);
+	test_query_operation_backing(counter = 2, task_join = true);
 }
 
 test_waiter_backing_failures :: ($K: Service.Handle_Kind) {
