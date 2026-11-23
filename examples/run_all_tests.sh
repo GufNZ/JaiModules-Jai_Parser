@@ -90,7 +90,7 @@ if [[ $checks_only == true ]]; then
 		status=1
 	fi
 	if (( status == 0 )); then
-		printf '%s\n' 'Static checks \e[32mPASS\e[0m.'
+		printf 'Static checks \e[32mPASS\e[0m\n'
 	fi
 	exit "$status"
 fi

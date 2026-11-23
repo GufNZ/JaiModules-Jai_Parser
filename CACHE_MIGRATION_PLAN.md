@@ -1657,13 +1657,17 @@ Exit: user decision recorded.
 							Verification (2026-11-20): 52 new shared join cases pass on x64 and optimised LLVM, alongside all twelve service configurations.
 							Canonical identities/keys, exact task selection/append, callback-relative charges/references, retry allocation counts and zero final caller/owner ledgers are checked.
 							This closes task/key/list/queue admission staging, not pending-query actual-free callback qualification or terminal/result backing below.
-						- [ ] Stage terminal-query operation identities and asynchronous `new_result` object/identity backing with recoverable failure and winner revalidation.
+						- [x] Stage terminal-query operation identities and asynchronous `new_result` object/identity backing with recoverable failure and winner revalidation.
 							- [x] Prepare terminal-query operation identity bytes outside the state gate with checked owner allocation, a pinned world and handle/lifecycle/counter revalidation before token issuance.
 							Verification (2026-11-20): 215 shared scenarios cover five owner-failure/retry cases, 200 direct/blocking allocation success/failure winner interleavings and ten operation-counter boundary cases across all five terminal outcomes.
 							Checks include canonical identity bytes, no token consumption on owner-preparation failure, handle reuse/owner retirement, shutdown, frontier replacement, all four admission quotas and unchanged callback-relative charges/publication/reference state.
 							Pending-query frontier winners reuse already prepared identity bytes or recoverably prepare a missing identity after partial failure; caller-export failure and export-time interleaving semantics remain unchanged.
 							Both focused backends and all twelve service configurations pass, including independent zero caller/owner ledgers.
-							- [ ] Recoverably stage asynchronous `new_result` object/identity backing and revalidate completion, cancellation, lifecycle and counter winners before publishing a result.
+							- [x] Recoverably stage asynchronous `new_result` object/identity backing and revalidate completion, cancellation, lifecycle and counter winners before publishing a result.
+							Verification (2026-11-20, recorded 2026-11-23): 101 shared scenarios cover object/identity failures with fanout and retry, counter boundaries and direct/blocking allocation-time cancellation, supersession, shutdown, joins and quota controls.
+							Result preparation precedes task/diagnostics publication; the `QUERY_RESULT` boundary checks result tokens, world references and discarded backing after winner revalidation.
+							The dedicated `query_result_allocation_hook` keeps asynchronous result faults independent of waiter/registration preparation faults.
+							Both focused backends and all twelve service configurations passed after crash recovery, including the existing publication negative controls and independent zero caller/owner ledgers.
 						- [x] Qualify pending-query backing actual frees with allocating/mutating cleanup reentry and held-heap controls; admission callbacks and final zero ledgers do not close this requirement.
 							- [x] Qualify existing-query-task join buffers: replaced live arrays, unused prepared arrays, counter-rejected admission, retry-discarded arrays and completion-obsolete arrays during join and waiter preparation.
 							Verification (2026-11-20): 30 shared exact-free cases cover six paths in direct/blocking, callback-suppressed and held-heap modes.
@@ -1684,9 +1688,54 @@ Exit: user decision recorded.
 							Both task/ready arrays are checked on replacement, restored-capacity non-adoption and replacement after waiter-stage capacity loss.
 							Each target's actual delegate free occurs exactly once before teardown; callbacks read retained worlds/sources, allocate/free owner storage, retain/release world handles and observe exact pre/post-admission charges.
 							The task and operation fixtures share `assert_query_backing_cleanup`; preparation hooks exclude cleanup reentry while independent caller/owner ledgers still track every allocation and finish at zero.
-							Both focused backends and all twelve service configurations pass.  No production change was needed.
+							Both focused backends and all twelve service configurations pass.
+							No production change was needed.
 							This closes pending-query backing cleanup qualification, not terminal-query/result recovery, completion/retirement staging or the service-wide allocator callback contract.
-					- [ ] Preallocate or recoverably stage `resolve_waiter` terminal observation/completion storage before terminal/detachment mutation, including cancellation, completion and shutdown winners.
+					- [x] Preallocate or recoverably stage `resolve_waiter` terminal observation/completion storage before terminal/detachment mutation, including cancellation, completion and shutdown winners.
+						- [x] Prepare completion-list backing outside the state gate before waiter admission, reserving space for queued entries and every admitted pending waiter.
+						Verification (2026-11-23): 76 shared scenarios cover ticket/world preparation failure and allocation-free fanout, direct/blocking handle reuse, terminal-ticket completion/shutdown, query frontier/shutdown/counter winners, quotas and real competing-waiter capacity retry/rejection.
+						The bound is `completions.count + ledger.live[PENDING_REGISTRATIONS] + 1`; queued stale references remain counted after their completion charge is released.
+						`new_waiter` revalidates source/lifecycle/terminal/counter/quota winners before charging, and `resolve_waiter` asserts spare capacity before detachment, so completion append cannot allocate.
+						Both focused backends and all twelve service configurations pass, with unchanged callback-relative charges/tokens and independent zero caller/owner ledgers.
+						- [x] Recoverably prepare terminal observation bytes before terminal/detachment mutation and revalidate cancellation, completion and shutdown winners.
+							- [x] Prepare query-waiter observation backing before admission and fill terminal outcomes without allocating during `resolve_waiter`.
+							Verification (2026-11-23): 193 shared scenarios cover five preparation allocations with same-world retry, direct/blocking handle/frontier/lifecycle/quota/counter winners, counter boundaries and completion/cancellation/shutdown/publication-failure/pending-release outcomes.
+							Prepared world/document/context copies and fixed-size operation/result identity storage move into the waiter registration only after admission succeeds.
+							Terminal resolution retains all prepared allocation addresses; cancelled/failed outcomes expose an empty result identity while retaining its allocation for cleanup.
+							Private rejected backing and released pending/terminal query backing use an ordinary outside-gate finaliser, after handle invalidation on release.
+							Both focused backends and all twelve service configurations pass, including canonical terminal bytes, unchanged rejected-admission state and independent zero caller/owner ledgers.
+							- [x] Prepare update-ticket waiter observation backing, including frontier/documents and future world/successor identities, with completion/cancellation/shutdown winner revalidation.
+							Verification (2026-11-23): 205 shared scenarios cover all six single-document preparation allocations with same-ticket retry, direct/blocking completion/shutdown/supersession/handle-reuse/quota winners and publication/supersession/caller-cancellation/shutdown/conversion-failure/pending-release outcomes.
+							A temporary `operation.registrations` pin protects immutable operation identity/frontier/documents during outside-gate checked preparation; common admission revalidation releases the pin without consuming rejected-admission tokens or charges.
+							Prepared world and successor identity storage is filled during `resolve_waiter` without allocation, retaining every buffer address; supersession stores the successor's `Operation_ID`, and unused terminal identities retain their allocation with a zero count.
+							Rejected private backing and released pending/terminal ticket backing use the ordinary outside-gate observation finaliser, after handle invalidation on release.
+							Both focused backends and all twelve service configurations pass, including canonical terminal bytes, callback-relative charges/tokens, operation-pin cleanup and independent zero caller/owner ledgers.
+							- [x] Qualify query-waiter observation backing actual frees after rejection, terminal delivery and pending release with allocating/mutating cleanup reentry and held-heap controls.
+							Verification (2026-11-23): 145 shared exact-free scenarios cover each reachable partial-preparation buffer, all five fully prepared buffers rejected at the operation-counter boundary, and pending/available/cancelled/publication-failed waiter release.
+							The existing `Pool_Cleanup_Probe`, allocation wrapper and `assert_query_backing_cleanup` require each captured delegate allocation to be freed exactly once before the API returns, rather than relying on fixture teardown or zero ledgers alone.
+							Direct/blocking callbacks read retained world/source bytes, allocate/free owner storage and retain/release world handles; release callbacks also require the old waiter handle to be invalidated before its backing free.
+							Callback-suppressed and held-heap controls retain exact-free accounting; cancelled/failed result identities have a zero count, but their prepared allocation is still freed.
+							Terminal-release ledger snapshots wait for the fixture's shared work to finish, keeping callback-time and post-return charges/reservations strict without unrelated completion races.
+							Both focused backends and all twelve service configurations pass, with unchanged cleanup tokens, no admission pins and independent zero caller/owner ledgers.
+							No production change was needed.
+							- [x] Qualify update-ticket waiter observation backing actual frees after partial preparation rejection, terminal delivery and pending release with allocating/mutating cleanup reentry and held-heap controls.
+							Verification (2026-11-23): 235 shared exact-free scenarios cover five reachable partial-preparation targets and all six single-document buffers through full pending-quota rejection, pending release and published/superseded/caller-cancelled/shutdown/conversion-failed terminal release.
+							The generic `test_waiter_observation_cleanup` reuses the query fixture's allocation wrapper, `Pool_Cleanup_Probe` and `assert_query_backing_cleanup`; the prior 145 query scenarios remain registered unchanged.
+							Every captured operation identity, frontier, document array, document bytes, future world identity and successor identity allocation is freed exactly once before the API returns and before fixture teardown.
+							Direct/blocking callbacks read retained world/source bytes, allocate/free owner storage and retain/release world handles; released waiter handles are already invalidated during the delegate free.
+							Callback-suppressed and held-heap controls retain exact-free accounting.
+							Zero-count world/successor identities remain allocated until release; supersession checks the canonical successor `Operation_ID`.
+							Ticket registration pins, callback-time/post-return charges and reservations remain exact; operation-token accounting includes supersession and the first shutdown identity.
+							Both focused backends and all twelve service configurations pass, with independent zero caller/owner ledgers.
+							No production change was needed.
+						- [x] Qualify completion-list replaced, unused and retry-discarded backing actual frees with allocating/mutating cleanup reentry and held-heap controls.
+						Verification (2026-11-23): 40 shared exact-free scenarios cover ticket/world sources, replaced live arrays, unused prepared arrays and retry-discarded arrays before both acceptance and retry rejection.
+						Direct/blocking, callback-suppressed and held-heap controls require each target's actual delegate free exactly once before admission returns and before fixture teardown.
+						Cleanup callbacks read retained worlds/sources, allocate/free owner storage, retain/release world handles and observe unchanged pre-admission charges and source references.
+						The shared `assert_query_backing_cleanup` retains the exact-free, reentry, reservation and independent zero caller/owner ledger checks; preparation ordinals exclude nested callbacks, not owner allocations.
+						Both focused backends and all twelve service configurations pass.
+						No production change was needed for completion-list cleanup qualification; terminal observation backing is a separate requirement above.
+						This closes `resolve_waiter` observation/completion staging and its backing-free qualification, not free-slot/retirement queue safety or the service-wide allocator callback contract.
 					- [ ] Make `release_handle` free-slot growth and `retired_worlds`/`retired_outputs`/`retired_sources` queue admission allocation-safe, including shutdown/release at exhausted capacity.
 					Owner delegate allocation/free callbacks still require the outstanding no-host-callback-under-gate qualification; checked caller exporters alone do not close it.
 			Internal owner/snapshot/control allocation itself also lacks a recoverable failure boundary.
@@ -1758,7 +1807,7 @@ Exit: user decision recorded.
 	A rejected join may retain precisely the recycled slot created by the cleanup callback's balanced retain/release; original live slots, operation identity, task/queue publication and charges remain unchanged.
 	`./run_all_tests.sh --analysis-ticket --repeat=3 --expect-summaries=199 --summary` passes three consecutive runs on each backend, with 199 summaries per execution.
 	`./run_all_tests.sh --service --summary` passes all twelve full worker/provider/coordinator/host/default-trace/real-worker-trace gates on `x64` and optimised LLVM, with 198 analysis summaries in each full worker.
-	Static checks and editor diagnostics are clean; no production behavior changes were needed, and broad parser/foreign-target regressions were not rerun.
+	Static checks and editor diagnostics are clean; no production behaviour changes were needed, and broad parser/foreign-target regressions were not rerun.
 	The final combined-analysis child, its combined-analysis parent and the bounded analysis-admission-backing parent are complete.
 	Allocator-wide callback qualification, remaining terminal/result backing, retirement, aggregate byte quotas and broader Phase 5/`C3`/`C5` requirements remain open.
 	- [x] Combined analysis callback/capacity-retry increment (2026-11-19).

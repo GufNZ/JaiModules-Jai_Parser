@@ -388,7 +388,7 @@ Registration :: struct {
 	operation: *Operation;
 	world: *World;
 	result: *Query_Result;
-	// `.WAITER`: its own terminal observation, which caller cancellation can decide independently of the operation.
+	// `.WAITER`: its own terminal observation; waiters own prepared bytes while pending.
 	terminal: bool;
 	observation: Observation;
 	delivered: bool;
@@ -2724,6 +2724,13 @@ release :: (service: *Service, handle: Handle($K)) -> bool, Operation_Error {
 
 	use_owner_memory(session);
 
+	observation_backing: Observation;
+	defer {
+		if observation_backing.operation_identity.data {
+			finish_waiter_observation_backing(session, *observation_backing);
+		}
+	}
+
 	#if K == .SESSION {
 		stopped := session.lifecycle == .STOPPED;
 		#if TEST_HOOKS {
@@ -2776,9 +2783,7 @@ release :: (service: *Service, handle: Handle($K)) -> bool, Operation_Error {
 			give(session, .COMPLETION_RECORDS);
 		}
 
-		if registration.terminal {
-			free_observation(*registration.observation);
-		}
+		observation_backing = registration.observation;
 
 		operation.registrations -= 1;
 		reap(session, operation);
@@ -3228,6 +3233,24 @@ Delivery :: enum u8 {
 		allow_stale_source_registration: bool;
 		// Retry rejected source-ticket backing; source admission incorrect-retry control:
 		retry_failed_source_registration: bool;
+
+		// == Ticket waiter observation backing ==
+		// Private update observation bytes prepared before ticket waiter admission; allocation and interleaving tests:
+		ticket_waiter_observation_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `ticket_waiter_observation_allocation_hook`:
+		ticket_waiter_observation_allocation_data: *void;
+
+		// == Query waiter observation backing ==
+		// Private terminal observation bytes prepared before query waiter admission; allocation and interleaving tests:
+		query_waiter_observation_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `query_waiter_observation_allocation_hook`:
+		query_waiter_observation_allocation_data: *void;
+
+		// == Waiter completion backing ==
+		// Completion-list capacity preparation before waiter admission; allocation failure and interleaving tests:
+		completion_allocation_hook: (size: s64, data: *void) -> bool;
+		// State passed to `completion_allocation_hook`:
+		completion_allocation_data: *void;
 
 		// == Source-update backing ==
 		// Private update/query operation/identity backing and analysis document/frontier copies; failure and interleaving tests:
@@ -4232,10 +4255,19 @@ new_waiter :: (
 	join_backing: *Source_Candidate_Join_Backing = null
 ) -> (waiter: Handle(.WAITER), error: Operation_Error, terminal_winner: bool) {
 	#assert K == .TICKET || K == .WORLD;
+	observation: Observation;
+	defer {
+		if observation.operation_identity.data {
+			finish_waiter_observation_backing(session, *observation);
+		}
+	}
+
 	while (
 		!registration_backing_ready(session)
 		|| operation.waiters.count >= operation.waiters.allocated
+		|| !completion_backing_ready(session)
 		|| (K == .WORLD && !source_operation_backing_ready(session))
+		|| !observation.operation_identity.data
 		|| (task_backing && !query_task_backing_ready(session, task_backing, join_backing))
 	) {
 		#if K == .WORLD {
@@ -4265,8 +4297,14 @@ new_waiter :: (
 			backing_ok = prepare_source_operation_backing(session);
 		} else if task_backing && !query_task_backing_ready(session, task_backing, join_backing) {
 			backing_ok = prepare_query_task_backing(session, task_backing, join_backing);
-		} else {
+		} else if operation.waiters.count >= operation.waiters.allocated {
 			backing_ok = prepare_waiter_backing(session, source, operation);
+		} else if !completion_backing_ready(session) {
+			backing_ok = prepare_completion_backing(session);
+		} else #if K == .WORLD {
+			backing_ok = prepare_query_waiter_observation(session, operation, *observation);
+		} else {
+			backing_ok = prepare_ticket_waiter_observation(session, operation, *observation);
 		}
 
 		current, registration := lookup_waiter_source(session, source);
@@ -4326,7 +4364,8 @@ new_waiter :: (
 	}
 
 
-	handle := register(session, .WAITER, .{operation = operation});
+	handle := register(session, .WAITER, .{operation = operation, observation = observation});
+	observation = .{};
 	array_add(*operation.waiters, .{slot = handle.slot, generation = handle.generation});
 	operation.registrations += 1;
 	return handle, .{}, false;
@@ -4342,6 +4381,7 @@ detach_waiter :: (session: *Session, operation: *Operation, slot: u64) {
 
 // One terminal transition per waiter, appended to the completion order.
 resolve_waiter :: (session: *Session, operation: *Operation, slot: u64, observation: Observation) {
+	assert(session.completions.count < session.completions.allocated);
 	reference: Slot_Reference;
 	for operation.waiters {
 		if it.slot == slot {
@@ -4352,7 +4392,40 @@ resolve_waiter :: (session: *Session, operation: *Operation, slot: u64, observat
 	detach_waiter(session, operation, slot);
 	registration := session.registrations[slot];
 	registration.terminal = true;
-	registration.observation = owned_observation(observation);
+	if operation.kind == .QUERY {
+		backing := *registration.observation;
+		assert(backing.operation_identity.count == observation.operation_identity.count);
+		assert(bytes_equal(backing.world_identity.([] u8), observation.world_identity.([] u8)));
+		assert(bytes_equal(backing.document, observation.document) && bytes_equal(backing.context_identity, observation.context_identity));
+		memcpy(backing.operation_identity.data, observation.operation_identity.data, observation.operation_identity.count);
+		result_identity := backing.query.result_identity;
+		assert(observation.query.result_identity.count <= result_identity.count);
+		result_identity.count = observation.query.result_identity.count;
+		memcpy(result_identity.data, observation.query.result_identity.data, result_identity.count);
+		backing.query = observation.query;
+		backing.query.result_identity = result_identity;
+	} else {
+		assert(operation.kind == .UPDATE);
+		backing := *registration.observation;
+		assert(bytes_equal(backing.operation_identity.([] u8), observation.operation_identity.([] u8)));
+		assert(bytes_equal(backing.provider_frontier, observation.provider_frontier));
+		assert(backing.documents.count == observation.documents.count);
+		for backing.documents {
+			assert(bytes_equal(it, observation.documents[it_index]));
+		}
+
+		world_identity := backing.update.world_identity;
+		successor := backing.update.successor;
+		assert(observation.update.world_identity.count <= world_identity.count && observation.update.successor.count <= successor.count);
+		world_identity.count = observation.update.world_identity.count;
+		successor.count = observation.update.successor.count;
+		memcpy(world_identity.data, observation.update.world_identity.data, world_identity.count);
+		memcpy(successor.data, observation.update.successor.data, successor.count);
+		backing.update = observation.update;
+		backing.update.world_identity = world_identity;
+		backing.update.successor = successor;
+	}
+
 	give(session, .PENDING_REGISTRATIONS);
 	array_add(*session.completions, reference);
 }

@@ -2282,6 +2282,227 @@ prepare_registration_backing :: (session: *Session) -> bool {
 	return true;
 }
 
+prepare_ticket_waiter_observation :: (session: *Session, operation: *Operation, backing: *Observation) -> bool {
+	operation.registrations += 1;
+	defer {
+		operation.registrations -= 1;
+		reap(session, operation);
+	}
+
+	allocator := owner_allocator(session);
+	#if TEST_HOOKS {
+		allocator = .{proc = ticket_waiter_observation_allocate, data = session};
+	}
+
+	prepared := false;
+	unlock(
+		*session.gate,
+		#code {
+			ok, identity := try_output_bytes(allocator, operation.identity.([] u8));
+			backing.operation_identity = xx identity;
+			if !ok {
+				return false;
+			}
+
+
+			ok, backing.provider_frontier = try_output_bytes(allocator, operation.frontier);
+			if !ok {
+				return false;
+			}
+
+
+			ok, backing.documents = try_output_array(allocator, operation.documents.count, [] u8);
+			if !ok {
+				return false;
+			}
+
+
+			for operation.documents {
+				ok, backing.documents[it_index] = try_output_bytes(allocator, it);
+				if !ok {
+					return false;
+				}
+			}
+
+			token: [8] u8;
+			world_identity: [] u8;
+			ok, world_identity = try_output_key(allocator, "world", session.identities.session.([] u8), token);
+			backing.update.world_identity = xx world_identity;
+			if !ok {
+				return false;
+			}
+
+
+			successor: [] u8;
+			prepared, successor = try_output_key(allocator, "operation", session.identities.session.([] u8), token);
+			backing.update.successor = xx successor;
+		}
+	);
+
+	backing.kind = .UPDATE;
+	return prepared;
+}
+
+#if TEST_HOOKS {
+	ticket_waiter_observation_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.ticket_waiter_observation_allocation_hook;
+			if hook && !hook(size, session.faults.ticket_waiter_observation_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+}
+
+prepare_query_waiter_observation :: (session: *Session, operation: *Operation, backing: *Observation) -> bool {
+	allocator := owner_allocator(session);
+	#if TEST_HOOKS {
+		allocator = .{proc = query_waiter_observation_allocate, data = session};
+	}
+
+	prepared := false;
+	unlock(
+		*session.gate,
+		#code {
+			token: [8] u8;
+			ok, identity := try_output_key(allocator, "operation", session.identities.session.([] u8), token);
+			backing.operation_identity = xx identity;
+			if !ok {
+				return false;
+			}
+
+
+			world_identity: [] u8;
+			ok, world_identity = try_output_bytes(allocator, operation.world.identity.([] u8));
+			backing.world_identity = xx world_identity;
+			if !ok {
+				return false;
+			}
+
+
+			ok, backing.document = try_output_bytes(allocator, operation.world.members[operation.member].document);
+			if !ok {
+				return false;
+			}
+
+
+			ok, backing.context_identity = try_output_bytes(allocator, operation.world.members[operation.member].context_identity);
+			if !ok {
+				return false;
+			}
+
+
+			result_identity: [] u8;
+			prepared, result_identity = try_output_key(allocator, "result", session.identities.session.([] u8), token);
+			backing.query.result_identity = xx result_identity;
+		}
+	);
+
+	backing.kind = .QUERY;
+	backing.query_kind = operation.query_kind;
+	return prepared;
+}
+
+finish_waiter_observation_backing :: (session: *Session, backing: *Observation) {
+	allocator := owner_allocator(session);
+	unlock(
+		*session.gate,
+		#code {
+			free_observation(backing,, allocator);
+		}
+	);
+}
+
+#if TEST_HOOKS {
+	query_waiter_observation_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.query_waiter_observation_allocation_hook;
+			if hook && !hook(size, session.faults.query_waiter_observation_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+}
+
+completion_backing_ready :: (session: *Session) -> bool {
+	return session.ledger.live[Limit_Name.PENDING_REGISTRATIONS] < session.completions.allocated - session.completions.count;
+}
+
+prepare_completion_backing :: (session: *Session) -> bool {
+	if completion_backing_ready(session) {
+		return true;
+	}
+
+
+	count := session.completions.count;
+	pending := session.ledger.live[Limit_Name.PENDING_REGISTRATIONS];
+	if pending >= S64_MAX - count || count + pending >= S64_MAX / 2 {
+		return false;
+	}
+
+
+	capacity := max(8, (count + pending + 1) * 2);
+	backing: Waiter_Backing;
+	defer finish_waiter_backing(session, *backing);
+
+	allocator := owner_allocator(session);
+	#if TEST_HOOKS {
+		allocator = .{proc = completion_backing_allocate, data = session};
+	}
+
+	ok: bool;
+	unlock(
+		*session.gate,
+		#code {
+			ok, backing.storage = try_output_array(allocator, capacity, Slot_Reference);
+		}
+	);
+	if !ok {
+		return false;
+	}
+
+
+	count = session.completions.count;
+	pending = session.ledger.live[Limit_Name.PENDING_REGISTRATIONS];
+	if completion_backing_ready(session) || pending >= capacity - count {
+		return true;
+	}
+
+
+	memcpy(backing.storage.data, session.completions.data, count * size_of(Slot_Reference));
+	backing.old_storage = .{data = session.completions.data, count = count};
+	session.completions.data = backing.storage.data;
+	session.completions.allocated = capacity;
+	backing.storage = .[];
+	return true;
+}
+
+#if TEST_HOOKS {
+	completion_backing_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+		session := data.(*Session);
+		if mode == .ALLOCATE || mode == .RESIZE {
+			hook := session.faults.completion_allocation_hook;
+			if hook && !hook(size, session.faults.completion_allocation_data) {
+				return null;
+			}
+		}
+
+
+		allocator := owner_allocator(session);
+		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
+	}
+}
+
 Waiter_Backing :: struct {
 	storage: [] Slot_Reference;
 	old_storage: [] Slot_Reference;
