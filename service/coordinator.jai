@@ -89,12 +89,12 @@ Observation :: struct {
 		PENDING;
 	};
 	operation_identity: Operation_ID;
-	provider_frontier: [] u8;
-	documents: [] [] u8;
+	provider_frontier: []u8;
+	documents: [][]u8;
 	update: Ticket_Terminal;
 	world_identity: World_ID;
-	document: [] u8;
-	context_identity: [] u8;
+	document: []u8;
+	context_identity: []u8;
 	query_kind: Query_Kind;
 	query: Query_Terminal;
 	phase: Pending_Phase;
@@ -106,26 +106,26 @@ is_terminal :: (observation: Observation) -> bool {
 
 Session_Options :: struct {
 	version: string;
-	workspace: [] u8;
-	provider_namespace: [] u8;
-	host_authority: [] u8;
+	workspace: []u8;
+	provider_namespace: []u8;
+	host_authority: []u8;
 	provider_capabilities: Provider_Adapter_Descriptor;
-	supported_tuples: [] Schema_Tuple;
-	contexts: [] Context_Registration;
+	supported_tuples: []Schema_Tuple;
+	contexts: []Context_Registration;
 	requested_limits: Limit_Request;
 }
 
 Tracked_Document :: struct {
-	document: [] u8;
-	provider_revision: [] u8;
+	document: []u8;
+	provider_revision: []u8;
 	binding: Document_Binding;
 	disk_kind: type_of(Disk_State.kind);
-	disk_source_revision: [] u8;
-	disk_context: [] u8;
+	disk_source_revision: []u8;
+	disk_context: []u8;
 	has_overlay: bool;
-	overlay_installation_revision: [] u8;
-	overlay_source_revision: [] u8;
-	overlay_context: [] u8;
+	overlay_installation_revision: []u8;
+	overlay_source_revision: []u8;
+	overlay_context: []u8;
 	overlay_origin: Overlay_Origin;
 	selection: type_of(Selected_Document.selection);
 }
@@ -138,12 +138,12 @@ Store_Mode :: enum u8 {
 
 Session_Description :: struct {
 	session_identity: Session_ID;
-	workspace: [] u8;
-	provider_namespace: [] u8;
+	workspace: []u8;
+	provider_namespace: []u8;
 	lifecycle: Lifecycle;
-	accepted_frontier: [] u8;
-	tracked_document_states: [] Tracked_Document;
-	clock_identity: [] u8;
+	accepted_frontier: []u8;
+	tracked_document_states: []Tracked_Document;
+	clock_identity: []u8;
 	effective_limits: Limits;
 	// No store binding exists before phase 6.
 	store_mode: Store_Mode;
@@ -156,13 +156,13 @@ Opened :: struct {
 
 Accepted :: struct {
 	ticket: Handle(.TICKET);
-	frontier: [] u8;
+	frontier: []u8;
 }
 
 Analysis_Request :: struct {
 	version: string;
-	expected_frontier: [] u8;
-	documents: [] [] u8;
+	expected_frontier: []u8;
+	documents: [][]u8;
 }
 
 Ticket_Observation :: struct {
@@ -182,8 +182,8 @@ World_Selector :: struct {
 	use_waiter: bool;
 	// `.HEAD`.
 	session: Handle(.SESSION);
-	workspace: [] u8;
-	expected_frontier: [] u8;
+	workspace: []u8;
+	expected_frontier: []u8;
 }
 
 World_Acquisition :: struct {
@@ -199,14 +199,14 @@ World_Acquisition :: struct {
 		FRONTIER_MISMATCH;
 		UPDATE_TERMINAL;
 	};
-	published_frontier: [] u8;
+	published_frontier: []u8;
 	observation: Observation;
 }
 
 Query_Request :: struct {
 	version: string;
 	world: Handle(.WORLD);
-	document: [] u8;
+	document: []u8;
 	kind: Query_Kind;
 }
 
@@ -222,7 +222,7 @@ Query_Start :: struct {
 }
 
 Deadline :: struct {
-	clock_identity: [] u8;
+	clock_identity: []u8;
 	nanoseconds: u64;
 }
 
@@ -265,9 +265,9 @@ Member_State :: enum u8 {
 }
 
 Selected_Member :: struct {
-	document: [] u8;
-	provider_revision: [] u8;
-	context_identity: [] u8;
+	document: []u8;
+	provider_revision: []u8;
+	context_identity: []u8;
 	state: Member_State;
 	source: *Source_Backing;
 	filename: string;
@@ -284,11 +284,11 @@ Member_Syntax :: struct {
 
 World :: struct {
 	identity: World_ID;
-	frontier: [] u8;
-	capture_key: [] u8;
+	frontier: []u8;
+	capture_key: []u8;
 	// Canonical `DocumentID` order.
-	members: [] Selected_Member;
-	syntax: [] Member_Syntax;
+	members: []Selected_Member;
+	syntax: []Member_Syntax;
 	// Coherent only when every member is a disk observation under one attested capture token.
 	consistency: Consistency;
 	state: enum u8 {
@@ -311,9 +311,9 @@ Query_Result :: struct {
 Result_Description :: struct {
 	result_identity: Result_ID;
 	world_identity: World_ID;
-	document: [] u8;
-	source_revision: [] u8;
-	context_identity: [] u8;
+	document: []u8;
+	source_revision: []u8;
+	context_identity: []u8;
 	kind: Query_Kind;
 	diagnostics_status: Diagnostics_Status;
 	// The protected syntax backing every query kind's references resolve against.
@@ -332,8 +332,8 @@ Operation :: struct {
 	};
 	terminal: bool;
 	// `.UPDATE`.
-	frontier: [] u8;
-	documents: [] [] u8;
+	frontier: []u8;
+	documents: [][]u8;
 	update: Ticket_Terminal;
 	// `.UPDATE` candidate or `.QUERY` world; held until the operation is reaped.
 	world: *World;
@@ -344,7 +344,7 @@ Operation :: struct {
 	result: *Query_Result;
 	task: *Task;
 	registrations: s64;
-	waiters: [..] Slot_Reference;
+	waiters: [..]Slot_Reference;
 }
 
 Task :: struct {
@@ -353,7 +353,7 @@ Task :: struct {
 		PARSE_INDEX;
 		QUERY_PAYLOAD;
 	};
-	key: [] u8;
+	key: []u8;
 	world: *World;
 	member: s64;
 	phase: enum u8 {
@@ -363,7 +363,7 @@ Task :: struct {
 		TERMINAL;
 	};
 	attempt: u64;
-	operations: [..] *Operation;
+	operations: [..]*Operation;
 }
 
 // One per dispatch; the producer fills it once and the coordinator consumes it once.
@@ -374,7 +374,7 @@ Mailbox :: struct {
 	consumed: bool;
 	ok: bool;
 	failure: Failure;
-	syntax: [] Member_Syntax;
+	syntax: []Member_Syntax;
 	diagnostics: *Diagnostics_Projection;
 }
 
@@ -395,7 +395,7 @@ Registration :: struct {
 }
 
 Retired_Output :: struct {
-	syntax: [] Member_Syntax;
+	syntax: []Member_Syntax;
 	diagnostics: *Diagnostics_Projection;
 }
 
@@ -414,22 +414,22 @@ Session :: struct {
 	retiring: bool;
 	directory_retiring: bool;
 	identities: Session_Identities;
-	workspace: [] u8;
+	workspace: []u8;
 	lifecycle: Lifecycle;
 	provider: *Provider_Model;
 	ledger: Resource_Ledger;
 	registry: Handle_Registry;
-	registrations: [..] *Registration;
-	operations: [..] *Operation;
-	worlds: [..] *World;
-	tasks: [..] *Task;
-	ready: [..] *Task;
-	optional_ready: [..] *Task;
-	mailboxes: [..] *Mailbox;
-	retired_worlds: [..] *World;
-	retired_outputs: [..] Retired_Output;
-	retired_sources: [..] *Source_Backing;
-	completions: [..] Slot_Reference;
+	registrations: [..]*Registration;
+	operations: [..]*Operation;
+	worlds: [..]*World;
+	tasks: [..]*Task;
+	ready: [..]*Task;
+	optional_ready: [..]*Task;
+	mailboxes: [..]*Mailbox;
+	retired_worlds: [..]*World;
+	retired_outputs: [..]Retired_Output;
+	retired_sources: [..]*Source_Backing;
+	completions: [..]Slot_Reference;
 	head: *World;
 	head_target: *World;
 	shutdown: *Operation;
@@ -443,7 +443,7 @@ Session :: struct {
 		// Behaviour switches and allocator callbacks; worker failure/interleaving controls and coordinator negative controls:
 		faults: Test_Faults;
 		// One barrier per `Test_Boundary`; worker lifecycle/wait races and native service trace tests:
-		pauses: [#run enum_names(Test_Boundary).count] Test_Pause;
+		pauses: [#run enum_names(Test_Boundary).count]Test_Pause;
 	}
 }
 
@@ -485,14 +485,14 @@ Service :: struct {
 		reject_changed_directory: bool;
 	}
 	incarnation: Service_Incarnation;
-	clock_identity: [] u8;
+	clock_identity: []u8;
 	ceilings: Limits;
 	minima: Limits;
-	sessions: [..] *Session;
+	sessions: [..]*Session;
 }
 
 // `epoch` must come from the trusted issuer (phase 2 `reserve_epoch`).
-open_service :: (authority_namespace: [] u8, epoch: u64, ceilings: Limits, minima: Limits) -> *Service {
+open_service :: (authority_namespace: []u8, epoch: u64, ceilings: Limits, minima: Limits) -> *Service {
 	service := New(Service);
 	service.allocator = context.default_allocator;
 	#if TEST_HOOKS {
@@ -590,7 +590,7 @@ open_session :: (service: *Service, options: Session_Options) -> (ok: bool, open
 	}
 	session.service = service;
 	session.identities = identities;
-	session.identities.session = xx array_copy(identities.session.([] u8));
+	session.identities.session = xx array_copy(identities.session.([]u8));
 	free(identities.session.data,, service.allocator);
 	session.workspace = array_copy(options.workspace);
 	session.ledger.limits = limits;
@@ -1008,7 +1008,7 @@ submit_source_batch :: (service: *Service, handle: Handle(.SESSION), batch: Sour
 	return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
 }
 
-prepare_source_ticket_registration :: (session: *Session, handle: Handle(.SESSION), frontier: [] u8) -> (ok: bool, error: Operation_Error) {
+prepare_source_ticket_registration :: (session: *Session, handle: Handle(.SESSION), frontier: []u8) -> (ok: bool, error: Operation_Error) {
 	while !registration_backing_ready(session) {
 		if !validate_session(session, handle) {
 			return false, stale(.SESSION);
@@ -1108,13 +1108,13 @@ submit_source_batch_attempt :: (
 	staged := provider_backing.model;
 	transfer_count := session.provider.batch_storage.count;
 	need_transfer := transfer_count >= session.provider.batch_storage.allocated;
-	transfer: [..] *Pool;
+	transfer: [..]*Pool;
 	transfer.allocator = owner_allocator(session);
 	stage_provider_copy(session.provider, provider_backing);
 	provider_backing.* = .{};
 	session.active_admissions += 1;
 	ok: bool;
-	frontier: [] u8;
+	frontier: []u8;
 	candidate_capture: Source_Candidate_Capture;
 	candidate_world: Source_Candidate_World_Backing;
 	candidate_task: Source_Candidate_Task_Backing;
@@ -1139,7 +1139,7 @@ submit_source_batch_attempt :: (
 
 	allocator := output_allocator();
 	output_ok: bool;
-	output: [] u8;
+	output: []u8;
 	error: Operation_Error;
 	unlock(
 		*session.gate,
@@ -1545,10 +1545,10 @@ request_analysis :: (service: *Service, handle: Handle(.SESSION), request: Analy
 	backing: Source_Update_Backing;
 	defer finish_source_update_backing(session, *backing);
 
-	documents: [] [] u8;
-	frontier: [] u8;
+	documents: [][]u8;
+	frontier: []u8;
 	allocator := output_allocator();
-	output: [] u8;
+	output: []u8;
 	output_ok := true;
 	output_attempted := false;
 	defer finish_analysis_receipt(session, *frontier, *documents, *output, allocator);
@@ -2230,7 +2230,7 @@ query :: (service: *Service, request: Query_Request) -> (ok: bool, started: Quer
 		allocator := owner_allocator(session);
 		adopt_source_candidate_task_list(*session.tasks, *task_backing.tasks, allocator);
 		adopt_source_candidate_task_list(*session.ready, *task_backing.ready, allocator);
-		operations: [..] *Operation;
+		operations: [..]*Operation;
 		operations.data = task_backing.operations.data;
 		operations.allocated = task_backing.operations.count;
 		operations.allocator = allocator;
@@ -2291,7 +2291,12 @@ poll_pinned :: (call: *Session, handle: Handle($K)) -> bool, Observation, Operat
 
 	#if K == .TICKET {
 		operation := registration.operation;
-		return true, ifx operation.terminal then update_observation(operation) else pending_observation(operation), .{};
+		return
+			true,
+			ifx operation.terminal
+				then update_observation(operation)
+				else pending_observation(operation),
+			.{};
 	} else #if K == .WAITER {
 		return true, waiter_observation(session, registration), .{};
 	} else {
@@ -2539,7 +2544,7 @@ cancel_waiter :: (service: *Service, handle: Handle(.WAITER)) -> (ok: bool, outc
 	}
 }
 
-drain_completions :: (service: *Service, handle: Handle(.SESSION), maximum: u64) -> (ok: bool, records: [] Completion_Record, error: Operation_Error) {
+drain_completions :: (service: *Service, handle: Handle(.SESSION), maximum: u64) -> (ok: bool, records: []Completion_Record, error: Operation_Error) {
 	call := use_call(service, handle);
 
 	session := validate_session(call, handle);
@@ -2555,7 +2560,7 @@ drain_completions :: (service: *Service, handle: Handle(.SESSION), maximum: u64)
 	}
 
 
-	snapshots: [..] Completion_Record;
+	snapshots: [..]Completion_Record;
 	for session.completions {
 		registration := live_registration(session, it);
 		if !registration || registration.delivered {
@@ -2584,8 +2589,8 @@ drain_completions :: (service: *Service, handle: Handle(.SESSION), maximum: u64)
 	}
 
 	allocator := output_allocator();
-	records: [] Completion_Record;
-	discarded: [..] Observation;
+	records: []Completion_Record;
+	discarded: [..]Observation;
 	returned := false;
 	defer {
 		release_drain_copies(session, snapshots, discarded, ifx returned then .[] else records, allocator);
@@ -2965,7 +2970,7 @@ read_result :: (service: *Service, handle: Handle(.RESULT)) -> (ok: bool, descri
 	return true, description, .{};
 }
 
-read_source :: (service: *Service, handle: Handle(.RESULT), start_byte: u64, end_byte: u64) -> bool, [] u8, Operation_Error {
+read_source :: (service: *Service, handle: Handle(.RESULT), start_byte: u64, end_byte: u64) -> bool, []u8, Operation_Error {
 	call := use_call(service, handle);
 
 	session, registration := lookup_pinned(call, handle);
@@ -3428,7 +3433,7 @@ Delivery :: enum u8 {
 
 		// == Parse failure containment ==
 		// Fail conversion of the named member in its candidate parse task; `service_traces_test.jai` `trace_v6` failure containment:
-		fail_parse_document: [] u8;
+		fail_parse_document: []u8;
 	}
 
 	session_of :: (service: *Service, handle: Handle(.SESSION)) -> *Session {
@@ -3577,7 +3582,12 @@ compute_task :: (session: *Session, mailbox: *Mailbox) {
 
 			if fault.failure != .NONE {
 				mailbox.ok = false;
-				mailbox.failure = .{stage = .CONVERSION, code = ifx fault.failure == .INVALID_TEXT then .INVALID_TEXT else .INVALID_EVIDENCE};
+				mailbox.failure = .{
+					stage = .CONVERSION,
+					code = ifx fault.failure == .INVALID_TEXT
+						then .INVALID_TEXT
+						else .INVALID_EVIDENCE
+				};
 				break;
 			}
 
@@ -3600,7 +3610,12 @@ compute_task :: (session: *Session, mailbox: *Mailbox) {
 		fault: Projection_Fault;
 		fault, mailbox.diagnostics = project_diagnostics(world.syntax[task.member].owner);
 		mailbox.ok = fault.failure == .NONE;
-		mailbox.failure = .{stage = .CONVERSION, code = ifx fault.failure == .INVALID_TEXT then .INVALID_TEXT else .INVALID_EVIDENCE};
+		mailbox.failure = .{
+			stage = .CONVERSION,
+			code = ifx fault.failure == .INVALID_TEXT
+				then .INVALID_TEXT
+				else .INVALID_EVIDENCE
+		};
 	}
 
 }
@@ -3774,19 +3789,19 @@ copy_observation :: (observation: Observation) -> Observation {
 
 owned_observation :: (observation: Observation) -> Observation {
 	result := observation;
-	result.operation_identity = xx array_copy(observation.operation_identity.([] u8));
+	result.operation_identity = xx array_copy(xx observation.operation_identity.([]u8));
 	result.provider_frontier = array_copy(observation.provider_frontier);
-	result.documents = NewArray(observation.documents.count, [] u8);
+	result.documents = NewArray(observation.documents.count, []u8);
 	for observation.documents {
 		result.documents[it_index] = array_copy(it);
 	}
 
-	result.update.world_identity = xx array_copy(observation.update.world_identity.([] u8));
-	result.update.successor = xx array_copy(observation.update.successor.([] u8));
-	result.world_identity = xx array_copy(observation.world_identity.([] u8));
+	result.update.world_identity = xx array_copy(observation.update.world_identity.([]u8));
+	result.update.successor = xx array_copy(observation.update.successor.([]u8));
+	result.world_identity = xx array_copy(observation.world_identity.([]u8));
 	result.document = array_copy(observation.document);
 	result.context_identity = array_copy(observation.context_identity);
-	result.query.result_identity = xx array_copy(observation.query.result_identity.([] u8));
+	result.query.result_identity = xx array_copy(observation.query.result_identity.([]u8));
 	return result;
 }
 
@@ -3859,7 +3874,7 @@ give :: (session: *Session, names: .. Limit_Name) {
 
 find_session :: (service: *Service, identity: Session_ID) -> *Session {
 	for service.sessions {
-		if bytes_equal(it.identities.session.([] u8), identity.([] u8)) {
+		if bytes_equal(xx it.identities.session, xx identity) {
 			return it;
 		}
 	}
@@ -3927,7 +3942,7 @@ describe :: (session: *Session, allocator: Allocator = .{}) -> Session_Descripti
 	}
 
 	return .{
-		session_identity = xx array_copy(session.identities.session.([] u8)),
+		session_identity = xx array_copy(session.identities.session.([]u8)),
 		workspace = array_copy(session.workspace),
 		provider_namespace = array_copy(session.provider.provider_namespace),
 		lifecycle = session.lifecycle,
@@ -3940,11 +3955,11 @@ describe :: (session: *Session, allocator: Allocator = .{}) -> Session_Descripti
 }
 
 // The session-owned copy of an accepted document identity.
-accepted_document :: (session: *Session, document: [] u8) -> [] u8 {
+accepted_document :: (session: *Session, document: []u8) -> []u8 {
 	return find_document(session.provider, document).document;
 }
 
-sort_canonical :: (values: [] [] u8) {
+sort_canonical :: (values: [][]u8) {
 	for i: 1..values.count - 1 {
 		j := i;
 		while j > 0 && compare_canonical(values[j - 1], values[j]) > 0 {
@@ -3954,8 +3969,8 @@ sort_canonical :: (values: [] [] u8) {
 	}
 }
 
-new_update_operation :: (session: *Session, frontier: [] u8, documents: [] [] u8) -> *Operation {
-	_, identity := issue_operation(*session.identities);
+new_update_operation :: (session: *Session, frontier: []u8, documents: [][]u8) -> *Operation {
+	_, identity := issue_operation(*session.identities);//QUESTION: why is this unchecked?
 	operation := New(Operation);
 	operation.identity = identity;
 	operation.kind = .UPDATE;
@@ -3965,7 +3980,7 @@ new_update_operation :: (session: *Session, frontier: [] u8, documents: [] [] u8
 	return operation;
 }
 
-find_candidate_world :: (session: *Session, key: [] u8) -> *World {
+find_candidate_world :: (session: *Session, key: []u8) -> *World {
 	for session.worlds {
 		if (it.state == .PENDING || it.state == .PUBLISHED) && bytes_equal(it.capture_key, key) {
 			return it;
@@ -4069,7 +4084,7 @@ start_candidate :: (
 			prepared_world.worlds = .{data = previous.data, count = previous.allocated};
 		}
 	} else {
-		_, generated := issue_world(*session.identities);
+		_, generated := issue_world(*session.identities);//QUESTION: why is this unchecked?
 		identity = generated;
 		world = New(World);
 	}
@@ -4103,7 +4118,7 @@ start_candidate :: (
 		adopt_source_candidate_task_list(*session.tasks, *prepared_task.tasks, owner_allocator(session));
 		adopt_source_candidate_task_list(*session.ready, *prepared_task.ready, owner_allocator(session));
 		task = prepared_task.task;
-		operations: [..] *Operation;
+		operations: [..]*Operation;
 		operations.data = prepared_task.operations.data;
 		operations.allocated = prepared_task.operations.count;
 		operations.allocator = owner_allocator(session);
@@ -4122,7 +4137,7 @@ start_candidate :: (
 		task = New(Task);
 		task.* = .{
 			kind = .PARSE_INDEX,
-			key = make_key("execution-task", session.identities.session.([] u8), world.identity.([] u8), xx "PARSE_INDEX"),
+			key = make_key("execution-task", xx session.identities.session, xx world.identity, xx "PARSE_INDEX"),
 			world = world,
 			attempt = 1,
 		};
@@ -4395,7 +4410,7 @@ resolve_waiter :: (session: *Session, operation: *Operation, slot: u64, observat
 	if operation.kind == .QUERY {
 		backing := *registration.observation;
 		assert(backing.operation_identity.count == observation.operation_identity.count);
-		assert(bytes_equal(backing.world_identity.([] u8), observation.world_identity.([] u8)));
+		assert(bytes_equal(xx backing.world_identity, xx observation.world_identity));
 		assert(bytes_equal(backing.document, observation.document) && bytes_equal(backing.context_identity, observation.context_identity));
 		memcpy(backing.operation_identity.data, observation.operation_identity.data, observation.operation_identity.count);
 		result_identity := backing.query.result_identity;
@@ -4407,7 +4422,7 @@ resolve_waiter :: (session: *Session, operation: *Operation, slot: u64, observat
 	} else {
 		assert(operation.kind == .UPDATE);
 		backing := *registration.observation;
-		assert(bytes_equal(backing.operation_identity.([] u8), observation.operation_identity.([] u8)));
+		assert(bytes_equal(xx backing.operation_identity, xx observation.operation_identity));
 		assert(bytes_equal(backing.provider_frontier, observation.provider_frontier));
 		assert(backing.documents.count == observation.documents.count);
 		for backing.documents {
@@ -4859,7 +4874,6 @@ destroy_session :: (session: *Session) {
 	array_free(session.retired_sources);
 	array_free(session.completions);
 	array_free(session.registry.slots);
-	array_free(session.registry.free_slots);
 	destroy(*session.changed);
 	destroy(*session.gate);
 	#if TEST_HOOKS {

@@ -115,8 +115,8 @@ leave_call :: (session: *Session) {
 	cleanup_owned(session);
 	service := session.service;
 	reclaim: bool;
-	retired_sessions: [..] *Session;
-	empty_sessions: [..] *Session;
+	retired_sessions: [..]*Session;
+	empty_sessions: [..]*Session;
 	lock(
 		*service.directory,
 		#code {
@@ -182,15 +182,15 @@ admit_directory :: (session: *Session) -> bool {
 		}
 	}
 
-	candidate: [..] *Session;
-	empty: [..] *Session;
+	candidate: [..]*Session;
+	empty: [..]*Session;
 	observed_count: s64;
 	defer array_free(candidate);
 
 	while true {
 		admitted: bool;
 		capacity: s64;
-		retired: [..] *Session;
+		retired: [..]*Session;
 		lock(
 			*service.directory,
 			#code {
@@ -391,9 +391,9 @@ reaper_job :: (thread: *Thread) -> s64 {
 
 cleanup_owned :: (session: *Session) {
 	push_allocator(owner_allocator(session));
-	worlds: [..] *World;
-	outputs: [..] Retired_Output;
-	sources: [..] *Source_Backing;
+	worlds:		[..]*World;
+	outputs:	[..]Retired_Output;
+	sources:	[..]*Source_Backing;
 	lock(
 		*session.gate,
 		#code {
@@ -467,11 +467,11 @@ cleanup_owned :: (session: *Session) {
 }
 
 finish_analysis_receipt :: (
-	session: *Session,
-	frontier: *[] u8,
-	documents: *[] [] u8,
-	output: *[] u8,
-	allocator: Allocator
+	session:	*Session,
+	frontier:	*[]u8,
+	documents:	*[][]u8,
+	output:		*[]u8,
+	allocator:	Allocator
 ) {
 	unlock(
 		*session.gate,
@@ -491,17 +491,17 @@ finish_analysis_receipt :: (
 }
 
 finish_source_admission :: (
-	session: *Session,
-	staged: *Provider_Model,
-	transfer: *[..] *Pool,
-	frontier: *[] u8,
-	candidate_capture: *Source_Candidate_Capture,
-	candidate_world: *Source_Candidate_World_Backing,
-	candidate_task: *Source_Candidate_Task_Backing,
-	candidate_join: *Source_Candidate_Join_Backing,
-	output: *[] u8,
-	error: *Operation_Error,
-	allocator: Allocator
+	session:			*Session,
+	staged:				*Provider_Model,
+	transfer:			*[..]*Pool,
+	frontier:			*[]u8,
+	candidate_capture:	*Source_Candidate_Capture,
+	candidate_world:	*Source_Candidate_World_Backing,
+	candidate_task:		*Source_Candidate_Task_Backing,
+	candidate_join:		*Source_Candidate_Join_Backing,
+	output:				*[]u8,
+	error:				*Operation_Error,
+	allocator:			Allocator
 ) {
 	unlock(
 		*session.gate,
@@ -568,7 +568,7 @@ stage_provider_copy :: (model: *Provider_Model, backing: *Source_Provider_Backin
 	staged.batch_storage = storage;
 }
 
-commit_provider_copy :: (model: *Provider_Model, staged: *Provider_Model, transfer: *[..] *Pool) {
+commit_provider_copy :: (model: *Provider_Model, staged: *Provider_Model, transfer: *[..]*Pool) {
 	if model.batch_storage.count + staged.batch_storage.count > model.batch_storage.allocated {
 		assert(transfer.allocated >= model.batch_storage.count + staged.batch_storage.count);
 		memcpy(transfer.data, model.batch_storage.data, model.batch_storage.count * size_of(*Pool));

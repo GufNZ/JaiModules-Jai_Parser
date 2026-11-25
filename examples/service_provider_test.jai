@@ -42,11 +42,11 @@ open :: (batch_events := 8, source_bytes := 1024) -> *Service.Provider_Model {
 	return Service.open_provider_model(descriptor(), xx NAMESPACE, identities.session, xx HOST, limits);
 }
 
-doc :: (key: string) -> [] u8 {
+doc :: (key: string) -> []u8 {
 	return Service.document_id(xx NAMESPACE, POLICY, xx key);
 }
 
-rev :: (model: *Service.Provider_Model, document: [] u8, token: string) -> [] u8 {
+rev :: (model: *Service.Provider_Model, document: []u8, token: string) -> []u8 {
 	return Service.provider_revision_id(model.provider_namespace, model.session, document, xx token);
 }
 
@@ -60,7 +60,7 @@ registration :: (filename: string) -> Service.Context_Registration {
 	return .{identity = Service.context_id(descriptor), descriptor = descriptor};
 }
 
-binding :: (document: [] u8, path := "D:/project/main.jai") -> *Service.Document_Binding {
+binding :: (document: []u8, path := "D:/project/main.jai") -> *Service.Document_Binding {
 	result := New(Service.Document_Binding);
 	result.document = document;
 	result.provider_policy_version = POLICY;
@@ -68,7 +68,7 @@ binding :: (document: [] u8, path := "D:/project/main.jai") -> *Service.Document
 	return result;
 }
 
-revision_state :: (revision: [] u8) -> Service.Expected_Provider_State {
+revision_state :: (revision: []u8) -> Service.Expected_Provider_State {
 	return .{kind = .REVISION, revision = revision};
 }
 
@@ -80,7 +80,7 @@ provenance :: () -> Service.Observation_Provenance {
 	return .{provider_identity = xx NAMESPACE, observation_token = xx "observation"};
 }
 
-present :: (text: string, syntax_context: [] u8) -> Service.Disk_Observation {
+present :: (text: string, syntax_context: []u8) -> Service.Disk_Observation {
 	return .{
 		kind = .PRESENT,
 		source = inline_source(text),
@@ -90,7 +90,7 @@ present :: (text: string, syntax_context: [] u8) -> Service.Disk_Observation {
 	};
 }
 
-set_overlay :: (document: [] u8, expected: Service.Expected_Provider_State, syntax_context: [] u8, text: string, resulting: [] u8) -> Service.Document_Event {
+set_overlay :: (document: []u8, expected: Service.Expected_Provider_State, syntax_context: []u8, text: string, resulting: []u8) -> Service.Document_Event {
 	return .{
 		document = document,
 		expected_provider_state = expected,
@@ -102,7 +102,7 @@ set_overlay :: (document: [] u8, expected: Service.Expected_Provider_State, synt
 	};
 }
 
-submit :: (model: *Service.Provider_Model, contexts: [] Service.Context_Registration, events: .. Service.Document_Event) -> bool, Service.Operation_Error {
+submit :: (model: *Service.Provider_Model, contexts: []Service.Context_Registration, events: .. Service.Document_Event) -> bool, Service.Operation_Error {
 	batch := Service.Source_Batch.{
 		version = Service.INTERFACE_VERSION,
 		session = model.session,
@@ -115,13 +115,13 @@ submit :: (model: *Service.Provider_Model, contexts: [] Service.Context_Registra
 }
 
 // A rejected batch leaves the frontier and the named document's revision exactly as they were.
-expect_rejected :: (model: *Service.Provider_Model, ok: bool, error: Service.Operation_Error, code: Service.Operation_Error_Code, frontier: [] u8, what: string) {
+expect_rejected :: (model: *Service.Provider_Model, ok: bool, error: Service.Operation_Error, code: Service.Operation_Error_Code, frontier: []u8, what: string) {
 	assert(!ok, "\e[91m%: accepted.\e[0m", what);
 	assert(error.code == code, "\e[91m%: expected %, got %.\e[0m", what, code, error.code);
 	assert(Service.bytes_equal(model.accepted_frontier, frontier), "\e[91m%: the frontier moved.\e[0m", what);
 }
 
-selected_text :: (model: *Service.Provider_Model, document: [] u8) -> string, Service.Selected_Document {
+selected_text :: (model: *Service.Provider_Model, document: []u8) -> string, Service.Selected_Document {
 	state := Service.find_document(model, document);
 	assert(state != null);
 	selected := Service.selected_document(state);
@@ -131,7 +131,7 @@ selected_text :: (model: *Service.Provider_Model, document: [] u8) -> string, Se
 
 test_descriptor :: () {
 	assert(Service.validate_provider_descriptor(descriptor()) == .NONE);
-	controls: [5] Service.Provider_Adapter_Descriptor;
+	controls: [5]Service.Provider_Adapter_Descriptor;
 	expected := Service.Provider_Failure.[.SCHEMA, .AUTHORITY, .ALIAS_POLICY, .CONSISTENCY, .LEASE];
 	for * controls {
 		it.* = descriptor();

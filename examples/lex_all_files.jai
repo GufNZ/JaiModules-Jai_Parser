@@ -56,7 +56,7 @@ main :: () {
 	path := join(#filepath, "../..");
 	reduced := path_to_string(reduce_path(parse_path(path)));
 
-	filenames: [..] string;
+	filenames: [..]string;
 	visit_files(reduced, true, *filenames, visit, visit_symlinks = false);
 
 	lexer: Parser_Lexer.Lexer;
@@ -158,7 +158,7 @@ benchmark_source_scan :: (source: string, $simd: bool, $materialise: bool) -> s6
 	}
 }
 
-benchmark_scan :: (sources: [] string, $simd: bool, $materialise: bool = true, storage: *Pool = null) -> s64 {
+benchmark_scan :: (sources: []string, $simd: bool, $materialise: bool = true, storage: *Pool = null) -> s64 {
 	tokens: s64;
 	for source: sources {
 		fresh: Pool;
@@ -179,7 +179,7 @@ benchmark_scan :: (sources: [] string, $simd: bool, $materialise: bool = true, s
 	return tokens;
 }
 
-benchmark_trial :: (sources: [] string, $simd: bool, expected_tokens: s64, frequency: s64, $materialise: bool, $reuse: bool) -> float64 {
+benchmark_trial :: (sources: []string, $simd: bool, expected_tokens: s64, frequency: s64, $materialise: bool, $reuse: bool) -> float64 {
 	REPETITIONS :: 25;
 	storage: Pool;
 	set_allocators(*storage);
@@ -228,7 +228,7 @@ assert_benchmark_token_parity :: (actual: Simd_Lexer.Parser_Token, expected: Par
 }
 
 benchmark_corpus :: (directory: string, clock_mode: string = "") {
-	filenames: [..] string;
+	filenames: [..]string;
 	visit_files(directory, true, *filenames, visit, visit_symlinks = false);
 	defer {
 		for filenames {
@@ -240,7 +240,7 @@ benchmark_corpus :: (directory: string, clock_mode: string = "") {
 
 	assert(!!filenames.count, "No Jai files found under '%'.", directory);
 
-	sources: [..] string;
+	sources: [..]string;
 	defer {
 		for sources {
 			free(it);
@@ -283,7 +283,7 @@ benchmark_workloads :: () {
 	}
 }
 
-benchmark_sources :: (name: string, sources: [] string, isolate_allocations: bool = false, clock_mode: string = "") {
+benchmark_sources :: (name: string, sources: []string, isolate_allocations: bool = false, clock_mode: string = "") {
 	bytes: s64;
 	token_count: s64;
 
@@ -328,7 +328,7 @@ benchmark_sources :: (name: string, sources: [] string, isolate_allocations: boo
 	}
 }
 
-benchmark_clock_probe :: (sources: [] string, $simd: bool, token_count: s64, frequency: s64) {
+benchmark_clock_probe :: (sources: []string, $simd: bool, token_count: s64, frequency: s64) {
 	for 1..2 {
 		assert(benchmark_scan(sources, simd) == token_count);
 	}
@@ -347,7 +347,7 @@ benchmark_clock_probe :: (sources: [] string, $simd: bool, token_count: s64, fre
 	print("Clock probe COMPLETE: % scans in % seconds; % ms/scan. Frequency requires external telemetry.\n", scans, elapsed, elapsed * 1000 / scans.(float64));
 }
 
-benchmark_measure :: (sources: [] string, bytes: s64, token_count: s64, frequency: s64, $materialise: bool, $reuse: bool) {
+benchmark_measure :: (sources: []string, bytes: s64, token_count: s64, frequency: s64, $materialise: bool, $reuse: bool) {
 	phase := ifx materialise then "materialised" else "streaming";
 	allocator := ifx reuse then "reused-pool" else "fresh-pool";
 	print("  Phase: % / %\n", phase, allocator);
@@ -356,8 +356,8 @@ benchmark_measure :: (sources: [] string, bytes: s64, token_count: s64, frequenc
 		assert(benchmark_scan(sources, true, materialise) == token_count);
 	}
 
-	scalar_samples: [9] float64;
-	simd_samples: [9] float64;
+	scalar_samples: [9]float64;
+	simd_samples: [9]float64;
 	for trial: 0..scalar_samples.count-1 {
 		if trial % 2 == 0 {
 			scalar_samples[trial] = benchmark_trial(sources, false, token_count, frequency, materialise, reuse);
@@ -474,7 +474,7 @@ consume_source_span :: (input: string, cursor: *s64, span: string) {
 	cursor.* += span.count;
 }
 
-visit :: (info: *File_Visit_Info, results: *[..] string) {
+visit :: (info: *File_Visit_Info, results: *[..]string) {
 	if ends_with(info.short_name, ".jai") {
 		array_add(results, copy_string(info.full_name));
 	}

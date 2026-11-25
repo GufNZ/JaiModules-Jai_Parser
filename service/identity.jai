@@ -3,10 +3,10 @@
 U64_MAX : u64 : 0xFFFF_FFFF_FFFF_FFFF;
 S64_MAX : s64 : 0x7FFF_FFFF_FFFF_FFFF;
 
-Session_ID :: #type,distinct [] u8;
-World_ID :: #type,distinct [] u8;
-Result_ID :: #type,distinct [] u8;
-Operation_ID :: #type,distinct [] u8;
+Session_ID		:: #type,distinct []u8;
+World_ID		:: #type,distinct []u8;
+Result_ID		:: #type,distinct []u8;
+Operation_ID	:: #type,distinct []u8;
 
 // Issues 1, 2, ... once each; retires at U64_MAX instead of wrapping.
 Identity_Counter :: struct {
@@ -25,16 +25,16 @@ issue_token :: (counter: *Identity_Counter) -> bool, u64 {
 }
 
 Service_Incarnation :: struct {
-	namespace: [] u8;
+	namespace: []u8;
 	session_counter: Identity_Counter;
 }
 
 // One per service bootstrap; `epoch` must come from the trusted issuer and never repeat for this authority.
-make_service_incarnation :: (authority_namespace: [] u8, epoch: u64) -> Service_Incarnation {
+make_service_incarnation :: (authority_namespace: []u8, epoch: u64) -> Service_Incarnation {
 	return .{namespace = make_key("service-incarnation", authority_namespace, little_endian(epoch, 8))};
 }
 
-clock_identity :: (incarnation: Service_Incarnation) -> [] u8 {
+clock_identity :: (incarnation: Service_Incarnation) -> []u8 {
 	return make_key("service-clock", incarnation.namespace);
 }
 
@@ -62,7 +62,7 @@ issue_world :: (identities: *Session_Identities) -> bool, World_ID {
 	}
 
 
-	return true, xx make_key("world", identities.session.([] u8), little_endian(token, 8));
+	return true, xx make_key("world", xx identities.session, little_endian(token, 8));
 }
 
 issue_result :: (identities: *Session_Identities) -> bool, Result_ID {
@@ -72,7 +72,7 @@ issue_result :: (identities: *Session_Identities) -> bool, Result_ID {
 	}
 
 
-	return true, xx make_key("result", identities.session.([] u8), little_endian(token, 8));
+	return true, xx make_key("result", xx identities.session, little_endian(token, 8));
 }
 
 issue_operation :: (identities: *Session_Identities) -> bool, Operation_ID {
@@ -82,7 +82,7 @@ issue_operation :: (identities: *Session_Identities) -> bool, Operation_ID {
 	}
 
 
-	return true, xx make_key("operation", identities.session.([] u8), little_endian(token, 8));
+	return true, xx make_key("operation", xx identities.session, little_endian(token, 8));
 }
 
 Handle_Kind :: enum u8 {
@@ -95,33 +95,42 @@ Handle_Kind :: enum u8 {
 }
 
 Handle :: struct (KIND: Handle_Kind) {
-	session: Session_ID;
-	slot: u64;
-	generation: u64;
-	owner_service: *void;
-	owner_token: u64;
+	session:		Session_ID;
+	slot:			u64;
+	generation:		u64;
+	owner_service:	*void;
+	owner_token:	u64;
 }
 
 Registration_Slot :: struct {
-	generation: u64;
-	kind: Handle_Kind;
-	live: bool;
-	retired: bool;
+	generation:	u64;
+	next_free:	u64;
+	kind:		Handle_Kind;
+	live:		bool;
+	retired:	bool;
+}
+
+Free_Registration_Slots :: struct {
+	head:	u64;
+	count:	s64;
 }
 
 // Slots are zero-based and start at generation 1; a reused slot gets the next generation, and a slot whose generation reaches U64_MAX is retired permanently.
 Handle_Registry :: struct {
-	session: Session_ID;
-	owner_service: *void;
-	owner_token: u64;
-	slots: [..] Registration_Slot;
-	free_slots: [..] u64;
+	session:		Session_ID;
+	owner_service:	*void;
+	owner_token:	u64;
+	slots:			[..]Registration_Slot;
+	free_slots:		Free_Registration_Slots;
 }
 
 register_handle :: (registry: *Handle_Registry, $kind: Handle_Kind) -> bool, Handle(kind) {
 	if registry.free_slots.count {
-		slot := pop(*registry.free_slots);
+		slot := registry.free_slots.head;
 		entry := *registry.slots[slot];
+		registry.free_slots.head = entry.next_free;
+		registry.free_slots.count -= 1;
+		entry.next_free = 0;
 		entry.generation += 1;
 		entry.kind = kind;
 		entry.live = true;
@@ -145,7 +154,7 @@ handle_is_live :: (registry: *Handle_Registry, handle: Handle($K)) -> bool {
 		}
 	}
 
-	if !bytes_equal(handle.session.([] u8), registry.session.([] u8)) {
+	if !bytes_equal(xx handle.session, xx registry.session) {
 		return false;
 	}
 
@@ -165,7 +174,9 @@ release_handle :: (registry: *Handle_Registry, handle: Handle($K)) -> bool {
 	if entry.generation == U64_MAX {
 		entry.retired = true;
 	} else {
-		array_add(*registry.free_slots, handle.slot);
+		entry.next_free = registry.free_slots.head;
+		registry.free_slots.head = handle.slot;
+		registry.free_slots.count += 1;
 	}
 
 	return true;

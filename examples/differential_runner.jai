@@ -88,23 +88,23 @@ RUNNER_LINE_LIMIT :: 2048;
 RUNNER_TAIL_BUDGET :: 65536;
 
 Runner_Cell :: struct {
-	bytes: [4] u8;
+	bytes: [4]u8;
 	count: s64;
 	width: s64;
-	style: [64] u8;
+	style: [64]u8;
 	style_count: s64;
 }
 
 Runner_Line :: struct {
-	cells: [RUNNER_LINE_LIMIT] Runner_Cell;
+	cells: [RUNNER_LINE_LIMIT]Runner_Cell;
 	count: s64;
 	cursor: s64;
-	style: [64] u8;
+	style: [64]u8;
 	style_count: s64;
-	escape: [128] u8;
+	escape: [128]u8;
 	escape_count: s64;
 	escape_state: s64;
-	utf8: [4] u8;
+	utf8: [4]u8;
 	utf8_count: s64;
 	utf8_expected: s64;
 	truncated: bool;
@@ -116,7 +116,7 @@ Runner_Line :: struct {
 
 Runner_Display :: struct {
 	vt: bool;
-	capture: *[..] u8;
+	capture: *[..]u8;
 	handle: HANDLE;
 	original_mode: u32;
 	restore_mode: bool;
@@ -126,7 +126,7 @@ Runner_Display :: struct {
 	redraw_ms: u64 = 100;
 	last_draw: u64;
 	last_snapshot: string;
-	workers: [5] *Runner_Worker;
+	workers: [5]*Runner_Worker;
 	slot_count: s64;
 	stopping: bool;
 	bounded: bool;
@@ -147,14 +147,14 @@ Runner_Display :: struct {
 
 runner_display: Runner_Display;
 
-runner_append :: (output: *[..] u8, text: string) {
+runner_append :: (output: *[..]u8, text: string) {
 	for text {
 		array_add(output, it);
 	}
 }
 
 runner_output :: (text: string) {
-	plain: [..] u8;
+	plain: [..]u8;
 	defer array_free(plain);
 	output := text;
 	if runner_display.vt {
@@ -334,7 +334,7 @@ runner_render :: (force := false) {
 	}
 
 
-	snapshot: [..] u8;
+	snapshot: [..]u8;
 	defer array_free(snapshot);
 	rows: s64;
 	has_summary := runner_display.bounded && runner_display.summary_enabled;
@@ -430,7 +430,7 @@ runner_message :: (format: string, arguments: ..Any) {
 	defer free(text.data);
 
 	if runner_display.bounded && runner_display.vt {
-		notice: [..] u8;
+		notice: [..]u8;
 		escape_state: s64;
 		for text {
 			if escape_state == 1 {
@@ -502,7 +502,7 @@ runner_is_pty :: (handle: HANDLE) -> bool {
 
 	Name_Info :: struct {
 		length: u32;
-		name: [1024] u16;
+		name: [1024]u16;
 	}
 
 	info: Name_Info;
@@ -558,13 +558,13 @@ runner_display_finish :: () {
 }
 
 runner_line_text :: (line: *Runner_Line, colours := false, max_width: s64 = 0x7FFF_FFFF, count_override: s64 = -1) -> string {
-	output: [..] u8;
+	output: [..]u8;
 	width: s64;
 	previous_style: string;
 	count := ifx count_override >= 0
 		then count_override
 		else line.count;
-	for *cell: ([] Runner_Cell).{data = line.cells.data, count = count} {
+	for *cell: ([]Runner_Cell).{data = line.cells.data, count = count} {
 		if width + cell.width > max_width {
 			break;
 		}
@@ -961,14 +961,14 @@ Runner_Worker :: struct {
 	marker: string;
 	marker_found: bool;
 	retention_found: bool;
-	marker_tail: [512] u8;
+	marker_tail: [512]u8;
 	marker_tail_count: s64;
 	inventory_capture: bool;
-	inventory_output: [..] u8;
+	inventory_output: [..]u8;
 }
 
 runner_scan_output :: (worker: *Runner_Worker, text: string) {
-	buffer: [4608] u8;
+	buffer: [4608]u8;
 	for 0..worker.marker_tail_count - 1 {
 		buffer[it] = worker.marker_tail[it];
 	}
@@ -1003,7 +1003,7 @@ runner_tail :: (worker: *Runner_Worker) -> s64 {
 	}
 
 
-	buffer: [4096] u8;
+	buffer: [4096]u8;
 	total: s64;
 	while total < RUNNER_TAIL_BUDGET {
 		count: u32;
@@ -1142,7 +1142,7 @@ get_runner_environment :: (name: *u16) -> bool, *u16 {
 	return count < required && (count || required == 1), previous;
 }
 
-start_worker :: (worker: *Runner_Worker, arguments: [] string, memory_bytes: u64, working_directory := "", log_path := "") -> bool {
+start_worker :: (worker: *Runner_Worker, arguments: []string, memory_bytes: u64, working_directory := "", log_path := "") -> bool {
 	worker.job = CreateJobObjectA(null, null);
 	if !worker.job {
 		return false;
@@ -1332,7 +1332,7 @@ runner_integer :: (text: string) -> bool, s64 {
 	return valid && !remainder, value;
 }
 
-parse_runner_options :: (arguments: [] string) -> bool, Runner_Options {
+parse_runner_options :: (arguments: []string) -> bool, Runner_Options {
 	options: Runner_Options;
 	option_names :: string.["--all", "--list", "--self-test", "--workers", "--batch-size", "--memory-mib", "--reserve-mib", "--timeout", "--first", "--last", "--redraw-ms"];
 	index := 1;
@@ -1425,7 +1425,7 @@ runner_memory_status :: (statistics: *Runner_Statistics) -> bool, MEMORYSTATUSEX
 
 runner_wait :: (worker: *Runner_Worker, timeout_ms: u64) -> s32 {
 	deadline := GetTickCount64() + timeout_ms;
-	handles: [2] HANDLE = .[worker.info.hProcess, runner_cancel_event];
+	handles: [2]HANDLE = .[worker.info.hProcess, runner_cancel_event];
 	while true {
 		runner_tail(worker);
 		runner_render();
@@ -1469,7 +1469,7 @@ runner_wait :: (worker: *Runner_Worker, timeout_ms: u64) -> s32 {
 	return 1;
 }
 
-collect_runner_sections :: (output: string, sections: *[..] Runner_Section) -> bool {
+collect_runner_sections :: (output: string, sections: *[..]Runner_Section) -> bool {
 	lines := split(output, "\n");
 	defer free(lines.data);
 
@@ -1553,7 +1553,7 @@ start_compiler_job :: (worker: *Runner_Worker, compiler: string, directory: stri
 	}
 
 
-	arguments: [..] string;
+	arguments: [..]string;
 	defer array_free(arguments);
 
 	array_add(*arguments, compiler, source, "-x64", "-quiet", "-", selector);
@@ -1633,7 +1633,7 @@ runner_self_test_mode :: (name: string) -> Runner_Self_Test_Mode {
 }
 
 runner_decoder_self_tests :: () {
-	capture: [..] u8;
+	capture: [..]u8;
 	defer array_free(capture);
 
 	previous := runner_display;
@@ -1740,7 +1740,7 @@ runner_test_scrollback :: (text: string, height: s64) -> s64 {
 }
 
 runner_renderer_self_tests :: () {
-	capture: [..] u8;
+	capture: [..]u8;
 	defer array_free(capture);
 
 	previous := runner_display;
@@ -1757,7 +1757,7 @@ runner_renderer_self_tests :: () {
 
 	first.label = "job 1 compile";
 	second.label = "job 2 runtime";
-	workers: [2] Runner_Worker;
+	workers: [2]Runner_Worker;
 	workers[0].line = first;
 	workers[1].line = second;
 	runner_display.workers[0] = *workers[0];
@@ -1813,14 +1813,14 @@ runner_renderer_self_tests :: () {
 }
 
 runner_stop_output_self_tests :: (root: string, executable: string) {
-	capture: [..] u8;
+	capture: [..]u8;
 	defer array_free(capture);
 
 	previous := runner_display;
 	runner_display = .{capture = *capture};
 	defer runner_display = previous;
 
-	workers: [2] Runner_Worker;
+	workers: [2]Runner_Worker;
 	defer {
 		for *workers {
 			close_worker(it);
@@ -1828,7 +1828,7 @@ runner_stop_output_self_tests :: (root: string, executable: string) {
 	}
 
 	for *worker: workers {
-		arguments: [] string = .[executable, "--self-child", "wait"];
+		arguments: []string = .[executable, "--self-child", "wait"];
 		assert(start_worker(worker, arguments, 1024 * MIB, root, tprint("%/stop-%.log", root, it_index)));
 		runner_worker_label(worker, tprint("job %/compile", it_index + 1));
 	}
@@ -1868,7 +1868,7 @@ runner_bounded_output_self_tests :: () {
 	assert(runner_pty_name("\\msys-123-pty2-from-master"));
 	assert(!runner_pty_name("\\ordinary-pipe"));
 	assert(!runner_pty_name("D:/logs/cygwin-output.log"));
-	capture: [..] u8;
+	capture: [..]u8;
 	defer array_free(capture);
 
 	previous := runner_display;
@@ -1879,7 +1879,7 @@ runner_bounded_output_self_tests :: () {
 		runner_display = previous;
 	}
 
-	workers: [2] Runner_Worker;
+	workers: [2]Runner_Worker;
 	for *worker: workers {
 		worker.line = New(Runner_Line);
 		worker.line.label = "job/compile";
@@ -1907,7 +1907,7 @@ runner_bounded_output_self_tests :: () {
 }
 
 runner_summary_self_tests :: () {
-	capture: [..] u8;
+	capture: [..]u8;
 	defer array_free(capture);
 
 	previous := runner_display;
@@ -1956,7 +1956,7 @@ runner_summary_self_tests :: () {
 	assert(plain == "PASS Typed integer conversions 3/3 | total 8/8 | jobs 4/4 (4 launched)");
 	assert(find_index_from_left(text, "\e[92mPASS") >= 0);
 	assert(find_index_from_left(text, "\e[96mTyped integer conversions") >= 0);
-	assert(find_index_from_left(text, "\e[93m3/3") >= 0);
+	assert(find_index_from_left(text, "\e[93m3\e[0m/\e[33m3\e[0m") >= 0);
 	runner_display_finish();
 }
 
@@ -1965,7 +1965,7 @@ run_runner_self_tests :: (root: string) -> s32 {
 	runner_bounded_output_self_tests();
 	runner_decoder_self_tests();
 	runner_renderer_self_tests();
-	executable_wide: [32768] u16;
+	executable_wide: [32768]u16;
 	length := GetModuleFileNameW(null, executable_wide.data, executable_wide.count);
 	if length <= 0 || length >= executable_wide.count {
 		return 1;
@@ -1985,7 +1985,7 @@ run_runner_self_tests :: (root: string) -> s32 {
 	defer close_worker(*worker);
 
 	for mode, mode_index: RUNNER_SELF_TEST_NAMES {
-		arguments: [] string = .[executable, "--self-child", mode, root];
+		arguments: []string = .[executable, "--self-child", mode, root];
 		budget: u64 = xx (
 			ifx mode == "memory"
 				then 64 * MIB
@@ -2097,7 +2097,7 @@ run_runner_self_tests :: (root: string) -> s32 {
 	return 0;
 }
 
-run_runner :: (arguments: [] string) -> s32 {
+run_runner :: (arguments: []string) -> s32 {
 	runner_display_start(100);
 	defer runner_display_finish();
 
@@ -2213,13 +2213,13 @@ run_runner :: (arguments: [] string) -> s32 {
 	}
 
 	output := string.{data = inventory.inventory_output.data, count = inventory.inventory_output.count};
-	empty_inventory: [..] u8;
+	empty_inventory: [..]u8;
 	inventory.inventory_output = empty_inventory;
 	close_worker(*inventory);
 
 	defer free(output.data);
 
-	sections: [..] Runner_Section;
+	sections: [..]Runner_Section;
 	defer {
 		for sections {
 			free(it.name.data);
@@ -2244,7 +2244,7 @@ run_runner :: (arguments: [] string) -> s32 {
 	}
 
 
-	jobs: [..] Runner_Job;
+	jobs: [..]Runner_Job;
 	defer {
 		for jobs {
 			free(it.directory.data);
@@ -2308,7 +2308,7 @@ run_runner :: (arguments: [] string) -> s32 {
 	runner_display.slot_count = options.workers;
 	runner_display.fixtures_total = expected_total;
 	runner_display.jobs_total = jobs.count;
-	workers: [4] Runner_Worker;
+	workers: [4]Runner_Worker;
 	defer {
 		for *workers {
 			close_worker(it);
@@ -2407,7 +2407,7 @@ run_runner :: (arguments: [] string) -> s32 {
 					close_worker(worker);
 
 					if section.runtime && !runtime_phase {
-						runtime_arguments: [] string = .[tprint("%/differential_test.exe", job.directory)];
+						runtime_arguments: []string = .[tprint("%/differential_test.exe", job.directory)];
 						if !start_worker(worker, runtime_arguments, memory_bytes, job.directory, tprint("%/runtime.log", job.directory)) {
 							runner_failure("\e[91mUnable to launch\e[0m runtime checks. Logs: \e[96m%\e[0m\n", job.directory);
 							return 1;
@@ -2524,7 +2524,7 @@ run_runner :: (arguments: [] string) -> s32 {
 		}
 
 
-		handles: [5] HANDLE;
+		handles: [5]HANDLE;
 		handle_count: u32 = 1;
 		handles[0] = runner_cancel_event;
 		for worker: workers {
@@ -2639,7 +2639,7 @@ main :: () {
 				child: Runner_Worker;
 				defer close_worker(*child);
 
-				child_arguments: [] string = .[arguments[0], "--self-child", "wait"];
+				child_arguments: []string = .[arguments[0], "--self-child", "wait"];
 				assert(start_worker(*child, child_arguments, 1024 * MIB));
 				assert(write_entire_file(tprint("%/descendant.pid", arguments[3]), tprint("%", child.info.dwProcessId)));
 				WaitForSingleObject(child.info.hProcess, INFINITE);

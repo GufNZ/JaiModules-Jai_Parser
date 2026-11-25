@@ -6,7 +6,7 @@
 DIGEST_SCHEMA :: "jai-cache-digest-meow128/1";
 
 Digest_128 :: struct {
-	bytes: [16] u8;
+	bytes: [16]u8;
 }
 
 operator == :: (a: Digest_128, b: Digest_128) -> bool {
@@ -19,7 +19,7 @@ Digest_State :: struct {
 
 // Meow reads from the source pointer even for empty input, so empty views use this buffer.
 #scope_file
-empty_input: [1] u8;
+empty_input: [1]u8;
 #scope_export
 
 digest_from_register :: (low: u64, high: u64) -> Digest_128 {
@@ -32,7 +32,7 @@ digest_from_register :: (low: u64, high: u64) -> Digest_128 {
 	return result;
 }
 
-digest_128 :: (bytes: [] u8) -> Digest_128 {
+digest_128 :: (bytes: []u8) -> Digest_128 {
 	source := ifx bytes.count
 		then bytes.data
 		else empty_input.data;
@@ -46,7 +46,7 @@ digest_begin :: (state: *Digest_State) {
 	MeowBegin(*state.meow, MeowDefaultSeed);
 }
 
-digest_absorb :: (state: *Digest_State, bytes: [] u8) {
+digest_absorb :: (state: *Digest_State, bytes: []u8) {
 	if bytes.count {
 		MeowAbsorb(*state.meow, xx bytes.count, bytes.data);
 	}

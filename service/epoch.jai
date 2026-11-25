@@ -20,7 +20,7 @@ Epoch_Failure :: enum u8 {
 	EXHAUSTED;
 }
 
-encode_epoch_file :: (authority_namespace: [] u8, epoch: u64) -> string {
+encode_epoch_file :: (authority_namespace: []u8, epoch: u64) -> string {
 	builder: String_Builder;
 	print(*builder, "%\n", EPOCH_FILE_SCHEMA);
 	append_uppercase_hex(*builder, authority_namespace);
@@ -29,7 +29,7 @@ encode_epoch_file :: (authority_namespace: [] u8, epoch: u64) -> string {
 }
 
 // Strict: the exact schema line, the matching uppercase-hex namespace and a canonical decimal epoch, each LF-terminated, nothing else.
-decode_epoch_file :: (text: string, authority_namespace: [] u8) -> (failure: Epoch_Failure, epoch: u64) {
+decode_epoch_file :: (text: string, authority_namespace: []u8) -> (failure: Epoch_Failure, epoch: u64) {
 	lines := split(text, "\n",, temp);
 	if lines.count != 4 || lines[3] != "" || lines[0] != EPOCH_FILE_SCHEMA {
 		return .MALFORMED_FILE, 0;
@@ -70,7 +70,7 @@ decode_epoch_file :: (text: string, authority_namespace: [] u8) -> (failure: Epo
 }
 
 // Reserves a fresh epoch greater than both the last recorded one and `floor` (the highest writer epoch in any readable store head).
-reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0) -> (ok: bool, epoch: u64, failure: Epoch_Failure) {
+reserve_epoch :: (directory: string, authority_namespace: []u8, floor: u64 = 0) -> (ok: bool, epoch: u64, failure: Epoch_Failure) {
 	#if !EPOCH_ISSUER_SUPPORTED {
 		return false, 0, .UNSUPPORTED_PLATFORM;
 	} else {
@@ -198,9 +198,9 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 
 #if OS == .WINDOWS {
 	MoveFileExW :: (existing: *u16, replacement: *u16, flags: u32) -> BOOL #foreign kernel32;
-	MOVEFILE_REPLACE_EXISTING :: 0x1;
-	MOVEFILE_WRITE_THROUGH :: 0x8;
-	ERROR_SHARING_VIOLATION :: 0x20;
+	MOVEFILE_REPLACE_EXISTING	:: 0x1;
+	MOVEFILE_WRITE_THROUGH		:: 0x8;
+	ERROR_SHARING_VIOLATION		:: 0x20;
 
 	// Share mode 0 is the exclusive lock; closing the handle releases it.
 	acquire_epoch_lock :: (path: string) -> (failure: Epoch_Failure, lock: HANDLE) {
@@ -262,11 +262,16 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 	read_small_file :: (path: string) -> (failure: Epoch_Failure, contents: string) {
 		handle := CreateFileW(utf8_to_wide(path,, temp), FILE_GENERIC_READ, FILE_SHARE_READ, null, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null);
 		if handle == INVALID_HANDLE_VALUE {
-			return ifx GetLastError() == ERROR_FILE_NOT_FOUND then .NONE else .IO_ERROR, "";
+			return
+				ifx GetLastError() == ERROR_FILE_NOT_FOUND
+					then .NONE
+					else .IO_ERROR,
+				"";
 		}
 
 
 		defer CloseHandle(handle);
+
 		size: LARGE_INTEGER;
 		if !GetFileSizeEx(handle, *size) || size.QuadPart < 0 || size.QuadPart > EPOCH_FILE_MAXIMUM_BYTES {
 			return .MALFORMED_FILE, "";
@@ -296,6 +301,7 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 
 
 		defer CloseHandle(handle);
+
 		written: DWORD;
 		return WriteFile(handle, text.data, xx text.count, *written, null) && written == xx text.count && FlushFileBuffers(handle);
 	}
@@ -374,6 +380,7 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 
 
 		defer close(directory_fd);
+
 		return flush_descriptor(directory_fd);
 	}
 
@@ -381,11 +388,16 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 	read_small_file :: (path: string) -> (failure: Epoch_Failure, contents: string) {
 		fd := open(temp_c_string(path), O_RDONLY | O_CLOEXEC);
 		if fd < 0 {
-			return ifx errno() == ENOENT then .NONE else .IO_ERROR, "";
+			return
+				ifx errno() == ENOENT
+					then .NONE
+					else .IO_ERROR,
+				"";
 		}
 
 
 		defer close(fd);
+
 		// One byte past the bound detects oversized files without `fstat`.
 		buffer := talloc_string(EPOCH_FILE_MAXIMUM_BYTES + 1);
 		total: s64;
@@ -427,6 +439,7 @@ reserve_epoch :: (directory: string, authority_namespace: [] u8, floor: u64 = 0)
 
 
 		defer close(fd);
+
 		written: s64;
 		while written < text.count {
 			count := write(fd, text.data + written, xx (text.count - written));

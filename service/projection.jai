@@ -7,7 +7,7 @@ SOURCE_TOKENS_SCHEMA :: "jai-cache-source-tokens/1";
 RECOVERY_SCHEMA :: "jai-cache-recovery/1";
 
 // The closed `.NAMED` registry, in the registry's table order.
-TOKEN_TAG_NAMES :: string.[
+TOKEN_TAG_NAMES :: string.[//QUESTION: why not enum?
 	"IDENT",
 	"NUMBER",
 	"STRING",
@@ -160,7 +160,7 @@ Token_Value :: struct {
 		STRING_BYTES;
 		NO_VALUE;
 	};
-	bytes: [] u8;
+	bytes: []u8;
 	bits: u64;
 }
 
@@ -227,20 +227,20 @@ Diagnostic_Recovery_Action :: enum u8 {
 
 Raw_Related_Diagnostic :: struct {
 	token_span: Token_Span_Observation;
-	message_bytes: [] u8;
+	message_bytes: []u8;
 }
 
 Raw_Diagnostic :: struct {
 	code: Diagnostic_Code;
 	severity: Diagnostic_Severity;
 	token_span: Token_Span_Observation;
-	message_bytes: [] u8;
+	message_bytes: []u8;
 	expected_token: Token_Tag;
 	actual_token: Token_Tag;
 	recovery_action: Diagnostic_Recovery_Action;
 	lexer_line: s32;
 	lexer_column: s32;
-	related: [] Raw_Related_Diagnostic;
+	related: []Raw_Related_Diagnostic;
 }
 
 Parse_Status_Observation :: enum u8 {
@@ -275,10 +275,10 @@ Projection_Fault :: struct {
 
 Token_Projection :: struct {
 	owner: *Owned_Syntax;
-	tokens: [] Token_Record;
-	synthetic_tokens: [] Synthetic_Token_Record;
-	recoveries: [] Recovery_Observation;
-	diagnostics: [] Raw_Diagnostic;
+	tokens: []Token_Record;
+	synthetic_tokens: []Synthetic_Token_Record;
+	recoveries: []Recovery_Observation;
+	diagnostics: []Raw_Diagnostic;
 	parse_status: Parse_Status_Observation;
 	storage: Pool;
 }

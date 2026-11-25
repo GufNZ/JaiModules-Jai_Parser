@@ -27,16 +27,16 @@ LIMIT_COUNT :: #run enum_names(Limit_Name).count;
 NO_CONFIGURED_QUOTA :: -1;
 
 Limits :: struct {
-	values: [LIMIT_COUNT] s64;
+	values: [LIMIT_COUNT]s64;
 }
 
 Limit_Request :: struct {
-	values: [LIMIT_COUNT] s64 = #run no_quota_values();
+	values: [LIMIT_COUNT]s64 = #run no_quota_values();
 }
 
 #scope_file
-no_quota_values :: () -> [LIMIT_COUNT] s64 {
-	result: [LIMIT_COUNT] s64;
+no_quota_values :: () -> [LIMIT_COUNT]s64 {
+	result: [LIMIT_COUNT]s64;
 	for * result {
 		it.* = NO_CONFIGURED_QUOTA;
 	}
@@ -86,8 +86,8 @@ within_limit :: (limits: Limits, name: Limit_Name, value: s64) -> bool {
 // Aggregate accounting: live + reserved + requested must stay within each effective limit.
 Resource_Ledger :: struct {
 	limits: Limits;
-	live: [LIMIT_COUNT] s64;
-	reserved: [LIMIT_COUNT] s64;
+	live: [LIMIT_COUNT]s64;
+	reserved: [LIMIT_COUNT]s64;
 }
 
 Ledger_Amount :: struct {
@@ -97,7 +97,7 @@ Ledger_Amount :: struct {
 
 // All-or-nothing: either every amount is reserved or none is.
 reserve :: (ledger: *Resource_Ledger, amounts: .. Ledger_Amount) -> bool {
-	pending: [LIMIT_COUNT] s64;
+	pending: [LIMIT_COUNT]s64;
 	for amounts {
 		if it.amount < 0 || it.amount > S64_MAX - pending[it.name] {
 			return false;

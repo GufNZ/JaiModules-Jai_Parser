@@ -18,7 +18,7 @@ Finding :: struct {
 	example: string;
 }
 
-findings: [..] Finding;
+findings: [..]Finding;
 parses: s64;
 
 check :: (source: string, label: string) {
@@ -54,14 +54,14 @@ check :: (source: string, label: string) {
 	}
 }
 
-visit :: (info: *File_Visit_Info, files: *[..] string) {
+visit :: (info: *File_Visit_Info, files: *[..]string) {
 	if !info.is_directory && ends_with(info.full_name, ".jai") {
 		array_add(files, copy_string(info.full_name));
 	}
 }
 
 main :: () {
-	files: [..] string;
+	files: [..]string;
 	inventories := string.["how_to", "examples/invaders", "modules/Jai_Parser", "modules/Basic"];
 	recursive := bool.[false, true, false, false];
 	for inventories {

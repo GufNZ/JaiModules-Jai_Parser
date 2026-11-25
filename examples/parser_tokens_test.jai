@@ -908,7 +908,7 @@ test_parser_node_pool :: () {
 	assert(parsed.root != null);
 	assert(parsed.node_pool.used_memblocks != null);
 
-	children: [..] *Extended.Parser_Node;
+	children: [..]*Extended.Parser_Node;
 	children.allocator = Extended.parser_node_allocator(*parsed);
 	array_add(*children, parsed.root);
 	assert(children.count == 1);
@@ -8144,7 +8144,7 @@ test_node_token_spans :: () {
 
 	block := New(Extended.Parser_Block);
 	block.kind = .BLOCK;
-	statements: [1] *Extended.Parser_Node = .[binary.(*Extended.Parser_Node)];
+	statements: [1]*Extended.Parser_Node = .[binary.(*Extended.Parser_Node)];
 	block.statements = array_copy(statements);
 	block.first_token = xx 0;
 	block.one_past_last_token = xx 3;
@@ -8703,7 +8703,7 @@ JAI;
 	assert(quick_return.arguments_unsorted[0].expression.(*Extended.Parser_Ident).resolved_declaration == quick_header.arguments[0]);
 }
 
-test_using_map_names :: (using_node: *Extended.Parser_Using, names: [] string) -> bool {
+test_using_map_names :: (using_node: *Extended.Parser_Using, names: []string) -> bool {
 	assert(using_node.filter_expression.(*Extended.Parser_Ident).name == "rename");
 	for * names {
 		it.* = ifx it.* == "pete"
@@ -8714,7 +8714,7 @@ test_using_map_names :: (using_node: *Extended.Parser_Using, names: [] string) -
 	return true;
 }
 
-test_using_map_collision :: (using_node: *Extended.Parser_Using, names: [] string) -> bool {
+test_using_map_collision :: (using_node: *Extended.Parser_Using, names: []string) -> bool {
 	for * names {
 		it.* = "same_name";
 	}
@@ -8722,7 +8722,7 @@ test_using_map_collision :: (using_node: *Extended.Parser_Using, names: [] strin
 	return true;
 }
 
-test_using_map_fields :: (using_node: *Extended.Parser_Using, names: [] string) -> bool {
+test_using_map_fields :: (using_node: *Extended.Parser_Using, names: []string) -> bool {
 	for * names {
 		it.* = ifx it.* == "Clear"
 			then "glClear"
@@ -8735,13 +8735,13 @@ test_using_map_fields :: (using_node: *Extended.Parser_Using, names: [] string) 
 test_semantic_field: Extended.Parser_Declaration;
 test_semantic_field_name: string;
 
-test_using_map_semantic_fields :: (using_node: *Extended.Parser_Using, bindings: *[..] Extended.Parser_Binding) -> bool {
+test_using_map_semantic_fields :: (using_node: *Extended.Parser_Using, bindings: *[..]Extended.Parser_Binding) -> bool {
 	assert(using_node.expression.kind == .DECLARATION);
 	array_add(bindings, .{name = test_semantic_field_name, declaration = *test_semantic_field});
 	return true;
 }
 
-test_using_map_decline_fields :: (using_node: *Extended.Parser_Using, bindings: *[..] Extended.Parser_Binding) -> bool {
+test_using_map_decline_fields :: (using_node: *Extended.Parser_Using, bindings: *[..]Extended.Parser_Binding) -> bool {
 	array_add(bindings, .{name = "Ignored", declaration = *test_semantic_field});
 	return false;
 }
@@ -10897,7 +10897,7 @@ JAI;
 	Extended.release_parser_tree(*shadowed_overloads);
 	Extended.release_parser_names(*shadowed_overloads);
 
-	unsupported_calls: [] string = .[
+	unsupported_calls: []string = .[
 		#string JAI
 First :: struct {
 	Value: int;
@@ -11566,7 +11566,7 @@ main :: () {
 JAI;
 	assert_mapped_field_fixture(ALIASED_RETURN_PAIR_SOURCE, filename);
 
-	generic_sources: [] string = .[
+	generic_sources: []string = .[
 		#string JAI
 Child :: struct {
 	Clear: int;
@@ -11818,7 +11818,7 @@ JAI,
 		Extended.release_parser_names(*parsed);
 	}
 
-	complete_alias_sources: [] string = .[
+	complete_alias_sources: []string = .[
 		#string JAI
 Child :: struct {
 	Clear: int;
@@ -11887,7 +11887,7 @@ JAI,
 		Extended.release_parser_names(*complete_alias);
 	}
 
-	unsupported_alias_sources: [] string = .[
+	unsupported_alias_sources: []string = .[
 		#string JAI
 Child :: struct {
 	Clear: int;
@@ -12018,7 +12018,7 @@ JAI;
 	Extended.release_parser_tree(*primitive_generic);
 	Extended.release_parser_names(*primitive_generic);
 
-	unsupported_generic_sources: [] string = .[
+	unsupported_generic_sources: []string = .[
 		#string JAI
 Box :: struct (T: Type) {
 	Nested: T;
@@ -13680,7 +13680,7 @@ check_declaration_metadata_edit :: (old_text: string, new_text: string, edit_sta
 	Extended.release_parser_names(*old);
 	free(old_source);
 
-	test_using_map_collision :: (using_node: *Extended.Parser_Using, names: [] string) -> bool {
+	test_using_map_collision :: (using_node: *Extended.Parser_Using, names: []string) -> bool {
 		for * names {
 			it.* = "same_name";
 		}

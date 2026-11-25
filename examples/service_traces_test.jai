@@ -106,7 +106,7 @@ write :: (trace: *Trace, relative: string, text: string) {
 	assert(write_entire_file(tprint("%/%", trace.root, relative), text));
 }
 
-submit :: (batch: *Service.Host_Batch) -> Service.Handle(.TICKET), [] u8 {
+submit :: (batch: *Service.Host_Batch) -> Service.Handle(.TICKET), []u8 {
 	ok, accepted, error := Service.submit_batch(batch);
 	assert(ok, "\e[91mSubmit failed: %.\e[0m", error);
 	return accepted.ticket, accepted.frontier;
@@ -173,7 +173,7 @@ selection :: (trace: *Trace, relative: string) -> Service.Tracked_Document {
 	return .{};
 }
 
-frontier :: (trace: *Trace) -> [] u8 {
+frontier :: (trace: *Trace) -> []u8 {
 	_, description := Service.describe_session(trace.host.service, trace.host.session);
 	return description.accepted_frontier;
 }
@@ -427,7 +427,7 @@ trace_t7 :: () {
 		Service.arm_pause(trace.session, .PUBLICATION);
 	}
 
-	queries: [2] Service.Query_Start;
+	queries: [2]Service.Query_Start;
 	for * queries {
 		it.* = query(*trace, world_b, "a.jai", .SYNTAX_DIAGNOSTICS);
 	}
@@ -440,7 +440,7 @@ trace_t7 :: () {
 		running = Service.executor_dispatch(trace.session);
 	}
 	ticket_pending := overlay(*trace, "a.jai", "b :: 2;");
-	update_waiters: [2] Service.Handle(.WAITER);
+	update_waiters: [2]Service.Handle(.WAITER);
 	for * update_waiters {
 		_, observed := Service.observe_ticket(trace.host.service, ticket_pending);
 		it.* = observed.waiter;
@@ -576,7 +576,7 @@ trace_v3 :: () {
 	late := query(*trace, world_one, "b.jai", .SYNTAX_SNAPSHOT);
 	assert(late.kind == .TERMINAL && late.observation.query.unavailable == .NOT_CAPTURED, "\e[91mLater bytes were attached to the old world.\e[0m");
 
-	members := ([] u8).[Service.harness_document(trace.host, "a.jai"), Service.harness_document(trace.host, "b.jai")];
+	members := ([]u8).[Service.harness_document(trace.host, "a.jai"), Service.harness_document(trace.host, "b.jai")];
 	ok, _, error := Service.request_analysis(trace.host.service, trace.host.session, .{version = Service.INTERFACE_VERSION, expected_frontier = first_frontier, documents = members});
 	assert(!ok && error.code == .BASE_MISMATCH);
 	analysed: Service.Accepted;
@@ -673,7 +673,7 @@ trace_v6 :: () {
 
 	// Retrying analysis needs no replayed edit.
 	trace.session.faults.fail_parse_document = .[];
-	members := ([] u8).[Service.harness_document(trace.host, "a.jai"), Service.harness_document(trace.host, "b.jai")];
+	members := ([]u8).[Service.harness_document(trace.host, "a.jai"), Service.harness_document(trace.host, "b.jai")];
 	ok, retry := Service.request_analysis(trace.host.service, trace.host.session, .{version = Service.INTERFACE_VERSION, expected_frontier = accepted_frontier, documents = members});
 	assert(ok);
 	world := world_of(*trace, retry.ticket);

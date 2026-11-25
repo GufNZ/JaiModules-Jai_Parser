@@ -33,8 +33,8 @@ main :: () {
 }
 
 // Independent oracle: literal byte layout of K(tag, fields), not the production encoder.
-literal_le64 :: (value: u64) -> [8] u8 {
-	result: [8] u8;
+literal_le64 :: (value: u64) -> [8]u8 {
+	result: [8]u8;
 	for 0..7 {
 		result[it] = xx ((value >> (8 * it)) & 0xFF);
 	}
@@ -42,40 +42,40 @@ literal_le64 :: (value: u64) -> [8] u8 {
 	return result;
 }
 
-expected_key :: (tag: string, fields: .. string) -> [] u8 {
-	expected: [..] u8;
-	add_all :: (expected: *[..] u8, bytes: [] u8) {
+expected_key :: (tag: string, fields: .. string) -> []u8 {
+	expected: [..]u8;
+	add_all :: (expected: *[..]u8, bytes: []u8) {
 		for bytes {
 			array_add(expected, it);
 		}
 	}
 
 	add_all(*expected, literal_le64(13));
-	add_all(*expected, "jai-cache-key".([] u8));
+	add_all(*expected, xx "jai-cache-key");
 	add_all(*expected, u8.[1, 0, 0, 0]);
 	add_all(*expected, literal_le64(xx tag.count));
-	add_all(*expected, tag.([] u8));
+	add_all(*expected, xx tag);
 	add_all(*expected, literal_le64(xx fields.count));
 	for fields {
 		add_all(*expected, literal_le64(xx it.count));
-		add_all(*expected, it.([] u8));
+		add_all(*expected, xx it);
 	}
 
 	return expected;
 }
 
 test_key_encoding :: () {
-	assert(Service.bytes_equal(Service.make_key("t", "ab".([] u8)), expected_key("t", "ab")));
+	assert(Service.bytes_equal(Service.make_key("t", xx "ab"), expected_key("t", "ab")));
 	assert(Service.bytes_equal(Service.make_key("empty"), expected_key("empty")));
-	assert(Service.bytes_equal(Service.make_key("pair", "".([] u8), "x".([] u8)), expected_key("pair", "", "x")));
+	assert(Service.bytes_equal(Service.make_key("pair", xx "", xx "x"), expected_key("pair", "", "x")));
 
 	// Negative control: the oracle comparison must notice a one-byte difference.
 	mutated := expected_key("t", "ab");
 	mutated[mutated.count - 1] = #char "c";
-	assert(!Service.bytes_equal(Service.make_key("t", "ab".([] u8)), mutated));
+	assert(!Service.bytes_equal(Service.make_key("t", xx "ab"), mutated));
 
 	// Nested keys are framed fields, so field boundaries cannot be confused.
-	assert(!Service.bytes_equal(Service.make_key("t", "ab".([] u8), "c".([] u8)), Service.make_key("t", "a".([] u8), "bc".([] u8))));
+	assert(!Service.bytes_equal(Service.make_key("t", xx "ab", xx "c"), Service.make_key("t", xx "a", xx "bc")));
 }
 
 test_value_encodings :: () {
@@ -100,33 +100,33 @@ test_value_encodings :: () {
 
 	assert(Service.bytes_equal(Service.v_null(), expected_key("null")));
 	assert(!Service.bytes_equal(Service.v_null(), Service.v_bytes(.[])));
-	schema := "jai-cache-interface/1/Example".([] u8);
-	record := Service.v_record(schema, Service.v_bool(false), Service.v_bytes("x".([] u8)));
-	assert(Service.bytes_equal(record, Service.make_key("record", schema, Service.v_bool(false), Service.v_bytes("x".([] u8)))));
+	schema := "jai-cache-interface/1/Example".([]u8);
+	record := Service.v_record(schema, Service.v_bool(false), Service.v_bytes(xx "x"));
+	assert(Service.bytes_equal(record, Service.make_key("record", schema, Service.v_bool(false), Service.v_bytes(xx "x"))));
 	assert(Service.bytes_equal(Service.v_enum(schema, "FIRST"), expected_key("enum", "jai-cache-interface/1/Example", "FIRST")));
 	assert(Service.interface_schema("Example") == "jai-cache-interface/1/Example");
 }
 
 test_canonical_order :: () {
-	assert(Service.compare_canonical("ab".([] u8), "ab".([] u8)) == 0);
-	assert(Service.compare_canonical("a".([] u8), "ab".([] u8)) < 0);
-	assert(Service.compare_canonical("ab".([] u8), "a".([] u8)) > 0);
-	assert(Service.compare_canonical("\x01".([] u8), "\xFF".([] u8)) < 0);
-	assert(Service.compare_canonical("".([] u8), "\x00".([] u8)) < 0);
+	assert(Service.compare_canonical(xx "ab", xx "ab") == 0);
+	assert(Service.compare_canonical(xx "a", xx "ab") < 0);
+	assert(Service.compare_canonical(xx "ab", xx "a") > 0);
+	assert(Service.compare_canonical(xx "\x01", xx "\xFF") < 0);
+	assert(Service.compare_canonical(xx "", xx "\x00") < 0);
 }
 
 test_parse_key :: () {
-	key := Service.make_key("tag", "one".([] u8), "".([] u8), "three".([] u8));
+	key := Service.make_key("tag", xx "one", xx "", xx "three");
 	ok, view := Service.parse_key(key, 8);
-	assert(ok && Service.bytes_equal(view.tag, "tag".([] u8)) && view.fields.count == 3);
-	assert(Service.bytes_equal(view.fields[0], "one".([] u8)) && !view.fields[1].count && Service.bytes_equal(view.fields[2], "three".([] u8)));
+	assert(ok && Service.bytes_equal(view.tag, xx "tag") && view.fields.count == 3);
+	assert(Service.bytes_equal(view.fields[0], xx "one") && !view.fields[1].count && Service.bytes_equal(view.fields[2], xx "three"));
 
 	for prefix: 0..key.count - 1 {
 		truncated_ok := Service.parse_key(.{count = prefix, data = key.data}, 8);
 		assert(!truncated_ok, "\e[91mTruncated key of % bytes accepted.\e[0m", prefix);
 	}
 
-	trailing: [..] u8;
+	trailing: [..]u8;
 	array_add(*trailing, ..key);
 	array_add(*trailing, 0);
 	trailing_ok := Service.parse_key(trailing, 8);
@@ -165,7 +165,7 @@ test_digest :: () {
 	}
 
 	for size: sizes {
-		input: [] u8 = .{count = size, data = data.data};
+		input: []u8 = .{count = size, data = data.data};
 		one_shot := Service.digest_128(input);
 		assert(one_shot == Service.digest_128(input), "\e[91mDigest is not deterministic for % bytes.\e[0m", size);
 		for chunk: chunks {
@@ -190,7 +190,7 @@ test_digest :: () {
 
 	// Regression pins for this meow_hash build, not independent published vectors.
 	empty := Service.digest_128(.[]);
-	abc := Service.digest_128("abc".([] u8));
+	abc := Service.digest_128(xx "abc");
 	assert(hex(empty) == "45C059582AA07C655E26830355B5A775", "\e[91mEmpty-input digest changed: %.\e[0m", hex(empty));
 	assert(hex(abc) == "3BCC0A43EC73F719B49A4C426B236D5F", "\e[91m\"abc\" digest changed: %.\e[0m", hex(abc));
 }
@@ -202,7 +202,7 @@ hex :: (digest: Service.Digest_128) -> string {
 }
 
 test_identities :: () {
-	authority := "test-authority".([] u8);
+	authority := "test-authority".([]u8);
 	incarnation := Service.make_service_incarnation(authority, 7);
 	assert(Service.bytes_equal(incarnation.namespace, expected_key("service-incarnation", "test-authority", "\x07\x00\x00\x00\x00\x00\x00\x00")));
 	other := Service.make_service_incarnation(authority, 8);
@@ -210,10 +210,10 @@ test_identities :: () {
 
 	ok_a, session_a := Service.issue_session(*incarnation);
 	ok_b, session_b := Service.issue_session(*incarnation);
-	assert(ok_a && ok_b && !Service.bytes_equal(session_a.session.([] u8), session_b.session.([] u8)));
+	assert(ok_a && ok_b && !Service.bytes_equal(xx session_a.session, xx session_b.session));
 	_, world := Service.issue_world(*session_a);
 	_, result := Service.issue_result(*session_a);
-	assert(!Service.bytes_equal(world.([] u8), result.([] u8)), "\e[91mEqual tokens in different domains must stay distinct.\e[0m");
+	assert(!Service.bytes_equal(xx world, xx result), "\e[91mEqual tokens in different domains must stay distinct.\e[0m");
 
 	counter := Service.Identity_Counter.{next = Service.U64_MAX - 1};
 	last_ok, last := Service.issue_token(*counter);
@@ -223,9 +223,14 @@ test_identities :: () {
 	assert(!still_exhausted);
 }
 
+reject_registry_allocation :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+	assert(false, "Release and reuse must not call the allocator.");
+	return null;
+}
+
 test_handle_registry :: () {
 	registry: Service.Handle_Registry;
-	registry.session = xx "session-a".([] u8);
+	registry.session = xx "session-a".([]u8);
 
 	ok, world := Service.register_handle(*registry, .WORLD);
 	assert(ok && world.slot == 0 && world.generation == 1 && Service.handle_is_live(*registry, world));
@@ -237,10 +242,13 @@ test_handle_registry :: () {
 	assert(!Service.handle_is_live(*registry, forged), "\e[91mA handle of the wrong kind must not validate.\e[0m");
 
 	foreign := world;
-	foreign.session = xx "session-b".([] u8);
+	foreign.session = xx "session-b";
 	assert(!Service.handle_is_live(*registry, foreign));
 
-	assert(Service.release_handle(*registry, world));
+	{
+		push_allocator(.{proc = reject_registry_allocation});
+		assert(Service.release_handle(*registry, world));
+	}
 	assert(!Service.release_handle(*registry, world), "\e[91mDouble release must fail.\e[0m");
 	assert(!Service.handle_is_live(*registry, world));
 
@@ -255,6 +263,18 @@ test_handle_registry :: () {
 	assert(registry.slots[reused.slot].retired && !registry.free_slots.count);
 	_, fresh := Service.register_handle(*registry, .WAITER);
 	assert(fresh.slot == 2 && fresh.generation == 1, "\e[91mAn exhausted slot must be retired, never reused.\e[0m");
+
+	{
+		push_allocator(.{proc = reject_registry_allocation});
+		assert(Service.release_handle(*registry, ticket));
+		assert(Service.release_handle(*registry, fresh));
+		assert(registry.free_slots.count == 2);
+		first_ok, first := Service.register_handle(*registry, .WORLD);
+		second_ok, second := Service.register_handle(*registry, .RESULT);
+		assert(first_ok && first.slot == fresh.slot && first.generation == fresh.generation + 1);
+		assert(second_ok && second.slot == ticket.slot && second.generation == ticket.generation + 1);
+		assert(!registry.free_slots.count && registry.slots.count == 3);
+	}
 }
 
 test_limits :: () {
@@ -320,7 +340,7 @@ test_epoch_issuer :: (executable: string) {
 	make_directory_if_it_does_not_exist(directory, recursive = true);
 	epoch_path := tprint("%/%", directory, Service.EPOCH_FILE_NAME);
 	file_delete(epoch_path);
-	authority := "project:D:/example".([] u8);
+	authority := "project:D:/example".([]u8);
 
 	ok, first := Service.reserve_epoch(directory, authority);
 	assert(ok && first == 1);
@@ -334,7 +354,7 @@ test_epoch_issuer :: (executable: string) {
 	ok_deleted, after_delete := Service.reserve_epoch(directory, authority, 11);
 	assert(ok_deleted && after_delete == 12);
 
-	ok_other, _, other_failure := Service.reserve_epoch(directory, "project:D:/other".([] u8));
+	ok_other, _, other_failure := Service.reserve_epoch(directory, xx "project:D:/other");
 	assert(!ok_other && other_failure == .AUTHORITY_MISMATCH);
 	ok_after_mismatch, after_mismatch := Service.reserve_epoch(directory, authority);
 	assert(ok_after_mismatch && after_mismatch == 13, "\e[91mA rejected reservation must not consume or reset the epoch.\e[0m");
@@ -396,17 +416,17 @@ test_epoch_issuer :: (executable: string) {
 	file_delete(epoch_path);
 	PROCESSES :: 4;
 	PER_PROCESS :: 25;
-	processes: [PROCESSES] Process;
+	processes: [PROCESSES]Process;
 	for * processes {
 		started := create_process(it, executable, "--reserve-epochs", directory, "project:D:/example", tprint("%", PER_PROCESS), capture_and_return_output = true);
 		assert(started);
 	}
 
-	seen: [..] u64;
+	seen: [..]u64;
 	for * processes {
-		output: [..] u8;
-		buffer: [4096] u8;
-		error_buffer: [4096] u8;
+		output: [..]u8;
+		buffer: [4096]u8;
+		error_buffer: [4096]u8;
 		while true {
 			read_ok, output_bytes, error_bytes := read_from_process(it, buffer, error_buffer, 100);
 			for 0..output_bytes - 1 {
@@ -443,7 +463,7 @@ test_epoch_issuer :: (executable: string) {
 
 reserve_epochs_child :: (directory: string, authority: string, count: s64) {
 	for 1..count {
-		ok, epoch, failure := Service.reserve_epoch(directory, authority.([] u8));
+		ok, epoch, failure := Service.reserve_epoch(directory, xx authority);
 		if !ok {
 			print("FAILED %\n", failure);
 			exit(1);

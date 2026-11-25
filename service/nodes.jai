@@ -41,18 +41,18 @@ Field_Value :: struct {
 	signed: s64;
 	// `.UNSIGNED` value or `.FLOAT64_BITS` bits.
 	unsigned: u64;
-	bytes: [] u8;
+	bytes: []u8;
 	// `.TOKEN_TAG` tag, or for `.OPERATOR` a byte character or a declared `Operator_Type` name.
 	tag: Token_Tag;
 	domain: string;
 	name: string;
-	names: [] string;
-	elements: [] Field_Value;
+	names: []string;
+	elements: []Field_Value;
 	span: Token_Span_Observation;
 }
 
 Field_Observation :: struct {
-	path: [] Path_Step;
+	path: []Path_Step;
 	value: Field_Value;
 }
 
@@ -63,20 +63,20 @@ Node_Record :: struct {
 	token_span: Token_Span_Observation;
 	has_origin: bool;
 	origin: Byte_Span;
-	fields: [] Field_Observation;
+	fields: []Field_Observation;
 }
 
 Helper_Record :: struct {
 	local_helper_id: u64;
 	layout: string;
-	fields: [] Field_Observation;
+	fields: []Field_Observation;
 }
 
 Node_Projection :: struct {
 	owner: *Owned_Syntax;
 	root: s64;
-	nodes: [] Node_Record;
-	helpers: [] Helper_Record;
+	nodes: []Node_Record;
+	helpers: []Helper_Record;
 
 	// Producer node pointer to its snapshot ID.
 	node_ids: Table(*void, s64);
@@ -130,7 +130,7 @@ Helper_Layout :: enum u8 {
 }
 
 HELPER_LAYOUT_NAMES :: string.[
-	"",
+	"",//TODO: document this blank.
 	"Parser_Argument",
 	"Parser_Context_Modification",
 	"Parser_Comma_Separated_Argument",
@@ -158,12 +158,14 @@ Node_Projector :: struct {
 	recording: bool;
 	node_ids: Table(*void, s64);
 	helper_ids: Table(*void, s64);
-	fields: [..] Field_Observation;
-	children: [..] Walk_Item;
+	fields: [..]Field_Observation;
+	children: [..]Walk_Item;
 	fault: Projection_Fault;
-	path_keys: Table(string, [] u8);
+	path_keys: Table(string, []u8);
+
 	// Parameter `using` node to its matching argument declaration, filled while describing the owning header.
 	parameter_using_targets: Table(*void, *void);
+
 	// Import-owned parameter call to its owning import, filled while describing the import.
 	import_calls: Table(*void, *void);
 }
@@ -352,8 +354,8 @@ fill_node_projection :: (projection: *Node_Projection) -> Projection_Fault {
 
 
 	// Phase 1 assigns IDs in preorder; phase 2 records fields once every referenced ID is known.
-	order: [..] Walk_Item;
-	stack: [..] Walk_Item;
+	order: [..]Walk_Item;
+	stack: [..]Walk_Item;
 	array_add(*stack, .{pointer = root});
 	node_count: s64;
 	helper_count: s64;
@@ -404,21 +406,26 @@ fill_node_projection :: (projection: *Node_Projection) -> Projection_Fault {
 
 		fields := sorted_fields(*projector);
 		if item.layout == .NONE {
-			_, id := table_find(*projector.node_ids, item.pointer);
+			_, id := table_find(*projector.node_ids, item.pointer);//QUESTION: why is this unchecked?
 			node := item.pointer.(*Parser.Parser_Node);
-			_, kind_name := node_kind_name(node.kind);
+			_, kind_name := node_kind_name(node.kind);//QUESTION: why is this unchecked?
 			span := Token_Span_Observation.{node.first_token.(s64), node.one_past_last_token.(s64)};
 			record := *projection.nodes[id];
 			record.* = .{
 				local_node_id = xx id,
 				kind = kind_name,
-				coordinates = .{node.location.l0, node.location.c0, node.location.l1, node.location.c1},
+				coordinates = .{
+					node.location.l0,
+					node.location.c0,
+					node.location.l1,
+					node.location.c1
+				},
 				token_span = span,
 				fields = fields
 			};
 			record.has_origin, record.origin = token_span_origin(projector.parsed, span);
 		} else {
-			_, id := table_find(*projector.helper_ids, item.pointer);
+			_, id := table_find(*projector.helper_ids, item.pointer);//QUESTION: why is this unchecked?
 			projection.helpers[id] = .{
 				local_helper_id = xx id,
 				layout = HELPER_LAYOUT_NAMES[item.layout],
@@ -461,7 +468,12 @@ node_value :: (p: *Node_Projector, node: *$T) -> Field_Value {
 
 	array_add(*p.children, .{pointer = node});
 	found, id := table_find(*p.node_ids, node);
-	return .{kind = .NODE, signed = ifx found then id else -1};
+	return .{
+		kind = .NODE,
+		signed = ifx found
+			then id
+			else -1
+	};
 }
 
 helper_value :: (p: *Node_Projector, pointer: *void, layout: Helper_Layout) -> Field_Value {
@@ -472,11 +484,16 @@ helper_value :: (p: *Node_Projector, pointer: *void, layout: Helper_Layout) -> F
 
 	array_add(*p.children, .{pointer = pointer, layout = layout});
 	found, id := table_find(*p.helper_ids, pointer);
-	return .{kind = .HELPER, signed = ifx found then id else -1};
+	return .{
+		kind = .HELPER,
+		signed = ifx found
+			then id
+			else -1
+	};
 }
 
-node_list :: (p: *Node_Projector, nodes: [] *$T) -> Field_Value {
-	elements: [] Field_Value;
+node_list :: (p: *Node_Projector, nodes: []*$T) -> Field_Value {
+	elements: []Field_Value;
 	if p.recording {
 		elements = NewArray(nodes.count, Field_Value);
 	}
@@ -491,7 +508,7 @@ node_list :: (p: *Node_Projector, nodes: [] *$T) -> Field_Value {
 	return .{kind = .LIST, elements = elements};
 }
 
-flags_value :: (p: *Node_Projector, domain: string, bits: u64, names: [] Flag_Name) -> Field_Value {
+flags_value :: (p: *Node_Projector, domain: string, bits: u64, names: []Flag_Name) -> Field_Value {
 	remaining := bits;
 	count: s64;
 	for names {
@@ -558,7 +575,7 @@ operator_value :: (p: *Node_Projector, operator_type: $T) -> Field_Value {
 }
 
 bytes_value :: (text: string) -> Field_Value {
-	return .{kind = .BYTES, bytes = text.([] u8)};
+	return .{kind = .BYTES, bytes = xx text};
 }
 
 signed_value :: (value: s64) -> Field_Value {
@@ -572,11 +589,17 @@ bool_value :: (value: bool) -> Field_Value {
 // A non-owning association: never queued for descent, and resolved only once IDs are known.
 alias_value :: (p: *Node_Projector, node: *void) -> Field_Value {
 	found, id := table_find(*p.node_ids, node);
-	return .{kind = .NODE, relationship = .ALIAS, signed = ifx found then id else -1};
+	return .{
+		kind = .NODE,
+		relationship = .ALIAS,
+		signed = ifx found
+			then id
+			else -1
+	};
 }
 
-argument_list :: (p: *Node_Projector, arguments: [] Parser.Parser_Argument) -> Field_Value {
-	elements: [] Field_Value;
+argument_list :: (p: *Node_Projector, arguments: []Parser.Parser_Argument) -> Field_Value {
+	elements: []Field_Value;
 	if p.recording {
 		elements = NewArray(arguments.count, Field_Value);
 	}
@@ -592,7 +615,7 @@ argument_list :: (p: *Node_Projector, arguments: [] Parser.Parser_Argument) -> F
 }
 
 // Lists that no reviewed producer route populates; a populated one has no registered owner or order.
-empty_list :: (p: *Node_Projector, list: [] $T, field_name: string) -> Field_Value {
+empty_list :: (p: *Node_Projector, list: []$T, field_name: string) -> Field_Value {
 	if list.count {
 		fail(p, .UNEXPECTED_ACTIVE_FIELD, field_name);
 	}
@@ -602,7 +625,7 @@ empty_list :: (p: *Node_Projector, list: [] $T, field_name: string) -> Field_Val
 
 INACTIVE :: Field_Value.{kind = .INACTIVE};
 
-REGISTERED_NODE_KINDS :: string.[
+REGISTERED_NODE_KINDS :: string.[//QUESTION: why string and not enum?
 	"ASM",
 	"BINARY_OPERATOR",
 	"BLOCK",
@@ -687,8 +710,8 @@ describe :: (p: *Node_Projector, item: Walk_Item) {
 			argument := item.pointer.(*Parser.Parser_Comma_Separated_Argument);
 			field(p, node_value(p, argument.node), "node");
 			field(p, enum_value(p, "Code_Comma_Separated_Argument.modifier", argument.modifier), "modifier");
-			field(p, signed_value(argument.modifier_token.(s64)), "modifier_token");
-			field(p, signed_value(argument.separator_token.(s64)), "separator_token");
+			field(p, signed_value(xx argument.modifier_token), "modifier_token");
+			field(p, signed_value(xx argument.separator_token), "separator_token");
 
 		case .STRUCT_LITERAL_INFO;
 			info := item.pointer.(*Parser.Parser_Struct_Literal_Info);
@@ -713,11 +736,17 @@ describe :: (p: *Node_Projector, item: Walk_Item) {
 }
 
 span_value :: (span: Parser.Token_Span) -> Field_Value {
-	return .{kind = .TOKEN_SPAN, span = .{span.first.(s64), span.one_past_last.(s64)}};
+	return .{
+		kind = .TOKEN_SPAN,
+		span = .{
+			xx span.first,
+			xx span.one_past_last
+		}
+	};
 }
 
-helper_list :: (p: *Node_Projector, items: [] *$T, layout: Helper_Layout) -> Field_Value {
-	elements: [] Field_Value;
+helper_list :: (p: *Node_Projector, items: []*$T, layout: Helper_Layout) -> Field_Value {
+	elements: []Field_Value;
 	if p.recording {
 		elements = NewArray(items.count, Field_Value);
 	}
@@ -799,7 +828,8 @@ describe_asm_helper :: (p: *Node_Projector, item: Walk_Item) {
 				ifx size.kind == .POLYMORPHIC
 					then node_value(p, size.polymorphic_name)
 					else inactive_arm(p, !!size.polymorphic_name, "polymorphic_name"),
-				"polymorphic_name");
+				"polymorphic_name"
+			);
 
 		case .ASM_OPERAND;
 			operand := item.pointer.(*Parser.Parser_Asm_Operand);
@@ -899,6 +929,7 @@ describe_node :: (p: *Node_Projector, pointer: *void) {
 		case .DIRECTIVE_CONTEXT_TYPE;	#through;
 		case .DIRECTIVE_THROUGH;		#through;
 		case .CONTEXT;
+			// NOP.
 
 		case .IDENT;
 			ident := node.(*Parser.Parser_Ident);
@@ -979,7 +1010,7 @@ describe_node :: (p: *Node_Projector, pointer: *void) {
 
 		case .COMMA_SEPARATED_ARGUMENTS;
 			comma := node.(*Parser.Parser_Comma_Separated_Arguments);
-			arguments: [] Field_Value;
+			arguments: []Field_Value;
 			if p.recording {
 				arguments = NewArray(comma.arguments.count, Field_Value);
 			}
@@ -1234,9 +1265,9 @@ describe_insert :: (p: *Node_Projector, insert: *Parser.Parser_Directive_Insert)
 
 
 	field(p, node_value(p, insert.scope_redirection), "scope_redirection");
-	replacements: [3] *Parser.Parser_Node = .[insert.break_replacement, insert.continue_replacement, insert.remove_replacement];
+	replacements: [3]*Parser.Parser_Node = .[insert.break_replacement, insert.continue_replacement, insert.remove_replacement];
 	names :: string.["break_replacement", "continue_replacement", "remove_replacement"];
-	order: [3] s64 = .[0, 1, 2];
+	order: [3]s64 = .[0, 1, 2];
 	for i: 1..2 {
 		j := i;
 		while j > 0 && replacements[order[j]] && replacements[order[j - 1]] && replacements[order[j]].first_token < replacements[order[j - 1]].first_token {
@@ -1309,8 +1340,8 @@ describe_procedure_header :: (p: *Node_Projector, header: *Parser.Parser_Procedu
 	}
 
 
-	argument_values: [] Field_Value;
-	using_values: [] Field_Value;
+	argument_values: []Field_Value;
+	using_values: []Field_Value;
 	if p.recording {
 		argument_values = NewArray(header.arguments.count, Field_Value);
 		using_values = NewArray(usings.count, Field_Value);
@@ -1438,7 +1469,7 @@ TYPE_CHILD_FIELDS :: string.["type_valued_expression", "must_implement", "pointe
 describe_type_instantiation :: (p: *Node_Projector, wrapper: *Parser.Parser_Type_Instantiation) {
 	flags := wrapper.inst_flags.(u64);
 	field(p, flags_value(p, "TYPE_INSTANTIATION", flags, TYPE_INSTANTIATION_FLAGS), "inst_flags");
-	children: [6] *Parser.Parser_Node = .[
+	children: [6]*Parser.Parser_Node = .[
 		wrapper.type_valued_expression,
 		wrapper.must_implement,
 		xx wrapper.pointer_to,
@@ -1446,12 +1477,13 @@ describe_type_instantiation :: (p: *Node_Projector, wrapper: *Parser.Parser_Type
 		xx wrapper.array_element_type,
 		wrapper.array_dimension
 	];
-	TYPE_VALUED :: 0;
-	MUST_IMPLEMENT :: 1;
-	POINTER_TO :: 2;
-	DIRECTIVE_TARGET :: 3;
-	ELEMENT :: 4;
-	DIMENSION :: 5;
+
+	TYPE_VALUED			:: 0;//QUESTION: why not an enum?
+	MUST_IMPLEMENT		:: 1;
+	POINTER_TO			:: 2;
+	DIRECTIVE_TARGET	:: 3;
+	ELEMENT				:: 4;
+	DIMENSION			:: 5;
 
 	// A parenthesised type's interval starts at `(`; the form's own leading token follows.
 	leading: Parser.Token_Type = .ERROR;
@@ -1466,7 +1498,7 @@ describe_type_instantiation :: (p: *Node_Projector, wrapper: *Parser.Parser_Type
 		first += 1;
 	}
 
-	active: [2] s64 = .[-1, -1];
+	active: [2]s64 = .[-1, -1];
 	if flags & 0x1 {
 		active[0] = ELEMENT;
 	} else if flags & 0x8 {
@@ -1528,9 +1560,9 @@ token_span_origin :: (parsed: *Parser.Parsed_Source, span: Token_Span_Observatio
 }
 
 // Observations sort by the canonical bytes of their complete paths.
-sorted_fields :: (p: *Node_Projector) -> [] Field_Observation {
+sorted_fields :: (p: *Node_Projector) -> []Field_Observation {
 	fields := array_copy(p.fields);
-	keys := NewArray(fields.count, [] u8);
+	keys := NewArray(fields.count, []u8);
 	for fields {
 		keys[it_index] = path_key(p, it.path);
 	}
@@ -1548,7 +1580,7 @@ sorted_fields :: (p: *Node_Projector) -> [] Field_Observation {
 	return fields;
 }
 
-path_key :: (p: *Node_Projector, path: [] Path_Step) -> [] u8 {
+path_key :: (p: *Node_Projector, path: []Path_Step) -> []u8 {
 	joined := path[0].name;
 	for 1..path.count - 1 {
 		joined = tprint("%.%", joined, path[it].name);
@@ -1561,14 +1593,14 @@ path_key :: (p: *Node_Projector, path: [] Path_Step) -> [] u8 {
 
 
 	schema := interface_schema("PathStep");
-	steps := NewArray(path.count, [] u8);
+	steps := NewArray(path.count, []u8);
 	for path {
 		ok, name := v_ascii(it.name);
 		assert(ok);
-		steps[it_index] = v_variant(schema.([] u8), "FIELD", name);
+		steps[it_index] = v_variant(xx schema, "FIELD", name);
 	}
 
-	key = v_sequence(schema.([] u8), ..steps);
+	key = v_sequence(xx schema, ..steps);
 	table_add(*p.path_keys, copy_string(joined), key);
 	return key;
 }

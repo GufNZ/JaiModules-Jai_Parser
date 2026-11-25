@@ -26,12 +26,12 @@ Normalised_Field :: struct {
 }
 
 Normalised_Tree :: struct {
-	fields: [..] Normalised_Field;
+	fields: [..]Normalised_Field;
 }
 
 Fixture_Temporary_Storage :: struct {
 	storage: Temporary_Storage;
-	buffer: [4096] u8;
+	buffer: [4096]u8;
 }
 
 initialize_fixture_temporary_storage :: (temporary: *Fixture_Temporary_Storage) {
@@ -94,7 +94,7 @@ Structural_Difference :: struct {
 }
 
 Differential_Result :: struct {
-	differences: [..] Structural_Difference;
+	differences: [..]Structural_Difference;
 }
 
 Workspace_Fixture_Result :: struct {
@@ -121,7 +121,7 @@ Compiler_Related_Info :: struct {
 Compiler_Diagnostic :: struct {
 	location: Compiler_Source_Location;
 	message: string;
-	related_information: [..] Compiler_Related_Info;
+	related_information: [..]Compiler_Related_Info;
 }
 
 Compiler_Diagnostic_Result :: struct {
@@ -130,7 +130,7 @@ Compiler_Diagnostic_Result :: struct {
 	process_result: Process_Result;
 	standard_output: string;
 	standard_error: string;
-	diagnostics: [..] Compiler_Diagnostic;
+	diagnostics: [..]Compiler_Diagnostic;
 }
 
 CLEAR_PROGRESS_LINE :: "\r\e[K";
@@ -163,7 +163,7 @@ COMPILED_RUN_DIRECTORY :: #run -> string {
 	return "";
 };
 
-get_differential_arguments :: () -> [] string {
+get_differential_arguments :: () -> []string {
 	arguments := get_build_options().compile_time_command_line;
 	if COMPILED_RUN_DIRECTORY {
 		arguments.count -= 1;
@@ -215,7 +215,7 @@ Differential_Progress :: struct {
 	selection: string;
 	section_enabled: bool;
 	planning: bool;
-	sections: [DIFFERENTIAL_SECTION_TOTAL] Differential_Section;
+	sections: [DIFFERENTIAL_SECTION_TOTAL]Differential_Section;
 	fixture_source: string;
 	fixture_path: string;
 	failed: bool;
@@ -792,7 +792,7 @@ capture_compiler_error :: (code: string, log_output := false, require_error_diag
 	return result;
 }
 
-append_compiler_diagnostics :: (output: string, diagnostics: *[..] Compiler_Diagnostic) {
+append_compiler_diagnostics :: (output: string, diagnostics: *[..]Compiler_Diagnostic) {
 	current: *Compiler_Diagnostic;
 	pending_location: *Compiler_Source_Location;
 	lines := split(output, "\n");
@@ -1935,7 +1935,7 @@ add_normalised_field :: (tree: *Normalised_Tree, path: string, name: string, val
 	array_add(*tree.fields, .{path = tprint("%.%", path, name), value = value});
 }
 
-find_normalised_field :: (fields: [] Normalised_Field, path: string) -> *Normalised_Field {
+find_normalised_field :: (fields: []Normalised_Field, path: string) -> *Normalised_Field {
 	for * fields {
 		if it.path == path {
 			return it;
@@ -4162,7 +4162,7 @@ count_syntax_tests :: () -> s64 {
 	return total;
 }
 
-collect_differential_sections :: () -> [DIFFERENTIAL_SECTION_TOTAL] Differential_Section {
+collect_differential_sections :: () -> [DIFFERENTIAL_SECTION_TOTAL]Differential_Section {
 	previous_progress := differential_progress;
 	differential_progress = .{planning = true};
 	run_compile_time_sections();

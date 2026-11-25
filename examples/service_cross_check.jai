@@ -8,7 +8,7 @@
 		options.os_target = os;
 		options.cpu_target = .X64;
 		options.output_type = .NO_OUTPUT;
-		import_path: [..] string;
+		import_path: [..]string;
 		array_add(*import_path, tprint("%../..", #filepath));
 		array_add(*import_path, ..options.import_path);
 		options.import_path = import_path;

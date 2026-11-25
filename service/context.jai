@@ -9,9 +9,16 @@ DIAGNOSTIC_PROFILE :: "jai-cache-diagnostic-profile/1";
 GRAMMAR_PROFILE :: "jai-parser-grammar/1";
 RECOVERY_POLICY :: "jai-parser-recovery/1";
 MESSAGE_POLICY :: "jai-parser-messages/1";
+
 PRESENTATION_LANGUAGE :: "en";
 
 PRODUCER_NAMESPACE :: "jai-parser-service";
+
+SYNTAX_CONTEXT_DESCRIPTOR :: "syntax-context-descriptor";
+
+//TODO: replace these with #run enum_name(Path_Encoding.$VALUE);
+WINDOWS_UTF16LE :: "WINDOWS_UTF16LE";
+POSIX_BYTES :: "POSIX_BYTES";
 
 Schema_Tuple :: struct {
 	token_tags: string;
@@ -55,11 +62,11 @@ IMPLEMENTED_SCHEMA_TUPLE :: Schema_Tuple.{
 	diagnostic_profile = DIAGNOSTIC_PROFILE
 };
 
-// The `QueryKind` payloads this registry supplies, in registry order.
+// The `QueryKind` payloads this registry supplies, in registry order.//QUESTION: is this for tests only?  If so, can we conditionally compile it?
 IMPLEMENTED_QUERY_KINDS :: string.["SYNTAX_SNAPSHOT", "SYNTAX_DIAGNOSTICS", "SYNTAX_DECLARATION_INDEX"];
 
 // `V(SchemaTuple)`: a record of the eleven identifiers in field order.
-schema_tuple_value :: (tuple: Schema_Tuple) -> bool, [] u8 {
+schema_tuple_value :: (tuple: Schema_Tuple) -> bool, []u8 {
 	identifiers := string.[
 		tuple.token_tags,
 		tuple.source_tokens,
@@ -73,7 +80,8 @@ schema_tuple_value :: (tuple: Schema_Tuple) -> bool, [] u8 {
 		tuple.parse_profile,
 		tuple.diagnostic_profile
 	];
-	fields: [11] [] u8;
+
+	fields: [11][]u8;
 	for identifiers {
 		ok, value := v_ascii(it);
 		if !ok {
@@ -88,26 +96,26 @@ schema_tuple_value :: (tuple: Schema_Tuple) -> bool, [] u8 {
 	return true, v_record(tuple_schema(), ..fields);
 }
 
-tuple_schema :: () -> [] u8 {
-	_, schema := v_ascii(interface_schema("SchemaTuple"));
+tuple_schema :: () -> []u8 {
+	_, schema := v_ascii(interface_schema("SchemaTuple"));//QUESTION: why is this unchecked?
 	return schema;
 }
 
 // `K("syntax-configuration", [V(Sequence(SchemaTuple), set)])` over a duplicate-free set of implemented tuples, in canonical byte order.
-configuration_id :: (tuples: [] Schema_Tuple) -> bool, [] u8 {
+configuration_id :: (tuples: []Schema_Tuple) -> bool, []u8 {
 	if !tuples.count {
 		return false, .[];
 	}
 
 
-	values := NewArray(tuples.count, [] u8,, temp);
+	values := NewArray(tuples.count, []u8,, temp);
 	for tuples {
 		if it != IMPLEMENTED_SCHEMA_TUPLE {
 			return false, .[];
 		}
 
 
-		_, values[it_index] = schema_tuple_value(it);
+		_, values[it_index] = schema_tuple_value(it);//QUESTION: why is this unchecked?
 	}
 
 
@@ -131,10 +139,10 @@ configuration_id :: (tuples: [] Schema_Tuple) -> bool, [] u8 {
 
 Path_Value :: struct {
 	encoding: enum u8 {
-		WINDOWS_UTF16LE;
+		WINDOWS_UTF16LE;//FIXME: duplicated into string constants...
 		POSIX_BYTES;
 	};
-	code_units: [] u8;
+	code_units: []u8;
 }
 
 // Exact UTF-16LE code units of a UTF-8 spelling; rejects invalid UTF-8, NUL and empty input.
@@ -144,7 +152,7 @@ windows_path_value :: (spelling: string) -> bool, Path_Value {
 	}
 
 
-	units: [..] u8;
+	units: [..]u8;
 	i := 0;
 	while i < spelling.count {
 		lead := spelling[i];
@@ -155,6 +163,7 @@ windows_path_value :: (spelling: string) -> bool, Path_Value {
 				else ifx lead < 0xF0
 					then 3
 					else 4;
+
 		code: u32 = ifx length == 1
 			then lead.(u32)
 			else ifx length == 2
@@ -162,6 +171,7 @@ windows_path_value :: (spelling: string) -> bool, Path_Value {
 				else ifx length == 3
 					then (lead & 0x0F).(u32)
 					else (lead & 0x07).(u32);
+
 		for 1..length - 1 {
 			code = (code << 6) | (spelling[i + it] & 0x3F).(u32);
 		}
@@ -196,11 +206,11 @@ posix_path_value :: (bytes: string) -> bool, Path_Value {
 }
 
 // `K("path", [encoding_tag, code_units])`.
-path_key :: (path: Path_Value) -> [] u8 {
+path_key :: (path: Path_Value) -> []u8 {
 	tag := ifx path.encoding == .WINDOWS_UTF16LE
-		then "WINDOWS_UTF16LE"
-		else "POSIX_BYTES";
-	return make_key("path", tag.([] u8), path.code_units);
+		then WINDOWS_UTF16LE
+		else POSIX_BYTES;
+	return make_key("path", xx tag, path.code_units);
 }
 
 Context_Paths :: struct {
@@ -210,7 +220,7 @@ Context_Paths :: struct {
 }
 
 // The ten descriptor fields in schema order.
-SYNTAX_CONTEXT_FIELDS :: string.[
+SYNTAX_CONTEXT_FIELDS :: string.[//QUESTION: enum?
 	"producer",
 	"syntax_schemas",
 	"parser_parameters",
@@ -224,14 +234,14 @@ SYNTAX_CONTEXT_FIELDS :: string.[
 ];
 
 // `K("syntax-context-descriptor", [K(field_name, values)...])` for this build's producer and the occurrence's paths.
-syntax_context_descriptor :: (paths: Context_Paths) -> bool, [] u8 {
+syntax_context_descriptor :: (paths: Context_Paths) -> bool, []u8 {
 	if !valid_path(paths.visible_filename) || !valid_path(paths.visible_directory) || !valid_path(paths.relative_base) {
 		return false, .[];
 	}
 
 
 	expected := expected_field_values();
-	fields: [SYNTAX_CONTEXT_FIELDS.count] [] u8;
+	fields: [SYNTAX_CONTEXT_FIELDS.count][]u8;
 	fields[0] = make_key("producer", ..expected.producer);
 	fields[1] = make_key("syntax_schemas", ..expected.syntax_schemas);
 	fields[2] = make_key("parser_parameters", ..expected.parser_parameters);
@@ -242,12 +252,12 @@ syntax_context_descriptor :: (paths: Context_Paths) -> bool, [] u8 {
 	fields[7] = make_key("relative_base", path_key(paths.relative_base));
 	fields[8] = make_key("resolver_binding", make_key("NO_RESOLUTION"));
 	fields[9] = make_key("semantic_extension", make_key("UNSUPPORTED"));
-	return true, make_key("syntax-context-descriptor", ..fields);
+	return true, make_key(SYNTAX_CONTEXT_DESCRIPTOR, ..fields);
 }
 
 // `ContextID = K("context", [context_schema_identifier, canonical_context_descriptor])`.
-context_id :: (descriptor: [] u8) -> [] u8 {
-	return make_key("context", SYNTAX_CONTEXT_SCHEMA.([] u8), descriptor);
+context_id :: (descriptor: []u8) -> []u8 {
+	return make_key("context", xx SYNTAX_CONTEXT_SCHEMA, descriptor);
 }
 
 Context_Failure :: enum u8 {
@@ -266,13 +276,13 @@ Context_Failure :: enum u8 {
 }
 
 Admitted_Context :: struct {
-	identity: [] u8;
-	descriptor: [] u8;
+	identity: []u8;
+	descriptor: []u8;
 	paths: Context_Paths;
 }
 
 // Parses and validates a `ContextRegistration` against this build, then recomputes its identity; the result owns copies of both byte strings.
-admit_context :: (identity: [] u8, descriptor: [] u8) -> Context_Failure, Admitted_Context {
+admit_context :: (identity: []u8, descriptor: []u8) -> Context_Failure, Admitted_Context {
 	failure, result := validate_context_registration(identity, descriptor);
 	if failure != .NONE {
 		return failure, .{};
@@ -291,10 +301,10 @@ admit_context :: (identity: [] u8, descriptor: [] u8) -> Context_Failure, Admitt
 
 #scope_module
 
-validate_context_registration :: (identity: [] u8, descriptor: [] u8) -> Context_Failure, Admitted_Context {
-	root_storage: [SYNTAX_CONTEXT_FIELDS.count] [] u8;
+validate_context_registration :: (identity: []u8, descriptor: []u8) -> Context_Failure, Admitted_Context {
+	root_storage: [SYNTAX_CONTEXT_FIELDS.count][]u8;
 	ok, root := parse_key_into(descriptor, root_storage);
-	if !ok || root.tag.(string) != "syntax-context-descriptor" || root.fields.count != SYNTAX_CONTEXT_FIELDS.count {
+	if !ok || root.tag.(string) != SYNTAX_CONTEXT_DESCRIPTOR || root.fields.count != SYNTAX_CONTEXT_FIELDS.count {
 		return .MALFORMED, .{};
 	}
 
@@ -302,7 +312,7 @@ validate_context_registration :: (identity: [] u8, descriptor: [] u8) -> Context
 	expected := expected_field_values();
 	result: Admitted_Context;
 	path_slots := (*Path_Value).[*result.paths.visible_filename, *result.paths.visible_directory, *result.paths.relative_base];
-	field_storage: [8] [] u8;
+	field_storage: [8][]u8;
 	for name: SYNTAX_CONTEXT_FIELDS {
 		field_ok, field := parse_key_into(root.fields[it_index], field_storage);
 		if !field_ok {
@@ -353,8 +363,8 @@ validate_context_registration :: (identity: [] u8, descriptor: [] u8) -> Context
 					return .UNSUPPORTED_PROFILE, .{};
 				}
 
-			case "visible_filename"; #through;
-			case "visible_directory"; #through;
+			case "visible_filename";	#through;
+			case "visible_directory";	#through;
 			case "relative_base";
 				path_ok, path := parse_path_key(values);
 				if !path_ok {
@@ -376,13 +386,12 @@ validate_context_registration :: (identity: [] u8, descriptor: [] u8) -> Context
 		}
 	}
 
-	identity_storage: [2] [] u8;
+	identity_storage: [2][]u8;
 	identity_ok, identity_key := parse_key_into(identity, identity_storage);
-	if (
-		!identity_ok
+	if (!identity_ok
 		|| identity_key.tag.(string) != "context"
 		|| identity_key.fields.count != 2
-		|| !bytes_equal(identity_key.fields[0], SYNTAX_CONTEXT_SCHEMA.([] u8))
+		|| !bytes_equal(identity_key.fields[0], xx SYNTAX_CONTEXT_SCHEMA)
 		|| !bytes_equal(identity_key.fields[1], descriptor)
 	) {
 		return .IDENTITY_MISMATCH, .{};
@@ -397,7 +406,7 @@ validate_context_registration :: (identity: [] u8, descriptor: [] u8) -> Context
 #scope_export
 
 // Parser, lexer and adapter source digests; called at compile time, including from a cross-compiling build's host.
-build_source_digests :: () -> (parser_digest: [16] u8, lexer_digest: [16] u8, adapter_digest: [16] u8) {
+build_source_digests :: () -> (parser_digest: [16]u8, lexer_digest: [16]u8, adapter_digest: [16]u8) {
 	return
 		source_digest(.["../module.jai", "../parser.jai", "../resolution.jai"]),
 		source_digest(.["../lexer.jai"]),
@@ -435,7 +444,7 @@ try_path_spelling :: (path: Path_Value, allocator: Allocator = context.allocator
 	}
 
 
-	bytes: [..] u8;
+	bytes: [..]u8;
 	bytes.data = storage.data;
 	bytes.allocated = storage.count;
 	i := 0;
@@ -466,7 +475,7 @@ try_path_spelling :: (path: Path_Value, allocator: Allocator = context.allocator
 
 #scope_file
 
-append_utf16_unit :: (units: *[..] u8, unit: u32) {
+append_utf16_unit :: (units: *[..]u8, unit: u32) {
 	array_add(units, (unit & 0xFF).(u8));
 	array_add(units, (unit >> 8).(u8));
 }
@@ -505,13 +514,13 @@ valid_path :: (path: Path_Value) -> bool {
 	return true;
 }
 
-parse_path_key :: (values: [] [] u8) -> bool, Path_Value {
+parse_path_key :: (values: [][]u8) -> bool, Path_Value {
 	if values.count != 1 {
 		return false, .{};
 	}
 
 
-	storage: [2] [] u8;
+	storage: [2][]u8;
 	ok, key := parse_key_into(values[0], storage);
 	if !ok || key.tag.(string) != "path" || key.fields.count != 2 {
 		return false, .{};
@@ -520,8 +529,8 @@ parse_path_key :: (values: [] [] u8) -> bool, Path_Value {
 
 	path: Path_Value;
 	if key.fields[0].(string) == {
-		case "WINDOWS_UTF16LE";	path.encoding = .WINDOWS_UTF16LE;
-		case "POSIX_BYTES";		path.encoding = .POSIX_BYTES;
+		case WINDOWS_UTF16LE;	path.encoding = .WINDOWS_UTF16LE;
+		case POSIX_BYTES;		path.encoding = .POSIX_BYTES;
 
 		case;					return false, .{};
 	}
@@ -531,7 +540,7 @@ parse_path_key :: (values: [] [] u8) -> bool, Path_Value {
 	return valid_path(path), path;
 }
 
-values_equal :: (values: [] [] u8, expected: [] [] u8) -> bool {
+values_equal :: (values: [][]u8, expected: [][]u8) -> bool {
 	if values.count != expected.count {
 		return false;
 	}
@@ -548,14 +557,14 @@ values_equal :: (values: [] [] u8, expected: [] [] u8) -> bool {
 }
 
 Expected_Values :: struct {
-	producer: [6] [] u8;
-	syntax_schemas: [4] [] u8;
-	parser_parameters: [5] [] u8;
-	parse_profile: [2] [] u8;
-	diagnostic_profile: [3] [] u8;
+	producer: [6][]u8;
+	syntax_schemas: [4][]u8;
+	parser_parameters: [5][]u8;
+	parse_profile: [2][]u8;
+	diagnostic_profile: [3][]u8;
 }
 
-EXPECTED_COMPILER_SDK :: #run make_key("compiler-sdk", COMPILER_VERSION.([] u8), COMPILER_LAYOUT_DIGEST_BYTES);
+EXPECTED_COMPILER_SDK :: #run make_key("compiler-sdk", COMPILER_VERSION.([]u8), COMPILER_LAYOUT_DIGEST_BYTES);
 EXPECTED_SYNTAX_ADAPTER :: #run syntax_adapter_descriptor();
 EXPECTED_NO_RESOLUTION :: #run make_key("NO_RESOLUTION");
 EXPECTED_UNSUPPORTED_SEMANTICS :: #run make_key("UNSUPPORTED");
@@ -563,7 +572,7 @@ EXPECTED_UNSUPPORTED_SEMANTICS :: #run make_key("UNSUPPORTED");
 expected_field_values :: () -> Expected_Values {
 	result: Expected_Values;
 	result.producer = .[
-		PRODUCER_NAMESPACE.([] u8),
+		xx PRODUCER_NAMESPACE,
 		parser_build_digest,
 		EXPECTED_COMPILER_SDK,
 		lexer_build_digest,
@@ -571,10 +580,10 @@ expected_field_values :: () -> Expected_Values {
 		EXPECTED_SYNTAX_ADAPTER
 	];
 	result.syntax_schemas = .[
-		SOURCE_TOKENS_SCHEMA.([] u8),
-		AUTHORED_NODES_SCHEMA.([] u8),
-		RECOVERY_SCHEMA.([] u8),
-		DECLARATION_INDEX_SCHEMA.([] u8)
+		xx SOURCE_TOKENS_SCHEMA,
+		xx AUTHORED_NODES_SCHEMA,
+		xx RECOVERY_SCHEMA,
+		xx DECLARATION_INDEX_SCHEMA
 	];
 	result.parser_parameters = .[
 		boolean_byte(Parser.ENABLE_TRIVIA),
@@ -583,28 +592,30 @@ expected_field_values :: () -> Expected_Values {
 		boolean_byte(Parser.USE_SIMD),
 		boolean_byte(Parser.TRACK_AST_REUSE)
 	];
-	result.parse_profile = .[GRAMMAR_PROFILE.([] u8), RECOVERY_POLICY.([] u8)];
-	result.diagnostic_profile = .[SYNTAX_DIAGNOSTICS_SCHEMA.([] u8), MESSAGE_POLICY.([] u8), PRESENTATION_LANGUAGE.([] u8)];
+	result.parse_profile = .[xx GRAMMAR_PROFILE, xx RECOVERY_POLICY];
+	result.diagnostic_profile = .[xx SYNTAX_DIAGNOSTICS_SCHEMA, xx MESSAGE_POLICY, xx PRESENTATION_LANGUAGE];
 	return result;
 }
 
 FALSE_BYTE :: u8.[0];
 TRUE_BYTE :: u8.[1];
 
-boolean_byte :: (value: bool) -> [] u8 {
-	return ifx value then TRUE_BYTE else FALSE_BYTE;
+boolean_byte :: inline (value: bool) -> []u8 {
+	return ifx value
+		then TRUE_BYTE
+		else FALSE_BYTE;
 }
 
 #assert Parser.ENABLE_TRIVIA "The full-featured syntax profile requires a trivia-enabled parser.";
 
 // Build identities: digests of the exact sources compiled into this build, taken at compile time.
-source_digest :: (files: [] string) -> [16] u8 {
+source_digest :: (files: []string) -> [16]u8 {
 	state: Digest_State;
 	digest_begin(*state);
 	for files {
 		source, ok := read_entire_file(tprint("%1%2", #filepath, it));
 		assert(ok, "Unable to read % for the build identity.", it);
-		digest_absorb(*state, make_key("source-file", it.([] u8), source.([] u8)));
+		digest_absorb(*state, make_key("source-file", it.([]u8), source.([]u8)));
 	}
 
 	return digest_end(*state).bytes;
@@ -612,7 +623,7 @@ source_digest :: (files: [] string) -> [16] u8 {
 
 #if IS_CROSS_COMPILING {
 	// A cross-target `#run` cannot call the target's file bindings; `#run,host` lambdas run outside this module's scope, so they import it.
-	PARSER_BUILD_DIGEST_BYTES, LEXER_BUILD_DIGEST_BYTES, ADAPTER_BUILD_DIGEST_BYTES :: #run,host -> [16] u8, [16] u8, [16] u8 {
+	PARSER_BUILD_DIGEST_BYTES, LEXER_BUILD_DIGEST_BYTES, ADAPTER_BUILD_DIGEST_BYTES :: #run,host -> [16]u8, [16]u8, [16]u8 {
 		#import "Jai_Parser/service";
 		parser, lexer, adapter := build_source_digests();
 		return parser, lexer, adapter;
@@ -622,7 +633,7 @@ source_digest :: (files: [] string) -> [16] u8 {
 }
 
 // The compiler layouts the parser overlays, by name, size and member offsets.
-COMPILER_LAYOUT_DIGEST_BYTES :: #run -> [16] u8 {
+COMPILER_LAYOUT_DIGEST_BYTES :: #run -> [16]u8 {
 	builder: String_Builder;
 	for Parser.TYPES {
 		info := it.(*Type_Info_Struct);

@@ -57,7 +57,7 @@ use_owner_memory :: (session: *Session) #expand {
 	}
 }
 
-try_output_array :: (allocator: Allocator, count: s64, $T: Type) -> bool, [] T {
+try_output_array :: (allocator: Allocator, count: s64, $T: Type) -> bool, []T {
 	if count < 0 || count > S64_MAX / size_of(T) {
 		return false, .[];
 	}
@@ -79,7 +79,7 @@ try_output_array :: (allocator: Allocator, count: s64, $T: Type) -> bool, [] T {
 	return true, .{count = count, data = memory.(*T)};
 }
 
-try_output_key :: (allocator: Allocator, tag: string, fields: .. [] u8) -> bool, [] u8 {
+try_output_key :: (allocator: Allocator, tag: string, fields: ..[]u8) -> bool, []u8 {
 	count := 8 + KEY_MAGIC.count + 4 + 8 + tag.count + 8;
 	for fields {
 		if it.count < 0 || count > S64_MAX - 8 || it.count > S64_MAX - count - 8 {
@@ -97,12 +97,12 @@ try_output_key :: (allocator: Allocator, tag: string, fields: .. [] u8) -> bool,
 	}
 
 
-	encoded: [..] u8;
+	encoded: [..]u8;
 	encoded.data = storage.data;
 	encoded.allocated = storage.count;
-	append_framed(*encoded, KEY_MAGIC.([] u8));
+	append_framed(*encoded, xx KEY_MAGIC);
 	append_u32_le(*encoded, KEY_SCHEMA_VERSION);
-	append_framed(*encoded, tag.([] u8));
+	append_framed(*encoded, xx tag);
 	append_u64_le(*encoded, xx fields.count);
 	for fields {
 		append_framed(*encoded, it);
@@ -171,8 +171,8 @@ prepare_shutdown_backing :: (session: *Session) -> bool {
 
 
 	session.shutdown_control = operations.data;
-	token: [8] u8;
-	identity_ok, identity := try_output_key(allocator, "operation", session.identities.session.([] u8), token);
+	token: [8]u8;
+	identity_ok, identity := try_output_key(allocator, "operation", xx session.identities.session, token);
 	if !identity_ok {
 		return false;
 	}
@@ -201,7 +201,7 @@ try_source_batch_pool :: (allocator: Allocator = context.allocator) -> *Pool {
 	return storage.data;
 }
 
-try_source_batch_metadata_storage :: (pool: *Pool, count: s64) -> bool, [] u8 {
+try_source_batch_metadata_storage :: (pool: *Pool, count: s64) -> bool, []u8 {
 	if count < 0 {
 		return false, .[];
 	}
@@ -255,7 +255,7 @@ try_source_batch_metadata_storage :: (pool: *Pool, count: s64) -> bool, [] u8 {
 	return ok, copied;
 }
 
-try_source_batch_metadata :: (pool: *Pool, source: [] u8) -> bool, [] u8 {
+try_source_batch_metadata :: (pool: *Pool, source: []u8) -> bool, []u8 {
 	ok, storage := try_source_batch_metadata_storage(pool, source.count);
 	if ok && source.count {
 		memcpy(storage.data, source.data, source.count);
@@ -288,7 +288,7 @@ Source_Batch_Metadata_Allocation :: struct {
 	storage: *Pool;
 }
 
-try_source_batch_frontier :: (model: *Provider_Model, allocator: Allocator = context.allocator) -> bool, [] u8, Identity_Counter {
+try_source_batch_frontier :: (model: *Provider_Model, allocator: Allocator = context.allocator) -> bool, []u8, Identity_Counter {
 	counter := model.frontier_counter;
 	ok, token := issue_token(*counter);
 	if !ok {
@@ -296,12 +296,12 @@ try_source_batch_frontier :: (model: *Provider_Model, allocator: Allocator = con
 	}
 
 
-	encoded: [8] u8;
+	encoded: [8]u8;
 	for 0..7 {
 		encoded[it] = xx ((token >> (8 * it)) & 0xFF);
 	}
 
-	identity_ok, identity := try_output_key(allocator, "provider-frontier", model.provider_namespace, model.session.([] u8), encoded);
+	identity_ok, identity := try_output_key(allocator, "provider-frontier", model.provider_namespace, xx model.session, encoded);
 	if !identity_ok {
 		return false, .[], model.frontier_counter;
 	}
@@ -311,8 +311,8 @@ try_source_batch_frontier :: (model: *Provider_Model, allocator: Allocator = con
 }
 
 Source_Batch_Commit_Backing :: struct {
-	documents: [] *Document_State;
-	contexts: [] Admitted_Context;
+	documents:	[]*Document_State;
+	contexts:	[]Admitted_Context;
 }
 
 try_source_batch_commit :: (
@@ -376,14 +376,14 @@ try_source_batch_commit :: (
 	return true, result;
 }
 
-try_source_batch_references :: (event_count: s64, allocator: Allocator = context.allocator) -> bool, [..] [] u8 {
-	result: [..] [] u8;
+try_source_batch_references :: (event_count: s64, allocator: Allocator = context.allocator) -> bool, [..][]u8 {//FIXME: name returns everywhere there is >1
+	result: [..][]u8;
 	if event_count < 0 || event_count > S64_MAX / 2 {
 		return false, result;
 	}
 
 
-	ok, storage := try_output_array(allocator, event_count * 2, [] u8);
+	ok, storage := try_output_array(allocator, event_count * 2, []u8);
 	if !ok {
 		return false, result;
 	}
@@ -395,17 +395,18 @@ try_source_batch_references :: (event_count: s64, allocator: Allocator = context
 	return true, result;
 }
 
-try_source_batch_revisions :: (existing: *Document_State, allocator: Allocator = context.allocator) -> bool, [..] [] u8 {
-	result: [..] [] u8;
+try_source_batch_revisions :: (existing: *Document_State, allocator: Allocator = context.allocator) -> bool, [..][]u8 {
+	result: [..][]u8;
 	count := ifx existing
 		then existing.used_revisions.count
 		else 0;
+
 	if count == S64_MAX {
 		return false, result;
 	}
 
 
-	ok, storage := try_output_array(allocator, count + 1, [] u8);
+	ok, storage := try_output_array(allocator, count + 1, []u8);
 	if !ok {
 		return false, result;
 	}
@@ -416,7 +417,7 @@ try_source_batch_revisions :: (existing: *Document_State, allocator: Allocator =
 	result.allocated = storage.count;
 	result.allocator = allocator;
 	if existing {
-		memcpy(result.data, existing.used_revisions.data, count * size_of([] u8));
+		memcpy(result.data, existing.used_revisions.data, count * size_of([]u8));
 	}
 
 	return true, result;
@@ -450,6 +451,7 @@ try_source_batch_storage :: (model: *Provider_Model, allocator: Allocator = cont
 }
 
 #if TEST_HOOKS {
+	//QUESTION: these are all very similar - can we generate them to cut down on boilerplate?
 	source_batch_revisions_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
 		session := data.(*Session);
 		if mode == .ALLOCATE || mode == .RESIZE {
@@ -662,8 +664,8 @@ try_source_batch_storage :: (model: *Provider_Model, allocator: Allocator = cont
 
 Source_Provider_Backing :: struct {
 	model: *Provider_Model;
-	documents: [] *Document_State;
-	contexts: [] Admitted_Context;
+	documents: []*Document_State;
+	contexts: []Admitted_Context;
 	states_count: s64;
 }
 
@@ -846,7 +848,7 @@ finish_source_provider_revisions :: (session: *Session, backing: *Source_Provide
 			for 0..backing.states_count - 1 {
 				copy := backing.documents[it];
 				revisions := copy.used_revisions;
-				empty: [..] [] u8;
+				empty: [..][]u8;
 				copy.used_revisions = empty;
 				free(revisions.data,, allocator);
 			}
@@ -854,7 +856,7 @@ finish_source_provider_revisions :: (session: *Session, backing: *Source_Provide
 	);
 }
 
-finish_source_provider_revision_storage :: (session: *Session, storage: [] [] u8) {
+finish_source_provider_revision_storage :: (session: *Session, storage: [][]u8) {
 	allocator := owner_allocator(session);
 	#if TEST_HOOKS {
 		allocator = .{proc = source_provider_revisions_allocate, data = session};
@@ -894,14 +896,14 @@ prepare_source_provider_revisions :: (session: *Session, backing: *Source_Provid
 		allocator = .{proc = source_provider_revisions_allocate, data = session};
 	}
 
-	storage: [] [] u8;
+	storage: [][]u8;
 	defer finish_source_provider_revision_storage(session, storage);
 
 	ok: bool;
 	unlock(
 		*session.gate,
 		#code {
-			ok, storage = try_output_array(allocator, count, [] u8);
+			ok, storage = try_output_array(allocator, count, []u8);
 		}
 	);
 
@@ -1014,8 +1016,8 @@ finish_source_provider_backing :: (session: *Session, backing: *Source_Provider_
 }
 
 Source_Operation_Backing :: struct {
-	storage: [] *Operation;
-	old_storage: [] *Operation;
+	storage:		[]*Operation;
+	old_storage:	[]*Operation;
 }
 
 source_operation_backing_ready :: (session: *Session) -> bool {
@@ -1155,12 +1157,12 @@ prepare_source_operation_backing :: (session: *Session) -> bool {
 }
 
 Source_Candidate_Join_Backing :: struct {
-	task: *Task;
-	operations: [] *Operation;
-	ready: [] *Task;
+	task:		*Task;
+	operations:	[]*Operation;
+	ready:		[]*Task;
 }
 
-prepare_source_candidate_join_backing :: (session: *Session, key: [] u8) -> bool, Source_Candidate_Join_Backing {
+prepare_source_candidate_join_backing :: (session: *Session, key: []u8) -> bool, Source_Candidate_Join_Backing {
 	world := find_candidate_world(session, key);
 	if !world || world.state == .PUBLISHED {
 		return true, .{};
@@ -1200,11 +1202,12 @@ prepare_source_candidate_join_backing :: (session: *Session, key: [] u8) -> bool
 			ok, backing = try_source_candidate_join_backing(operations_capacity, ready_capacity, allocator);
 		}
 	);
+
 	backing.task = task;
 	return ok, backing;
 }
 
-source_candidate_join_backing_ready :: (session: *Session, key: [] u8, backing: *Source_Candidate_Join_Backing) -> bool {
+source_candidate_join_backing_ready :: (session: *Session, key: []u8, backing: *Source_Candidate_Join_Backing) -> bool {
 	world := find_candidate_world(session, key);
 	if !world || world.state == .PUBLISHED {
 		return true;
@@ -1220,7 +1223,8 @@ source_candidate_join_backing_ready :: (session: *Session, key: [] u8, backing: 
 	return task == backing.task
 		&& (task.operations.count < task.operations.allocated || backing.operations.count > task.operations.count)
 		&& (!task.optional || task.phase != .READY
-			|| session.ready.count < session.ready.allocated || backing.ready.count > session.ready.count);
+			|| session.ready.count < session.ready.allocated || backing.ready.count > session.ready.count
+		);
 }
 
 adopt_source_candidate_join_backing :: (session: *Session, backing: *Source_Candidate_Join_Backing) {
@@ -1309,12 +1313,12 @@ free_source_candidate_join_backing :: (backing: *Source_Candidate_Join_Backing, 
 }
 
 Source_Candidate_Task_Backing :: struct {
-	task: *Task;
-	key: [] u8;
-	world_identity_offset: s64;
-	operations: [] *Operation;
-	tasks: [] *Task;
-	ready: [] *Task;
+	task:					*Task;
+	key:					[]u8;
+	world_identity_offset:	s64;
+	operations:				[]*Operation;
+	tasks:					[]*Task;
+	ready:					[]*Task;
 }
 
 prepare_query_task_key :: (session: *Session, world: *World, member: s64, backing: *Source_Candidate_Task_Backing) -> bool {
@@ -1330,8 +1334,8 @@ prepare_query_task_key :: (session: *Session, world: *World, member: s64, backin
 			ok, backing.key = try_output_key(
 				allocator,
 				"execution-task",
-				session.identities.session.([] u8),
-				world.identity.([] u8),
+				xx session.identities.session,
+				xx world.identity,
 				xx "QUERY_PAYLOAD",
 				world.members[member].document,
 				xx "SYNTAX_DIAGNOSTICS"
@@ -1342,7 +1346,7 @@ prepare_query_task_key :: (session: *Session, world: *World, member: s64, backin
 	return ok;
 }
 
-find_query_task :: (session: *Session, key: [] u8) -> *Task {
+find_query_task :: (session: *Session, key: []u8) -> *Task {
 	result: *Task;
 	for session.tasks {
 		if it.phase != .TERMINAL && bytes_equal(it.key, key) {
@@ -1405,6 +1409,7 @@ prepare_query_task_backing :: (
 			ok, join.* = try_source_candidate_join_backing(capacity, 0, allocator);
 		}
 	);
+
 	join.task = task;
 	return ok;
 }
@@ -1423,9 +1428,11 @@ prepare_query_new_task_backing :: (session: *Session, backing: *Source_Candidate
 	tasks_capacity := ifx session.tasks.count < session.tasks.allocated
 		then 0
 		else max(8, session.tasks.count + 1);
+
 	ready_capacity := ifx session.ready.count < session.ready.allocated
 		then 0
 		else max(8, session.ready.count + 1);
+
 	ok := true;
 	unlock(
 		*session.gate,
@@ -1494,7 +1501,7 @@ try_source_candidate_task_backing :: (
 
 
 	result.task = tasks.data;
-	key_ok, key := try_output_key(allocator, "execution-task", identity.([] u8), world_identity.([] u8), xx "PARSE_INDEX");
+	key_ok, key := try_output_key(allocator, "execution-task", xx identity, xx world_identity, xx "PARSE_INDEX");
 	if !key_ok {
 		return false, .{};
 	}
@@ -1562,11 +1569,12 @@ finish_analysis_candidate_task_backing :: (session: *Session, backing: *Source_C
 }
 
 free_source_candidate_task_backing :: (backing: *Source_Candidate_Task_Backing, allocator: Allocator = context.allocator) {
-	free(backing.task,, allocator);
-	free(backing.key.data,, allocator);
-	free(backing.operations.data,, allocator);
-	free(backing.tasks.data,, allocator);
-	free(backing.ready.data,, allocator);
+	push_allocator(allocator);
+	free(backing.task);
+	free(backing.key.data);
+	free(backing.operations.data);
+	free(backing.tasks.data);
+	free(backing.ready.data);
 	backing.* = .{};
 }
 
@@ -1602,7 +1610,7 @@ try_source_candidate_world_backing :: (
 
 	result.world = worlds.data;
 	token: [8] u8;
-	identity_ok, encoded := try_output_key(allocator, "world", identity.([] u8), token);
+	identity_ok, encoded := try_output_key(allocator, "world", xx identity, token);
 	if !identity_ok {
 		return false, .{};
 	}
@@ -1642,18 +1650,18 @@ free_source_candidate_world_backing :: (backing: *Source_Candidate_World_Backing
 }
 
 Source_Candidate_Capture :: struct {
-	members: [] Selected_Member;
-	key: [] u8;
-	consistency: Consistency;
-	capturable: bool;
+	members:		[]Selected_Member;
+	key:			[]u8;
+	consistency:	Consistency;
+	capturable:		bool;
 }
 
 Analysis_Candidate_Snapshot :: struct {
-	model: Provider_Model;
-	states: [] Document_State;
-	documents: [] *Document_State;
-	contexts: [] Admitted_Context;
-	metadata: [] u8;
+	model:		Provider_Model;
+	states:		[]Document_State;
+	documents:	[]*Document_State;
+	contexts:	[]Admitted_Context;
+	metadata:	[]u8;
 }
 
 free_analysis_candidate_snapshot :: (snapshot: *Analysis_Candidate_Snapshot, allocator: Allocator = context.allocator) {
@@ -1719,7 +1727,7 @@ try_analysis_candidate_snapshot :: (
 	return true, result;
 }
 
-analysis_candidate_metadata_count :: (model: *Provider_Model, documents: [] [] u8) -> bool, s64 {
+analysis_candidate_metadata_count :: (model: *Provider_Model, documents: [][]u8) -> bool, s64 {
 	count: s64;
 	for documents {
 		state := find_document(model, it);
@@ -1762,15 +1770,15 @@ analysis_candidate_metadata_count :: (model: *Provider_Model, documents: [] [] u
 	return true, count;
 }
 
-analysis_snapshot_bytes :: (snapshot: *Analysis_Candidate_Snapshot, cursor: *s64, bytes: [] u8) -> [] u8 {
+analysis_snapshot_bytes :: (snapshot: *Analysis_Candidate_Snapshot, cursor: *s64, bytes: []u8) -> []u8 {
 	assert(bytes.count >= 0 && bytes.count <= snapshot.metadata.count - cursor.*);
-	result := ([] u8).{data = snapshot.metadata.data + cursor.*, count = bytes.count};
+	result := ([]u8).{data = snapshot.metadata.data + cursor.*, count = bytes.count};
 	memcpy(result.data, bytes.data, bytes.count);
 	cursor.* += bytes.count;
 	return result;
 }
 
-stage_analysis_candidate_snapshot :: (model: *Provider_Model, documents: [] [] u8, snapshot: *Analysis_Candidate_Snapshot) {
+stage_analysis_candidate_snapshot :: (model: *Provider_Model, documents: [][]u8, snapshot: *Analysis_Candidate_Snapshot) {
 	assert(snapshot.states.count == documents.count);
 	cursor: s64;
 	for documents {
@@ -1782,6 +1790,7 @@ stage_analysis_candidate_snapshot :: (model: *Provider_Model, documents: [] [] u
 			document = analysis_snapshot_bytes(snapshot, *cursor, state.document),
 			provider_revision = analysis_snapshot_bytes(snapshot, *cursor, state.provider_revision),
 		};
+
 		consistency: Consistency;
 		if selected.provenance {
 			consistency = .{
@@ -1861,8 +1870,8 @@ finish_analysis_candidate_capture :: (
 try_source_candidate_capture :: (
 	model: *Provider_Model,
 	identity: Session_ID,
-	frontier: [] u8,
-	documents: [] [] u8,
+	frontier: []u8,
+	documents: [][]u8,
 	allocator: Allocator = context.allocator
 ) -> bool, Source_Candidate_Capture {
 	result := Source_Candidate_Capture.{capturable = true};
@@ -1880,7 +1889,7 @@ try_source_candidate_capture :: (
 		}
 	}
 
-	keys_ok, member_keys := try_output_array(allocator, documents.count, [] u8);
+	keys_ok, member_keys := try_output_array(allocator, documents.count, []u8);
 	if !keys_ok {
 		return false, .{};
 	}
@@ -1941,7 +1950,7 @@ try_source_candidate_capture :: (
 
 
 	defer free(members_key.data,, allocator);
-	key_ok, key := try_output_key(allocator, "execution-capture", identity.([] u8), frontier, members_key, xx "SYNTAX_INDEX");
+	key_ok, key := try_output_key(allocator, "execution-capture", xx identity, frontier, members_key, xx "SYNTAX_INDEX");
 	if !key_ok {
 		return false, .{};
 	}
@@ -1967,8 +1976,8 @@ free_source_candidate_capture :: (capture: *Source_Candidate_Capture, allocator:
 
 Source_Update_Backing :: struct {
 	operation: *Operation;
-	documents: [] [] u8;
-	identity: [] u8;
+	documents: [][]u8;
+	identity: []u8;
 }
 
 #if TEST_HOOKS {
@@ -1998,7 +2007,7 @@ prepare_query_operation_identity :: (session: *Session, backing: *Source_Update_
 		*session.gate,
 		#code {
 			token: [8] u8;
-			prepared, backing.identity = try_output_key(allocator, "operation", session.identities.session.([] u8), token);
+			prepared, backing.identity = try_output_key(allocator, "operation", xx session.identities.session, token);
 		}
 	);
 
@@ -2018,11 +2027,11 @@ prepare_source_update_backing :: (session: *Session, count: s64, backing: *Sourc
 			ok, operations := try_output_array(allocator, 1, Operation);
 			if ok {
 				backing.operation = operations.data;
-				documents_ok, documents := try_output_array(allocator, count, [] u8);
+				documents_ok, documents := try_output_array(allocator, count, []u8);
 				backing.documents = documents;
 				if documents_ok {
-					token: [8] u8;
-					prepared, backing.identity = try_output_key(allocator, "operation", session.identities.session.([] u8), token);
+					token: [8]u8;
+					prepared, backing.identity = try_output_key(allocator, "operation", xx session.identities.session, token);
 				}
 			}
 		}
@@ -2031,7 +2040,7 @@ prepare_source_update_backing :: (session: *Session, count: s64, backing: *Sourc
 	return prepared;
 }
 
-prepare_analysis_document_backing :: (session: *Session, request: Analysis_Request, documents: [] [] u8, frontier: *[] u8) -> bool {
+prepare_analysis_document_backing :: (session: *Session, request: Analysis_Request, documents: [][]u8, frontier: *[]u8) -> bool {
 	allocator := owner_allocator(session);
 	#if TEST_HOOKS {
 		allocator = .{proc = source_update_allocate, data = session};
@@ -2088,8 +2097,8 @@ finish_query_operation_backing :: (session: *Session, backing: *Source_Update_Ba
 }
 
 Immediate_Result_Backing :: struct {
-	result: *Query_Result;
-	identity: [] u8;
+	result:		*Query_Result;
+	identity:	[]u8;
 }
 
 prepare_immediate_result_backing :: (session: *Session, backing: *Immediate_Result_Backing, asynchronous := false) -> bool {
@@ -2107,8 +2116,8 @@ prepare_immediate_result_backing :: (session: *Session, backing: *Immediate_Resu
 			ok, storage := try_output_array(allocator, 1, Query_Result);
 			if ok {
 				backing.result = storage.data;
-				token: [8] u8;
-				prepared, backing.identity = try_output_key(allocator, "result", session.identities.session.([] u8), token);
+				token: [8]u8;
+				prepared, backing.identity = try_output_key(allocator, "result", xx session.identities.session, token);
 			}
 		}
 	);
@@ -2146,11 +2155,11 @@ finish_immediate_result_backing :: (session: *Session, backing: *Immediate_Resul
 }
 
 Registration_Backing :: struct {
-	slots: [] Registration_Slot;
-	registrations: [] *Registration;
-	registration: *Registration;
-	old_slots: [] Registration_Slot;
-	old_registrations: [] *Registration;
+	slots:				[]Registration_Slot;
+	registrations:		[]*Registration;
+	registration:		*Registration;
+	old_slots:			[]Registration_Slot;
+	old_registrations:	[]*Registration;
 }
 
 registration_backing_ready :: (session: *Session) -> bool {
@@ -2163,11 +2172,12 @@ finish_registration_backing :: (session: *Session, backing: *Registration_Backin
 	unlock(
 		*session.gate,
 		#code {
-			free(backing.slots.data,, allocator);
-			free(backing.registrations.data,, allocator);
-			free(backing.registration,, allocator);
-			free(backing.old_slots.data,, allocator);
-			free(backing.old_registrations.data,, allocator);
+			push_allocator(allocator);
+			free(backing.slots.data);
+			free(backing.registrations.data);
+			free(backing.registration);
+			free(backing.old_slots.data);
+			free(backing.old_registrations.data);
 		}
 	);
 }
@@ -2298,7 +2308,7 @@ prepare_ticket_waiter_observation :: (session: *Session, operation: *Operation, 
 	unlock(
 		*session.gate,
 		#code {
-			ok, identity := try_output_bytes(allocator, operation.identity.([] u8));
+			ok, identity := try_output_bytes(allocator, xx operation.identity);
 			backing.operation_identity = xx identity;
 			if !ok {
 				return false;
@@ -2311,7 +2321,7 @@ prepare_ticket_waiter_observation :: (session: *Session, operation: *Operation, 
 			}
 
 
-			ok, backing.documents = try_output_array(allocator, operation.documents.count, [] u8);
+			ok, backing.documents = try_output_array(allocator, operation.documents.count, []u8);
 			if !ok {
 				return false;
 			}
@@ -2324,17 +2334,17 @@ prepare_ticket_waiter_observation :: (session: *Session, operation: *Operation, 
 				}
 			}
 
-			token: [8] u8;
-			world_identity: [] u8;
-			ok, world_identity = try_output_key(allocator, "world", session.identities.session.([] u8), token);
+			token: [8]u8;
+			world_identity: []u8;
+			ok, world_identity = try_output_key(allocator, "world", xx session.identities.session, token);
 			backing.update.world_identity = xx world_identity;
 			if !ok {
 				return false;
 			}
 
 
-			successor: [] u8;
-			prepared, successor = try_output_key(allocator, "operation", session.identities.session.([] u8), token);
+			successor: []u8;
+			prepared, successor = try_output_key(allocator, "operation", xx session.identities.session, token);
 			backing.update.successor = xx successor;
 		}
 	);
@@ -2369,16 +2379,16 @@ prepare_query_waiter_observation :: (session: *Session, operation: *Operation, b
 	unlock(
 		*session.gate,
 		#code {
-			token: [8] u8;
-			ok, identity := try_output_key(allocator, "operation", session.identities.session.([] u8), token);
+			token: [8]u8;
+			ok, identity := try_output_key(allocator, "operation", xx session.identities.session, token);
 			backing.operation_identity = xx identity;
 			if !ok {
 				return false;
 			}
 
 
-			world_identity: [] u8;
-			ok, world_identity = try_output_bytes(allocator, operation.world.identity.([] u8));
+			world_identity: []u8;
+			ok, world_identity = try_output_bytes(allocator, xx operation.world.identity);
 			backing.world_identity = xx world_identity;
 			if !ok {
 				return false;
@@ -2397,8 +2407,8 @@ prepare_query_waiter_observation :: (session: *Session, operation: *Operation, b
 			}
 
 
-			result_identity: [] u8;
-			prepared, result_identity = try_output_key(allocator, "result", session.identities.session.([] u8), token);
+			result_identity: []u8;
+			prepared, result_identity = try_output_key(allocator, "result", xx session.identities.session, token);
 			backing.query.result_identity = xx result_identity;
 		}
 	);
@@ -2504,8 +2514,8 @@ prepare_completion_backing :: (session: *Session) -> bool {
 }
 
 Waiter_Backing :: struct {
-	storage: [] Slot_Reference;
-	old_storage: [] Slot_Reference;
+	storage:		[]Slot_Reference;
+	old_storage:	[]Slot_Reference;
 }
 
 finish_waiter_backing :: (session: *Session, backing: *Waiter_Backing) {
@@ -2614,7 +2624,7 @@ issue_shutdown_identity :: (session: *Session) -> bool, Operation_ID {
 	return true, identity;
 }
 
-try_output_bytes :: (allocator: Allocator, source: [] u8) -> bool, [] u8 {
+try_output_bytes :: (allocator: Allocator, source: []u8) -> bool, []u8 {
 	ok, bytes := try_output_array(allocator, source.count, u8);
 	if ok && source.count {
 		memcpy(bytes.data, source.data, source.count);
@@ -2729,11 +2739,11 @@ export_argument_error :: (
 	return error;
 }
 
-export_bytes :: (session: *Session, handle: Handle($K), source: [] u8) -> (ok: bool, bytes: [] u8, error: Operation_Error) {
+export_bytes :: (session: *Session, handle: Handle($K), source: []u8) -> (ok: bool, bytes: []u8, error: Operation_Error) {
 	allocator := output_allocator();
 	snapshot := array_copy(source);
 	ok: bool;
-	output: [] u8;
+	output: []u8;
 	unlock(
 		*session.gate,
 		#code {
@@ -2776,6 +2786,7 @@ export_query_terminal :: (session: *Session, handle: Handle(.WORLD), observation
 		}
 	}
 
+
 	if !ok {
 		return false, .{}, error;
 	}
@@ -2786,7 +2797,7 @@ export_query_terminal :: (session: *Session, handle: Handle(.WORLD), observation
 
 export_world_observation :: (session: *Session, handle: Handle($K), observation: Observation) -> bool, World_Acquisition, Operation_Error {
 	if observation.kind == .PENDING {
-		ok, identity, error := export_bytes(session, handle, observation.operation_identity.([] u8));
+		ok, identity, error := export_bytes(session, handle, xx observation.operation_identity);
 		if !ok {
 			return false, .{}, error;
 		}
@@ -2816,7 +2827,7 @@ try_output_tracked_document :: (allocator: Allocator, source: Tracked_Document) 
 	result.overlay_installation_revision = .[];
 	result.overlay_source_revision = .[];
 	result.overlay_context = .[];
-	sources := ([] u8).[
+	sources := ([]u8).[
 		source.document,
 		source.provider_revision,
 		source.binding.document,
@@ -2828,7 +2839,7 @@ try_output_tracked_document :: (allocator: Allocator, source: Tracked_Document) 
 		source.overlay_context,
 	];
 
-	destinations := (*[] u8).[
+	destinations := (*[]u8).[
 		*result.document,
 		*result.provider_revision,
 		*result.binding.document,
@@ -2866,16 +2877,16 @@ try_output_description :: (allocator: Allocator, source: Session_Description) ->
 	result.accepted_frontier = .[];
 	result.clock_identity = .[];
 	result.tracked_document_states = .[];
-	sources := ([] u8).[
-		source.session_identity.([] u8),
+	sources := ([]u8).[
+		xx source.session_identity,
 		source.workspace,
 		source.provider_namespace,
 		source.accepted_frontier,
 		source.clock_identity,
 	];
 
-	destinations := (*[] u8).[
-		(*result.session_identity).(*[] u8),
+	destinations := (*[]u8).[
+		xx (*result.session_identity),
 		*result.workspace,
 		*result.provider_namespace,
 		*result.accepted_frontier,
@@ -2894,8 +2905,7 @@ try_output_description :: (allocator: Allocator, source: Session_Description) ->
 	}
 
 
-	ok: bool;
-	ok, result.tracked_document_states = try_output_array(allocator, source.tracked_document_states.count, Tracked_Document);
+	ok:, result.tracked_document_states = try_output_array(allocator, source.tracked_document_states.count, Tracked_Document);
 	if !ok {
 		free_description(*result,, allocator);
 		return false, .{};
@@ -2925,26 +2935,28 @@ try_output_observation :: (allocator: Allocator, source: Observation) -> bool, O
 	result.document = .[];
 	result.context_identity = .[];
 	result.query.result_identity = .[];
-	sources := ([] u8).[
-		source.operation_identity.([] u8),
+
+	sources := ([]u8).[
+		xx source.operation_identity,
 		source.provider_frontier,
-		source.update.world_identity.([] u8),
-		source.update.successor.([] u8),
-		source.world_identity.([] u8),
+		xx source.update.world_identity,
+		xx source.update.successor,
+		xx source.world_identity,
 		source.document,
 		source.context_identity,
-		source.query.result_identity.([] u8),
+		xx source.query.result_identity,
 	];
-	destinations := (*[] u8).[
-		(*result.operation_identity).(*[] u8),
+	destinations := (*[]u8).[
+		xx (*result.operation_identity),
 		*result.provider_frontier,
-		(*result.update.world_identity).(*[] u8),
-		(*result.update.successor).(*[] u8),
-		(*result.world_identity).(*[] u8),
+		xx (*result.update.world_identity),
+		xx (*result.update.successor),
+		xx (*result.world_identity),
 		*result.document,
 		*result.context_identity,
-		(*result.query.result_identity).(*[] u8),
+		xx (*result.query.result_identity),
 	];
+
 	for sources {
 		ok, bytes := try_output_bytes(allocator, it);
 		if !ok {
@@ -2957,8 +2969,7 @@ try_output_observation :: (allocator: Allocator, source: Observation) -> bool, O
 	}
 
 
-	ok: bool;
-	ok, result.documents = try_output_array(allocator, source.documents.count, [] u8);
+	ok:, result.documents = try_output_array(allocator, source.documents.count, []u8);
 	if !ok {
 		free_observation(*result,, allocator);
 		return false, .{};
@@ -2977,7 +2988,7 @@ try_output_observation :: (allocator: Allocator, source: Observation) -> bool, O
 	return true, result;
 }
 
-free_output_records :: (allocator: Allocator, records: [] Completion_Record) {
+free_output_records :: (allocator: Allocator, records: []Completion_Record) {
 	for * records {
 		free_observation(*it.observation,, allocator);
 	}
@@ -2985,7 +2996,7 @@ free_output_records :: (allocator: Allocator, records: [] Completion_Record) {
 	free(records.data,, allocator);
 }
 
-try_output_records :: (allocator: Allocator, snapshots: [] Completion_Record) -> bool, [] Completion_Record {
+try_output_records :: (allocator: Allocator, snapshots: []Completion_Record) -> bool, []Completion_Record {
 	ok, records := try_output_array(allocator, snapshots.count, Completion_Record);
 	if !ok {
 		return false, .[];
@@ -3007,9 +3018,9 @@ try_output_records :: (allocator: Allocator, snapshots: [] Completion_Record) ->
 
 release_drain_copies :: (
 	session: *Session,
-	snapshots: [] Completion_Record,
-	discarded: [] Observation,
-	records: [] Completion_Record,
+	snapshots: []Completion_Record,
+	discarded: []Observation,
+	records: []Completion_Record,
 	allocator: Allocator
 ) {
 	unlock(

@@ -94,7 +94,7 @@ test_open :: (root: string) {
 	// Each host reserves a fresh epoch in the root, so its incarnation and session identities never repeat.
 	first := open(root);
 	second := open(root);
-	assert(second.epoch == first.epoch + 1 && !Service.bytes_equal(first.session_identity.([] u8), second.session_identity.([] u8)));
+	assert(second.epoch == first.epoch + 1 && !Service.bytes_equal(xx first.session_identity, xx second.session_identity));
 	assert(file_exists(tprint("%/%", root, Service.EPOCH_FILE_NAME)));
 
 	for string.["", "/a.jai", "../a.jai", "a/../b.jai", "a//b.jai", "./a.jai", "a\\b.jai", "C:a.jai"] {
@@ -232,8 +232,8 @@ log_completion :: (host: *Service.Harness_Host, record: Service.Completion_Recor
 
 test_dispatch :: (root: string) {
 	host := open(root);
-	waiters: [3] Service.Handle(.WAITER);
-	tickets: [3] Service.Handle(.TICKET);
+	waiters: [3]Service.Handle(.WAITER);
+	tickets: [3]Service.Handle(.TICKET);
 	for 0..2 {
 		write_entire_file(tprint("%/d%.jai", root, it), tprint("d% :: %;", it, it));
 		batch := Service.begin_batch(host);

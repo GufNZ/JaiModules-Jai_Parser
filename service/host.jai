@@ -10,17 +10,19 @@ Harness_Host :: struct {
 	service: *Service;
 	session: Handle(.SESSION);
 	session_identity: Session_ID;
+
 	// Absolute, `/`-separated, without a trailing separator.
 	root: string;
 	epoch: u64;
-	workspace: [] u8;
-	provider_namespace: [] u8;
-	host_authority: [] u8;
+	workspace: []u8;
+	provider_namespace: []u8;
+	host_authority: []u8;
 	revisions: Identity_Counter;
 	observations: Identity_Counter;
 	confirmations: Identity_Counter;
+
 	// Context identities the session already owns.
-	registered: [..] [] u8;
+	registered: [..][]u8;
 	dispatching: bool;
 	dispatch_failures: s64;
 }
@@ -51,7 +53,7 @@ open_harness_host :: (root: string, ceilings: Limits, minima: Limits, requested_
 	}
 
 
-	authority := tprint("%1%2", HARNESS_AUTHORITY_PREFIX, normalised).([] u8);
+	authority := tprint("%1%2", HARNESS_AUTHORITY_PREFIX, normalised).([]u8);
 	epoch_ok, epoch := reserve_epoch(normalised, authority);
 	if !epoch_ok {
 		free(normalised);
@@ -75,12 +77,15 @@ open_harness_host :: (root: string, ceilings: Limits, minima: Limits, requested_
 			adapter_schema = SOURCE_PROVIDER_SCHEMA,
 			authority_identity = host.host_authority,
 			document_policy_version = HARNESS_POLICY_VERSION,
-			path_platform = ifx OS == .WINDOWS then .WINDOWS_UTF16LE else .POSIX_BYTES,
+			path_platform = ifx OS == .WINDOWS
+				then .WINDOWS_UTF16LE
+				else .POSIX_BYTES,
 			consistency_capabilities = .IMMUTABLE_CAPTURE,
 		},
 		supported_tuples = .[IMPLEMENTED_SCHEMA_TUPLE],
 		requested_limits = requested_limits,
 	};
+
 	opened_ok, opened, error := open_session(host.service, options);
 	if !opened_ok {
 		free(host.root);
@@ -113,7 +118,7 @@ close_harness_host :: (host: *Harness_Host) -> bool, Operation_Error {
 	return released, release_error;
 }
 
-harness_document :: (host: *Harness_Host, relative: string) -> [] u8 {
+harness_document :: (host: *Harness_Host, relative: string) -> []u8 {
 	return document_id(host.provider_namespace, HARNESS_POLICY_VERSION, xx relative);
 }
 
@@ -137,8 +142,8 @@ valid_relative :: (relative: string) -> bool {
 Host_Batch :: struct {
 	host: *Harness_Host;
 	description: Session_Description;
-	events: [..] Document_Event;
-	contexts: [..] Context_Registration;
+	events: [..]Document_Event;
+	contexts: [..]Context_Registration;
 }
 
 // Snapshots the accepted frontier and tracked states the batch's expected bases come from.
@@ -160,7 +165,7 @@ set_overlay :: (batch: *Host_Batch, relative: string, text: string) -> bool {
 }
 
 // Edits apply to the tracked overlay's bytes, each to the previous edit's result.
-edit_overlay :: (batch: *Host_Batch, relative: string, edits: [] Range_Edit) -> bool {
+edit_overlay :: (batch: *Host_Batch, relative: string, edits: []Range_Edit) -> bool {
 	tracked := find_tracked(batch, relative);
 	event := prepare(batch, relative);
 	if !event || !tracked || !tracked.has_overlay {
@@ -189,7 +194,7 @@ observe_disk :: (batch: *Host_Batch, relative: string) -> bool {
 }
 
 // The host saved an overlay installation's bytes itself (default: the current one); clearing it needs matching bytes.
-ack_save :: (batch: *Host_Batch, relative: string, installation: [] u8 = .[]) -> bool {
+ack_save :: (batch: *Host_Batch, relative: string, installation: []u8 = .[]) -> bool {
 	tracked := find_tracked(batch, relative);
 	event := prepare(batch, relative);
 	if !event || !tracked || !tracked.has_overlay {
@@ -209,6 +214,7 @@ ack_save :: (batch: *Host_Batch, relative: string, installation: [] u8 = .[]) ->
 	event.expected_overlay_revision = ifx installation.count
 		then installation
 		else tracked.overlay_installation_revision;
+
 	return true;
 }
 
@@ -227,7 +233,7 @@ reset_overlay :: (batch: *Host_Batch, relative: string) -> bool {
 }
 
 // The host confirms restoring `text` from `candidate`; the confirmation binds both.
-restore_overlay :: (batch: *Host_Batch, relative: string, text: string, candidate: [] u8) -> bool {
+restore_overlay :: (batch: *Host_Batch, relative: string, text: string, candidate: []u8) -> bool {
 	event := prepare(batch, relative);
 	if !event || !candidate.count {
 		return false;
@@ -361,7 +367,7 @@ prepare :: (batch: *Host_Batch, relative: string) -> *Document_Event {
 	}
 
 	tracked := find_tracked(batch, relative);
-	_, token := issue_token(*host.revisions);
+	_, token := issue_token(*host.revisions);//QUESTION: why is this unchecked?
 	event := array_add(*batch.events);
 	event.document = harness_document(host, relative);
 	event.source_context = registration.identity;
@@ -381,7 +387,7 @@ prepare :: (batch: *Host_Batch, relative: string) -> *Document_Event {
 }
 
 disk_observation :: (host: *Harness_Host, event: *Document_Event) -> bool, Disk_Observation {
-	_, token := issue_token(*host.observations);
+	_, token := issue_token(*host.observations);//QUESTION: why is this unchecked?
 	observation := Disk_Observation.{
 		syntax_context = event.source_context,
 		provenance = .{provider_identity = host.provider_namespace, observation_token = little_endian(token, 8,, temp)},
@@ -407,13 +413,13 @@ disk_observation :: (host: *Harness_Host, event: *Document_Event) -> bool, Disk_
 }
 
 // The document key is the relative path itself.
-relative_of :: (host: *Harness_Host, document: [] u8) -> string {
-	_, view := parse_key(document, 3,, temp);
+relative_of :: (host: *Harness_Host, document: []u8) -> string {
+	_, view := parse_key(document, 3,, temp);//QUESTION: why is this unchecked?
 	return xx view.fields[2];
 }
 
 confirmation :: (host: *Harness_Host, event: *Document_Event, action: Confirmation_Action) -> Host_Confirmation {
-	_, token := issue_token(*host.confirmations);
+	_, token := issue_token(*host.confirmations);//QUESTION: why is this unchecked?
 	return .{
 		host_authority = host.host_authority,
 		confirmation_token = make_key("harness-confirmation", host.host_authority, little_endian(token, 8),, temp),

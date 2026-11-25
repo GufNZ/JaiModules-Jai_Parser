@@ -129,23 +129,23 @@ assert_simd_lexer_parity :: (input: string) -> s64 {
 
 	push_allocator(.{proc = pool_allocator_proc, data = *storage});
 
-	expected_diagnostics: [..] Simd_Diagnostic;
-	actual_diagnostics: [..] Simd_Diagnostic;
+	expected_diagnostics: [..]Simd_Diagnostic;
+	actual_diagnostics: [..]Simd_Diagnostic;
 	scalar: Extended.Lexer;
 	vectorised: Simd.Lexer;
 	scalar.user_data = *expected_diagnostics;
 	vectorised.user_data = *actual_diagnostics;
 	scalar.error_callback = (lexer: *Extended.Lexer, message: string, line: s32, column: s32) {
-		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message = copy_string(message), line = line, column = column});
+		array_add(cast(*[..]Simd_Diagnostic) lexer.user_data, .{message = copy_string(message), line = line, column = column});
 	};
 	vectorised.error_callback = (lexer: *Simd.Lexer, message: string, line: s32, column: s32) {
-		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message = copy_string(message), line = line, column = column});
+		array_add(cast(*[..]Simd_Diagnostic) lexer.user_data, .{message = copy_string(message), line = line, column = column});
 	};
 	scalar.detail_callback = (lexer: *Extended.Lexer, message: string) {
-		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message = copy_string(message), line = lexer.current_line_number, column = lexer.current_character_index, is_detail = true});
+		array_add(cast(*[..]Simd_Diagnostic) lexer.user_data, .{message = copy_string(message), line = lexer.current_line_number, column = lexer.current_character_index, is_detail = true});
 	};
 	vectorised.detail_callback = (lexer: *Simd.Lexer, message: string) {
-		array_add(cast(*[..] Simd_Diagnostic) lexer.user_data, .{message = copy_string(message), line = lexer.current_line_number, column = lexer.current_character_index, is_detail = true});
+		array_add(cast(*[..]Simd_Diagnostic) lexer.user_data, .{message = copy_string(message), line = lexer.current_line_number, column = lexer.current_character_index, is_detail = true});
 	};
 	Extended.set_input_from_string(*scalar, input);
 	Simd.set_input_from_string(*vectorised, input);
@@ -235,7 +235,7 @@ assert_simd_lexer_parity :: (input: string) -> s64 {
 }
 
 test_simd_line_comments :: () {
-	input: [192] u8;
+	input: [192]u8;
 	for offset: 0..63 {
 		for length: s64.[0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129] {
 			for stop: -1..length-1 {
@@ -329,7 +329,7 @@ test_simd_identifier_masks :: ($width: s64) {
 			then 64
 			else 32;
 
-		input: [128] u8;
+		input: [128]u8;
 		for *input {
 			it.* = #char "a";
 		}
@@ -601,7 +601,7 @@ test_structured_trivia :: (lexer: *Extended.Lexer) {
 	assert(eof.type == .END_OF_INPUT);
 	assert(eof.preceding_trivia == input);
 
-	expected_kinds: [6] Extended.Trivia_Kind = .[
+	expected_kinds: [6]Extended.Trivia_Kind = .[
 		Extended.Trivia_Kind.SHEBANG,
 		Extended.Trivia_Kind.WHITESPACE,
 		Extended.Trivia_Kind.LINE_COMMENT,
@@ -609,7 +609,7 @@ test_structured_trivia :: (lexer: *Extended.Lexer) {
 		Extended.Trivia_Kind.BLOCK_COMMENT,
 		Extended.Trivia_Kind.WHITESPACE,
 	];
-	expected_text: [6] string = .[
+	expected_text: [6]string = .[
 		"#!/usr/bin/env jai",
 		"\r\n",
 		"// line",

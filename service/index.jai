@@ -23,12 +23,12 @@ SYNTAX_ADAPTER_FEATURES :: Adapter_Feature.[
 ];
 
 // `K("syntax-adapter", [schema_id, registry_binding, K(feature_name, [method_tag, observation_schema])...])`.
-syntax_adapter_descriptor :: () -> [] u8 {
-	fields: [SYNTAX_ADAPTER_FEATURES.count + 2] [] u8;
-	fields[0] = SYNTAX_ADAPTER_SCHEMA.([] u8);
-	fields[1] = SYNTAX_REGISTRY_BINDING.([] u8);
+syntax_adapter_descriptor :: () -> []u8 {
+	fields: [SYNTAX_ADAPTER_FEATURES.count + 2][]u8;
+	fields[0] = xx SYNTAX_ADAPTER_SCHEMA;
+	fields[1] = xx SYNTAX_REGISTRY_BINDING;
 	for SYNTAX_ADAPTER_FEATURES {
-		fields[it_index + 2] = make_key(it.name, it.method.([] u8), it.observation_schema.([] u8));
+		fields[it_index + 2] = make_key(it.name, xx it.method, xx it.observation_schema);
 	}
 
 	return make_key("syntax-adapter", ..fields);
@@ -69,13 +69,15 @@ Coverage_Subject :: struct {
 }
 
 Coverage_Reason :: struct {
-	code: Coverage_Code;
-	subject: Coverage_Subject;
-	field_path: [] Path_Step;
-	impacts: Coverage_Impact;
+	code:			Coverage_Code;
+	subject:		Coverage_Subject;
+	field_path:		[]Path_Step;
+	impacts:		Coverage_Impact;
+
 	// Null when no origin is available.
-	origin: *Origin;
-	detail_utf8: string;
+	origin:			*Origin;
+
+	detail_utf8:	string;
 }
 
 Entry_Name :: struct {
@@ -87,14 +89,14 @@ Entry_Name :: struct {
 	};
 	// Always `.SOURCE` for `.SPELLED`; the insertion or unlocated origin for `.MISSING`.
 	origin: Origin;
-	spelling_bytes: [] u8;
+	spelling_bytes: []u8;
 	// `.SPELLED` and `.UNMAPPED`.
-	producer_name_bytes: [] u8;
+	producer_name_bytes: []u8;
 	form: enum u8 {
 		IDENTIFIER;
 		OPERATOR;
 	};
-	recovery_origins: [] Origin;
+	recovery_origins: []Origin;
 	// `.UNMAPPED` only.
 	reason: Coverage_Reason;
 }
@@ -123,23 +125,24 @@ Scope_Directive_Tag :: enum u8 {
 
 // Snapshot node IDs; -1 means not set.
 Scope_Basis :: struct {
-	statement_list_node_id: s64 = -1;
-	preceding_directive_node_id: s64 = -1;
+	statement_list_node_id:			s64 = -1;
+	preceding_directive_node_id:	s64 = -1;
 }
 
 Visibility_Syntax :: struct {
-	scope_directive: Scope_Directive_Tag;
-	scope_basis: Scope_Basis;
-	observations: [] Origin;
+	scope_directive:	Scope_Directive_Tag;
+	scope_basis:		Scope_Basis;
+	observations:		[]Origin;
 }
 
 Program_Export_Name :: struct {
-	origin: Origin;
-	value_bytes: [] u8;
+	origin:			Origin;
+	value_bytes:	[]u8;
 }
 
 Program_Export_Occurrence :: struct {
 	marker_origin: Origin;
+
 	// Null when no string token follows the marker.
 	name_argument: *Program_Export_Name;
 }
@@ -150,7 +153,8 @@ Recovery_Status :: struct {
 		RECOVERED;
 		UNCLASSIFIED;
 	};
-	// `.UNCLASSIFIED` only.
+
+	// `.UNCLASSIFIED` only.//FIXME: field comments should end in : not .
 	reason: Coverage_Reason;
 }
 
@@ -166,16 +170,18 @@ Index_Entry :: struct {
 	declaration_origin: Origin;
 	container: Container;
 	visibility_syntax: Visibility_Syntax;
+
 	// Null when the declaration has no `#program_export` prefix.  Every binding of one compound shares one occurrence.
 	program_export_syntax: *Program_Export_Occurrence;
+
 	recovery_status: Recovery_Status;
 }
 
 Shared_Region :: struct {
-	local_region_id: u64;
-	compound_node_id: u64;
-	parent_container: Container;
-	binding_entries: [] u64;
+	local_region\_id:	u64;
+	compound_node_id:	u64;
+	parent_container:	Container;
+	binding_entries:	[]u64;
 }
 
 Index_Coverage :: struct {
@@ -183,15 +189,15 @@ Index_Coverage :: struct {
 		COMPLETE_SYNTAX_TRAVERSAL;
 		PARTIAL_SYNTAX_TRAVERSAL;
 	};
-	reasons: [] Coverage_Reason;
+	reasons: []Coverage_Reason;
 }
 
 Declaration_Index :: struct {
-	snapshot: *Syntax_Snapshot;
-	coverage: Index_Coverage;
-	entries: [] Index_Entry;
-	shared_regions: [] Shared_Region;
-	storage: Pool;
+	snapshot:		*Syntax_Snapshot;
+	coverage:		Index_Coverage;
+	entries:		[]Index_Entry;
+	shared_regions:	[]Shared_Region;
+	storage:		Pool;
 }
 
 project_declaration_index :: (snapshot: *Syntax_Snapshot) -> Projection_Fault, *Declaration_Index {
@@ -199,12 +205,7 @@ project_declaration_index :: (snapshot: *Syntax_Snapshot) -> Projection_Fault, *
 	index.snapshot = snapshot;
 	set_allocators(*index.storage, context.allocator);
 
-	fault: Projection_Fault;
-	{
-		push_allocator(pool_allocator_proc, *index.storage);
-		fault = fill_declaration_index(index);
-	}
-
+	fault := fill_declaration_index(index,, Allocator.{pool_allocator_proc, *index.storage});
 	if fault.failure != .NONE {
 		release_declaration_index(index);
 		return fault, null;
@@ -225,35 +226,35 @@ Index_Builder :: struct {
 	snapshot: *Syntax_Snapshot;
 
 	// Owning node, top-level owning field and that field's list position (-1 when not a list element), per node ID.
-	parents: [] s64;
-	edges: [] string;
-	edge_elements: [] s64;
-	path: [..] Path_Step;
+	parents:		[]s64;
+	edges:			[]string;
+	edge_elements:	[]s64;
+	path:			[..]Path_Step;
 
 	// Container of the node itself, and the container its owned children inherit.
-	outer: [] Container;
-	inner: [] Container;
-	region_ids: [] s64;
+	outer:		[]Container;
+	inner:		[]Container;
+	region_ids:	[]s64;
 
 	// Nearest owning statement list and the position of the statement containing the node, or -1.
-	anchor_lists: [] s64;
-	anchor_positions: [] s64;
-	enum_mode: [] bool;
+	anchor_lists:		[]s64;
+	anchor_positions:	[]s64;
+	enum_mode:			[]bool;
 
 	// Per statement list: the last direct scope directive reached so far in preorder.
-	last_directive: [] s64;
+	last_directive:	[]s64;
 
 	// Entry of an ordinary declaration or bare enum member node, or -1.
-	entry_of_node: [] s64;
-	entries: [..] Index_Entry;
-	regions: [..] Shared_Region;
-	reasons: [..] Coverage_Reason;
-	fault: Projection_Fault;
+	entry_of_node:	[]s64;
+	entries:		[..]Index_Entry;
+	regions:		[..]Shared_Region;
+	reasons:		[..]Coverage_Reason;
+	fault:			Projection_Fault;
 }
 
 Name_Pair :: struct {
-	key: string;
-	token: string;
+	key:	string;
+	token:	string;
 }
 
 // Multi-character operator-declaration names from `parse_operator_declaration_name`, with the token each consumes.
@@ -491,7 +492,7 @@ fail :: (b: *Index_Builder, failure: Projection_Failure, record: string, index: 
 	}
 }
 
-field_of :: (fields: [] Field_Observation, first: string, second := "") -> Field_Value {
+field_of :: (fields: []Field_Observation, first: string, second := "") -> Field_Value {
 	length := ifx second.count then 2 else 1;
 	for fields {
 		if it.path.count == length && it.path[0].name == first && (length == 1 || it.path[1].name == second) {
@@ -568,14 +569,14 @@ declaration_origin :: (b: *Index_Builder, id: s64) -> Origin {
 	return origin;
 }
 
-spelled_name :: (b: *Index_Builder, first: s64, last: s64, producer: [] u8, form: type_of(Entry_Name.form)) -> Entry_Name {
+spelled_name :: (b: *Index_Builder, first: s64, last: s64, producer: []u8, form: type_of(Entry_Name.form)) -> Entry_Name {
 	origin := token_origin(b, first, last);
 	source := b.snapshot.source;
 	spelling := string.{origin.span.end - origin.span.start, source.data + origin.span.start};
 	return .{kind = .SPELLED, origin = origin, spelling_bytes = xx spelling, producer_name_bytes = producer, form = form};
 }
 
-unmapped_name :: (b: *Index_Builder, id: s64, producer: [] u8, path: .. string) -> Entry_Name {
+unmapped_name :: (b: *Index_Builder, id: s64, producer: []u8, path: .. string) -> Entry_Name {
 	reason := add_reason(b, .UNMAPPED_NAME, id, .NAMES | .SOURCE_MAPPING, "The name's source tokens could not be correlated with its producer value.", ..path);
 	return .{kind = .UNMAPPED, producer_name_bytes = producer, reason = reason};
 }
@@ -617,7 +618,7 @@ visibility_of :: (b: *Index_Builder, id: s64) -> Visibility_Syntax {
 // The `parse_declaration_node` prefix: `#program_export ["name"]`, `#no_reset`, then `$` or `$$`.
 // Returns the first token after it, the export occurrence and whether the prefix agrees with the recorded flags.
 // An uncorrelated export marker reports partial metadata.
-correlate_prefix :: (b: *Index_Builder, id: s64, first: s64, flags: Field_Value, export_name: [] u8) -> (next_token: s64, program_export: *Program_Export_Occurrence, prefix_ok: bool) {
+correlate_prefix :: (b: *Index_Builder, id: s64, first: s64, flags: Field_Value, export_name: []u8) -> (next_token: s64, program_export: *Program_Export_Occurrence, prefix_ok: bool) {//QUESTION: why is the bool last and not first?
 	i := first;
 	export: *Program_Export_Occurrence;
 	marked := token_is(b, i, byte_tag(#char "#")) && identifier_is(b, i + 1, "program_export");
@@ -632,7 +633,7 @@ correlate_prefix :: (b: *Index_Builder, id: s64, first: s64, flags: Field_Value,
 		}
 	}
 
-	argument: [] u8;
+	argument: []u8;
 	if export && export.name_argument {
 		argument = export.name_argument.value_bytes;
 	}
@@ -887,7 +888,7 @@ emit_compound :: (b: *Index_Builder, id: s64) {
 
 	region_id := b.regions.count;
 	b.region_ids[id] = region_id;
-	bindings: [..] u64;
+	bindings: [..]u64;
 	arguments := field_of(nodes[comma].fields, "arguments").elements;
 	for value: arguments {
 		if value.kind != .HELPER || value.signed < 0 || value.signed >= b.snapshot.helpers.count {
@@ -932,15 +933,18 @@ emit_compound :: (b: *Index_Builder, id: s64) {
 			then spelled_name(b, span.first, span.first, producer, .IDENTIFIER)
 			else unmapped_name(b, target, producer, "name");
 
-		entry := add_entry(b, .{
-			declaration_node_id = xx id,
-			name = name,
-			syntax_kind = .COMPOUND_BINDING,
-			declaration_origin = node_origin(b, id),
-			container = b.outer[id],
-			visibility_syntax = visibility_of(b, id),
-			program_export_syntax = export
-		});
+		entry := add_entry(
+			b,
+			.{
+				declaration_node_id = xx id,
+				name = name,
+				syntax_kind = .COMPOUND_BINDING,
+				declaration_origin = node_origin(b, id),
+				container = b.outer[id],
+				visibility_syntax = visibility_of(b, id),
+				program_export_syntax = export
+			}
+		);
 		array_add(*bindings, entry);
 	}
 
@@ -948,12 +952,15 @@ emit_compound :: (b: *Index_Builder, id: s64) {
 		add_reason(b, .UNMAPPED_ORIGIN, id, .SOURCE_MAPPING, "The compound declaration has no mapped source span.");
 	}
 
-	array_add(*b.regions, .{
-		local_region_id = xx region_id,
-		compound_node_id = xx id,
-		parent_container = b.outer[id],
-		binding_entries = bindings
-	});
+	array_add(
+		*b.regions,
+		.{
+			local_region_id = xx region_id,
+			compound_node_id = xx id,
+			parent_container = b.outer[id],
+			binding_entries = bindings
+		}
+	);
 }
 
 // `parse_enum_member` builds a bare member from exactly `IDENT ;`.

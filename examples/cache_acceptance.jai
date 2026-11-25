@@ -41,8 +41,8 @@ FAMILIES :: Case_Family.[
 	.{prefix = "D", count = 8, scope = .DEFERRED_FEATURE},
 ];
 
-build_ledger :: () -> [..] Acceptance_Case {
-	cases: [..] Acceptance_Case;
+build_ledger :: () -> [..]Acceptance_Case {
+	cases: [..]Acceptance_Case;
 	for family: FAMILIES {
 		for 1..family.count {
 			verdict: Verdict = ifx family.scope == .DEFERRED_FEATURE
@@ -63,8 +63,8 @@ build_ledger :: () -> [..] Acceptance_Case {
 	return cases;
 }
 
-tally_ledger :: (cases: [] Acceptance_Case) -> [VERDICT_COUNT] s64 {
-	tally: [VERDICT_COUNT] s64;
+tally_ledger :: (cases: []Acceptance_Case) -> [VERDICT_COUNT]s64 {
+	tally: [VERDICT_COUNT]s64;
 	for cases {
 		tally[it.verdict] += 1;
 	}
@@ -72,7 +72,7 @@ tally_ledger :: (cases: [] Acceptance_Case) -> [VERDICT_COUNT] s64 {
 	return tally;
 }
 
-ledger_failed :: (tally: [VERDICT_COUNT] s64) -> bool {
+ledger_failed :: (tally: [VERDICT_COUNT]s64) -> bool {
 	return tally[Verdict.FAIL] || tally[Verdict.BLOCKED];
 }
 

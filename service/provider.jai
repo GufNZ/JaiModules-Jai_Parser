@@ -39,7 +39,7 @@ Lease_Capability :: struct {
 
 Provider_Adapter_Descriptor :: struct {
 	adapter_schema: string;
-	authority_identity: [] u8;
+	authority_identity: []u8;
 	document_policy_version: u32;
 	path_platform: Path_Platform;
 	case_alias_link_policy: Alias_Policy;
@@ -84,26 +84,26 @@ validate_provider_descriptor :: (descriptor: Provider_Adapter_Descriptor) -> Pro
 }
 
 // `K("document", [provider_namespace, document_policy_version:u32, provider_document_key])`.
-document_id :: (provider_namespace: [] u8, policy_version: u32, document_key: [] u8) -> [] u8 {
+document_id :: (provider_namespace: []u8, policy_version: u32, document_key: []u8) -> []u8 {
 	return make_key("document", provider_namespace, little_endian(policy_version, 4), document_key);
 }
 
 // `K("source", [u32 1, u64 byte_count, DIGEST128(bytes)])`.
-source_revision_of :: (bytes: [] u8) -> [] u8 {
+source_revision_of :: (bytes: []u8) -> []u8 {
 	digest := digest_128(bytes);
 	return make_key("source", little_endian(1, 4), little_endian(xx bytes.count, 8), digest.bytes);
 }
 
-provider_revision_id :: (provider_namespace: [] u8, session: Session_ID, document: [] u8, token: [] u8) -> [] u8 {
-	return make_key("provider-revision", provider_namespace, session.([] u8), document, token);
+provider_revision_id :: (provider_namespace: []u8, session: Session_ID, document: []u8, token: []u8) -> []u8 {
+	return make_key("provider-revision", provider_namespace, xx session, document, token);
 }
 
-provider_frontier_id :: (provider_namespace: [] u8, session: Session_ID, token: u64) -> [] u8 {
-	return make_key("provider-frontier", provider_namespace, session.([] u8), little_endian(token, 8));
+provider_frontier_id :: (provider_namespace: []u8, session: Session_ID, token: u64) -> []u8 {
+	return make_key("provider-frontier", provider_namespace, xx session, little_endian(token, 8));
 }
 
 Document_Binding :: struct {
-	document: [] u8;
+	document: []u8;
 	absolute_path: Path_Value;
 	provider_policy_version: u32;
 }
@@ -113,7 +113,7 @@ Source_Input :: struct {
 		INLINE_BYTES;
 		PROVIDER_LEASE;
 	};
-	bytes: [] u8;
+	bytes: []u8;
 }
 
 Consistency :: struct {
@@ -121,13 +121,13 @@ Consistency :: struct {
 		IMMUTABLE_CAPTURE;
 		COHERENT_CAPTURE;
 	};
-	provider_namespace: [] u8;
-	capture_token: [] u8;
+	provider_namespace: []u8;
+	capture_token: []u8;
 }
 
 Observation_Provenance :: struct {
-	provider_identity: [] u8;
-	observation_token: [] u8;
+	provider_identity: []u8;
+	observation_token: []u8;
 	consistency: Consistency;
 }
 
@@ -138,10 +138,10 @@ Disk_Observation :: struct {
 	};
 	// `.PRESENT` only.
 	source: Source_Input;
-	source_revision: [] u8;
+	source_revision: []u8;
 	// `.ABSENT` only.
-	provider_revision: [] u8;
-	syntax_context: [] u8;
+	provider_revision: []u8;
+	syntax_context: []u8;
 	provenance: Observation_Provenance;
 }
 
@@ -150,7 +150,7 @@ Expected_Provider_State :: struct {
 		UNTRACKED;
 		REVISION;
 	};
-	revision: [] u8;
+	revision: []u8;
 }
 
 Confirmation_Action :: enum u8 {
@@ -159,20 +159,20 @@ Confirmation_Action :: enum u8 {
 }
 
 Host_Confirmation :: struct {
-	host_authority: [] u8;
-	confirmation_token: [] u8;
-	document: [] u8;
+	host_authority: []u8;
+	confirmation_token: []u8;
+	document: []u8;
 	expected_provider_state: Expected_Provider_State;
 	action: Confirmation_Action;
 	// Empty means null.
-	source_revision: [] u8;
-	recovery_candidate: [] u8;
+	source_revision: []u8;
+	recovery_candidate: []u8;
 }
 
 Range_Edit :: struct {
 	start_byte: u64;
 	end_byte: u64;
-	replacement: [] u8;
+	replacement: []u8;
 }
 
 Event_Kind :: enum u8 {
@@ -187,38 +187,43 @@ Event_Kind :: enum u8 {
 
 // One record for every arm; each kind reads only its own payload fields.
 Document_Event :: struct {
-	document: [] u8;
+	document: []u8;
 	expected_provider_state: Expected_Provider_State;
-	source_context: [] u8;
+	source_context: []u8;
 	binding: *Document_Binding;
 	kind: Event_Kind;
+
 	// `.SET_OVERLAY` and `.RESTORE_OVERLAY`.
 	source: Source_Input;
+
 	// `.EDIT_OVERLAY`.
-	base_source_revision: [] u8;
-	edits: [] Range_Edit;
+	base_source_revision: []u8;
+	edits: []Range_Edit;
+
 	// `.OBSERVE_DISK`, `.ACK_SAVE` and `.RESET_OVERLAY`.
 	disk: Disk_Observation;
+
 	// `.ACK_SAVE`.
-	written_source_revision: [] u8;
-	expected_overlay_revision: [] u8;
+	written_source_revision: []u8;
+	expected_overlay_revision: []u8;
+
 	// `.RESET_OVERLAY` and `.RESTORE_OVERLAY`.
 	host_confirmation: Host_Confirmation;
-	recovery_candidate: [] u8;
-	resulting_provider_revision: [] u8;
+	recovery_candidate: []u8;
+	resulting_provider_revision: []u8;
 }
 
 Context_Registration :: struct {
-	identity: [] u8;
-	descriptor: [] u8;
+	identity:	[]u8;
+	descriptor:	[]u8;
 }
 
 Source_Batch :: struct {
 	version: string;
 	session: Session_ID;
-	expected_frontier: [] u8;
-	contexts: [] Context_Registration;
-	events: [] Document_Event;
+	expected_frontier: []u8;
+	contexts: []Context_Registration;
+	events: []Document_Event;
 }
 
 Operation_Error_Code :: enum u8 {
@@ -266,19 +271,19 @@ Admission_Reason :: struct {
 // Only the arm selected by `code` is meaningful.
 Operation_Error :: struct {
 	code: Operation_Error_Code;
-	path: [] Path_Step;
+	path: []Path_Step;
 	rule: Argument_Rule;
 	scope: Base_Scope;
-	document: [] u8;
+	document: []u8;
 	event_tag: string;
 	admission: Admission_Reason;
 	handle_kind: Handle_Kind;
 }
 
 Source_Backing :: struct {
-	revision: [] u8;
-	bytes: [] u8;
-	references: s64;
+	revision:	[]u8;
+	bytes:		[]u8;
+	references:	s64;
 }
 
 retain_source :: (backing: *Source_Backing) {
@@ -311,7 +316,7 @@ Disk_State :: struct {
 		UNAVAILABLE;
 	};
 	source: *Source_Backing;
-	syntax_context: [] u8;
+	syntax_context: []u8;
 	provenance: Observation_Provenance;
 	reason: Unavailable_Reason;
 }
@@ -322,27 +327,27 @@ Overlay_Origin :: enum u8 {
 }
 
 Overlay_State :: struct {
-	installation_revision: [] u8;
+	installation_revision: []u8;
 	source: *Source_Backing;
-	syntax_context: [] u8;
+	syntax_context: []u8;
 	origin: Overlay_Origin;
 }
 
 Document_State :: struct {
-	document: [] u8;
-	provider_revision: [] u8;
+	document: []u8;
+	provider_revision: []u8;
 	binding: Document_Binding;
 	disk: Disk_State;
 	has_overlay: bool;
 	overlay: Overlay_State;
 	// Every provider revision accepted for this document; a token is never reassigned.
-	used_revisions: [..] [] u8;
+	used_revisions: [..][]u8;
 }
 
 Selected_Document :: struct {
-	document: [] u8;
-	provider_revision: [] u8;
-	syntax_context: [] u8;
+	document: []u8;
+	provider_revision: []u8;
+	syntax_context: []u8;
 	kind: enum u8 {
 		PRESENT;
 		ABSENT;
@@ -355,8 +360,10 @@ Selected_Document :: struct {
 		DISK;
 		RESTORED_OVERLAY;
 	};
+
 	// Set for overlay selections only.
-	overlay_revision: [] u8;
+	overlay_revision: []u8;
+
 	// Null for host overlays.
 	provenance: *Observation_Provenance;
 	reason: Unavailable_Reason;
@@ -401,26 +408,27 @@ selected_document :: (state: *Document_State) -> Selected_Document {
 }
 
 Provider_Model :: struct {
-	descriptor: Provider_Adapter_Descriptor;
-	provider_namespace: [] u8;
-	session: Session_ID;
-	host_authority: [] u8;
-	limits: Limits;
-	documents: [..] *Document_State;
-	contexts: [..] Admitted_Context;
-	frontier_counter: Identity_Counter;
-	accepted_frontier: [] u8;
+	descriptor:			Provider_Adapter_Descriptor;
+	provider_namespace:	[]u8;
+	session:			Session_ID;
+	host_authority:		[]u8;
+	limits:				Limits;
+	documents:			[..]*Document_State;
+	contexts:			[..]Admitted_Context;
+	frontier_counter:	Identity_Counter;
+	accepted_frontier:	[]u8;
+
 	// Each accepted batch's copied identities and metadata; released with the model.
-	batch_storage: [..] *Pool;
+	batch_storage:		[..]*Pool;
 }
 
 // The descriptor must already have passed `validate_provider_descriptor`.
 // The initial frontier precedes every accepted batch.
-open_provider_model :: (descriptor: Provider_Adapter_Descriptor, provider_namespace: [] u8, session: Session_ID, host_authority: [] u8, limits: Limits) -> *Provider_Model {
+open_provider_model :: (descriptor: Provider_Adapter_Descriptor, provider_namespace: []u8, session: Session_ID, host_authority: []u8, limits: Limits) -> *Provider_Model {
 	model := New(Provider_Model);
 	model.descriptor = descriptor;
 	model.provider_namespace = array_copy(provider_namespace);
-	model.session = xx array_copy(session.([] u8));
+	model.session = xx array_copy(session.([]u8));
 	model.host_authority = array_copy(host_authority);
 	model.limits = limits;
 	_, token := issue_token(*model.frontier_counter);
@@ -446,7 +454,7 @@ close_provider_model :: (model: *Provider_Model) {
 	free(model);
 }
 
-find_document :: (model: *Provider_Model, document: [] u8) -> *Document_State {
+find_document :: (model: *Provider_Model, document: []u8) -> *Document_State {
 	for model.documents {
 		if bytes_equal(it.document, document) {
 			return it;
@@ -458,7 +466,7 @@ find_document :: (model: *Provider_Model, document: [] u8) -> *Document_State {
 }
 
 // Tracked documents in canonical `DocumentID` order; the states stay owned by the model.
-tracked_documents :: (model: *Provider_Model) -> [] *Document_State {
+tracked_documents :: (model: *Provider_Model) -> []*Document_State {
 	result := array_copy(model.documents,, temp);
 	for i: 1..result.count - 1 {
 		j := i;
@@ -471,11 +479,11 @@ tracked_documents :: (model: *Provider_Model) -> [] *Document_State {
 	return result;
 }
 
-has_context :: (model: *Provider_Model, identity: [] u8) -> bool {
+has_context :: (model: *Provider_Model, identity: []u8) -> bool {
 	return find_context(model, identity) != null;
 }
 
-find_context :: (model: *Provider_Model, identity: [] u8) -> *Admitted_Context {
+find_context :: (model: *Provider_Model, identity: []u8) -> *Admitted_Context {
 	for * model.contexts {
 		if bytes_equal(it.identity, identity) {
 			return it;
@@ -487,8 +495,8 @@ find_context :: (model: *Provider_Model, identity: [] u8) -> *Admitted_Context {
 }
 
 // Session-level registrations from `OpenSession`; all are admitted or none.
-register_contexts :: (model: *Provider_Model, registrations: [] Context_Registration) -> bool, Operation_Error {
-	admitted: [..] Admitted_Context;
+register_contexts :: (model: *Provider_Model, registrations: []Context_Registration) -> bool, Operation_Error {
+	admitted: [..]Admitted_Context;
 	for registrations {
 		failure, context_value := admit_context(it.identity, it.descriptor);
 		duplicate := has_context(model, context_value.identity);
@@ -498,8 +506,13 @@ register_contexts :: (model: *Provider_Model, registrations: [] Context_Registra
 
 		if failure != .NONE || duplicate {
 			array_free(admitted);
-			error := Operation_Error.{code = .INVALID_ARGUMENT, rule = ifx failure != .NONE then Argument_Rule.INVALID_ENCODING else .DUPLICATE};
-			error.path = NewArray(2, Path_Step);
+			error := Operation_Error.{
+				code = .INVALID_ARGUMENT,
+				rule = ifx failure != .NONE
+					then Argument_Rule.INVALID_ENCODING
+					else .DUPLICATE
+			};
+			error.path = NewArray(2, Path_Step);//QUESTION: this feels like something we could integrate into the literal above, perhaps via array_copy of a literal?
 			error.path[0] = .{kind = .FIELD, name = "contexts"};
 			error.path[1] = .{kind = .ELEMENT, index = it_index};
 			return false, error;
@@ -516,7 +529,7 @@ register_contexts :: (model: *Provider_Model, registrations: [] Context_Registra
 }
 
 // Validates the whole batch against staged copies, then commits every member and one new frontier together, or nothing.
-apply_source_batch :: (model: *Provider_Model, batch: Source_Batch) -> (ok: bool, frontier: [] u8, error: Operation_Error) {
+apply_source_batch :: (model: *Provider_Model, batch: Source_Batch) -> (ok: bool, frontier: []u8, error: Operation_Error) {
 	storage := try_source_batch_pool();
 	if !storage {
 		return false, .[], .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
@@ -530,38 +543,38 @@ apply_source_batch :: (model: *Provider_Model, batch: Source_Batch) -> (ok: bool
 #scope_module
 
 apply_source_batch_with_storage :: (
-	model: *Provider_Model,
-	batch: Source_Batch,
-	storage: *Pool,
-	storage_allocator: Allocator = context.allocator,
-	state_allocator: Allocator = context.allocator,
-	revision_allocator: Allocator = context.allocator,
-	source_allocator: Allocator = context.allocator,
-	source_bytes_allocator: Allocator = context.allocator,
-	source_identity_allocator: Allocator = context.allocator,
-	edit_allocator: Allocator = context.allocator,
-	state_list_allocator: Allocator = context.allocator,
-	reference_list_allocator: Allocator = context.allocator,
-	context_list_allocator: Allocator = context.allocator,
-	path_allocator: Allocator = context.allocator,
-	commit_allocator: Allocator = context.allocator,
-	frontier_allocator: Allocator = context.allocator,
-	metadata_allocator: Allocator = .{}
-) -> (ok: bool, frontier: [] u8, error: Operation_Error) {
+	model:						*Provider_Model,
+	batch:						Source_Batch,
+	storage:					*Pool,
+	storage_allocator:			Allocator = context.allocator,
+	state_allocator:			Allocator = context.allocator,
+	revision_allocator:			Allocator = context.allocator,
+	source_allocator:			Allocator = context.allocator,
+	source_bytes_allocator:		Allocator = context.allocator,
+	source_identity_allocator:	Allocator = context.allocator,
+	edit_allocator:				Allocator = context.allocator,
+	state_list_allocator:		Allocator = context.allocator,
+	reference_list_allocator:	Allocator = context.allocator,
+	context_list_allocator:		Allocator = context.allocator,
+	path_allocator:				Allocator = context.allocator,
+	commit_allocator:			Allocator = context.allocator,
+	frontier_allocator:			Allocator = context.allocator,
+	metadata_allocator:			Allocator = .{}
+) -> (ok: bool, frontier: []u8, error: Operation_Error) {
 	staging := Batch_Staging.{
-		model = model,
-		storage = storage,
-		state_allocator = state_allocator,
-		revision_allocator = revision_allocator,
-		source_allocator = source_allocator,
-		source_bytes_allocator = source_bytes_allocator,
-		source_identity_allocator = source_identity_allocator,
-		edit_allocator = edit_allocator,
-		state_list_allocator = state_list_allocator,
-		reference_list_allocator = reference_list_allocator,
-		context_list_allocator = context_list_allocator,
-		path_allocator = path_allocator,
-		metadata_allocator = metadata_allocator,
+		model	= model,
+		storage	= storage,
+		state_allocator				= state_allocator,
+		revision_allocator			= revision_allocator,
+		source_allocator			= source_allocator,
+		source_bytes_allocator		= source_bytes_allocator,
+		source_identity_allocator	= source_identity_allocator,
+		edit_allocator				= edit_allocator,
+		state_list_allocator		= state_list_allocator,
+		reference_list_allocator	= reference_list_allocator,
+		context_list_allocator		= context_list_allocator,
+		path_allocator				= path_allocator,
+		metadata_allocator			= metadata_allocator,
 	};
 
 	if !staging.metadata_allocator.proc {
@@ -683,25 +696,25 @@ try_source_edit_size :: (current: s64, removed: s64, replacement: s64, capacity:
 #scope_file
 
 Batch_Staging :: struct {
-	model: *Provider_Model;
-	states: [..] *Document_State;
-	contexts: [..] Admitted_Context;
-	referenced_contexts: [..] [] u8;
-	error: Operation_Error;
-	path: [..] Path_Step;
-	storage: *Pool;
-	state_allocator: Allocator;
-	revision_allocator: Allocator;
-	source_allocator: Allocator;
-	source_bytes_allocator: Allocator;
-	source_identity_allocator: Allocator;
-	edit_allocator: Allocator;
-	state_list_allocator: Allocator;
-	reference_list_allocator: Allocator;
-	context_list_allocator: Allocator;
-	path_allocator: Allocator;
-	metadata_allocator: Allocator;
-	metadata_failed: bool;
+	model:					*Provider_Model;
+	states:					[..]*Document_State;
+	contexts:				[..]Admitted_Context;
+	referenced_contexts:	[..][]u8;
+	error:					Operation_Error;
+	path:					[..]Path_Step;
+	storage:				*Pool;
+	state_allocator:			Allocator;
+	revision_allocator:			Allocator;
+	source_allocator:			Allocator;
+	source_bytes_allocator:		Allocator;
+	source_identity_allocator:	Allocator;
+	edit_allocator:				Allocator;
+	state_list_allocator:		Allocator;
+	reference_list_allocator:	Allocator;
+	context_list_allocator:		Allocator;
+	path_allocator:				Allocator;
+	metadata_allocator:			Allocator;
+	metadata_failed:		bool;
 }
 
 release_document_sources :: (state: *Document_State) {
@@ -729,7 +742,7 @@ discard_staging :: (staging: *Batch_Staging) {
 	free(staging.storage);
 }
 
-own :: (staging: *Batch_Staging, bytes: [] u8) -> [] u8 {
+own :: (staging: *Batch_Staging, bytes: []u8) -> []u8 {
 	if staging.metadata_failed {
 		return .[];
 	}
@@ -770,7 +783,7 @@ argument :: (staging: *Batch_Staging, rule: Argument_Rule, names: .. string) -> 
 	return reject(staging, .INVALID_ARGUMENT);
 }
 
-base_mismatch :: (staging: *Batch_Staging, scope: Base_Scope, document: [] u8) -> bool {
+base_mismatch :: (staging: *Batch_Staging, scope: Base_Scope, document: []u8) -> bool {
 	staging.error.scope = scope;
 	staging.error.document = document;
 	return reject(staging, .BASE_MISMATCH);
@@ -786,7 +799,7 @@ capability :: (staging: *Batch_Staging, schema: string) -> bool {
 	return reject(staging, .ADMISSION_DENIED);
 }
 
-new_source :: (staging: *Batch_Staging, bytes: [] u8) -> *Source_Backing {
+new_source :: (staging: *Batch_Staging, bytes: []u8) -> *Source_Backing {
 	ok, storage := try_output_array(staging.source_allocator, 1, Source_Backing);
 	if !ok {
 		staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
@@ -803,8 +816,8 @@ new_source :: (staging: *Batch_Staging, bytes: [] u8) -> *Source_Backing {
 	}
 
 
-	version: [4] u8 = .[1, 0, 0, 0];
-	byte_count: [8] u8;
+	version: [4]u8 = .[1, 0, 0, 0];
+	byte_count: [8]u8;
 	for 0..7 {
 		byte_count[it] = xx ((bytes.count >> (8 * it)) & 0xFF);
 	}
@@ -825,7 +838,7 @@ new_source :: (staging: *Batch_Staging, bytes: [] u8) -> *Source_Backing {
 	return backing;
 }
 
-key_fields :: (key: [] u8, tag: string, count: s64) -> bool, [] [] u8 {
+key_fields :: (key: []u8, tag: string, count: s64) -> bool, [][]u8 {
 	ok, view := parse_key(key, xx count,, temp);
 	if !ok || view.tag.(string) != tag || view.fields.count != count {
 		return false, .[];
@@ -843,7 +856,7 @@ stage_batch :: (staging: *Batch_Staging, batch: Source_Batch) -> bool {
 	}
 
 
-	if !bytes_equal(batch.session.([] u8), model.session.([] u8)) {
+	if !bytes_equal(xx batch.session, xx model.session) {
 		return argument(staging, .INCONSISTENT_BINDING, "session");
 	}
 
@@ -874,7 +887,11 @@ stage_batch :: (staging: *Batch_Staging, batch: Source_Batch) -> bool {
 	staging.contexts.allocated = contexts.count;
 	staging.contexts.allocator = staging.context_list_allocator;
 	for registration: batch.contexts {
-		array_add(*staging.path, .{kind = .FIELD, name = "contexts"}, .{kind = .ELEMENT, index = it_index});
+		array_add(
+			*staging.path,
+			.{kind = .FIELD, name = "contexts"},
+			.{kind = .ELEMENT, index = it_index}
+		);
 		failure, admitted := validate_context_registration(registration.identity, registration.descriptor);
 		if failure != .NONE {
 			return argument(staging, .INVALID_ENCODING);
@@ -933,7 +950,11 @@ stage_batch :: (staging: *Batch_Staging, batch: Source_Batch) -> bool {
 	staging.referenced_contexts = references;
 	tracked_count := model.documents.count;
 	for event, event_index: batch.events {
-		array_add(*staging.path, .{kind = .FIELD, name = "events"}, .{kind = .ELEMENT, index = event_index});
+		array_add(
+			*staging.path,
+			.{kind = .FIELD, name = "events"},
+			.{kind = .ELEMENT, index = event_index}
+		);
 		for 0..event_index - 1 {
 			if bytes_equal(batch.events[it].document, event.document) {
 				return argument(staging, .DUPLICATE, "document");
@@ -947,6 +968,7 @@ stage_batch :: (staging: *Batch_Staging, batch: Source_Batch) -> bool {
 				return limit(staging, .CAPTURE_DOCUMENTS);
 			}
 		}
+
 
 		if !stage_event(staging, event, existing) {
 			return false;
@@ -965,7 +987,11 @@ stage_batch :: (staging: *Batch_Staging, batch: Source_Batch) -> bool {
 		}
 
 		if !used {
-			array_add(*staging.path, .{kind = .FIELD, name = "contexts"}, .{kind = .ELEMENT, index = it_index});
+			array_add(
+				*staging.path,
+				.{kind = .FIELD, name = "contexts"},
+				.{kind = .ELEMENT, index = it_index}
+			);
 			return argument(staging, .INCONSISTENT_BINDING);
 		}
 	}
@@ -974,7 +1000,7 @@ stage_batch :: (staging: *Batch_Staging, batch: Source_Batch) -> bool {
 	return true;
 }
 
-known_context :: (staging: *Batch_Staging, identity: [] u8) -> bool {
+known_context :: (staging: *Batch_Staging, identity: []u8) -> bool {
 	array_add(*staging.referenced_contexts, identity);
 	if has_context(staging.model, identity) {
 		return true;
@@ -992,7 +1018,7 @@ known_context :: (staging: *Batch_Staging, identity: [] u8) -> bool {
 }
 
 // A host-issued key under this provider's namespace and policy version.
-valid_document_key :: (model: *Provider_Model, document: [] u8) -> bool {
+valid_document_key :: (model: *Provider_Model, document: []u8) -> bool {
 	ok, fields := key_fields(document, "document", 3);
 	if !ok || !bytes_equal(fields[0], model.provider_namespace) || !fields[2].count {
 		return false;
@@ -1055,7 +1081,7 @@ valid_provenance :: (staging: *Batch_Staging, provenance: Observation_Provenance
 }
 
 // Applies a disk observation to `state.disk`, checking its revision claim against the bytes rather than trusting it.
-stage_disk :: (staging: *Batch_Staging, state: *Document_State, observation: Disk_Observation, resulting: [] u8) -> bool {
+stage_disk :: (staging: *Batch_Staging, state: *Document_State, observation: Disk_Observation, resulting: []u8) -> bool {
 	if !known_context(staging, observation.syntax_context) {
 		return argument(staging, .INCONSISTENT_BINDING, "disk", "context");
 	}
@@ -1179,21 +1205,25 @@ stage_edited_source :: (staging: *Batch_Staging, source: *Source_Backing, edits:
 
 	for edit: edits {
 		if edit.start_byte > edit.end_byte || edit.end_byte > xx current.count {
-			array_add(*staging.path, .{kind = .FIELD, name = "edits"}, .{kind = .ELEMENT, index = it_index});
+			array_add(
+				*staging.path,
+				.{kind = .FIELD, name = "edits"},
+				.{kind = .ELEMENT, index = it_index}
+			);
 			argument(staging, .OUT_OF_RANGE);
 			return null;
 		}
 
 
 		removed := (edit.end_byte - edit.start_byte).(s64);
-		size_ok, size := try_source_edit_size(current.count, removed, edit.replacement.count, staging.model.limits.values[Limit_Name.SOURCE_BYTES]);
-		if !size_ok {
+		ok, size := try_source_edit_size(current.count, removed, edit.replacement.count, staging.model.limits.values[Limit_Name.SOURCE_BYTES]);
+		if !ok {
 			limit(staging, .SOURCE_BYTES);
 			return null;
 		}
 
 
-		ok, next := try_output_array(staging.edit_allocator, size, u8);
+		ok=, next := try_output_array(staging.edit_allocator, size, u8);
 		if !ok {
 			staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
 			return null;
@@ -1276,7 +1306,7 @@ stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Docum
 
 
 	revision_ok, revision_fields := key_fields(event.resulting_provider_revision, "provider-revision", 4);
-	if (!revision_ok || !bytes_equal(revision_fields[0], model.provider_namespace) || !bytes_equal(revision_fields[1], model.session.([] u8))
+	if (!revision_ok || !bytes_equal(revision_fields[0], model.provider_namespace) || !bytes_equal(revision_fields[1], xx model.session)
 		|| !bytes_equal(revision_fields[2], event.document) || !revision_fields[3].count
 	) {
 		return argument(staging, .INCONSISTENT_BINDING, "resulting_provider_revision");

@@ -88,14 +88,14 @@ main :: () {
 	print("Service snapshot \e[92mPASS\e[0m.\n");
 }
 
-inventory_files :: (directory: string, recursive: bool) -> [..] string {
-	visit :: (info: *File_Visit_Info, files: *[..] string) {
+inventory_files :: (directory: string, recursive: bool) -> [..]string {
+	visit :: (info: *File_Visit_Info, files: *[..]string) {
 		if !info.is_directory && ends_with(info.full_name, ".jai") {
 			array_add(files, copy_string(info.full_name));
 		}
 	}
 
-	files: [..] string;
+	files: [..]string;
 	visit_files(directory, recursive, *files, visit, visit_symlinks = false);
 	quick_sort(files, compare_strings);
 	return files;
@@ -427,7 +427,7 @@ test_token_values :: () {
 	semicolon := find(projection, ";");
 	assert(semicolon.tag.kind == .BYTE_CHAR && semicolon.tag.byte == #char ";" && semicolon.value.kind == .NO_VALUE);
 
-	notes: [..] string;
+	notes: [..]string;
 	for projection.tokens {
 		if it.tag.name == "NOTE" {
 			assert(it.value.kind == .NAME);
@@ -770,7 +770,7 @@ node_projection_invariants :: (projection: *Service.Node_Projection) -> bool, st
 		it.* = -1;
 	}
 
-	check_value :: (value: Service.Field_Value, owner: s64, node_owners: [] s64, helper_owners: [] s64) -> bool {
+	check_value :: (value: Service.Field_Value, owner: s64, node_owners: []s64, helper_owners: []s64) -> bool {
 		if value.kind == {
 			case .NODE;
 				if value.signed == -1 {
@@ -863,8 +863,8 @@ node_projection_invariants :: (projection: *Service.Node_Projection) -> bool, st
 
 
 	// Field observations are unique and sorted by canonical path bytes, computed here independently.
-	check_order :: (fields: [] Service.Field_Observation) -> bool {
-		previous: [] u8;
+	check_order :: (fields: []Service.Field_Observation) -> bool {
+		previous: []u8;
 		for fields {
 			key := authored_path_key(it.path);
 			if it_index && Service.compare_canonical(previous, key) >= 0 {
@@ -896,7 +896,7 @@ node_projection_invariants :: (projection: *Service.Node_Projection) -> bool, st
 }
 
 // Literal K/V layout of a field path, written out from the contract rather than through the service's encoders.
-authored_path_key :: (path: [] Service.Path_Step) -> [] u8 {
+authored_path_key :: (path: []Service.Path_Step) -> []u8 {
 	frame :: (builder: *String_Builder, bytes: string) {
 		count := bytes.count;
 		for 0..7 {
@@ -934,7 +934,7 @@ authored_path_key :: (path: [] Service.Path_Step) -> [] u8 {
 	return xx key("sequence", ..steps);
 }
 
-get_field :: (fields: [] Service.Field_Observation, names: .. string) -> Service.Field_Value {
+get_field :: (fields: []Service.Field_Observation, names: .. string) -> Service.Field_Value {
 	for fields {
 		if it.path.count != names.count {
 			continue;
@@ -1031,7 +1031,7 @@ test_node_vectors :: () {
 	}
 
 	{
-		SOURCE :: "p: *[4] int = null; c := cast(u8) n; x := xx w; s := size_of(int); t := type_of(c); u := .[1, 2]; q := Point.{1, 2}; e := -n; d := #this; v := m.(u16);";
+		SOURCE :: "p: *[4]int = null; c := cast(u8) n; x := xx w; s := size_of(int); t := type_of(c); u := .[1, 2]; q := Point.{1, 2}; e := -n; d := #this; v := m.(u16);";
 		owned, projection := project_source_nodes(SOURCE);
 		defer Service.release_owned_syntax(owned);
 		defer Service.release_node_projection(projection);
@@ -1104,7 +1104,7 @@ test_node_vectors :: () {
 		defer Service.release_owned_syntax(owned);
 		defer Service.release_node_projection(projection);
 
-		names: [..] string;
+		names: [..]string;
 		for projection.nodes {
 			if it.kind == "BINARY_OPERATOR" || it.kind == "UNARY_OPERATOR" {
 				operator_field := get_field(it.fields, "operator_type");
@@ -1462,7 +1462,7 @@ test_directive_vectors :: () {
 
 	// A typed array literal's parenthesised element type yields a wrapper whose interval starts at `(`, yet its form is the fixed array inside.
 	{
-		owned, projection := project_source_nodes("a := ([2] int).[.[1, 2]];");
+		owned, projection := project_source_nodes("a := ([2]int).[.[1, 2]];");
 		defer Service.release_owned_syntax(owned);
 		defer Service.release_node_projection(projection);
 
@@ -1615,7 +1615,7 @@ test_assembly_vectors :: () {
 		return *projection.helpers[value.signed];
 	}
 
-	statements: [5] *Service.Helper_Record;
+	statements: [5]*Service.Helper_Record;
 	for statement_ids {
 		statements[it_index] = helper(projection, it);
 		assert(statements[it_index].layout == "Parser_Asm_Statement");
@@ -1672,7 +1672,7 @@ declaration_index_invariants :: (index: *Service.Declaration_Index, snapshot: *S
 		region_of_compound[it] = -1;
 	}
 
-	collect :: (value: Service.Field_Value, owner: s64, field: string, snapshot: *Service.Syntax_Snapshot, owners: [] s64, owner_fields: [] string) {
+	collect :: (value: Service.Field_Value, owner: s64, field: string, snapshot: *Service.Syntax_Snapshot, owners: []s64, owner_fields: []string) {
 		if value.kind == {
 			case .LIST;
 				for value.elements {
@@ -1700,14 +1700,14 @@ declaration_index_invariants :: (index: *Service.Declaration_Index, snapshot: *S
 		}
 	}
 
-	is_properties :: (id: s64, nodes: [] Service.Node_Record, owners: [] s64, owner_fields: [] string) -> bool {
+	is_properties :: (id: s64, nodes: []Service.Node_Record, owners: []s64, owner_fields: []string) -> bool {
 		owner := owners[id];
 		return owner >= 0 && nodes[owner].kind == "COMPOUND_DECLARATION" && owner_fields[id] == "declaration_properties";
 	}
 
 
 	// The nearest enclosing entry declaration or shared payload, walking owners upwards from `node`.
-	expected_container :: (node: s64, nodes: [] Service.Node_Record, owners: [] s64, owner_fields: [] string, entry_of_node: [] s64, region_of_compound: [] s64) -> Service.Container {
+	expected_container :: (node: s64, nodes: []Service.Node_Record, owners: []s64, owner_fields: []string, entry_of_node: []s64, region_of_compound: []s64) -> Service.Container {
 		child := node;
 		while owners[child] >= 0 {
 			parent := owners[child];
@@ -1802,7 +1802,7 @@ declaration_index_invariants :: (index: *Service.Declaration_Index, snapshot: *S
 
 
 	// An event reaches an entry when the entry's node is on its owner's ownership path, except through a compound's targets for its bindings.
-	reaches :: (owner: s64, node: s64, binding: bool, owners: [] s64, owner_fields: [] string) -> bool {
+	reaches :: (owner: s64, node: s64, binding: bool, owners: []s64, owner_fields: []string) -> bool {
 		child := -1;
 		current := owner;
 		while current >= 0 {
@@ -2163,7 +2163,7 @@ END
 	);
 
 	check(
-		"`bt :: 1; operator [ ] = :: (a: *T, i: int, v: int) {} operator == :: (a: T, b: T) -> bool { return true; } operator *[] :: (a: *T, i: int) -> *int { return null; }",
+		"`bt :: 1; operator [ ] = :: (a: *T, i: int, v: int) {} operator == :: (a: T, b: T) -> bool { return true; } operator*[] :: (a: *T, i: int) -> *int { return null; }",
 		"D `bt R -; D [ ] = R -; D a D1 -; D i D1 -; D v D1 -; D == R -; D a D5 -; D b D5 -; D #anon D5 -; D *[] R -; D a D9 -; D i D9 -; D #anon D9 -"
 	);
 
@@ -2395,7 +2395,7 @@ test_declaration_index_controls :: () {
 		event.owner_node_id = node_id(find_node(snapshot.node_projection, "BLOCK", 1));
 		fault, index := Service.project_declaration_index(snapshot);
 		assert(fault.failure == .NONE);
-		got: [4] type_of(Service.Recovery_Status.kind);
+		got: [4]type_of(Service.Recovery_Status.kind);
 		for index.entries {
 			got[it_index] = it.recovery_status.kind;
 		}
@@ -2476,7 +2476,7 @@ tally :: (key: string) {
 }
 
 tally_routes :: (projection: *Service.Node_Projection) {
-	tally_value :: (owner: string, path: [] Service.Path_Step, value: Service.Field_Value) {
+	tally_value :: (owner: string, path: []Service.Path_Step, value: Service.Field_Value) {
 		if value.kind == {
 			case .ENUM;
 				tally(tprint("enum:%=%", value.domain, value.name));
@@ -2557,7 +2557,7 @@ HELPER_LAYOUTS :: string.[
 
 // Prints every registered route this run never observed, so each can be given a vector or a recorded disposition.
 report_route_coverage :: () {
-	missing: [..] string;
+	missing: [..]string;
 	kinds := type_info(type_of(Parser.Parser_Node.kind)).(*Type_Info_Enum);
 	for kinds.names {
 		if !table_find_pointer(*route_counts, tprint("kind:%", it)) {

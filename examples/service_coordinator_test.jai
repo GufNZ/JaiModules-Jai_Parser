@@ -81,16 +81,16 @@ open :: (session_options: Service.Session_Options) -> Fixture {
 	return fixture;
 }
 
-doc :: (key: string) -> [] u8 {
+doc :: (key: string) -> []u8 {
 	return Service.document_id(xx NAMESPACE, 1, xx key);
 }
 
 same :: (a: $T, b: T) -> bool {
-	return Service.bytes_equal(a.([] u8), b.([] u8));
+	return Service.bytes_equal(a.([]u8), b.([]u8));
 }
 
 // Replaces `key`'s overlay with `text` in one batch and returns the ticket.
-set_text :: (fixture: *Fixture, key: string, text: string) -> Service.Handle(.TICKET), [] u8 {
+set_text :: (fixture: *Fixture, key: string, text: string) -> Service.Handle(.TICKET), []u8 {
 	session := fixture.session;
 	document := doc(key);
 	state := Service.find_document(session.provider, document);
@@ -398,7 +398,7 @@ test_analysis_requests :: () {
 	Service.executor_run(fixture.session);
 	_, published := Service.poll(fixture.service, ticket);
 
-	request :: (fixture: *Fixture, frontier: [] u8, documents: .. [] u8) -> bool, Service.Accepted, Service.Operation_Error {
+	request :: (fixture: *Fixture, frontier: []u8, documents: .. []u8) -> bool, Service.Accepted, Service.Operation_Error {
 		ok, accepted, error := Service.request_analysis(fixture.service, fixture.handle, .{version = Service.INTERFACE_VERSION, expected_frontier = frontier, documents = documents});
 		return ok, accepted, error;
 	}

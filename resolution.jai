@@ -2,68 +2,68 @@
 #import "String";
 
 Parser_Follow_Flags :: enum_flags u8 {
-	LOAD :: 0x1;
-	IMPORT :: 0x2;
-	IMPORT_FILE :: 0x4;
-	IMPORT_DIR :: 0x8;
-	ALL_IMPORTS :: IMPORT | IMPORT_FILE | IMPORT_DIR;
-	ALL :: LOAD | ALL_IMPORTS;
+	LOAD		:: 0x1;
+	IMPORT		:: 0x2;
+	IMPORT_FILE	:: 0x4;
+	IMPORT_DIR	:: 0x8;
+	ALL_IMPORTS	:: IMPORT | IMPORT_FILE | IMPORT_DIR;
+	ALL			:: LOAD | ALL_IMPORTS;
 }
 
 Parser_Imported_File :: struct {
-	filename: string;
-	source: string;
-	parsed: Parsed_Source;
+	filename:	string;
+	source:		string;
+	parsed:		Parsed_Source;
 }
 
 Parser_Imported_Module :: struct {
-	declaration: *Parser_Declaration;
-	filename: string;
-	source: string;
-	parsed: Parsed_Source;
-	loaded_files: [..] Parser_Imported_File;
-	unresolved_loads: [..] *Parser_Directive_Load;
-	load_limit_reached: bool;
+	declaration:		*Parser_Declaration;
+	filename:			string;
+	source:				string;
+	parsed:				Parsed_Source;
+	loaded_files:		[..]Parser_Imported_File;
+	unresolved_loads:	[..]*Parser_Directive_Load;
+	load_limit_reached:	bool;
 }
 
 Parser_Import_Binding :: struct {
-	reference: *Parser_Ident;
-	declaration: *Parser_Declaration;
+	reference:		*Parser_Ident;
+	declaration:	*Parser_Declaration;
 }
 
 Parser_Mapped_Name :: struct {
-	using_node: *Parser_Using;
-	source_name: string;
-	exported_name: string;
-	declaration: *Parser_Declaration;
+	using_node:		*Parser_Using;
+	source_name:	string;
+	exported_name:	string;
+	declaration:	*Parser_Declaration;
 }
 
 Parser_Map_Collision :: struct {
-	using_node: *Parser_Using;
-	other_using_node: *Parser_Using;
-	exported_name: string;
-	first: *Parser_Declaration;
-	second: *Parser_Declaration;
+	using_node:			*Parser_Using;
+	other_using_node:	*Parser_Using;
+	exported_name:		string;
+	first:				*Parser_Declaration;
+	second:				*Parser_Declaration;
 }
 
 Parser_File_Imports :: struct {
-	modules: [..] Parser_Imported_Module;
-	loaded_files: [..] Parser_Imported_File;
-	unresolved_imports: [..] *Parser_Directive_Import;
-	unresolved_loads: [..] *Parser_Directive_Load;
-	unsupported_using_filters: [..] *Parser_Using;
-	mapped_names: [..] Parser_Mapped_Name;
-	map_collisions: [..] Parser_Map_Collision;
-	bindings: [..] Parser_Import_Binding;
-	load_limit_reached: bool;
+	modules:					[..]Parser_Imported_Module;
+	loaded_files:				[..]Parser_Imported_File;
+	unresolved_imports:			[..]*Parser_Directive_Import;
+	unresolved_loads:			[..]*Parser_Directive_Load;
+	unsupported_using_filters:	[..]*Parser_Using;
+	mapped_names:				[..]Parser_Mapped_Name;
+	map_collisions:				[..]Parser_Map_Collision;
+	bindings:					[..]Parser_Import_Binding;
+	load_limit_reached:			bool;
 }
 
 resolve_file_imports :: (
 	parsed: *Parsed_Source,
-	import_path: [] string = .[],
+	import_path: []string = .[],
 	follow: Parser_Follow_Flags = .ALL,
-	map_names: (using_node: *Parser_Using, names: [] string) -> bool = null,
-	aggregate_fields: (using_node: *Parser_Using, bindings: *[..] Parser_Binding) -> bool = null
+	map_names: (using_node: *Parser_Using, names: []string) -> bool = null,
+	aggregate_fields: (using_node: *Parser_Using, bindings: *[..]Parser_Binding) -> bool = null
 ) -> Parser_File_Imports {
 	result: Parser_File_Imports;
 	if !parsed.root || parsed.root.kind != .BLOCK || follow == 0 {
@@ -243,7 +243,7 @@ lookup_import_binding :: (module: *Parser_Imported_Module, name: string) -> *Par
 	return lookup_loaded_binding(module.loaded_files, name);
 }
 
-lookup_loaded_binding :: (files: [] Parser_Imported_File, name: string) -> *Parser_Declaration {
+lookup_loaded_binding :: (files: []Parser_Imported_File, name: string) -> *Parser_Declaration {
 	for files {
 		for it.parsed.root_scope.bindings {
 			if it.name == name {
@@ -299,8 +299,8 @@ using_targets_module :: (using_node: *Parser_Using, module: *Parser_Imported_Mod
 collect_using_mappings :: (
 	scope: *Parser_Lexical_Scope,
 	imports: *Parser_File_Imports,
-	map_names: (using_node: *Parser_Using, names: [] string) -> bool,
-	aggregate_fields: (using_node: *Parser_Using, bindings: *[..] Parser_Binding) -> bool
+	map_names: (using_node: *Parser_Using, names: []string) -> bool,
+	aggregate_fields: (using_node: *Parser_Using, bindings: *[..]Parser_Binding) -> bool
 ) {
 	for using_node: scope.usings {
 		if using_node.filter_type != .MAP {
@@ -319,7 +319,7 @@ collect_using_mappings :: (
 		if !handled && map_names {
 			provided := false;
 			if aggregate_fields && using_node.expression && using_node.expression.kind == .DECLARATION {
-				bindings: [..] Parser_Binding;
+				bindings: [..]Parser_Binding;
 				provided = aggregate_fields(using_node, *bindings);
 				if provided {
 					handled = map_using_names(imports, using_node, bindings, map_names);
@@ -394,8 +394,8 @@ collect_mapping_conflicts :: (scope: *Parser_Lexical_Scope, imports: *Parser_Fil
 	}
 }
 
-map_import_names :: (imports: *Parser_File_Imports, using_node: *Parser_Using, module: *Parser_Imported_Module, map_names: (using_node: *Parser_Using, names: [] string) -> bool) -> bool {
-	bindings: [..] Parser_Binding;
+map_import_names :: (imports: *Parser_File_Imports, using_node: *Parser_Using, module: *Parser_Imported_Module, map_names: (using_node: *Parser_Using, names: []string) -> bool) -> bool {
+	bindings: [..]Parser_Binding;
 	for module.parsed.root_scope.bindings {
 		array_add(*bindings, it);
 	}
@@ -1279,7 +1279,7 @@ parsed_primitive_type :: (expression: *Parser_Node, root_scope: *Parser_Lexical_
 	visited: [..]*Parser_Declaration;
 	defer array_free(visited);
 
-	names: [] string = .["bool", "string", "s8", "s16", "s32", "s64", "u8", "u16", "u32", "u64", "float32", "float64"];
+	names: []string = .["bool", "string", "s8", "s16", "s32", "s64", "u8", "u16", "u32", "u64", "float32", "float64"];
 	while expression && expression.kind == .IDENT {
 		ident := expression.(*Parser_Ident);
 		if ident.name == "int" || ident.name == "float" {
@@ -2097,7 +2097,7 @@ instantiate_polymorphic_aggregate_call :: (call: *Parser_Procedure_Call, header:
 		else null;
 }
 
-infer_aggregate_expression_type :: (expression: *Parser_Node, visited: *[..] *Parser_Declaration, root_scope: *Parser_Lexical_Scope) -> *Parser_Node {
+infer_aggregate_expression_type :: (expression: *Parser_Node, visited: *[..]*Parser_Declaration, root_scope: *Parser_Lexical_Scope) -> *Parser_Node {
 	if !expression {
 		return null;
 	}
@@ -2124,7 +2124,7 @@ infer_aggregate_expression_type :: (expression: *Parser_Node, visited: *[..] *Pa
 			}
 
 
-			bindings: [..] Parser_Binding;
+			bindings: [..]Parser_Binding;
 			defer array_free(bindings);
 
 			structure := container.declaration.expression.(*Parser_Struct);
@@ -2234,7 +2234,7 @@ infer_aggregate_expression_type :: (expression: *Parser_Node, visited: *[..] *Pa
 	return null;
 }
 
-infer_aggregate_type_expression :: (declaration: *Parser_Declaration, visited: *[..] *Parser_Declaration, root_scope: *Parser_Lexical_Scope) -> *Parser_Node {
+infer_aggregate_type_expression :: (declaration: *Parser_Declaration, visited: *[..]*Parser_Declaration, root_scope: *Parser_Lexical_Scope) -> *Parser_Node {
 	for visited.* {
 		if it == declaration {
 			return null;
@@ -2374,7 +2374,7 @@ evaluate_literal_boolean :: (expression: *Parser_Node, result: *bool, root_scope
 	return evaluate_constant_boolean(expression, result, *visited, root_scope);
 }
 
-collect_aggregate_bindings :: (statements: []*Parser_Node, bindings: *[..] Parser_Binding, root_scope: *Parser_Lexical_Scope) -> bool {
+collect_aggregate_bindings :: (statements: []*Parser_Node, bindings: *[..]Parser_Binding, root_scope: *Parser_Lexical_Scope) -> bool {
 	for statement: statements {
 		if statement.kind == .DECLARATION {
 			field := statement.(*Parser_Declaration);
@@ -2402,13 +2402,13 @@ collect_aggregate_bindings :: (statements: []*Parser_Node, bindings: *[..] Parse
 	return true;
 }
 
-map_aggregate_names :: (scope: *Parser_Lexical_Scope, imports: *Parser_File_Imports, using_node: *Parser_Using, map_names: (using_node: *Parser_Using, names: [] string) -> bool) -> bool {
+map_aggregate_names :: (scope: *Parser_Lexical_Scope, imports: *Parser_File_Imports, using_node: *Parser_Using, map_names: (using_node: *Parser_Using, names: []string) -> bool) -> bool {
 	if !using_node.expression || using_node.expression.kind != .DECLARATION {
 		return false;
 	}
 
 
-	visited: [..] *Parser_Declaration;
+	visited: [..]*Parser_Declaration;
 	defer array_free(visited);
 
 	root_scope := scope;
@@ -2430,7 +2430,7 @@ map_aggregate_names :: (scope: *Parser_Lexical_Scope, imports: *Parser_File_Impo
 	}
 
 
-	bindings: [..] Parser_Binding;
+	bindings: [..]Parser_Binding;
 	if !collect_aggregate_bindings(structure.block.statements, *bindings, root_scope) {
 		array_free(bindings);
 		return false;
@@ -2442,8 +2442,8 @@ map_aggregate_names :: (scope: *Parser_Lexical_Scope, imports: *Parser_File_Impo
 	return success;
 }
 
-map_using_names :: (imports: *Parser_File_Imports, using_node: *Parser_Using, bindings: [] Parser_Binding, map_names: (using_node: *Parser_Using, names: [] string) -> bool) -> bool {
-	names: [..] string;
+map_using_names :: (imports: *Parser_File_Imports, using_node: *Parser_Using, bindings: []Parser_Binding, map_names: (using_node: *Parser_Using, names: []string) -> bool) -> bool {
+	names: [..]string;
 	for bindings {
 		array_add(*names, it.name);
 	}

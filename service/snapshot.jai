@@ -33,19 +33,20 @@ SYNTAX_SNAPSHOT_SCHEMA :: "jai-cache-syntax-snapshot/1";
 
 // The `jai-cache-syntax-snapshot/1` envelope: one exact capture, or no envelope at all if any part fails conversion.
 Syntax_Snapshot :: struct {
-	owner: *Owned_Syntax;
-	source: string;
+	owner:				*Owned_Syntax;
+	source:				string;
+
 	// -1 only for a safely retained parse with no root, never a fabricated empty file.
-	root: s64;
-	nodes: [] Node_Record;
-	helpers: [] Helper_Record;
-	tokens: [] Token_Record;
-	synthetic_tokens: [] Synthetic_Token_Record;
-	recoveries: [] Recovery_Observation;
-	diagnostics: [] Raw_Diagnostic;
-	parse_status: Parse_Status_Observation;
-	token_projection: *Token_Projection;
-	node_projection: *Node_Projection;
+	root:				s64;
+	nodes:				[]Node_Record;
+	helpers:			[]Helper_Record;
+	tokens:				[]Token_Record;
+	synthetic_tokens:	[]Synthetic_Token_Record;
+	recoveries:			[]Recovery_Observation;
+	diagnostics:		[]Raw_Diagnostic;
+	parse_status:		Parse_Status_Observation;
+	token_projection:	*Token_Projection;
+	node_projection:	*Node_Projection;
 }
 
 project_snapshot :: (owner: *Owned_Syntax) -> Projection_Fault, *Syntax_Snapshot {
@@ -75,18 +76,18 @@ project_snapshot :: (owner: *Owned_Syntax) -> Projection_Fault, *Syntax_Snapshot
 
 	snapshot := New(Syntax_Snapshot);
 	snapshot.* = .{
-		owner = owner,
-		source = owner.source,
-		root = nodes.root,
-		nodes = nodes.nodes,
-		helpers = nodes.helpers,
-		tokens = tokens.tokens,
-		synthetic_tokens = tokens.synthetic_tokens,
-		recoveries = tokens.recoveries,
-		diagnostics = tokens.diagnostics,
-		parse_status = tokens.parse_status,
-		token_projection = tokens,
-		node_projection = nodes
+		owner				= owner,
+		source				= owner.source,
+		root				= nodes.root,
+		nodes				= nodes.nodes,
+		helpers				= nodes.helpers,
+		tokens				= tokens.tokens,
+		synthetic_tokens	= tokens.synthetic_tokens,
+		recoveries			= tokens.recoveries,
+		diagnostics			= tokens.diagnostics,
+		parse_status		= tokens.parse_status,
+		token_projection	= tokens,
+		node_projection		= nodes
 	};
 
 	return .{}, snapshot;

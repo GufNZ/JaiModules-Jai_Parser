@@ -3850,7 +3850,7 @@ parse_declaration_expression :: (parser: *Parser, allow_multi_value_expression :
 }
 
 // Parse type-only prefixes before general expressions so polymorphic bindings and pointer/view types keep their structure.
-// For example, `*T`, `[] T`, and `#type distinct T` describe types here, while `*value` in an ordinary expression can instead mean address-of.
+// For example, `*T`, `[]T`, and `#type distinct T` describe types here, while `*value` in an ordinary expression can instead mean address-of.
 parse_type_instantiation :: (parser: *Parser) -> *Parser_Type_Instantiation {
 	first := parser.cursor;
 
@@ -5299,7 +5299,7 @@ binary_operator_info :: (token_type: Token_Type) -> (bool, Operator_Type, s32, b
 }
 
 // Recognize explicit type prefixes before unary operators, since the same punctuation can begin either form.
-// `[3] T` and `*[] T` are type-valued expressions; `-3` stays a signed literal, and a leading `.` binds to its immediate primary before later postfix access.
+// `[3]T` and `*[]T` are type-valued expressions; `-3` stays a signed literal, and a leading `.` binds to its immediate primary before later postfix access.
 parse_prefix :: (parser: *Parser) -> *Parser_Node {
 	first := parser.cursor;
 	token := parser_peek(parser);

@@ -37,14 +37,14 @@ Diagnostic_Record :: struct {
 	severity: Diagnostic_Severity;
 	primary_origin: Origin;
 	message_utf8: string;
-	related: [] Related_Diagnostic;
+	related: []Related_Diagnostic;
 	parser_observation: Parser_Observation;
 }
 
 Diagnostics_Projection :: struct {
 	owner: *Owned_Syntax;
 	parse_status: Parse_Status_Observation;
-	records: [] Diagnostic_Record;
+	records: []Diagnostic_Record;
 	tokens: *Token_Projection;
 	storage: Pool;
 }
@@ -84,7 +84,7 @@ release_diagnostics_projection :: (projection: *Diagnostics_Projection) {
 }
 
 // Exact UTF-8: no overlong forms, surrogates or code points above U+10FFFF.
-is_valid_utf8 :: (bytes: [] u8) -> bool {
+is_valid_utf8 :: (bytes: []u8) -> bool {
 	i := 0;
 	while i < bytes.count {
 		lead := bytes[i];
@@ -95,11 +95,11 @@ is_valid_utf8 :: (bytes: [] u8) -> bool {
 			i += 1;
 			continue;
 		} else if lead & 0xE0 == 0xC0 {
-			length, minimum, code = 2, 0x80, lead & 0x1F;
+			length, minimum, code = 2, 0x80,	lead & 0x1F;
 		} else if lead & 0xF0 == 0xE0 {
-			length, minimum, code = 3, 0x800, lead & 0x0F;
+			length, minimum, code = 3, 0x800,	lead & 0x0F;
 		} else if lead & 0xF8 == 0xF0 {
-			length, minimum, code = 4, 0x10000, lead & 0x07;
+			length, minimum, code = 4, 0x10000,	lead & 0x07;
 		} else {
 			return false;
 		}

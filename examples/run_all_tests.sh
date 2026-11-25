@@ -16,7 +16,7 @@ usage() {
 		'--check: check runner syntax, Git whitespace and worker line width without compiling.'					\
 		'Differential fixtures run once through the bounded differential runner.'								\
 		'Its child compile/runtime logs are printed after it finishes.'											\
-		'Requires jai on PATH, or JAI=/path/to/jai.exe. Failures do not stop later tests.'
+		'Requires jai on PATH, or JAI=/path/to/jai.exe.  Failures do not stop later tests.'
 	printf '%s\n' '--query-operation: only focused pending-query operation backing checks.'
 }
 

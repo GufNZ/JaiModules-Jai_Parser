@@ -1,6 +1,6 @@
 // Cache service: the trivia-enabled parser plus the service foundations (CACHE_MIGRATION_PLAN.md phase 2 onwards).
 
-// `TEST_HOOKS` exposes deterministic execution and barriers; `REAL_WORKER` retains native execution in a hooks build. Neither changes payload semantics.
+// `TEST_HOOKS` exposes deterministic execution and barriers; `REAL_WORKER` retains native execution in a hooks build.  Neither changes payload semantics.
 #module_parameters(TEST_HOOKS := false, REAL_WORKER := false);
 
 #add_context cache_service_output_allocator: Allocator;

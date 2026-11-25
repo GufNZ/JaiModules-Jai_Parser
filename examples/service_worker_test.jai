@@ -517,7 +517,7 @@ test_required_fifo :: () {
 	assert(Service.await_pause(fixture.session, .SELECTED));
 	second := analysis(fixture, "b.jai");
 	third := analysis(fixture, "c.jai");
-	joined: [8] Service.Handle(.TICKET);
+	joined: [8]Service.Handle(.TICKET);
 	for * joined {
 		it.* = analysis(fixture, "c.jai");
 	}
@@ -678,7 +678,7 @@ test_registration_and_wait :: () {
 		_, description := Service.read_result(fixture.host.service, result.result);
 		assert(description.snapshot.source == "answer :: 42;");
 		tampered := result.result;
-		tampered.session = xx "foreign session".([] u8);
+		tampered.session = xx "foreign session".([]u8);
 		valid := Service.read_result(fixture.host.service, tampered);
 		assert(!valid, "\e[91mInline routing byPASSed the live handle's session binding.\e[0m");
 		release(fixture, result.result);
@@ -780,7 +780,7 @@ test_shutdown_deadline_and_owners :: () {
 		_, repeated := Service.request_shutdown(fixture.host.service, fixture.host.session);
 		_, first_observation := Service.poll(fixture.host.service, shutdown);
 		_, repeated_observation := Service.poll(fixture.host.service, repeated);
-		assert(Service.bytes_equal(first_observation.operation_identity.([] u8), repeated_observation.operation_identity.([] u8)));
+		assert(Service.bytes_equal(first_observation.operation_identity.([]u8), repeated_observation.operation_identity.([]u8)));
 		Service.free_observation(*first_observation);
 		Service.free_observation(*repeated_observation);
 		_, waited := Service.wait(
@@ -881,7 +881,7 @@ finish_drain :: (
 	}
 }
 
-free_records :: (records: [] Service.Completion_Record, allocator: Allocator = context.allocator) {
+free_records :: (records: []Service.Completion_Record, allocator: Allocator = context.allocator) {
 	for * records {
 		Service.free_observation(*it.observation,, allocator);
 	}
@@ -965,13 +965,13 @@ Output_Interleaving :: struct {
 	retirement_waiter: Service.Handle(.WAITER);
 	retirement_world: Service.Handle(.WORLD);
 	analysis_ticket: Service.Handle(.TICKET);
-	records: [] Service.Completion_Record;
-	retained_worlds: [] Service.Handle(.WORLD);
-	retained_results: [] Service.Handle(.RESULT);
-	competing_worlds: [..] Service.Handle(.WORLD);
-	competing_shutdowns: [..] Service.Handle(.SHUTDOWN);
-	competing_waiters: [..] Service.Handle(.WAITER);
-	competing_tickets: [..] Service.Handle(.TICKET);
+	records: []Service.Completion_Record;
+	retained_worlds: []Service.Handle(.WORLD);
+	retained_results: []Service.Handle(.RESULT);
+	competing_worlds: [..]Service.Handle(.WORLD);
+	competing_shutdowns: [..]Service.Handle(.SHUTDOWN);
+	competing_waiters: [..]Service.Handle(.WAITER);
+	competing_tickets: [..]Service.Handle(.TICKET);
 	replacement_ticket: Service.Handle(.TICKET);
 	source_capacity: s64;
 }
@@ -1252,7 +1252,7 @@ output_interleaving_job :: (thread: *Thread) -> s64 {
 			released, error = Service.release(fixture.host.service, fixture.host.session);
 			assert(!released && error.code == .ACTIVE_SESSION);
 			described, description := Service.describe_session(fixture.host.service, fixture.host.session);
-			assert(described && Service.bytes_equal(description.session_identity.([] u8), fixture.host.session_identity.([] u8)));
+			assert(described && Service.bytes_equal(description.session_identity.([]u8), fixture.host.session_identity.([]u8)));
 			Service.free_description(*description);
 			read_ok := Service.read_world(fixture.host.service, job.drain.world);
 			assert(read_ok);
@@ -1570,7 +1570,7 @@ Source_Revalidation_Snapshot :: struct {
 	documents: s64;
 	contexts: s64;
 	next_allocations: s64;
-	preparation_allocations: [2] s64;
+	preparation_allocations: [2]s64;
 	protected_source: *Service.Source_Backing;
 	protected_references: s64;
 }
@@ -1583,9 +1583,9 @@ Output_Probe :: struct {
 	job: Output_Interleaving;
 	gate_progress: bool;
 	registration_probe: *Registration_Probe;
-	source_document: [] u8;
-	source_references: [2] s64;
-	source_active_admissions: [2] s64;
+	source_document: []u8;
+	source_references: [2]s64;
+	source_active_admissions: [2]s64;
 	source_revalidation: *Source_Revalidation_Snapshot;
 }
 
@@ -2209,13 +2209,13 @@ prepared_description :: () -> Drain_Fixture {
 	return drain;
 }
 
-assert_description_bytes :: (copy: [] u8, expected: [] u8) {
+assert_description_bytes :: (copy: []u8, expected: []u8) {
 	assert(Service.bytes_equal(copy, expected));
 	assert(!copy.count || copy.data != expected.data, "\e[91mDescription exports alias another owner's bytes.\e[0m");
 }
 
 assert_description_copy :: (copy: Service.Session_Description, expected: Service.Session_Description) {
-	assert_description_bytes(copy.session_identity.([] u8), expected.session_identity.([] u8));
+	assert_description_bytes(copy.session_identity.([]u8), expected.session_identity.([]u8));
 	assert_description_bytes(copy.workspace, expected.workspace);
 	assert_description_bytes(copy.provider_namespace, expected.provider_namespace);
 	assert_description_bytes(copy.accepted_frontier, expected.accepted_frontier);
@@ -2430,7 +2430,7 @@ test_directory_backing :: () {
 		service := fixture.host.service;
 		assert(directory_service_owned(service), "\e[91mThe shared directory backing belongs to a session heap.\e[0m");
 		capacity := service.sessions.allocated;
-		extra: [..] Service.Handle(.SESSION);
+		extra: [..]Service.Handle(.SESSION);
 		ok, survivor := Service.open_session(service, open_output_options());
 		assert(ok);
 		Service.free_description(*survivor.description);
@@ -2556,9 +2556,9 @@ Directory_Allocation :: struct {
 	direct: bool;
 	gate_progress: bool;
 	expected_count: s64;
-	retire: [] Service.Handle(.SESSION);
+	retire: []Service.Handle(.SESSION);
 	open_count: s64;
-	opened: [..] Service.Handle(.SESSION);
+	opened: [..]Service.Handle(.SESSION);
 }
 
 directory_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
@@ -2628,7 +2628,7 @@ test_directory_allocation_interleavings :: (direct := false) {
 			negative_control := it;
 			fixture := open("X3-directory-allocation-interleaving");
 			service := fixture.host.service;
-			handles: [..] Service.Handle(.SESSION);
+			handles: [..]Service.Handle(.SESSION);
 			array_add(*handles, fixture.host.session);
 			while service.sessions.count < service.sessions.allocated {
 				ok, opened := Service.open_session(service, open_output_options());
@@ -2712,7 +2712,7 @@ test_directory_allocation_failures :: () {
 			negative_control := it;
 			fixture := open("X3-directory-allocation-failure");
 			service := fixture.host.service;
-			handles: [..] Service.Handle(.SESSION);
+			handles: [..]Service.Handle(.SESSION);
 			if empty_directory {
 				close_output_session(service, fixture.host.session);
 			} else {
@@ -2891,8 +2891,8 @@ test_source_registration_failures :: (
 				assert(Service.set_overlay(*batch, "added.jai", "second :: 2;"));
 			}
 
-			edits: [2] Service.Range_Edit;
-			disk_revision: [] u8;
+			edits: [2]Service.Range_Edit;
+			disk_revision: []u8;
 			if event_kind == .OBSERVE_DISK {
 				disk_revision = Service.source_revision_of(xx submitted);
 			}
@@ -2900,7 +2900,7 @@ test_source_registration_failures :: (
 			before: Service.Resource_Ledger;
 			identities: Service.Session_Identities;
 			frontier_counter: Service.Identity_Counter;
-			slots: [] Service.Registration_Slot;
+			slots: []Service.Registration_Slot;
 			free_count: s64;
 			operations: s64;
 			documents: s64;
@@ -3170,8 +3170,8 @@ test_source_registration_failures :: (
 				polled, receipt := Service.poll(fixture.host.service, accepted.ticket);
 				assert(polled);
 				token_bytes := Service.little_endian(identities.operation_counter.next, 8);
-				expected_identity := Service.make_key("operation", fixture.host.session_identity.([] u8), token_bytes);
-				assert(Service.bytes_equal(receipt.operation_identity.([] u8), expected_identity));
+				expected_identity := Service.make_key("operation", fixture.host.session_identity.([]u8), token_bytes);
+				assert(Service.bytes_equal(receipt.operation_identity.([]u8), expected_identity));
 				free(token_bytes.data);
 				free(expected_identity.data);
 				Service.free_observation(*receipt);
@@ -3277,7 +3277,7 @@ test_source_batch_metadata_storage :: () {
 	pool.oversized_size = 48;
 	pool.block_allocator = allocator;
 	pool.overwrite_memory = true;
-	text := "0123456789ABCDEFGHIJKLMN".([] u8);
+	text := "0123456789ABCDEFGHIJKLMN".([]u8);
 	assert(text.count == 24);
 	ok, bytes := Service.try_source_batch_metadata(pool, .[]);
 	assert(ok && !bytes.count && !probe.allocations);
@@ -3299,7 +3299,7 @@ test_source_batch_metadata_storage :: () {
 	reset(pool);
 	ok, bytes = Service.try_source_batch_metadata(pool, text);
 	assert(ok && Service.bytes_equal(bytes, text) && probe.allocations == 4);
-	large: [80] u8;
+	large: [80]u8;
 	for * large {
 		it.* = xx it_index;
 	}
@@ -3310,7 +3310,7 @@ test_source_batch_metadata_storage :: () {
 	probe.fail_at = 0;
 	ok, bytes = Service.try_source_batch_metadata(pool, large);
 	assert(ok && Service.bytes_equal(bytes, large) && pool.out_of_band_allocations && probe.allocations == 6);
-	huge: [] u8;
+	huge: []u8;
 	huge.count = 0x7FFFFFFFFFFFFFFF;
 	ok, bytes = Service.try_source_batch_metadata(pool, huge);
 	assert(!ok && !bytes.count && probe.allocations == 6);
@@ -3592,7 +3592,7 @@ test_source_candidate_join_admission :: (
 						}
 					}
 
-					operations: [..] *Service.Operation;
+					operations: [..]*Service.Operation;
 					if task {
 						operations = task.operations;
 					}
@@ -3898,7 +3898,7 @@ test_analysis_candidate_join :: (
 				demote_for_test(fixture, target);
 			}
 
-			held: [..] Service.Handle(.WORLD);
+			held: [..]Service.Handle(.WORLD);
 			if combined {
 				while true {
 					room: bool;
@@ -3960,14 +3960,14 @@ test_analysis_candidate_join :: (
 			request := Service.Analysis_Request.{version = Service.INTERFACE_VERSION, expected_frontier = description.accepted_frontier};
 			world: *Service.World;
 			task: *Service.Task;
-			operations: [..] *Service.Operation;
-			ready: [..] *Service.Task;
+			operations: [..]*Service.Operation;
+			ready: [..]*Service.Task;
 			optional_count: s64;
 			worlds: s64;
 			operation_count: s64;
 			registrations: s64;
 			free_slots: s64;
-			slots: [] Service.Registration_Slot;
+			slots: []Service.Registration_Slot;
 			frontier_next: u64;
 			identities: Service.Session_Identities;
 			before: Service.Resource_Ledger;
@@ -4277,9 +4277,9 @@ test_source_candidate_task_backing :: () {
 	allocator := open_output_probe(*probe);
 	identity: Service.Session_ID = xx "candidate-task-test";
 	world: Service.World_ID = xx "candidate-world-test";
-	expected := Service.make_key("execution-task", identity.([] u8), world.([] u8), xx "PARSE_INDEX",, temp);
+	expected := Service.make_key("execution-task", identity.([]u8), world.([]u8), xx "PARSE_INDEX",, temp);
 	replacement: Service.World_ID = xx "candidate-world-last";
-	replaced := Service.make_key("execution-task", identity.([] u8), replacement.([] u8), xx "PARSE_INDEX",, temp);
+	replaced := Service.make_key("execution-task", identity.([]u8), replacement.([]u8), xx "PARSE_INDEX",, temp);
 	assert(replacement.count == world.count);
 	for s64.[0, 8] {
 		tasks_capacity := it;
@@ -4318,8 +4318,8 @@ test_source_candidate_world_backing :: () {
 	probe: Output_Probe;
 	allocator := open_output_probe(*probe);
 	identity: Service.Session_ID = xx "candidate-world-test";
-	token: [8] u8;
-	expected := Service.make_key("world", identity.([] u8), token,, temp);
+	token: [8]u8;
+	expected := Service.make_key("world", identity.([]u8), token,, temp);
 	for s64.[0, 8] {
 		capacity := it;
 		allocations := 2 + xx !!capacity;
@@ -4356,7 +4356,7 @@ test_source_candidate_capture :: () {
 		#code {
 			world := fixture.session.head;
 			assert(world && world.members.count == 1);
-			documents := ([] u8).[world.members[0].document];
+			documents := ([]u8).[world.members[0].document];
 			source := world.members[0].source;
 			references := source.references;
 			for 1..7 {
@@ -4393,7 +4393,7 @@ test_source_candidate_capture :: () {
 		.{encoding = .WINDOWS_UTF16LE, code_units = utf16_units},
 	];
 
-	expected := ([] u8).[
+	expected := ([]u8).[
 		xx "path.jai",
 		utf8_spelling,
 	];
@@ -4408,7 +4408,7 @@ test_source_candidate_capture :: () {
 			assert(ok == (it == 2) && probe.allocations == 1);
 			if ok {
 				assert(
-					Service.bytes_equal(filename.([] u8), spelling),
+					Service.bytes_equal(filename.([]u8), spelling),
 					"Path spelling mismatch for %: actual count %, expected count %.",
 					path.encoding,
 					filename.count,
@@ -4742,7 +4742,7 @@ test_source_candidate_final_revalidation :: (direct := false) {
 				direct = direct,
 				job = .{drain = test.drain, action = action, active_source_retirement = true},
 				registration_probe = *probe,
-				source_document = Service.harness_document(fixture.host, "a.jai").([] u8),
+				source_document = Service.harness_document(fixture.host, "a.jai").([]u8),
 				source_revalidation = *snapshot,
 			};
 			allocator := open_output_probe(*output_probe);
@@ -4956,14 +4956,14 @@ test_source_candidate_capture_admission :: (
 			test := prepared_retain(.WORLD, .ARRAYS);
 			fixture := test.drain.fixture;
 			sentinel_world: Service.Handle(.WORLD);
-			sentinel_document: [] u8;
+			sentinel_document: []u8;
 			if combined {
 				extra := Service.begin_batch(fixture.host);
 				assert(Service.set_overlay(*extra, "b.jai", "sentinel :: 2;"));
 				extra_ok, extra_accepted := Service.submit_batch(*extra);
 				assert(extra_ok);
 				sentinel_world = world_of(fixture, extra_accepted.ticket);
-				sentinel_document = Service.harness_document(fixture.host, "b.jai").([] u8);
+				sentinel_document = Service.harness_document(fixture.host, "b.jai").([]u8);
 				release(fixture, extra_accepted.ticket);
 				free(extra_accepted.frontier.data);
 			}
@@ -4976,7 +4976,7 @@ test_source_candidate_capture_admission :: (
 			assert(Service.set_overlay(*batch, ifx new_document then "added.jai" else "a.jai", "answer :: 77;"));
 			adds_document := new_document || paired;
 			expected_world := "answer :: 77;";
-			edit: [1] Service.Range_Edit;
+			edit: [1]Service.Range_Edit;
 			disk_revision := ifx event_kind == .OBSERVE_DISK
 				then Service.source_revision_of(xx "answer :: 77;");
 			probe := Registration_Probe.{
@@ -4984,7 +4984,7 @@ test_source_candidate_capture_admission :: (
 				direct = direct,
 				ready_capacity_control = ready_retry,
 				track_source = true,
-				source_document = ifx combined then sentinel_document else Service.harness_document(fixture.host, "a.jai").([] u8),
+				source_document = ifx combined then sentinel_document else Service.harness_document(fixture.host, "a.jai").([]u8),
 				job = .{drain = test.drain, action = .OTHER_DRAIN},
 			};
 			output_probe := Output_Probe.{
@@ -5010,9 +5010,9 @@ test_source_candidate_capture_admission :: (
 			sentinel: Service.Document_State;
 			sentinel_references: s64;
 			provider: Service.Provider_Model;
-			worlds: [..] *Service.World;
-			tasks: [..] *Service.Task;
-			ready: [..] *Service.Task;
+			worlds: [..]*Service.World;
+			tasks: [..]*Service.Task;
+			ready: [..]*Service.Task;
 			operations: s64;
 			head: *Service.World;
 			head_target: *Service.World;
@@ -5213,23 +5213,23 @@ test_source_candidate_capture_admission :: (
 			);
 
 			if ok {
-				token_bytes: [8] u8;
+				token_bytes: [8]u8;
 				for 0..7 {
 					token_bytes[it] = xx ((identities.world_counter.next >> (it * 8)) & 0xFF);
 				}
 
-				expected := Service.make_key("world", identities.session.([] u8), token_bytes,, temp);
+				expected := Service.make_key("world", identities.session.([]u8), token_bytes,, temp);
 				observation := await(fixture, accepted.ticket);
 				assert(observation.update.kind == .PUBLISHED);
-				assert(Service.bytes_equal(observation.update.world_identity.([] u8), expected));
+				assert(Service.bytes_equal(observation.update.world_identity.([]u8), expected));
 				if task_backing || combined {
-					expected_task := Service.make_key("execution-task", identities.session.([] u8), expected, xx "PARSE_INDEX",, temp);
+					expected_task := Service.make_key("execution-task", identities.session.([]u8), expected, xx "PARSE_INDEX",, temp);
 					matched := false;
 					Service.with_lock(
 						*fixture.session.gate,
 						#code {
 							for fixture.session.tasks {
-								if it.kind == .PARSE_INDEX && Service.bytes_equal(it.world.identity.([] u8), expected) {
+								if it.kind == .PARSE_INDEX && Service.bytes_equal(it.world.identity.([]u8), expected) {
 									assert(Service.bytes_equal(it.key, expected_task));
 									assert(it.operations.count == 1 && it.operations.allocated == 1);
 									assert(it.operations[0].world == it.world);
@@ -5246,10 +5246,10 @@ test_source_candidate_capture_admission :: (
 				read_ok, description := Service.read_world(fixture.host.service, world);
 				assert(read_ok && description.members.count == 1 + xx paired);
 				for description.members {
-					expected_bytes := ifx paired && Service.bytes_equal(it.document.([] u8), batch.events[0].document)
+					expected_bytes := ifx paired && Service.bytes_equal(it.document.([]u8), batch.events[0].document)
 						then "second :: 2;"
 						else expected_world;
-					assert(Service.bytes_equal(it.source.bytes, expected_bytes.([] u8)));
+					assert(Service.bytes_equal(it.source.bytes, expected_bytes.([]u8)));
 				}
 
 				release(fixture, world);
@@ -5294,8 +5294,8 @@ test_source_candidate_capture_admission :: (
 
 test_source_batch_commit_storage :: () {
 	state: Service.Document_State;
-	documents: [1] *Service.Document_State = .[*state];
-	contexts: [1] Service.Admitted_Context;
+	documents: [1]*Service.Document_State = .[*state];
+	contexts: [1]Service.Admitted_Context;
 	contexts[0].identity = xx "commit-context";
 	model: Service.Provider_Model;
 	model.documents.data = documents.data;
@@ -5360,7 +5360,7 @@ test_source_batch_reference_storage :: () {
 	ok, storage := Service.try_source_batch_references(2, allocator);
 	assert(ok && !storage.count && storage.allocated == 4 && probe.allocations == 2);
 	for 0..3 {
-		array_add(*storage, "known-context".([] u8));
+		array_add(*storage, "known-context".([]u8));
 	}
 
 	assert(storage.count == 4 && probe.allocations == 2);
@@ -5424,7 +5424,7 @@ test_source_batch_revision_storage :: () {
 	overflow.used_revisions.count = MAX_COUNT;
 	ok, revisions = Service.try_source_batch_revisions(*overflow, allocator);
 	assert(!ok && !revisions.data && probe.allocations == 4);
-	overflow.used_revisions.count = MAX_COUNT / size_of([] u8);
+	overflow.used_revisions.count = MAX_COUNT / size_of([]u8);
 	ok, revisions = Service.try_source_batch_revisions(*overflow, allocator);
 	assert(!ok && !revisions.data && probe.allocations == 4);
 	close_output_probe(*probe);
@@ -5710,14 +5710,14 @@ test_source_batch_storage_admission :: (
 		}
 
 		expected_world := "answer :: 77;";
-		original_source: [] u8;
+		original_source: []u8;
 		if new_document {
 			retained_ok, retained := Service.read_world(fixture.host.service, test.drain.world);
 			assert(retained_ok && retained.members.count == 1);
 			original_source = retained.members[0].source.bytes;
 		}
 
-		disk_revision: [] u8;
+		disk_revision: []u8;
 		disk_source: *Service.Source_Backing;
 		if event_kind == .OBSERVE_DISK {
 			disk_revision = Service.source_revision_of(xx "answer :: 77;");
@@ -5757,10 +5757,10 @@ test_source_batch_storage_admission :: (
 
 		allocator := open_output_probe(*output_probe);
 		before: Service.Resource_Ledger;
-		storage: [..] *Pool;
+		storage: [..]*Pool;
 		identities: Service.Session_Identities;
 		frontier_counter: Service.Identity_Counter;
-		edits: [2] Service.Range_Edit;
+		edits: [2]Service.Range_Edit;
 		documents: s64;
 		contexts: s64;
 		event_index := ifx later_event then 1;
@@ -6591,7 +6591,7 @@ Pool_Cleanup_Probe :: struct {
 	// Observed `source.references` before the callback's allocation and mutation steps.
 	source_references: s64;
 	// Expected bytes for the optional `source` readability check; borrowed from the fixture.
-	source_bytes: [] u8;
+	source_bytes: []u8;
 	// Whether the callback found `source.bytes` equal to `source_bytes`.
 	source_readable: bool;
 
@@ -7052,7 +7052,7 @@ test_source_batch_pool_cleanup :: (
 	assert(Service.set_overlay(*batch, filename, "answer :: 77;"));
 	source := receipt_source_batch(batch);
 	expected_world := "answer :: 77;";
-	disk_revision: [] u8;
+	disk_revision: []u8;
 	disk_source: *Service.Source_Backing;
 	if event_kind == .OBSERVE_DISK {
 		disk_revision = Service.source_revision_of(xx "answer :: 77;");
@@ -7119,7 +7119,7 @@ test_source_batch_pool_cleanup :: (
 
 	allocator := open_output_probe(*output_probe);
 	before: Service.Resource_Ledger;
-	edits: [2] Service.Range_Edit;
+	edits: [2]Service.Range_Edit;
 	documents: s64;
 	contexts: s64;
 	original_source: *Service.Source_Backing;
@@ -8246,8 +8246,8 @@ test_source_registration_interleavings :: (
 					polled, receipt := Service.poll(fixture.host.service, accepted.ticket);
 					assert(polled);
 					token_bytes := Service.little_endian(probe.callback_identities.operation_counter.next, 8);
-					expected_identity := Service.make_key("operation", fixture.host.session_identity.([] u8), token_bytes);
-					assert(Service.bytes_equal(receipt.operation_identity.([] u8), expected_identity));
+					expected_identity := Service.make_key("operation", fixture.host.session_identity.([]u8), token_bytes);
+					assert(Service.bytes_equal(receipt.operation_identity.([]u8), expected_identity));
 					free(token_bytes.data);
 					free(expected_identity.data);
 					Service.free_observation(*receipt);
@@ -8458,14 +8458,14 @@ test_source_registration_receipt_retry :: (
 		test := prepared_retain(.WORLD, .ARRAYS);
 		fixture := test.drain.fixture;
 		sentinel_world: Service.Handle(.WORLD);
-		source_document: [] u8;
+		source_document: []u8;
 		if track_references {
 			extra := Service.begin_batch(fixture.host);
 			assert(Service.set_overlay(*extra, "b.jai", "second :: 2;"));
 			added_ok, added := Service.submit_batch(*extra);
 			assert(added_ok);
 			sentinel_world = world_of(fixture, added.ticket);
-			source_document = Service.harness_document(fixture.host, "b.jai").([] u8);
+			source_document = Service.harness_document(fixture.host, "b.jai").([]u8);
 			release(fixture, added.ticket);
 			free(added.frontier.data);
 		}
@@ -8502,7 +8502,7 @@ test_source_registration_receipt_retry :: (
 
 		assert(Service.set_overlay(*batch, ifx batch_context_list || new_document then "added.jai" else "a.jai", "answer :: 77;"));
 		expected_world := "answer :: 77;";
-		disk_revision: [] u8;
+		disk_revision: []u8;
 		disk_source: *Service.Source_Backing;
 		if event_kind == .OBSERVE_DISK {
 			disk_revision = Service.source_revision_of(xx "answer :: 77;");
@@ -8550,7 +8550,7 @@ test_source_registration_receipt_retry :: (
 		before: Service.Resource_Ledger;
 		identities: Service.Session_Identities;
 		source_references: s64;
-		edits: [2] Service.Range_Edit;
+		edits: [2]Service.Range_Edit;
 		documents: s64;
 		contexts: s64;
 		original_source: *Service.Source_Backing;
@@ -9503,8 +9503,8 @@ test_source_update_counter :: (last_token := false, late := false, direct := fal
 		polled, receipt := Service.poll(fixture.host.service, accepted.ticket);
 		assert(polled);
 		token_bytes := Service.little_endian(Service.U64_MAX - 1, 8);
-		expected := Service.make_key("operation", fixture.host.session_identity.([] u8), token_bytes);
-		assert(Service.bytes_equal(receipt.operation_identity.([] u8), expected));
+		expected := Service.make_key("operation", fixture.host.session_identity.([]u8), token_bytes);
+		assert(Service.bytes_equal(receipt.operation_identity.([]u8), expected));
 		free(token_bytes.data);
 		free(expected.data);
 		Service.free_observation(*receipt);
@@ -9735,8 +9735,8 @@ test_analysis_candidate_snapshot :: () {
 
 			posix := u8.[0x41];
 			utf16 := u8.[0x41, 0x00];
-			namespace := array_copy("provider".([] u8));
-			token := array_copy("capture".([] u8));
+			namespace := array_copy("provider".([]u8));
+			token := array_copy("capture".([]u8));
 			state := Service.Document_State.{document = xx "document", provider_revision = xx "revision"};
 			if !selection {
 				state.has_overlay = true;
@@ -9770,7 +9770,7 @@ test_analysis_candidate_snapshot :: () {
 			}
 
 			states := (*Service.Document_State).[*state];
-			documents := ([] u8).[state.document];
+			documents := ([]u8).[state.document];
 			model: Service.Provider_Model;
 			model.documents.data = states.data;
 			model.documents.count = states.count;
@@ -9926,7 +9926,7 @@ test_analysis_world_cleanup :: (direct := false, control: s64 = 0, task := false
 			}
 
 			_, description := Service.describe_session(fixture.host.service, fixture.host.session);
-			documents := ([] u8).[Service.harness_document(fixture.host, "a.jai")];
+			documents := ([]u8).[Service.harness_document(fixture.host, "a.jai")];
 			request := Service.Analysis_Request.{
 				version = Service.INTERFACE_VERSION,
 				expected_frontier = description.accepted_frontier,
@@ -10186,7 +10186,7 @@ test_analysis_candidate_cleanup :: (direct := false, control: s64 = 0) {
 		fixture := test.drain.fixture;
 		session := fixture.session;
 		_, description := Service.describe_session(fixture.host.service, fixture.host.session);
-		documents := ([] u8).[Service.harness_document(fixture.host, "a.jai")];
+		documents := ([]u8).[Service.harness_document(fixture.host, "a.jai")];
 		request := Service.Analysis_Request.{
 			version = Service.INTERFACE_VERSION,
 			expected_frontier = description.accepted_frontier,
@@ -10370,8 +10370,8 @@ test_analysis_ticket_backing_failures :: (
 			}
 
 			_, description := Service.describe_session(fixture.host.service, fixture.host.session);
-			documents := ([] u8).[Service.harness_document(fixture.host, "a.jai")];
-			paired_documents: [2] [] u8;
+			documents := ([]u8).[Service.harness_document(fixture.host, "a.jai")];
+			paired_documents: [2][]u8;
 			request := Service.Analysis_Request.{
 				version = Service.INTERFACE_VERSION,
 				expected_frontier = description.accepted_frontier,
@@ -10394,14 +10394,14 @@ test_analysis_ticket_backing_failures :: (
 			allocator := open_output_probe(*output_probe);
 			before: Service.Resource_Ledger;
 			identities: Service.Session_Identities;
-			slots: [] Service.Registration_Slot;
+			slots: []Service.Registration_Slot;
 			registrations: s64;
 			free_slots: s64;
 			operations: s64;
-			operation_storage: [..] *Service.Operation;
-			world_storage: [..] *Service.World;
-			task_storage: [..] *Service.Task;
-			ready_storage: [..] *Service.Task;
+			operation_storage: [..]*Service.Operation;
+			world_storage: [..]*Service.World;
+			task_storage: [..]*Service.Task;
+			ready_storage: [..]*Service.Task;
 			worlds: s64;
 			frontier_next: u64;
 			source: *Service.Source_Backing;
@@ -10565,13 +10565,13 @@ test_analysis_ticket_backing_failures :: (
 					*session.gate,
 					#code {
 						operation := session.registrations[accepted.ticket.slot].operation;
-						token: [8] u8;
+						token: [8]u8;
 						for 0..7 {
 							token[it] = xx ((identities.operation_counter.next >> (it * 8)) & 0xFF);
 						}
 
-						expected := Service.make_key("operation", session.identities.session.([] u8), token,, temp);
-						assert(Service.bytes_equal(operation.identity.([] u8), expected));
+						expected := Service.make_key("operation", session.identities.session.([]u8), token,, temp);
+						assert(Service.bytes_equal(operation.identity.([]u8), expected));
 						assert(operation.documents.count == request.documents.count && operation.frontier.data != accepted.frontier.data);
 						assert(Service.bytes_equal(operation.documents[0], documents[0]) && operation.documents[0].data != documents[0].data);
 						if world || task || combined && new_world {
@@ -10579,8 +10579,8 @@ test_analysis_ticket_backing_failures :: (
 								token[it] = xx ((identities.world_counter.next >> (it * 8)) & 0xFF);
 							}
 
-							expected_world := Service.make_key("world", session.identities.session.([] u8), token,, temp);
-							assert(Service.bytes_equal(operation.world.identity.([] u8), expected_world));
+							expected_world := Service.make_key("world", session.identities.session.([]u8), token,, temp);
+							assert(Service.bytes_equal(operation.world.identity.([]u8), expected_world));
 							if task || combined {
 								found := false;
 								for session.tasks {
@@ -10588,8 +10588,8 @@ test_analysis_ticket_backing_failures :: (
 										found = true;
 										expected_task := Service.make_key(
 											"execution-task",
-											session.identities.session.([] u8),
-											operation.world.identity.([] u8),
+											session.identities.session.([]u8),
+											operation.world.identity.([]u8),
 											xx "PARSE_INDEX",,
 											temp
 										);
@@ -10765,7 +10765,7 @@ test_analysis_ticket_backing_interleavings :: (
 				}
 
 				_, description := Service.describe_session(fixture.host.service, fixture.host.session);
-				documents := ([] u8).[Service.harness_document(fixture.host, "a.jai")];
+				documents := ([]u8).[Service.harness_document(fixture.host, "a.jai")];
 				request := Service.Analysis_Request.{
 					version = Service.INTERFACE_VERSION,
 					expected_frontier = description.accepted_frontier,
@@ -11084,7 +11084,7 @@ test_analysis_ticket_backing_limits :: (counter := false, exhausted := false, wo
 		}
 
 		_, description := Service.describe_session(fixture.host.service, fixture.host.session);
-		documents := ([] u8).[Service.harness_document(fixture.host, "a.jai")];
+		documents := ([]u8).[Service.harness_document(fixture.host, "a.jai")];
 		request := Service.Analysis_Request.{
 			version = Service.INTERFACE_VERSION,
 			expected_frontier = description.accepted_frontier,
@@ -11151,20 +11151,20 @@ test_analysis_ticket_backing_limits :: (counter := false, exhausted := false, wo
 				if counter {
 					if ok {
 						operation := session.registrations[accepted.ticket.slot].operation;
-						token: [8] u8;
+						token: [8]u8;
 						for 0..7 {
 							token[it] = xx ((identities.operation_counter.next >> (it * 8)) & 0xFF);
 						}
 
-						expected := Service.make_key("operation", session.identities.session.([] u8), token,, temp);
-						assert(Service.bytes_equal(operation.identity.([] u8), expected));
+						expected := Service.make_key("operation", session.identities.session.([]u8), token,, temp);
+						assert(Service.bytes_equal(operation.identity.([]u8), expected));
 						if world && !join {
 							for 0..7 {
 								token[it] = xx ((identities.world_counter.next >> (it * 8)) & 0xFF);
 							}
 
-							expected_world := Service.make_key("world", session.identities.session.([] u8), token,, temp);
-							assert(Service.bytes_equal(operation.world.identity.([] u8), expected_world));
+							expected_world := Service.make_key("world", session.identities.session.([]u8), token,, temp);
+							assert(Service.bytes_equal(operation.world.identity.([]u8), expected_world));
 						}
 					}
 
@@ -11216,7 +11216,7 @@ test_analysis_receipt_failures :: () {
 		seed := submit(fixture, "answer :: 42;");
 		world := world_of(fixture, seed);
 		_, description := Service.describe_session(fixture.host.service, fixture.host.session);
-		documents := ([] u8).[Service.harness_document(fixture.host, "a.jai")];
+		documents := ([]u8).[Service.harness_document(fixture.host, "a.jai")];
 		request := Service.Analysis_Request.{
 			version = Service.INTERFACE_VERSION,
 			expected_frontier = description.accepted_frontier,
@@ -11323,7 +11323,7 @@ test_analysis_receipt_interleavings :: (direct := false, negative_control := fal
 			drain := prepared_drain("X3-X5-analysis-receipt", held = action == .COMPLETE_WORK);
 			fixture := drain.fixture;
 			_, description := Service.describe_session(fixture.host.service, fixture.host.session);
-			documents := ([] u8).[Service.harness_document(fixture.host, "a.jai")];
+			documents := ([]u8).[Service.harness_document(fixture.host, "a.jai")];
 			request := Service.Analysis_Request.{
 				version = Service.INTERFACE_VERSION,
 				expected_frontier = description.accepted_frontier,
@@ -11422,7 +11422,7 @@ test_analysis_argument_failures :: () {
 			world := world_of(fixture, seed);
 			_, description := Service.describe_session(fixture.host.service, fixture.host.session);
 			document := Service.harness_document(fixture.host, "a.jai");
-			documents := ([] u8).[document, document];
+			documents := ([]u8).[document, document];
 			request := Service.Analysis_Request.{
 				version = Service.INTERFACE_VERSION,
 				expected_frontier = description.accepted_frontier,
@@ -11541,7 +11541,7 @@ test_analysis_argument_interleavings :: (direct := false, negative_control := fa
 				fixture := drain.fixture;
 				_, description := Service.describe_session(fixture.host.service, fixture.host.session);
 				document := Service.harness_document(fixture.host, "a.jai");
-				documents := ([] u8).[document, document];
+				documents := ([]u8).[document, document];
 				request := Service.Analysis_Request.{
 					version = Service.INTERFACE_VERSION,
 					expected_frontier = description.accepted_frontier,
@@ -11668,7 +11668,7 @@ prepared_terminal_query :: (scenario: Terminal_Query_Case) -> Terminal_Query_Fix
 
 	expected := Service.Observation.{
 		kind = .QUERY,
-		world_identity = xx array_copy(backing.identity.([] u8)),
+		world_identity = xx array_copy(backing.identity.([]u8)),
 		document = array_copy(request.document),
 		query_kind = request.kind,
 	};
@@ -11691,7 +11691,7 @@ assert_terminal_query :: (test: Terminal_Query_Fixture, output: Service.Query_St
 	assert(output.kind == .TERMINAL && !output.result.owner_token && !output.waiter.owner_token);
 	observation := output.observation;
 	assert(observation.kind == .QUERY && observation.operation_identity.count);
-	assert(Service.bytes_equal(observation.world_identity.([] u8), test.expected.world_identity.([] u8)));
+	assert(Service.bytes_equal(observation.world_identity.([]u8), test.expected.world_identity.([]u8)));
 	assert(Service.bytes_equal(observation.document, test.expected.document));
 	assert(Service.bytes_equal(observation.context_identity, test.expected.context_identity));
 	assert(observation.query_kind == test.request.kind);
@@ -11739,11 +11739,11 @@ assert_terminal_query_identity :: (test: Terminal_Query_Fixture, started: Servic
 	assert_terminal_query(test, started);
 	expected := Service.make_key(
 		"operation",
-		identities.session.([] u8),
+		identities.session.([]u8),
 		Service.little_endian(identities.operation_counter.next, 8,, temp)
 	);
 
-	assert(Service.bytes_equal(started.observation.operation_identity.([] u8), expected));
+	assert(Service.bytes_equal(started.observation.operation_identity.([]u8), expected));
 	free(expected.data);
 }
 
@@ -12006,10 +12006,10 @@ test_terminal_query_owner_backing :: () {
 			second_ok, second := Service.query(fixture.host.service, test.request,, allocator);
 			assert(second_ok);
 			assert_terminal_query(test, second);
-			assert(!Service.bytes_equal(output.observation.operation_identity.([] u8), second.observation.operation_identity.([] u8)));
+			assert(!Service.bytes_equal(output.observation.operation_identity.([]u8), second.observation.operation_identity.([]u8)));
 			assert(output.observation.world_identity.data != second.observation.world_identity.data);
 			assert(output.observation.document.data != second.observation.document.data);
-			world_bytes := output.observation.world_identity.([] u8);
+			world_bytes := output.observation.world_identity.([]u8);
 			world_bytes[0] ^= 1;
 			output.observation.document[0] ^= 1;
 			if output.observation.context_identity.count {
@@ -12094,7 +12094,7 @@ test_terminal_query_interleavings :: (direct := false, negative_control := false
 
 				if probe.job.replacement_world.owner_token {
 					world_ok, replacement := Service.read_world(fixture.host.service, probe.job.replacement_world);
-					assert(world_ok && Service.bytes_equal(replacement.identity.([] u8), test.expected.world_identity.([] u8)));
+					assert(world_ok && Service.bytes_equal(replacement.identity.([]u8), test.expected.world_identity.([]u8)));
 					release(fixture, probe.job.replacement_world);
 					release(fixture, probe.job.surviving_world);
 				}
@@ -12698,7 +12698,7 @@ Retain_Backing_Case :: enum {
 Retain_Fixture :: struct (K: Service.Handle_Kind) {
 	drain: Drain_Fixture;
 	source: Service.Handle(K);
-	held: [..] Service.Handle(K);
+	held: [..]Service.Handle(K);
 }
 
 prepared_retain :: ($K: Service.Handle_Kind, scenario: Retain_Backing_Case, held := false, acquisition := false) -> Retain_Fixture(K) {
@@ -12795,7 +12795,7 @@ Registration_Probe :: struct {//FIXME: document all fields:
 	track_source: bool;
 	track_source_backing: *Service.Source_Backing;
 	source_active_admissions: s64;
-	source_document: [] u8;
+	source_document: []u8;
 	source_references: s64;
 	track_world: *Service.World;
 	world_references: s64;
@@ -12933,7 +12933,7 @@ test_retain_backing_failures :: ($K: Service.Handle_Kind, acquisition := false) 
 			session := fixture.session;
 			probe := Registration_Probe.{fail_at = fail_at};
 			before: Service.Resource_Ledger;
-			before_slots: [] Service.Registration_Slot;
+			before_slots: []Service.Registration_Slot;
 			before_registrations: s64;
 			before_free: s64;
 			before_references: s64;
@@ -13050,10 +13050,10 @@ query_immediate_fixture :: (test: Retain_Fixture(.WORLD), kind: Service.Query_Ki
 assert_immediate_result :: (fixture: Fixture, handle: Service.Handle(.RESULT), world: *Service.World, kind: Service.Query_Kind, token: u64) {
 	ok, description := Service.read_result(fixture.host.service, handle);
 	assert(ok && description.kind == kind);
-	assert(Service.bytes_equal(description.world_identity.([] u8), world.identity.([] u8)));
+	assert(Service.bytes_equal(description.world_identity.([]u8), world.identity.([]u8)));
 	token_bytes := Service.little_endian(token, 8);
-	expected := Service.make_key("result", fixture.host.session_identity.([] u8), token_bytes);
-	assert(Service.bytes_equal(description.result_identity.([] u8), expected));
+	expected := Service.make_key("result", fixture.host.session_identity.([]u8), token_bytes);
+	assert(Service.bytes_equal(description.result_identity.([]u8), expected));
 	free(token_bytes.data);
 	free(expected.data);
 }
@@ -13075,7 +13075,7 @@ test_immediate_result_failures :: () {
 				fixture := test.drain.fixture;
 				before: Service.Resource_Ledger;
 				identities: Service.Session_Identities;
-				slots: [] Service.Registration_Slot;
+				slots: []Service.Registration_Slot;
 				free_count: s64;
 				registrations: s64;
 				world: *Service.World;
@@ -13265,12 +13265,12 @@ test_immediate_result_interleavings :: (direct := false, negative_control := fal
 					probe.job.retained_worlds = test.held;
 				}
 
-				world_identity: [] u8;
+				world_identity: []u8;
 				Service.with_lock(
 					*fixture.session.gate,
 					#code {
 						probe.track_world = fixture.session.registrations[test.source.slot].world;
-						world_identity = array_copy(probe.track_world.identity.([] u8));
+						world_identity = array_copy(probe.track_world.identity.([]u8));
 						fixture.session.faults.registration_allocation_hook = registration_allocation_probe;
 						fixture.session.faults.registration_allocation_data = *probe;
 						fixture.session.faults.allow_stale_immediate_result = negative_control;
@@ -13337,7 +13337,7 @@ test_immediate_result_interleavings :: (direct := false, negative_control := fal
 							if action == .RETIRE_IMMEDIATE_WORLD {
 								assert(probe.world_references == 1);
 								for fixture.session.worlds {
-									assert(!Service.bytes_equal(it.identity.([] u8), world_identity));
+									assert(!Service.bytes_equal(it.identity.([]u8), world_identity));
 								}
 							} else {
 								assert(probe.track_world.references == probe.world_references - (ifx ok then 0 else 1));
@@ -14346,8 +14346,8 @@ test_query_operation_backing :: (
 							then Service.U64_MAX - 1
 							else observed.callback_identities.operation_counter.next;
 						token_bytes := Service.little_endian(token, 8);
-						expected := Service.make_key("operation", session.identities.session.([] u8), token_bytes);
-						assert(Service.bytes_equal(operation.identity.([] u8), expected));
+						expected := Service.make_key("operation", session.identities.session.([]u8), token_bytes);
+						assert(Service.bytes_equal(operation.identity.([]u8), expected));
 						free(expected.data);
 						free(token_bytes.data);
 						if task_key {
@@ -14460,8 +14460,8 @@ assert_query_task_key :: (session: *Service.Session, world: *Service.World, task
 	push_allocator(context.default_allocator);
 	expected := Service.make_key(
 		"execution-task",
-		session.identities.session.([] u8),
-		world.identity.([] u8),
+		session.identities.session.([]u8),
+		world.identity.([]u8),
 		xx "QUERY_PAYLOAD",
 		world.members[task.member].document,
 		xx "SYNTAX_DIAGNOSTICS"
@@ -14816,11 +14816,11 @@ assert_query_result_identity :: (observation: Service.Observation, identities: S
 	assert(observation.query.kind == .AVAILABLE);
 	expected := Service.make_key(
 		"result",
-		identities.session.([] u8),
+		identities.session.([]u8),
 		Service.little_endian(identities.result_counter.next, 8,, temp)
 	);
 
-	assert(Service.bytes_equal(observation.query.result_identity.([] u8), expected));
+	assert(Service.bytes_equal(observation.query.result_identity.([]u8), expected));
 	free(expected.data);
 }
 
@@ -14937,7 +14937,7 @@ test_query_result_interleavings :: (direct := false) {
 				);
 
 				Service.resume_pause(fixture.session, .QUERY_RESULT);
-				waiters: [..] Service.Handle(.WAITER);
+				waiters: [..]Service.Handle(.WAITER);
 				array_add(*waiters, first.waiter);
 				array_add(*waiters, second.waiter);
 				for probe.job.competing_waiters {
@@ -15609,7 +15609,7 @@ test_waiter_observation_cleanup :: ($K: Service.Handle_Kind, scenario: string = 
 								*fixture.session.gate,
 								#code {
 									identity := fixture.session.registrations[replacement.slot].operation.identity;
-									assert(Service.bytes_equal(observation.update.successor.([] u8), identity.([] u8)));
+									assert(Service.bytes_equal(observation.update.successor.([]u8), identity.([]u8)));
 								}
 							);
 
@@ -15785,11 +15785,11 @@ test_query_waiter_observation_terminal :: () {
 					assert(current.observation.world_identity.data == backing.world_identity.data && current.observation.document.data == backing.document.data);
 					assert(current.observation.context_identity.data == backing.context_identity.data);
 					assert(current.observation.query.result_identity.data == backing.query.result_identity.data);
-					assert(Service.bytes_equal(current.observation.operation_identity.([] u8), observation.operation_identity.([] u8)));
-					assert(Service.bytes_equal(current.observation.world_identity.([] u8), observation.world_identity.([] u8)));
+					assert(Service.bytes_equal(current.observation.operation_identity.([]u8), observation.operation_identity.([]u8)));
+					assert(Service.bytes_equal(current.observation.world_identity.([]u8), observation.world_identity.([]u8)));
 					assert(Service.bytes_equal(current.observation.document, observation.document));
 					assert(Service.bytes_equal(current.observation.context_identity, observation.context_identity));
-					assert(Service.bytes_equal(current.observation.query.result_identity.([] u8), observation.query.result_identity.([] u8)));
+					assert(Service.bytes_equal(current.observation.query.result_identity.([]u8), observation.query.result_identity.([]u8)));
 					if action == .EXHAUST_RESULT_COUNTER {
 						fixture.session.identities.result_counter = result_counter;
 					}
@@ -15916,7 +15916,7 @@ test_ticket_waiter_observation_terminal :: () {
 						*fixture.session.gate,
 						#code {
 							identity := fixture.session.registrations[replacement.slot].operation.identity;
-							assert(Service.bytes_equal(observation.update.successor.([] u8), identity.([] u8)));
+							assert(Service.bytes_equal(observation.update.successor.([]u8), identity.([]u8)));
 						}
 					);
 
@@ -15938,10 +15938,10 @@ test_ticket_waiter_observation_terminal :: () {
 					assert(current.observation.provider_frontier.data == backing.provider_frontier.data && current.observation.documents.data == backing.documents.data);
 					assert(current.observation.update.world_identity.data == backing.update.world_identity.data);
 					assert(current.observation.update.successor.data == backing.update.successor.data);
-					assert(Service.bytes_equal(current.observation.operation_identity.([] u8), observation.operation_identity.([] u8)));
+					assert(Service.bytes_equal(current.observation.operation_identity.([]u8), observation.operation_identity.([]u8)));
 					assert(Service.bytes_equal(current.observation.provider_frontier, observation.provider_frontier));
-					assert(Service.bytes_equal(current.observation.update.world_identity.([] u8), observation.update.world_identity.([] u8)));
-					assert(Service.bytes_equal(current.observation.update.successor.([] u8), observation.update.successor.([] u8)));
+					assert(Service.bytes_equal(current.observation.update.world_identity.([]u8), observation.update.world_identity.([]u8)));
+					assert(Service.bytes_equal(current.observation.update.successor.([]u8), observation.update.successor.([]u8)));
 					for current.observation.documents {
 						assert(it.data == backing.documents[it_index].data && Service.bytes_equal(it, observation.documents[it_index]));
 					}
@@ -16376,7 +16376,7 @@ test_waiter_backing_failures :: ($K: Service.Handle_Kind) {
 			session := fixture.session;
 			probe := Registration_Probe.{fail_at = fail_at};
 			before: Service.Resource_Ledger;
-			before_slots: [] Service.Registration_Slot;
+			before_slots: []Service.Registration_Slot;
 			before_operations: s64;
 			before_tasks: s64;
 			before_references: s64;
@@ -16895,7 +16895,7 @@ World_Registration_Fixture :: struct {
 	ticket: Service.Handle(.TICKET);
 	waiter: Service.Handle(.WAITER);
 	world: Service.Handle(.WORLD);
-	identity: [] u8;
+	identity: []u8;
 }
 
 prepared_world_registration :: (scenario: World_Registration_Case, backing_case: Retain_Backing_Case) -> World_Registration_Fixture {
@@ -16915,7 +16915,7 @@ prepared_world_registration :: (scenario: World_Registration_Case, backing_case:
 	test.world = world_of(fixture, test.ticket);
 	read_ok, world := Service.read_world(fixture.host.service, test.world);
 	assert(read_ok);
-	test.identity = array_copy(world.identity.([] u8));
+	test.identity = array_copy(world.identity.([]u8));
 	if scenario == .HEAD {
 		ok, description := Service.describe_session(fixture.host.service, fixture.host.session);
 		assert(ok);
@@ -16972,7 +16972,7 @@ prepared_world_registration :: (scenario: World_Registration_Case, backing_case:
 assert_world_registration :: (test: World_Registration_Fixture, handle: Service.Handle(.WORLD)) {
 	fixture := test.retained.drain.fixture;
 	ok, world := Service.read_world(fixture.host.service, handle);
-	assert(ok && Service.bytes_equal(world.identity.([] u8), test.identity));
+	assert(ok && Service.bytes_equal(world.identity.([]u8), test.identity));
 	assert(Service.bytes_equal(world.members[0].source.bytes, xx "answer :: 43;"));
 }
 
@@ -17027,7 +17027,7 @@ test_world_registration_failures :: () {
 				session := fixture.session;
 				probe := Registration_Probe.{fail_at = fail_at};
 				before: Service.Resource_Ledger;
-				before_slots: [] Service.Registration_Slot;
+				before_slots: []Service.Registration_Slot;
 				before_free: s64;
 				before_references: s64;
 				before_identities: Service.Session_Identities;
@@ -17270,7 +17270,7 @@ test_world_registration_interleavings :: (direct := false, negative_control := f
 								assert(probe.world_references == 1);
 								if !ok {
 									for fixture.session.worlds {
-										assert(!Service.bytes_equal(it.identity.([] u8), test.identity));
+										assert(!Service.bytes_equal(it.identity.([]u8), test.identity));
 									}
 								}
 							} else if !ok {
@@ -17422,11 +17422,11 @@ test_repeated_shutdown_failures :: () {
 				session := fixture.session;
 				probe := Registration_Probe.{fail_at = fail_at};
 				before: Service.Resource_Ledger;
-				before_slots: [] Service.Registration_Slot;
+				before_slots: []Service.Registration_Slot;
 				before_registrations: s64;
 				before_free: s64;
 				before_references: s64;
-				before_identity: [] u8;
+				before_identity: []u8;
 				Service.with_lock(
 					*session.gate,
 					#code {
@@ -17435,7 +17435,7 @@ test_repeated_shutdown_failures :: () {
 						before_registrations = session.registrations.count;
 						before_free = session.registry.free_slots.count;
 						before_references = session.shutdown.registrations;
-						before_identity = array_copy(session.shutdown.identity.([] u8));
+						before_identity = array_copy(session.shutdown.identity.([]u8));
 						session.identities.operation_counter.next = Service.U64_MAX;
 						session.faults.registration_allocation_hook = registration_allocation_probe;
 						session.faults.registration_allocation_data = *probe;
@@ -17450,7 +17450,7 @@ test_repeated_shutdown_failures :: () {
 						session.faults.registration_allocation_hook = null;
 						session.faults.registration_allocation_data = null;
 						assert(session.identities.operation_counter.next == Service.U64_MAX);
-						assert(Service.bytes_equal(session.shutdown.identity.([] u8), before_identity));
+						assert(Service.bytes_equal(session.shutdown.identity.([]u8), before_identity));
 						assert(session.lifecycle == (ifx held then Service.Lifecycle.DRAINING else .STOPPED));
 						if fail_at <= allocation_count {
 							assert(!ok && !duplicate.owner_token && error.code == .ADMISSION_DENIED && error.admission.kind == .RESOURCE_EXHAUSTED);
@@ -17480,7 +17480,7 @@ test_repeated_shutdown_failures :: () {
 
 				if ok {
 					polled, observation := Service.poll(fixture.host.service, duplicate);
-					assert(polled && Service.bytes_equal(observation.operation_identity.([] u8), before_identity));
+					assert(polled && Service.bytes_equal(observation.operation_identity.([]u8), before_identity));
 					Service.free_observation(*observation);
 					release(fixture, duplicate);
 				}
@@ -17576,12 +17576,12 @@ test_repeated_shutdown_interleavings :: (direct := false, negative_control := fa
 					probe.job.retained_worlds = test.retained.held;
 				}
 
-				before_identity: [] u8;
+				before_identity: []u8;
 				before_counter: u64;
 				Service.with_lock(
 					*fixture.session.gate,
 					#code {
-						before_identity = array_copy(fixture.session.shutdown.identity.([] u8));
+						before_identity = array_copy(fixture.session.shutdown.identity.([]u8));
 						before_counter = fixture.session.identities.operation_counter.next;
 						fixture.session.faults.registration_allocation_hook = registration_allocation_probe;
 						fixture.session.faults.registration_allocation_data = *probe;
@@ -17616,7 +17616,7 @@ test_repeated_shutdown_interleavings :: (direct := false, negative_control := fa
 							fixture.session.faults.registration_allocation_hook = null;
 							fixture.session.faults.registration_allocation_data = null;
 							assert(fixture.session.identities.operation_counter.next == before_counter);
-							assert(Service.bytes_equal(fixture.session.shutdown.identity.([] u8), before_identity));
+							assert(Service.bytes_equal(fixture.session.shutdown.identity.([]u8), before_identity));
 							assert(fixture.session.shutdown.registrations == probe.shutdown_references + xx ok);
 							assert(fixture.session.ledger.live[Service.Limit_Name.LIVE_HANDLES] == probe.shutdown_live + xx ok);
 							if action == .COMPLETE_SHUTDOWN {
@@ -17628,7 +17628,7 @@ test_repeated_shutdown_interleavings :: (direct := false, negative_control := fa
 
 				if ok {
 					polled, observation := Service.poll(fixture.host.service, duplicate);
-					assert(polled && Service.bytes_equal(observation.operation_identity.([] u8), before_identity));
+					assert(polled && Service.bytes_equal(observation.operation_identity.([]u8), before_identity));
 					Service.free_observation(*observation);
 					release(fixture, duplicate);
 				}
@@ -17641,7 +17641,7 @@ test_repeated_shutdown_interleavings :: (direct := false, negative_control := fa
 
 				for probe.job.competing_shutdowns {
 					polled, observation := Service.poll(fixture.host.service, it);
-					assert(polled && Service.bytes_equal(observation.operation_identity.([] u8), before_identity));
+					assert(polled && Service.bytes_equal(observation.operation_identity.([]u8), before_identity));
 					Service.free_observation(*observation);
 					release(fixture, it);
 				}
@@ -17739,8 +17739,10 @@ test_shutdown_reserved_activation :: (pressure := false, negative_control := fal
 			before_slots = session.registry.slots.count;
 			before_registrations = session.registrations.count;
 			assert(!Service.handle_is_live(*session.registry, reserved_handle));
-			for session.registry.free_slots {
-				assert(it != reserved_handle.slot);
+			free_slot := session.registry.free_slots.head;
+			for 1..session.registry.free_slots.count {
+				assert(free_slot != reserved_handle.slot);
+				free_slot = session.registry.slots[free_slot].next_free;
 			}
 
 			if pressure {
@@ -17752,7 +17754,7 @@ test_shutdown_reserved_activation :: (pressure := false, negative_control := fal
 	);
 
 	token_bytes := Service.little_endian(token, 8);
-	expected_identity := Service.make_key("operation", fixture.host.session_identity.([] u8), token_bytes);
+	expected_identity := Service.make_key("operation", fixture.host.session_identity.([]u8), token_bytes);
 	defer free(token_bytes.data);
 	defer free(expected_identity.data);
 
@@ -17787,7 +17789,7 @@ test_shutdown_reserved_activation :: (pressure := false, negative_control := fal
 		*session.gate,
 		#code {
 			assert(session.identities.operation_counter.next == token + 1);
-			assert(Service.bytes_equal(session.shutdown.identity.([] u8), expected_identity));
+			assert(Service.bytes_equal(session.shutdown.identity.([]u8), expected_identity));
 			assert(Service.handle_is_live(*session.registry, shutdown));
 		}
 	);
@@ -17838,8 +17840,8 @@ test_shutdown_identity_exhaustion :: () {
 	last_ok, last := Service.request_shutdown(fixture.host.service, fixture.host.session);
 	assert(last_ok && session.identities.operation_counter.next == Service.U64_MAX);
 	token_bytes := Service.little_endian(Service.U64_MAX - 1, 8);
-	expected := Service.make_key("operation", fixture.host.session_identity.([] u8), token_bytes);
-	assert(Service.bytes_equal(session.shutdown.identity.([] u8), expected));
+	expected := Service.make_key("operation", fixture.host.session_identity.([]u8), token_bytes);
+	assert(Service.bytes_equal(session.shutdown.identity.([]u8), expected));
 	free(expected.data);
 	free(token_bytes.data);
 	observation := await(fixture, last);
@@ -17867,7 +17869,7 @@ prepare_provider_error :: (
 	batch: *Service.Source_Batch,
 	scenario: Provider_Error_Case,
 	registration: Service.Context_Registration,
-	oversized_source: [] u8
+	oversized_source: []u8
 ) {
 	if scenario == {
 		case .SESSION;
@@ -17927,7 +17929,7 @@ free_provider_error_batch :: (batch: Service.Source_Batch, scenario: Provider_Er
 	}
 }
 
-assert_provider_error :: (error: Service.Operation_Error, scenario: Provider_Error_Case, document: [] u8) {
+assert_provider_error :: (error: Service.Operation_Error, scenario: Provider_Error_Case, document: []u8) {
 	if scenario == .VERSION {
 		assert(error.code == .INVALID_VERSION && !error.path.count && !error.document.count);
 		return;
@@ -18440,7 +18442,7 @@ test_open_output_failures :: () {
 	options := open_output_options();
 	probe: Output_Probe;
 	allocator := open_output_probe(*probe);
-	for ([] Service.Schema_Tuple).[
+	for ([]Service.Schema_Tuple).[
 		.[],
 		.[Service.IMPLEMENTED_SCHEMA_TUPLE, Service.IMPLEMENTED_SCHEMA_TUPLE],
 		.[Service.Schema_Tuple.{}],
@@ -18569,13 +18571,13 @@ prepared_world_output :: (kind: World_Output) -> Drain_Fixture {
 
 world_output_selector :: (drain: Drain_Fixture, kind: World_Output) -> Service.World_Selector {
 	if kind == .PENDING_HEAD || kind == .MISMATCH_HEAD {
-		frontier: [] u8;
+		frontier: []u8;
 		if kind == .PENDING_HEAD {
 			_, description := Service.describe_session(drain.fixture.host.service, drain.fixture.host.session);
 			frontier = array_copy(description.accepted_frontier);
 			Service.free_description(*description);
 		} else {
-			frontier = array_copy("unmatched-frontier".([] u8));
+			frontier = array_copy("unmatched-frontier".([]u8));
 		}
 
 		return .{
@@ -18605,14 +18607,14 @@ free_world_output :: (output: *Service.World_Acquisition, allocator: Allocator =
 
 assert_world_output :: (output: Service.World_Acquisition, expected: Service.World_Acquisition) {
 	assert(output.kind == expected.kind && output.unavailable == expected.unavailable);
-	assert_description_bytes(output.operation_identity.([] u8), expected.operation_identity.([] u8));
+	assert_description_bytes(output.operation_identity.([]u8), expected.operation_identity.([]u8));
 	assert_description_bytes(output.published_frontier, expected.published_frontier);
-	assert_description_bytes(output.observation.operation_identity.([] u8), expected.observation.operation_identity.([] u8));
+	assert_description_bytes(output.observation.operation_identity.([]u8), expected.observation.operation_identity.([]u8));
 	assert_description_bytes(output.observation.provider_frontier, expected.observation.provider_frontier);
 	assert(output.observation.kind == expected.observation.kind);
 	assert(output.observation.update.kind == expected.observation.update.kind);
 	assert(output.observation.update.cancellation == expected.observation.update.cancellation);
-	assert_description_bytes(output.observation.update.successor.([] u8), expected.observation.update.successor.([] u8));
+	assert_description_bytes(output.observation.update.successor.([]u8), expected.observation.update.successor.([]u8));
 	assert(output.observation.documents.count == expected.observation.documents.count);
 	for expected.observation.documents {
 		assert_description_bytes(output.observation.documents[it_index], it);

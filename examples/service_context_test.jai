@@ -41,14 +41,14 @@ reject_view_allocation :: (mode: Allocator_Mode, size: s64, old_size: s64, old_m
 }
 
 test_borrowed_key_views :: () {
-	encoded := Service.make_key("borrowed", "first".([] u8), "second".([] u8));
+	encoded := Service.make_key("borrowed", xx "first", xx "second");
 	defer free(encoded.data);
 
 	legacy_ok, legacy := Service.parse_key(encoded, 2);
 	assert(legacy_ok);
 	defer array_free(legacy.fields);
 
-	storage: [2] [] u8;
+	storage: [2][]u8;
 	attempts: s64;
 	allocator := Allocator.{proc = reject_view_allocation, data = *attempts};
 	ok, view := Service.parse_key_into(encoded, storage,, allocator);
@@ -58,7 +58,7 @@ test_borrowed_key_views :: () {
 		assert(it.data == legacy.fields[it_index].data && Service.bytes_equal(it, legacy.fields[it_index]));
 	}
 
-	short_storage: [1] [] u8;
+	short_storage: [1][]u8;
 	ok, view = Service.parse_key_into(encoded, short_storage,, allocator);
 	assert(!ok && !view.fields.count && !view.tag.count && !attempts);
 	for 0..encoded.count - 1 {
@@ -133,14 +133,14 @@ test_context_identity_scratch :: () {
 	memcpy(trailing.data, identity.data, identity.count);
 	defer free(trailing.data);
 
-	schema := Service.SYNTAX_CONTEXT_SCHEMA.([] u8);
-	candidates: [7] [] u8 = .[
+	schema := Service.SYNTAX_CONTEXT_SCHEMA.([]u8);
+	candidates: [7][]u8 = .[
 		Service.make_key("not-context", schema, descriptor),
-		Service.make_key("context", "other-schema".([] u8), descriptor),
-		Service.make_key("context", schema, "other-descriptor".([] u8)),
+		Service.make_key("context", xx "other-schema", descriptor),
+		Service.make_key("context", schema, xx "other-descriptor"),
 		Service.make_key("context", descriptor, schema),
 		Service.make_key("context", schema),
-		Service.make_key("context", schema, descriptor, "extra".([] u8)),
+		Service.make_key("context", schema, descriptor, xx "extra"),
 		trailing
 	];
 	for candidates {
@@ -228,7 +228,7 @@ test_descriptor_layout :: () {
 	assert(ok);
 	root_ok, root := Service.parse_key(descriptor, 16);
 	assert(root_ok && root.tag.(string) == "syntax-context-descriptor" && root.fields.count == FIELDS.count);
-	values: [FIELDS.count] [..] [] u8;
+	values: [FIELDS.count][..][]u8;
 	for FIELDS {
 		field_ok, field := Service.parse_key(root.fields[it_index], 16);
 		assert(field_ok && field.tag.(string) == it, "\e[91mField % is %.\e[0m", it_index, field.tag.(string));
@@ -240,13 +240,13 @@ test_descriptor_layout :: () {
 	assert(Service.bytes_equal(producer[5], Service.syntax_adapter_descriptor()), "\e[91mThe producer binds the adapter's capability descriptor.\e[0m");
 
 	// Build identities are digests of the exact compiled sources, recomputed here from the files.
-	digest_of :: (files: [] string) -> [16] u8 {
+	digest_of :: (files: []string) -> [16]u8 {
 		state: Service.Digest_State;
 		Service.digest_begin(*state);
 		for files {
 			source, read_ok := read_entire_file(tprint("%../service/%", #filepath, it));
 			assert(read_ok);
-			Service.digest_absorb(*state, Service.make_key("source-file", it.([] u8), source.([] u8)));
+			Service.digest_absorb(*state, Service.make_key("source-file", xx it, xx source));
 		}
 
 		return Service.digest_end(*state).bytes;
@@ -282,7 +282,7 @@ test_descriptor_layout :: () {
 	_, posix_paths.visible_filename = Service.posix_path_value("D:/project/main.jai");
 	posix_ok, posix := Service.syntax_context_descriptor(posix_paths);
 	assert(alias_ok && base_ok && posix_ok);
-	for ([] u8).[alias, base, posix] {
+	for ([]u8).[alias, base, posix] {
 		assert(!Service.bytes_equal(Service.context_id(it), identity), "\e[91mVariant % shares the original identity.\e[0m", it_index);
 		variant_failure := Service.admit_context(Service.context_id(it), it);
 		assert(variant_failure == .NONE);
@@ -296,20 +296,20 @@ test_descriptor_layout :: () {
 }
 
 // Rebuilds the descriptor with field `index` replaced by `K(name, values)`.
-with_field :: (descriptor: [] u8, index: s64, name: string, values: .. [] u8) -> [] u8 {
+with_field :: (descriptor: []u8, index: s64, name: string, values: .. []u8) -> []u8 {
 	_, root := Service.parse_key(descriptor, 16);
 	fields := array_copy(root.fields);
 	fields[index] = Service.make_key(name, ..values);
 	return Service.make_key("syntax-context-descriptor", ..fields);
 }
 
-field_values :: (descriptor: [] u8, index: s64) -> [..] [] u8 {
+field_values :: (descriptor: []u8, index: s64) -> [..][]u8 {
 	_, root := Service.parse_key(descriptor, 16);
 	_, field := Service.parse_key(root.fields[index], 16);
 	return field.fields;
 }
 
-expect :: (descriptor: [] u8, failure: Service.Context_Failure, what: string) {
+expect :: (descriptor: []u8, failure: Service.Context_Failure, what: string) {
 	actual := Service.admit_context(Service.context_id(descriptor), descriptor);
 	assert(actual == failure, "\e[91m%: expected %, got %.\e[0m", what, failure, actual);
 }
@@ -375,11 +375,11 @@ test_admission_controls :: () {
 		expect(Service.make_key("syntax-context-descriptor", ..fields), .FIELD_ORDER, "reordered fields");
 		missing := Service.make_key("syntax-context-descriptor", ..array_view(fields, 0, 9));
 		expect(missing, .MALFORMED, "missing field");
-		extra: [..] [] u8;
+		extra: [..][]u8;
 		array_add(*extra, ..root.fields);
 		array_add(*extra, Service.make_key("extension"));
 		expect(Service.make_key("syntax-context-descriptor", ..extra), .MALFORMED, "unknown extra field");
-		trailing: [..] u8;
+		trailing: [..]u8;
 		array_add(*trailing, ..descriptor);
 		array_add(*trailing, 0);
 		expect(trailing, .MALFORMED, "trailing byte");

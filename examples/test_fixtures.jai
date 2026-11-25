@@ -159,8 +159,8 @@ FLOAT_CONSTANT_CASES :: Typed_Numeric_Case.[
 	.{parameter_type = "float32",									setup = "original :: 1.23456789; value := original;",							compiler_accepts = false,	parser_matches = false},
 ];
 
-make_typed_float_cases :: () -> [..] Typed_Numeric_Case {
-	cases: [..] Typed_Numeric_Case;
+make_typed_float_cases :: () -> [..]Typed_Numeric_Case {
+	cases: [..]Typed_Numeric_Case;
 	for fixture: TYPED_FLOAT_CASES {
 		array_add(*cases, fixture);
 	}
@@ -223,8 +223,8 @@ make_typed_float_cases :: () -> [..] Typed_Numeric_Case {
 	return cases;
 }
 
-make_typed_integer_cases :: () -> [..] Typed_Numeric_Case {
-	cases: [..] Typed_Numeric_Case;
+make_typed_integer_cases :: () -> [..]Typed_Numeric_Case {
+	cases: [..]Typed_Numeric_Case;
 	for fixture: TYPED_INTEGER_CASES {
 		array_add(*cases, fixture);
 	}
@@ -2502,8 +2502,8 @@ make_numeric_rank_case :: (first: string, second: string, arguments: string, sel
 	return .{first_parameters = first, second_parameters = second, arguments = arguments, selected_index = selected_index};
 }
 
-make_numeric_rank_cases :: () -> [..] Numeric_Rank_Case {
-	cases: [..] Numeric_Rank_Case;
+make_numeric_rank_cases :: () -> [..]Numeric_Rank_Case {
+	cases: [..]Numeric_Rank_Case;
 	for fixture: NUMERIC_RANK_CASES {
 		array_add(*cases, fixture);
 	}

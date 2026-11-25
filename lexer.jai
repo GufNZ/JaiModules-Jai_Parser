@@ -35,34 +35,34 @@ UNICODE_POP_DIRECTIONAL_FORMATTING	:: 0x202C;
 Token_Type :: enum s16 {
 	// Mentally insert ASCII types here:
 
-	BITWISE_XOR	:: #char "^";
-	BITWISE_NOT	:: #char "~";
-	BITWISE_AND	:: #char "&";
-	BITWISE_OR	:: #char "|";
+	BITWISE_XOR			:: #char "^";
+	BITWISE_NOT			:: #char "~";
+	BITWISE_AND			:: #char "&";
+	BITWISE_OR			:: #char "|";
 
 
-	IDENT :: 256;
-	NUMBER :: 257;
-	STRING :: 258;
+	IDENT				:: 256;
+	NUMBER				:: 257;
+	STRING				:: 258;
 
-	PLUSEQUALS :: 259;
-	MINUSEQUALS :: 260;
-	TIMESEQUALS :: 261;
-	DIVEQUALS :: 262;
-	MODEQUALS :: 263;
-	ISEQUAL :: 264;
-	ISNOTEQUAL :: 265;
-	LOGICAL_AND :: 266;
-	LOGICAL_OR :: 267;
-	LESSEQUALS :: 268;
-	GREATEREQUALS :: 269;
+	PLUSEQUALS			:: 259;
+	MINUSEQUALS			:: 260;
+	TIMESEQUALS			:: 261;
+	DIVEQUALS			:: 262;
+	MODEQUALS			:: 263;
+	ISEQUAL				:: 264;
+	ISNOTEQUAL			:: 265;
+	LOGICAL_AND			:: 266;
+	LOGICAL_OR			:: 267;
+	LESSEQUALS			:: 268;
+	GREATEREQUALS		:: 269;
 
-	RIGHT_ARROW :: 270;
-	DOUBLE_DOT :: 271;
-	DOUBLE_DOLLAR :: 272;
+	RIGHT_ARROW			:: 270;
+	DOUBLE_DOT			:: 271;
+	DOUBLE_DOLLAR		:: 272;
 
-	SHIFT_LEFT  :: 273;
-	SHIFT_RIGHT :: 274;
+	SHIFT_LEFT  		:: 273;
+	SHIFT_RIGHT			:: 274;
 
 	ROTATE_LEFT			:: 275;
 	ROTATE_RIGHT		:: 276;
@@ -145,8 +145,8 @@ Token_Type :: enum s16 {
 
 	END_OF_INPUT;
 
-	OPERATOR_ARRAY_SUBSCRIPT :: 500;	// Not actually an input token.  It's here so that it can be used as an 'operator_type' in Ast_Binary.  Ugh...
-	OPERATOR_ASSIGNMENT_TO_ARRAY_SUBSCRIPT :: 501;
+	OPERATOR_ARRAY_SUBSCRIPT				:: 500;	// Not actually an input token.  It's here so that it can be used as an 'operator_type' in Ast_Binary.  Ugh...
+	OPERATOR_ASSIGNMENT_TO_ARRAY_SUBSCRIPT	:: 501;
 
 	ERROR;
 };
@@ -330,10 +330,10 @@ Token :: struct {
 	l1, c1: s32 = -1;
 
 	union {
-		ident\ _value: struct { name: Table_String; hash: u32; };
+		ident_value: struct { name: Table_String; hash: u32; };
 		integer_value: u64;
 		float64_value: float64;
-		string\_value: string;
+		string_value: string;
 	};
 
 	value_flags: Value_Flags;	// If a number or a note.  Mostly the old numeric_flags, but also has HERESTRING now.
@@ -359,7 +359,7 @@ Lexer :: struct {
 	identifier_storage: *Identifier_Storage;
 	identifier_handler: (lexer: *Lexer, name: string, source_name: string) -> Table_String = copy_identifier_name;
 
-	tokens: [MAX_CONCURRENT_TOKENS] Token;
+	tokens: [MAX_CONCURRENT_TOKENS]Token;
 	token_array_cursor:  s32;
 	num_incoming_tokens: s32;
 
@@ -382,7 +382,7 @@ Lexer :: struct {
 	error_callback: (lexer: *Lexer, message: string, line: s32, column: s32);
 	detail_callback: (lexer: *Lexer, message: string);
 
-	scratch_buffer: [MAX_IDENTIFIER_LENGTH] u8;
+	scratch_buffer: [MAX_IDENTIFIER_LENGTH]u8;
 
 	reported_error := false;
 }
@@ -1171,7 +1171,7 @@ parse_here_string_body :: (lexer: *Lexer, terminator: string, want_cr := false, 
 		len = dest - result_string.data;
 	}
 
-	result_string[len]  = 0;			// :ZeroTermination
+	result_string[len] = 0;				// :ZeroTermination
 	assert(result_string.count >= len);	// I hope we had enough space!
 	result_string.count = len;			// :ZeroTermination
 
@@ -1798,7 +1798,7 @@ make_string_constant :: (lexer: *Lexer) -> *Token {
 						}
 
 						LEN_MAX :: 4;
-						buf: [LEN_MAX] u8;
+						buf: [LEN_MAX]u8;
 
 						s: string;
 						s.data = buf.data;
