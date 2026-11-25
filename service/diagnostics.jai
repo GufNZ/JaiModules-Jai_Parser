@@ -4,13 +4,15 @@
 SYNTAX_DIAGNOSTICS_SCHEMA :: "jai-cache-syntax-diagnostics/1";
 
 Origin :: struct {
-	kind: enum u8 {
+	kind: enum u8 {//QUESTION: this looks like it would be better as a [tagged] union...
 		SOURCE;
 		INSERTED;
 		UNLOCATED;
 	};
-	// `.SOURCE` span, or the zero-width anchor of an `.INSERTED` origin.
+
+	// `.SOURCE` span, or the zero-width anchor of an `.INSERTED` origin:
 	span: Byte_Span;
+
 	expected_token: Token_Tag;
 	reason: enum u8 {
 		NO_SOURCE_LOCATION;
@@ -19,34 +21,34 @@ Origin :: struct {
 }
 
 Parser_Observation :: struct {
-	token_span: Token_Span_Observation;
-	expected_token: Token_Tag;
-	actual_token: Token_Tag;
-	recovery_action: Diagnostic_Recovery_Action;
-	lexer_line: s32;
-	lexer_column: s32;
+	token_span:			Token_Span_Observation;
+	expected_token:		Token_Tag;
+	actual_token:		Token_Tag;
+	recovery_action:	Diagnostic_Recovery_Action;
+	lexer_line:			s32;
+	lexer_column:		s32;
 }
 
 Related_Diagnostic :: struct {
-	origin: Origin;
-	message_utf8: string;
+	origin:			Origin;
+	message_utf8:	string;
 }
 
 Diagnostic_Record :: struct {
-	code: Diagnostic_Code;
-	severity: Diagnostic_Severity;
-	primary_origin: Origin;
-	message_utf8: string;
-	related: []Related_Diagnostic;
-	parser_observation: Parser_Observation;
+	code:				Diagnostic_Code;
+	severity:			Diagnostic_Severity;
+	primary_origin:		Origin;
+	message_utf8:		string;
+	related:			[]Related_Diagnostic;
+	parser_observation:	Parser_Observation;
 }
 
 Diagnostics_Projection :: struct {
-	owner: *Owned_Syntax;
-	parse_status: Parse_Status_Observation;
-	records: []Diagnostic_Record;
-	tokens: *Token_Projection;
-	storage: Pool;
+	owner:			*Owned_Syntax;
+	parse_status:	Parse_Status_Observation;
+	records:		[]Diagnostic_Record;
+	tokens:			*Token_Projection;
+	storage:		Pool;
 }
 
 project_diagnostics :: (owner: *Owned_Syntax) -> Projection_Fault, *Diagnostics_Projection {
@@ -182,7 +184,7 @@ fill_diagnostics :: (projection: *Diagnostics_Projection) -> Projection_Fault {
 	return .{};
 }
 
-// An inserted missing token maps through its one correlated recovery record and synthetic token; anything else maps its token span.
+// An inserted missing token maps through its one correlated recovery record and synthetic token; anything else maps its token span:
 primary_origin :: (tokens: *Token_Projection, diagnostic: Raw_Diagnostic, diagnostic_index: s64) -> Projection_Failure, Origin {
 	if diagnostic.recovery_action != .INSERT_MISSING_TOKEN {
 		return .NONE, span_origin(tokens, diagnostic.token_span);
@@ -232,7 +234,7 @@ primary_origin :: (tokens: *Token_Projection, diagnostic: Raw_Diagnostic, diagno
 	return .NONE, .{kind = .INSERTED, span = .{anchor, anchor}, expected_token = synthetic.tag};
 }
 
-// A nonempty span covers its first token's start through its last token's end; an empty one is a zero-width anchor at its token.
+// A nonempty span covers its first token's start through its last token's end; an empty one is a zero-width anchor at its token:
 span_origin :: (tokens: *Token_Projection, span: Token_Span_Observation) -> Origin {
 	count := tokens.tokens.count;
 	if span.first < 0 || span.one_past_last < span.first || span.one_past_last > count || span.first >= count {

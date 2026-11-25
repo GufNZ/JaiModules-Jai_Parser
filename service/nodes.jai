@@ -10,12 +10,12 @@ Path_Step :: struct {
 		FIELD;
 		ELEMENT;
 	};
-	name: string;
-	index: s64;
+	name:	string;
+	index:	s64;
 }
 
 Field_Value :: struct {
-	kind: enum u8 {
+	kind: enum u8 {//QUESTION: this looks like it would be better as a [tagged] union...
 		INACTIVE;
 		BOOL;
 		SIGNED;
@@ -37,50 +37,54 @@ Field_Value :: struct {
 		ALIAS;
 	};
 	boolean: bool;
-	// `.SIGNED` value, or the referenced ID for `.NODE` and `.HELPER` (-1 when the pointer is null).
+
+	// `.SIGNED` value, or the referenced ID for `.NODE` and `.HELPER` (-1 when the pointer is null):
 	signed: s64;
-	// `.UNSIGNED` value or `.FLOAT64_BITS` bits.
-	unsigned: u64;
-	bytes: []u8;
-	// `.TOKEN_TAG` tag, or for `.OPERATOR` a byte character or a declared `Operator_Type` name.
-	tag: Token_Tag;
-	domain: string;
-	name: string;
-	names: []string;
-	elements: []Field_Value;
-	span: Token_Span_Observation;
+
+	// `.UNSIGNED` value or `.FLOAT64_BITS` bits:
+	unsigned:	u64;
+	bytes:		[]u8;
+
+	// `.TOKEN_TAG` tag, or for `.OPERATOR` a byte character or a declared `Operator_Type` name:
+	tag:		Token_Tag;
+	domain:		string;
+	name:		string;
+	names:		[]string;
+	elements:	[]Field_Value;
+	span:		Token_Span_Observation;
 }
 
 Field_Observation :: struct {
-	path: []Path_Step;
-	value: Field_Value;
+	path:	[]Path_Step;
+	value:	Field_Value;
 }
 
 Node_Record :: struct {
-	local_node_id: u64;
-	kind: string;
-	coordinates: Coordinates;
-	token_span: Token_Span_Observation;
-	has_origin: bool;
-	origin: Byte_Span;
-	fields: []Field_Observation;
+	local_node_id:	u64;
+	kind:			string;
+	coordinates:	Coordinates;
+	token_span:		Token_Span_Observation;
+	has_origin:		bool;
+	origin:			Byte_Span;
+	fields:			[]Field_Observation;
 }
 
 Helper_Record :: struct {
-	local_helper_id: u64;
-	layout: string;
-	fields: []Field_Observation;
+	local_helper_id:	u64;
+	layout:				string;
+	fields:				[]Field_Observation;
 }
 
 Node_Projection :: struct {
-	owner: *Owned_Syntax;
-	root: s64;
-	nodes: []Node_Record;
-	helpers: []Helper_Record;
+	owner:		*Owned_Syntax;
+	root:		s64;
+	nodes:		[]Node_Record;
+	helpers:	[]Helper_Record;
 
-	// Producer node pointer to its snapshot ID.
-	node_ids: Table(*void, s64);
-	storage: Pool;
+	// Producer node pointer to its snapshot ID:
+	node_ids:	Table(*void, s64);
+
+	storage:	Pool;
 }
 
 project_nodes :: (owner: *Owned_Syntax) -> Projection_Fault, *Node_Projection {
@@ -149,33 +153,33 @@ HELPER_LAYOUT_NAMES :: string.[
 ];
 
 Walk_Item :: struct {
-	pointer: *void;
-	layout: Helper_Layout;
+	pointer:	*void;
+	layout:		Helper_Layout;
 }
 
 Node_Projector :: struct {
-	parsed: *Parser.Parsed_Source;
-	recording: bool;
-	node_ids: Table(*void, s64);
-	helper_ids: Table(*void, s64);
-	fields: [..]Field_Observation;
-	children: [..]Walk_Item;
-	fault: Projection_Fault;
-	path_keys: Table(string, []u8);
+	parsed:			*Parser.Parsed_Source;
+	recording:		bool;
+	node_ids:		Table(*void, s64);
+	helper_ids:		Table(*void, s64);
+	fields:			[..]Field_Observation;
+	children:		[..]Walk_Item;
+	fault:			Projection_Fault;
+	path_keys:		Table(string, []u8);
 
-	// Parameter `using` node to its matching argument declaration, filled while describing the owning header.
-	parameter_using_targets: Table(*void, *void);
+	// Parameter `using` node to its matching argument declaration, filled while describing the owning header:
+	parameter_using_targets:	Table(*void, *void);
 
-	// Import-owned parameter call to its owning import, filled while describing the import.
-	import_calls: Table(*void, *void);
+	// Import-owned parameter call to its owning import, filled while describing the import:
+	import_calls:	Table(*void, *void);
 }
 
 Flag_Name :: struct {
-	name: string;
-	bit: u64;
+	name:	string;
+	bit:	u64;
 }
 
-// Closed source-flag domains from CACHE_CONTRACTS.md, with the installed SDK's bit values.  Names are in unsigned ASCII order.
+// Closed source-flag domains from CACHE_CONTRACTS.md, with the installed SDK's bit values.  Names are in unsigned ASCII order:
 NODE_FLAGS :: Flag_Name.[
 	.{"ALLOWED_BY_CONTEXT",		0x4},
 	.{"EXPRESSION_IS_SPREAD",	0x1},
@@ -459,7 +463,7 @@ field :: (p: *Node_Projector, value: Field_Value, names: .. string) {
 	array_add(*p.fields, .{path, value});
 }
 
-// Records an owning edge and queues the child for the walk; returns its ID once known.
+// Records an owning edge and queues the child for the walk; returns its ID once known:
 node_value :: (p: *Node_Projector, node: *$T) -> Field_Value {
 	if !node {
 		return .{kind = .NODE, signed = -1};
@@ -541,7 +545,7 @@ flags_value :: (p: *Node_Projector, domain: string, bits: u64, names: []Flag_Nam
 	return .{kind = .FLAGS, domain = domain, names = selected};
 }
 
-// `domain` names the producer field; every admitted value must be a declared name of its enum type.
+// `domain` names the producer field; every admitted value must be a declared name of its enum type:
 enum_value :: (p: *Node_Projector, domain: string, value: $T) -> Field_Value {
 	info := type_info(T);
 	for info.values {
@@ -555,7 +559,7 @@ enum_value :: (p: *Node_Projector, domain: string, value: $T) -> Field_Value {
 	return .{};
 }
 
-// Declared producer names take precedence: they lie in 131-169 and 500, so a value is a byte character only when no name declares it.
+// Declared producer names take precedence: they lie in 131-169 and 500, so a value is a byte character only when no name declares it:
 operator_value :: (p: *Node_Projector, operator_type: $T) -> Field_Value {
 	value := operator_type.(s64);
 	info := type_info(T);
@@ -586,7 +590,7 @@ bool_value :: (value: bool) -> Field_Value {
 	return .{kind = .BOOL, boolean = value};
 }
 
-// A non-owning association: never queued for descent, and resolved only once IDs are known.
+// A non-owning association: never queued for descent, and resolved only once IDs are known:
 alias_value :: (p: *Node_Projector, node: *void) -> Field_Value {
 	found, id := table_find(*p.node_ids, node);
 	return .{
@@ -614,7 +618,7 @@ argument_list :: (p: *Node_Projector, arguments: []Parser.Parser_Argument) -> Fi
 	return .{kind = .LIST, elements = elements};
 }
 
-// Lists that no reviewed producer route populates; a populated one has no registered owner or order.
+// Lists that no reviewed producer route populates; a populated one has no registered owner or order:
 empty_list :: (p: *Node_Projector, list: []$T, field_name: string) -> Field_Value {
 	if list.count {
 		fail(p, .UNEXPECTED_ACTIVE_FIELD, field_name);
@@ -720,7 +724,7 @@ describe :: (p: *Node_Projector, item: Walk_Item) {
 
 		case .ARRAY_LITERAL_INFO;
 			info := item.pointer.(*Parser.Parser_Array_Literal_Info);
-			// No reviewed producer route populates `alignment`.
+			// No reviewed producer route populates `alignment`:
 			if info.alignment {
 				fail(p, .UNEXPECTED_ACTIVE_FIELD, "Parser_Array_Literal_Info.alignment");
 			}
@@ -761,7 +765,7 @@ helper_list :: (p: *Node_Projector, items: []*$T, layout: Helper_Layout) -> Fiel
 	return .{kind = .LIST, elements = elements};
 }
 
-// An arm the kind does not select must hold no payload; it is recorded as inactive and never followed.
+// An arm the kind does not select must hold no payload; it is recorded as inactive and never followed:
 inactive_arm :: (p: *Node_Projector, populated: bool, field_name: string) -> Field_Value {
 	if populated {
 		fail(p, .UNEXPECTED_ACTIVE_FIELD, field_name);
@@ -770,14 +774,14 @@ inactive_arm :: (p: *Node_Projector, populated: bool, field_name: string) -> Fie
 	return INACTIVE;
 }
 
-// Embedded value slots are distinct helper occurrences; an optional one with no expression is inactive storage.
+// Embedded value slots are distinct helper occurrences; an optional one with no expression is inactive storage:
 optional_value :: (p: *Node_Projector, value: *Parser.Parser_Asm_Value) -> Field_Value {
 	return ifx value.expression
 		then helper_value(p, value, .ASM_VALUE)
 		else INACTIVE;
 }
 
-// Assembly helpers select their active arm from the kind field; every other arm must be empty.
+// Assembly helpers select their active arm from the kind field; every other arm must be empty:
 describe_asm_helper :: (p: *Node_Projector, item: Walk_Item) {
 	if item.layout == {
 		case .ASM_FEATURE;
@@ -1071,8 +1075,8 @@ describe_node :: (p: *Node_Projector, pointer: *void) {
 			flags := push.push_context_flags.(u64);
 			field(p, flags_value(p, "PUSH_CONTEXT", flags, PUSH_CONTEXT_FLAGS), "push_context_flags");
 			field(p, node_value(p, push.to_push), "to_push");
-			// The `.DEFER_POP` route has no body.
-			if flags & 0x2 {
+			// The `.DEFER_POP` route has no body:
+			if flags & 0x2 {//FIXME: name this magic number
 				if push.block {
 					fail(p, .UNEXPECTED_ACTIVE_FIELD, "Parser_Push_Context.block");
 				}
@@ -1234,7 +1238,7 @@ describe_directive :: (p: *Node_Projector, node: *Parser.Parser_Node) {
 	}
 }
 
-// On the arrow route the source header owns its body block, and `expression` may only alias that block.
+// On the arrow route the source header owns its body block, and `expression` may only alias that block:
 describe_run :: (p: *Node_Projector, run: *Parser.Parser_Directive_Run) {
 	field(p, flags_value(p, "RUN", run.flags.(u64), RUN_FLAGS), "flags");
 	field(p, bytes_value(run.assertion_string), "assertion_string");
@@ -1256,7 +1260,7 @@ describe_run :: (p: *Node_Projector, run: *Parser.Parser_Directive_Run) {
 	field(p, alias_value(p, run.expression), "expression");
 }
 
-// Replacement clauses follow their source order (break, continue, remove on a tie), between the scope prefix and the payload.
+// Replacement clauses follow their source order (break, continue, remove on a tie), between the scope prefix and the payload:
 describe_insert :: (p: *Node_Projector, insert: *Parser.Parser_Directive_Insert) {
 	if insert.expansion {
 		fail(p, .UNEXPECTED_ACTIVE_FIELD, "Parser_Directive_Insert.expansion");
@@ -1283,7 +1287,7 @@ describe_insert :: (p: *Node_Projector, insert: *Parser.Parser_Directive_Insert)
 	field(p, node_value(p, insert.expression), "expression");
 }
 
-// Dynamic prefixes follow their token order (reverse first on a tie), then expansion, explicit names, range and body.
+// Dynamic prefixes follow their token order (reverse first on a tie), then expansion, explicit names, range and body:
 describe_for :: (p: *Node_Projector, for_node: *Parser.Parser_For) {
 	field(p, flags_value(p, "FOR", for_node.for_flags.(u64), FOR_FLAGS), "for_flags");
 	reverse := for_node.want_reverse_expression;
@@ -1305,7 +1309,7 @@ describe_for :: (p: *Node_Projector, for_node: *Parser.Parser_For) {
 	field(p, node_value(p, for_node.block), "block");
 }
 
-// Each parameter `using` precedes its argument; its expression is an alias to exactly one argument, in argument order.
+// Each parameter `using` precedes its argument; its expression is an alias to exactly one argument, in argument order:
 describe_procedure_header :: (p: *Node_Projector, header: *Parser.Parser_Procedure_Header) {
 	field(p, flags_value(p, "PROCEDURE", header.procedure_flags.(u64), PROCEDURE_FLAGS), "procedure_flags");
 	field(p, bytes_value(header.name), "name");
@@ -1372,7 +1376,7 @@ describe_procedure_header :: (p: *Node_Projector, header: *Parser.Parser_Procedu
 	field(p, node_value(p, header.body_or_null), "body_or_null");
 }
 
-// The name is safe only when it is the identifier payload of a token inside this node's interval.
+// The name is safe only when it is the identifier payload of a token inside this node's interval:
 describe_placeholder :: (p: *Node_Projector, placeholder: *Parser.Parser_Placeholder) {
 	first := placeholder.first_token.(s64);
 	last := placeholder.one_past_last_token.(s64);
@@ -1391,7 +1395,7 @@ describe_placeholder :: (p: *Node_Projector, placeholder: *Parser.Parser_Placeho
 	fail(p, .UNQUALIFIED_ROUTE, "Parser_Placeholder.name");
 }
 
-// Explicit prefix casts visit the target first, postfix casts the expression first; auto casts have no target.
+// Explicit prefix casts visit the target first, postfix casts the expression first; auto casts have no target:
 describe_cast :: (p: *Node_Projector, cast_node: *Parser.Parser_Cast) {
 	flags := cast_node.cast_flags.(u64);
 	field(p, flags_value(p, "CAST", flags, CAST_FLAGS), "cast_flags");
@@ -1465,7 +1469,7 @@ describe_literal :: (p: *Node_Projector, literal: *Parser.Parser_Literal) {
 
 TYPE_CHILD_FIELDS :: string.["type_valued_expression", "must_implement", "pointer_to", "type_directive_target", "array_element_type", "array_dimension"];
 
-// Selects one source form from flags and the leading token, then visits only that form's children in registry order.
+// Selects one source form from flags and the leading token, then visits only that form's children in registry order:
 describe_type_instantiation :: (p: *Node_Projector, wrapper: *Parser.Parser_Type_Instantiation) {
 	flags := wrapper.inst_flags.(u64);
 	field(p, flags_value(p, "TYPE_INSTANTIATION", flags, TYPE_INSTANTIATION_FLAGS), "inst_flags");
@@ -1485,7 +1489,7 @@ describe_type_instantiation :: (p: *Node_Projector, wrapper: *Parser.Parser_Type
 	ELEMENT				:: 4;
 	DIMENSION			:: 5;
 
-	// A parenthesised type's interval starts at `(`; the form's own leading token follows.
+	// A parenthesised type's interval starts at `(`; the form's own leading token follows:
 	leading: Parser.Token_Type = .ERROR;
 	first := wrapper.first_token.(s64);
 	while first >= 0 && first < wrapper.one_past_last_token.(s64) && first < p.parsed.tokens.count {
@@ -1544,7 +1548,7 @@ describe_type_instantiation :: (p: *Node_Projector, wrapper: *Parser.Parser_Type
 	}
 }
 
-// A `/` directly after the polymorphic name means the constraint suffix was consumed, even when its expression is missing.
+// A `/` directly after the polymorphic name means the constraint suffix was consumed, even when its expression is missing:
 consumed_constraint :: (p: *Node_Projector, expression: *Parser.Parser_Node) -> bool {
 	next := expression.one_past_last_token.(s64);
 	return next >= 0 && next < p.parsed.tokens.count && p.parsed.tokens[next].type == #char "/";
@@ -1559,7 +1563,7 @@ token_span_origin :: (parsed: *Parser.Parsed_Source, span: Token_Span_Observatio
 	return true, .{parsed.tokens[span.first].byte_start, parsed.tokens[span.one_past_last - 1].byte_end};
 }
 
-// Observations sort by the canonical bytes of their complete paths.
+// Observations sort by the canonical bytes of their complete paths:
 sorted_fields :: (p: *Node_Projector) -> []Field_Observation {
 	fields := array_copy(p.fields);
 	keys := NewArray(fields.count, []u8);
@@ -1567,7 +1571,7 @@ sorted_fields :: (p: *Node_Projector) -> []Field_Observation {
 		keys[it_index] = path_key(p, it.path);
 	}
 
-	// Insertion sort: records have only a handful of fields.
+	// Insertion sort: records have only a handful of fields:
 	for i: 1..fields.count - 1 {
 		j := i;
 		while j > 0 && compare_canonical(keys[j - 1], keys[j]) > 0 {

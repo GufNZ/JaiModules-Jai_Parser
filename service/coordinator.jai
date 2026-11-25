@@ -51,10 +51,12 @@ Ticket_Terminal :: struct {
 		FAILED;
 	};
 	world_identity: World_ID;
-	// Empty means null.
-	successor: Operation_ID;
-	cancellation: Cancellation_Reason;
-	failure: Failure;
+
+	// Empty means null:
+	successor:		Operation_ID;
+
+	cancellation:	Cancellation_Reason;
+	failure:		Failure;
 }
 
 Query_Terminal :: struct {
@@ -65,11 +67,11 @@ Query_Terminal :: struct {
 		CANCELLED;
 		FAILED;
 	};
-	result_identity: Result_ID;
-	unavailable: Unavailable_Reason;
-	unsupported: Query_Kind;
-	cancellation: Cancellation_Reason;
-	failure: Failure;
+	result_identity:	Result_ID;
+	unavailable:		Unavailable_Reason;
+	unsupported:		Query_Kind;
+	cancellation:		Cancellation_Reason;
+	failure:			Failure;
 }
 
 Pending_Phase :: enum u8 {
@@ -88,16 +90,16 @@ Observation :: struct {
 		SHUTDOWN;
 		PENDING;
 	};
-	operation_identity: Operation_ID;
-	provider_frontier: []u8;
-	documents: [][]u8;
-	update: Ticket_Terminal;
-	world_identity: World_ID;
-	document: []u8;
-	context_identity: []u8;
-	query_kind: Query_Kind;
-	query: Query_Terminal;
-	phase: Pending_Phase;
+	operation_identity:	Operation_ID;
+	provider_frontier:	[]u8;
+	documents:			[][]u8;
+	update:				Ticket_Terminal;
+	world_identity:		World_ID;
+	document:			[]u8;
+	context_identity:	[]u8;
+	query_kind:			Query_Kind;
+	query:				Query_Terminal;
+	phase:				Pending_Phase;
 }
 
 is_terminal :: (observation: Observation) -> bool {
@@ -105,29 +107,29 @@ is_terminal :: (observation: Observation) -> bool {
 }
 
 Session_Options :: struct {
-	version: string;
-	workspace: []u8;
-	provider_namespace: []u8;
-	host_authority: []u8;
-	provider_capabilities: Provider_Adapter_Descriptor;
-	supported_tuples: []Schema_Tuple;
-	contexts: []Context_Registration;
-	requested_limits: Limit_Request;
+	version:				string;
+	workspace:				[]u8;
+	provider_namespace:		[]u8;
+	host_authority:			[]u8;
+	provider_capabilities:	Provider_Adapter_Descriptor;
+	supported_tuples:		[]Schema_Tuple;
+	contexts:				[]Context_Registration;
+	requested_limits:		Limit_Request;
 }
 
 Tracked_Document :: struct {
-	document: []u8;
-	provider_revision: []u8;
-	binding: Document_Binding;
-	disk_kind: type_of(Disk_State.kind);
-	disk_source_revision: []u8;
-	disk_context: []u8;
-	has_overlay: bool;
-	overlay_installation_revision: []u8;
-	overlay_source_revision: []u8;
-	overlay_context: []u8;
-	overlay_origin: Overlay_Origin;
-	selection: type_of(Selected_Document.selection);
+	document:						[]u8;
+	provider_revision:				[]u8;
+	binding:						Document_Binding;
+	disk_kind:						type_of(Disk_State.kind);
+	disk_source_revision:			[]u8;
+	disk_context:					[]u8;
+	has_overlay:					bool;
+	overlay_installation_revision:	[]u8;
+	overlay_source_revision:		[]u8;
+	overlay_context:				[]u8;
+	overlay_origin:					Overlay_Origin;
+	selection:						type_of(Selected_Document.selection);
 }
 
 Store_Mode :: enum u8 {
@@ -137,53 +139,56 @@ Store_Mode :: enum u8 {
 }
 
 Session_Description :: struct {
-	session_identity: Session_ID;
-	workspace: []u8;
-	provider_namespace: []u8;
-	lifecycle: Lifecycle;
-	accepted_frontier: []u8;
-	tracked_document_states: []Tracked_Document;
-	clock_identity: []u8;
-	effective_limits: Limits;
-	// No store binding exists before phase 6.
-	store_mode: Store_Mode;
+	session_identity:			Session_ID;
+	workspace:					[]u8;
+	provider_namespace:			[]u8;
+	lifecycle:					Lifecycle;
+	accepted_frontier:			[]u8;
+	tracked_document_states:	[]Tracked_Document;
+	clock_identity:				[]u8;
+	effective_limits:			Limits;
+
+	// No store binding exists before phase 6:
+	store_mode:					Store_Mode;
 }
 
 Opened :: struct {
-	session: Handle(.SESSION);
-	description: Session_Description;
+	session:		Handle(.SESSION);
+	description:	Session_Description;
 }
 
 Accepted :: struct {
-	ticket: Handle(.TICKET);
-	frontier: []u8;
+	ticket:		Handle(.TICKET);
+	frontier:	[]u8;
 }
 
 Analysis_Request :: struct {
-	version: string;
-	expected_frontier: []u8;
-	documents: [][]u8;
+	version:			string;
+	expected_frontier:	[]u8;
+	documents:			[][]u8;
 }
 
 Ticket_Observation :: struct {
-	terminal: bool;
-	observation: Observation;
-	waiter: Handle(.WAITER);
+	terminal:		bool;
+	observation:	Observation;
+	waiter:			Handle(.WAITER);
 }
 
-World_Selector :: struct {
+World_Selector :: struct {//QUESTION: this looks like it would be better as a [tagged] union...
 	kind: enum u8 {
 		PUBLISHED_UPDATE;
 		HEAD;
 	};
-	// `.PUBLISHED_UPDATE`: an update ticket, or an update waiter when `use_waiter` is set.
-	ticket: Handle(.TICKET);
-	waiter: Handle(.WAITER);
-	use_waiter: bool;
-	// `.HEAD`.
-	session: Handle(.SESSION);
-	workspace: []u8;
-	expected_frontier: []u8;
+
+	// `.PUBLISHED_UPDATE`: an update ticket, or an update waiter when `use_waiter` is set:
+	ticket:		Handle(.TICKET);
+	waiter:		Handle(.WAITER);
+	use_waiter:	bool;
+
+	// `.HEAD`:
+	session:			Handle(.SESSION);
+	workspace:			[]u8;
+	expected_frontier:	[]u8;
 }
 
 World_Acquisition :: struct {
@@ -192,22 +197,22 @@ World_Acquisition :: struct {
 		PENDING;
 		UNAVAILABLE;
 	};
-	world: Handle(.WORLD);
-	operation_identity: Operation_ID;
+	world:				Handle(.WORLD);
+	operation_identity:	Operation_ID;
 	unavailable: enum u8 {
 		NO_HEAD;
 		FRONTIER_MISMATCH;
 		UPDATE_TERMINAL;
 	};
-	published_frontier: []u8;
-	observation: Observation;
+	published_frontier:	[]u8;
+	observation:		Observation;
 }
 
 Query_Request :: struct {
-	version: string;
-	world: Handle(.WORLD);
-	document: []u8;
-	kind: Query_Kind;
+	version:	string;
+	world:		Handle(.WORLD);
+	document:	[]u8;
+	kind:		Query_Kind;
 }
 
 Query_Start :: struct {
@@ -216,19 +221,19 @@ Query_Start :: struct {
 		PENDING;
 		TERMINAL;
 	};
-	result: Handle(.RESULT);
-	waiter: Handle(.WAITER);
-	observation: Observation;
+	result:			Handle(.RESULT);
+	waiter:			Handle(.WAITER);
+	observation:	Observation;
 }
 
 Deadline :: struct {
-	clock_identity: []u8;
-	nanoseconds: u64;
+	clock_identity:	[]u8;
+	nanoseconds:	u64;
 }
 
 Wait_Observation :: struct {
-	timed_out: bool;
-	observation: Observation;
+	timed_out:		bool;
+	observation:	Observation;
 }
 
 Result_Acquisition :: struct {
@@ -237,24 +242,24 @@ Result_Acquisition :: struct {
 		PENDING;
 		TERMINAL;
 	};
-	result: Handle(.RESULT);
-	observation: Observation;
+	result:			Handle(.RESULT);
+	observation:	Observation;
 }
 
 Cancel_Outcome :: struct {
-	already_terminal: bool;
-	observation: Observation;
+	already_terminal:	bool;
+	observation:		Observation;
 }
 
 Completion_Record :: struct {
-	registration: Handle(.WAITER);
-	observation: Observation;
+	registration:	Handle(.WAITER);
+	observation:	Observation;
 }
 
 Diagnostics_Status :: struct {
-	parse_status: Parse_Status_Observation;
-	error_count: u64;
-	warning_count: u64;
+	parse_status:	Parse_Status_Observation;
+	error_count:	u64;
+	warning_count:	u64;
 }
 
 Member_State :: enum u8 {
@@ -265,86 +270,97 @@ Member_State :: enum u8 {
 }
 
 Selected_Member :: struct {
-	document: []u8;
-	provider_revision: []u8;
-	context_identity: []u8;
-	state: Member_State;
-	source: *Source_Backing;
-	filename: string;
+	document:			[]u8;
+	provider_revision:	[]u8;
+	context_identity:	[]u8;
+	state:				Member_State;
+	source:				*Source_Backing;
+	filename:			string;
 }
 
 Member_Syntax :: struct {
-	owner: *Owned_Syntax;
-	snapshot: *Syntax_Snapshot;
-	index: *Declaration_Index;
-	status: Diagnostics_Status;
-	// Filled by the first published diagnostics query task.
-	diagnostics: *Diagnostics_Projection;
+	owner:			*Owned_Syntax;
+	snapshot:		*Syntax_Snapshot;
+	index:			*Declaration_Index;
+	status:			Diagnostics_Status;
+
+	// Filled by the first published diagnostics query task:
+	diagnostics:	*Diagnostics_Projection;
 }
 
 World :: struct {
-	identity: World_ID;
-	frontier: []u8;
-	capture_key: []u8;
+	identity:		World_ID;
+	frontier:		[]u8;
+	capture_key:	[]u8;
+
 	// Canonical `DocumentID` order.
-	members: []Selected_Member;
-	syntax: []Member_Syntax;
-	// Coherent only when every member is a disk observation under one attested capture token.
-	consistency: Consistency;
+	members:		[]Selected_Member;
+
+	syntax:			[]Member_Syntax;
+
+	// Coherent only when every member is a disk observation under one attested capture token:
+	consistency:	Consistency;
+
 	state: enum u8 {
 		PENDING;
 		PUBLISHED;
 		FAILED;
 		CANCELLED;
 	};
-	references: s64;
+	references:		s64;
+	next_retired:	*World;
 }
 
 Query_Result :: struct {
-	identity: Result_ID;
-	world: *World;
-	member: s64;
-	kind: Query_Kind;
-	references: s64;
+	identity:	Result_ID;
+	world:		*World;
+	member:		s64;
+	kind:		Query_Kind;
+	references:	s64;
 }
 
 Result_Description :: struct {
-	result_identity: Result_ID;
-	world_identity: World_ID;
-	document: []u8;
-	source_revision: []u8;
-	context_identity: []u8;
-	kind: Query_Kind;
-	diagnostics_status: Diagnostics_Status;
-	// The protected syntax backing every query kind's references resolve against.
-	backing: *Syntax_Snapshot;
-	snapshot: *Syntax_Snapshot;
-	diagnostics: *Diagnostics_Projection;
-	index: *Declaration_Index;
+	result_identity:	Result_ID;
+	world_identity:		World_ID;
+	document:			[]u8;
+	source_revision:	[]u8;
+	context_identity:	[]u8;
+	kind:				Query_Kind;
+	diagnostics_status:	Diagnostics_Status;
+
+	// The protected syntax backing every query kind's references resolve against:
+	backing:			*Syntax_Snapshot;
+
+	snapshot:			*Syntax_Snapshot;
+	diagnostics:		*Diagnostics_Projection;
+	index:				*Declaration_Index;
 }
 
 Operation :: struct {
 	identity: Operation_ID;
-	kind: enum u8 {
+	kind: enum u8 {//QUESTION: this looks like it would be better as a [tagged] union...
 		UPDATE;
 		QUERY;
 		SHUTDOWN;
 	};
 	terminal: bool;
-	// `.UPDATE`.
-	frontier: []u8;
-	documents: [][]u8;
-	update: Ticket_Terminal;
-	// `.UPDATE` candidate or `.QUERY` world; held until the operation is reaped.
+
+	// `.UPDATE`:
+	frontier:	[]u8;
+	documents:	[][]u8;
+	update:		Ticket_Terminal;
+
+	// `.UPDATE` candidate or `.QUERY` world; held until the operation is reaped:
 	world: *World;
-	// `.QUERY`.
-	member: s64;
-	query_kind: Query_Kind;
-	query: Query_Terminal;
-	result: *Query_Result;
-	task: *Task;
-	registrations: s64;
-	waiters: [..]Slot_Reference;
+
+	// `.QUERY`:
+	member:			s64;
+	query_kind:		Query_Kind;
+	query:			Query_Terminal;
+	result:			*Query_Result;
+	task:			*Task;
+	registrations:	s64;
+	waiters:		[..]Slot_Reference;
 }
 
 Task :: struct {
@@ -353,91 +369,100 @@ Task :: struct {
 		PARSE_INDEX;
 		QUERY_PAYLOAD;
 	};
-	key: []u8;
-	world: *World;
-	member: s64;
+	key:	[]u8;
+	world:	*World;
+	member:	s64;
 	phase: enum u8 {
 		READY;
 		RUNNING;
 		STOP_REQUESTED;
 		TERMINAL;
 	};
-	attempt: u64;
-	operations: [..]*Operation;
+	attempt:	u64;
+	operations:	[..]*Operation;
 }
 
-// One per dispatch; the producer fills it once and the coordinator consumes it once.
+// One per dispatch; the producer fills it once and the coordinator consumes it once:
 Mailbox :: struct {
-	session: *Session;
-	task: *Task;
-	attempt: u64;
-	consumed: bool;
-	ok: bool;
-	failure: Failure;
-	syntax: []Member_Syntax;
-	diagnostics: *Diagnostics_Projection;
+	session:		*Session;
+	task:			*Task;
+	attempt:		u64;
+	consumed:		bool;
+	ok:				bool;
+	failure:		Failure;
+	syntax:			[]Member_Syntax;
+	diagnostics:	*Diagnostics_Projection;
+	retired_output:	Retired_Output;
 }
 
 Slot_Reference :: struct {
-	slot: u64;
-	generation: u64;
+	slot:		u64;
+	generation:	u64;
 }
 
 Registration :: struct {
-	kind: Handle_Kind;
-	operation: *Operation;
-	world: *World;
-	result: *Query_Result;
-	// `.WAITER`: its own terminal observation; waiters own prepared bytes while pending.
-	terminal: bool;
-	observation: Observation;
-	delivered: bool;
+	kind:			Handle_Kind;
+	operation:		*Operation;
+	world:			*World;
+	result:			*Query_Result;
+
+	// `.WAITER`: its own terminal observation; waiters own prepared bytes while pending:
+	terminal:		bool;
+
+	observation:	Observation;
+	delivered:		bool;
 }
 
 Retired_Output :: struct {
-	syntax: []Member_Syntax;
-	diagnostics: *Diagnostics_Projection;
+	syntax:			[]Member_Syntax;
+	diagnostics:	*Diagnostics_Projection;
+	next_retired:	*Retired_Output;
 }
 
-Session :: struct {
-	service: *Service;
-	heap: Owned_Heap;
-	gate: Mutex;
-	changed: Condition_Variable;
-	compute: Thread;
-	reaper: Thread;
-	threaded: bool;
-	worker_joined: bool;
-	call_pins: s64;
-	active_admissions: s64;
-	cleanup_pins: s64;
-	retiring: bool;
-	directory_retiring: bool;
-	identities: Session_Identities;
-	workspace: []u8;
-	lifecycle: Lifecycle;
-	provider: *Provider_Model;
-	ledger: Resource_Ledger;
-	registry: Handle_Registry;
-	registrations: [..]*Registration;
-	operations: [..]*Operation;
-	worlds: [..]*World;
-	tasks: [..]*Task;
-	ready: [..]*Task;
-	optional_ready: [..]*Task;
-	mailboxes: [..]*Mailbox;
-	retired_worlds: [..]*World;
-	retired_outputs: [..]Retired_Output;
-	retired_sources: [..]*Source_Backing;
-	completions: [..]Slot_Reference;
-	head: *World;
-	head_target: *World;
-	shutdown: *Operation;
-	shutdown_control: *Operation;
-	shutdown_registration: Handle(.SHUTDOWN);
-	session_released: bool;
-	// Deterministic monotonic clock, advanced only by `wait`.
+Session :: struct {//TODO: document fields, probably on all the big structs.
+	service:				*Service;
+	heap:					Owned_Heap;
+	gate:					Mutex;
+	changed:				Condition_Variable;
+	compute:				Thread;
+	reaper:					Thread;
+	threaded:				bool;
+	worker_joined:			bool;
+	call_pins:				s64;
+	active_admissions:		s64;
+	cleanup_pins:			s64;
+	retiring:				bool;
+	directory_retiring:		bool;
+	identities:				Session_Identities;
+	workspace:				[]u8;
+	lifecycle:				Lifecycle;
+	provider:				*Provider_Model;
+	ledger:					Resource_Ledger;
+	registry:				Handle_Registry;
+	registrations:			[..]*Registration;
+	operations:				[..]*Operation;
+	worlds:					[..]*World;
+	tasks:					[..]*Task;
+	ready:					[..]*Task;
+	optional_ready:			[..]*Task;
+	mailboxes:				[..]*Mailbox;
+	retired_world_head:		*World;
+	retired_world_tail:		*World;
+	retired_output_head:	*Retired_Output;
+	retired_output_tail:	*Retired_Output;
+	retired_source_head:	*Source_Backing;
+	retired_source_tail:	*Source_Backing;
+	completions:			[..]Slot_Reference;
+	head:					*World;
+	head_target:			*World;
+	shutdown:				*Operation;
+	shutdown_control:		*Operation;
+	shutdown_registration:	Handle(.SHUTDOWN);
+	session_released:		bool;
+
+	// Deterministic monotonic clock, advanced only by `wait`:
 	now: u64;
+
 	#if TEST_HOOKS {
 		// == Per-session controls and deterministic barriers ==
 		// Behaviour switches and allocator callbacks; worker failure/interleaving controls and coordinator negative controls:
@@ -448,9 +473,9 @@ Session :: struct {
 }
 
 Service :: struct {
-	directory: Mutex;
-	clock_base: Apollo_Time;
-	allocator: Allocator;
+	directory:	Mutex;
+	clock_base:	Apollo_Time;
+	allocator:	Allocator;
 	#if TEST_HOOKS {
 		// == Owned-memory accounting ==
 		// Atomic live session/owner allocation count; worker rollback, retirement and final-zero-ledger checks:
@@ -484,11 +509,11 @@ Service :: struct {
 		// Reject changed directory membership after unlocked allocation instead of refreshing; `test_directory_allocation_interleavings`:
 		reject_changed_directory: bool;
 	}
-	incarnation: Service_Incarnation;
-	clock_identity: []u8;
-	ceilings: Limits;
-	minima: Limits;
-	sessions: [..]*Session;
+	incarnation:	Service_Incarnation;
+	clock_identity:	[]u8;
+	ceilings:		Limits;
+	minima:			Limits;
+	sessions:		[..]*Session;
 }
 
 // `epoch` must come from the trusted issuer (phase 2 `reserve_epoch`).
@@ -2755,12 +2780,12 @@ release :: (service: *Service, handle: Handle($K)) -> bool, Operation_Error {
 
 		for session.provider.documents {
 			if it.disk.source {
-				array_add(*session.retired_sources, it.disk.source);
+				retire_source(session, it.disk.source);
 				it.disk.source = null;
 			}
 
 			if it.has_overlay && it.overlay.source {
-				array_add(*session.retired_sources, it.overlay.source);
+				retire_source(session, it.overlay.source);
 				it.overlay.source = null;
 				it.has_overlay = false;
 			}
@@ -4731,13 +4756,17 @@ release_member_syntax :: (syntax: *Member_Syntax) {
 
 release_mailbox_output :: (mailbox: *Mailbox) {
 	if mailbox.syntax.count || mailbox.diagnostics {
-		array_add(
-			*mailbox.session.retired_outputs,
-			.{
-				syntax = mailbox.syntax,
-				diagnostics = mailbox.diagnostics,
-			}
-		);
+		output := *mailbox.retired_output;
+		output.syntax = mailbox.syntax;
+		output.diagnostics = mailbox.diagnostics;
+		session := mailbox.session;
+		if session.retired_output_tail {
+			session.retired_output_tail.next_retired = output;
+		} else {
+			session.retired_output_head = output;
+		}
+
+		session.retired_output_tail = output;
 	}
 
 	mailbox.syntax = .[];
@@ -4757,7 +4786,29 @@ release_world :: (session: *Session, world: *World) {
 		}
 	}
 
-	array_add(*session.retired_worlds, world);
+	if session.retired_world_tail {
+		session.retired_world_tail.next_retired = world;
+	} else {
+		session.retired_world_head = world;
+	}
+
+	session.retired_world_tail = world;
+}
+
+retire_source :: (session: *Session, source: *Source_Backing) {
+	source.retired_references += 1;
+	if source.retired_references != 1 {
+		return;
+	}
+
+
+	if session.retired_source_tail {
+		session.retired_source_tail.next_retired = source;
+	} else {
+		session.retired_source_head = source;
+	}
+
+	session.retired_source_tail = source;
 }
 
 // Frees terminal operations no registration can observe any more.
@@ -4797,9 +4848,9 @@ check_stopped :: (session: *Session) {
 		|| session.threaded && !session.worker_joined
 		|| session.active_admissions
 		|| session.cleanup_pins
-		|| session.retired_worlds.count
-		|| session.retired_outputs.count
-		|| session.retired_sources.count
+		|| session.retired_world_head
+		|| session.retired_output_head
+		|| session.retired_source_head
 	) {
 		return;
 	}
@@ -4842,10 +4893,13 @@ destroy_session :: (session: *Session) {
 
 	for session.mailboxes {
 		release_mailbox_output(it);
-		free(it);
 	}
 
 	cleanup_owned(session);
+
+	for session.mailboxes {
+		free(it);
+	}
 
 	for session.tasks {
 		array_free(it.operations);
@@ -4869,9 +4923,6 @@ destroy_session :: (session: *Session) {
 	array_free(session.ready);
 	array_free(session.optional_ready);
 	array_free(session.mailboxes);
-	array_free(session.retired_worlds);
-	array_free(session.retired_outputs);
-	array_free(session.retired_sources);
 	array_free(session.completions);
 	array_free(session.registry.slots);
 	destroy(*session.changed);

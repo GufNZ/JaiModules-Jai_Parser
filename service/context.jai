@@ -1,14 +1,14 @@
 // Context registry (phase 3 step 5): the implemented schema tuple, the `jai-cache-syntax-context/1` descriptor and its admission, per CACHE_CONTRACTS.md "Syntax Context Registry and Adapter Bindings" and the milestone-2 `SchemaTuple` closure.
 // Only the one tuple and producer this build implements are admitted; anything else rejects without a fallback.
 
-SYNTAX_CONTEXT_SCHEMA :: "jai-cache-syntax-context/1";
-PARSE_PROFILE :: "jai-cache-parse-profile/1";
-DIAGNOSTIC_PROFILE :: "jai-cache-diagnostic-profile/1";
+SYNTAX_CONTEXT_SCHEMA	:: "jai-cache-syntax-context/1";
+PARSE_PROFILE			:: "jai-cache-parse-profile/1";
+DIAGNOSTIC_PROFILE		:: "jai-cache-diagnostic-profile/1";
 
-// What the two profile identifiers resolve to in the descriptor's `parse_profile` and `diagnostic_profile` fields.
-GRAMMAR_PROFILE :: "jai-parser-grammar/1";
-RECOVERY_POLICY :: "jai-parser-recovery/1";
-MESSAGE_POLICY :: "jai-parser-messages/1";
+// What the two profile identifiers resolve to in the descriptor's `parse_profile` and `diagnostic_profile` fields:
+GRAMMAR_PROFILE	:: "jai-parser-grammar/1";
+RECOVERY_POLICY	:: "jai-parser-recovery/1";
+MESSAGE_POLICY	:: "jai-parser-messages/1";
 
 PRESENTATION_LANGUAGE :: "en";
 
@@ -17,55 +17,55 @@ PRODUCER_NAMESPACE :: "jai-parser-service";
 SYNTAX_CONTEXT_DESCRIPTOR :: "syntax-context-descriptor";
 
 //TODO: replace these with #run enum_name(Path_Encoding.$VALUE);
-WINDOWS_UTF16LE :: "WINDOWS_UTF16LE";
-POSIX_BYTES :: "POSIX_BYTES";
+WINDOWS_UTF16LE	:: "WINDOWS_UTF16LE";
+POSIX_BYTES		:: "POSIX_BYTES";
 
 Schema_Tuple :: struct {
-	token_tags: string;
-	source_tokens: string;
-	nodes: string;
-	recovery: string;
-	declaration_index: string;
-	diagnostics: string;
-	snapshot: string;
-	authored_edges: string;
-	syntax_adapter: string;
-	parse_profile: string;
-	diagnostic_profile: string;
+	token_tags:			string;
+	source_tokens:		string;
+	nodes:				string;
+	recovery:			string;
+	declaration_index:	string;
+	diagnostics:		string;
+	snapshot:			string;
+	authored_edges:		string;
+	syntax_adapter:		string;
+	parse_profile:		string;
+	diagnostic_profile:	string;
 }
 
 operator == :: (a: Schema_Tuple, b: Schema_Tuple) -> bool {
-	return a.token_tags == b.token_tags
-		&& a.source_tokens == b.source_tokens
-		&& a.nodes == b.nodes
-		&& a.recovery == b.recovery
-		&& a.declaration_index == b.declaration_index
-		&& a.diagnostics == b.diagnostics
-		&& a.snapshot == b.snapshot
-		&& a.authored_edges == b.authored_edges
-		&& a.syntax_adapter == b.syntax_adapter
-		&& a.parse_profile == b.parse_profile
-		&& a.diagnostic_profile == b.diagnostic_profile;
+	return a.token_tags			== b.token_tags
+		&& a.source_tokens		== b.source_tokens
+		&& a.nodes				== b.nodes
+		&& a.recovery			== b.recovery
+		&& a.declaration_index	== b.declaration_index
+		&& a.diagnostics		== b.diagnostics
+		&& a.snapshot			== b.snapshot
+		&& a.authored_edges		== b.authored_edges
+		&& a.syntax_adapter		== b.syntax_adapter
+		&& a.parse_profile		== b.parse_profile
+		&& a.diagnostic_profile	== b.diagnostic_profile;
 }
 
 IMPLEMENTED_SCHEMA_TUPLE :: Schema_Tuple.{
-	token_tags = TOKEN_TAGS_SCHEMA,
-	source_tokens = SOURCE_TOKENS_SCHEMA,
-	nodes = AUTHORED_NODES_SCHEMA,
-	recovery = RECOVERY_SCHEMA,
-	declaration_index = DECLARATION_INDEX_SCHEMA,
-	diagnostics = SYNTAX_DIAGNOSTICS_SCHEMA,
-	snapshot = SYNTAX_SNAPSHOT_SCHEMA,
-	authored_edges = AUTHORED_EDGES_SCHEMA,
-	syntax_adapter = SYNTAX_ADAPTER_SCHEMA,
-	parse_profile = PARSE_PROFILE,
-	diagnostic_profile = DIAGNOSTIC_PROFILE
+	token_tags			= TOKEN_TAGS_SCHEMA,
+	source_tokens		= SOURCE_TOKENS_SCHEMA,
+	nodes				= AUTHORED_NODES_SCHEMA,
+	recovery			= RECOVERY_SCHEMA,
+	declaration_index	= DECLARATION_INDEX_SCHEMA,
+	diagnostics			= SYNTAX_DIAGNOSTICS_SCHEMA,
+	snapshot			= SYNTAX_SNAPSHOT_SCHEMA,
+	authored_edges		= AUTHORED_EDGES_SCHEMA,
+	syntax_adapter		= SYNTAX_ADAPTER_SCHEMA,
+	parse_profile		= PARSE_PROFILE,
+	diagnostic_profile	= DIAGNOSTIC_PROFILE
 };
 
-// The `QueryKind` payloads this registry supplies, in registry order.//QUESTION: is this for tests only?  If so, can we conditionally compile it?
+// The `QueryKind` payloads this registry supplies, in registry order:	//QUESTION: is this for tests only?  If so, can we conditionally compile it?
 IMPLEMENTED_QUERY_KINDS :: string.["SYNTAX_SNAPSHOT", "SYNTAX_DIAGNOSTICS", "SYNTAX_DECLARATION_INDEX"];
 
-// `V(SchemaTuple)`: a record of the eleven identifiers in field order.
+// `V(SchemaTuple)`: a record of the eleven identifiers in field order:
 schema_tuple_value :: (tuple: Schema_Tuple) -> bool, []u8 {
 	identifiers := string.[
 		tuple.token_tags,
@@ -101,7 +101,7 @@ tuple_schema :: () -> []u8 {
 	return schema;
 }
 
-// `K("syntax-configuration", [V(Sequence(SchemaTuple), set)])` over a duplicate-free set of implemented tuples, in canonical byte order.
+// `K("syntax-configuration", [V(Sequence(SchemaTuple), set)])` over a duplicate-free set of implemented tuples, in canonical byte order:
 configuration_id :: (tuples: []Schema_Tuple) -> bool, []u8 {
 	if !tuples.count {
 		return false, .[];
@@ -145,7 +145,7 @@ Path_Value :: struct {
 	code_units: []u8;
 }
 
-// Exact UTF-16LE code units of a UTF-8 spelling; rejects invalid UTF-8, NUL and empty input.
+// Exact UTF-16LE code units of a UTF-8 spelling; rejects invalid UTF-8, NUL and empty input:
 windows_path_value :: (spelling: string) -> bool, Path_Value {
 	if !spelling.count || !is_valid_utf8(xx spelling) {
 		return false, .{};
@@ -205,7 +205,7 @@ posix_path_value :: (bytes: string) -> bool, Path_Value {
 	return true, .{encoding = .POSIX_BYTES, code_units = xx copy_string(bytes)};
 }
 
-// `K("path", [encoding_tag, code_units])`.
+// `K("path", [encoding_tag, code_units])`:
 path_key :: (path: Path_Value) -> []u8 {
 	tag := ifx path.encoding == .WINDOWS_UTF16LE
 		then WINDOWS_UTF16LE
@@ -219,7 +219,7 @@ Context_Paths :: struct {
 	relative_base: Path_Value;
 }
 
-// The ten descriptor fields in schema order.
+// The ten descriptor fields in schema order:
 SYNTAX_CONTEXT_FIELDS :: string.[//QUESTION: enum?
 	"producer",
 	"syntax_schemas",
@@ -233,7 +233,7 @@ SYNTAX_CONTEXT_FIELDS :: string.[//QUESTION: enum?
 	"semantic_extension"
 ];
 
-// `K("syntax-context-descriptor", [K(field_name, values)...])` for this build's producer and the occurrence's paths.
+// `K("syntax-context-descriptor", [K(field_name, values)...])` for this build's producer and the occurrence's paths:
 syntax_context_descriptor :: (paths: Context_Paths) -> bool, []u8 {
 	if !valid_path(paths.visible_filename) || !valid_path(paths.visible_directory) || !valid_path(paths.relative_base) {
 		return false, .[];
@@ -242,20 +242,20 @@ syntax_context_descriptor :: (paths: Context_Paths) -> bool, []u8 {
 
 	expected := expected_field_values();
 	fields: [SYNTAX_CONTEXT_FIELDS.count][]u8;
-	fields[0] = make_key("producer", ..expected.producer);
-	fields[1] = make_key("syntax_schemas", ..expected.syntax_schemas);
-	fields[2] = make_key("parser_parameters", ..expected.parser_parameters);
-	fields[3] = make_key("parse_profile", ..expected.parse_profile);
-	fields[4] = make_key("diagnostic_profile", ..expected.diagnostic_profile);
-	fields[5] = make_key("visible_filename", path_key(paths.visible_filename));
-	fields[6] = make_key("visible_directory", path_key(paths.visible_directory));
-	fields[7] = make_key("relative_base", path_key(paths.relative_base));
-	fields[8] = make_key("resolver_binding", make_key("NO_RESOLUTION"));
-	fields[9] = make_key("semantic_extension", make_key("UNSUPPORTED"));
+	fields[0] = make_key("producer",			..expected.producer);
+	fields[1] = make_key("syntax_schemas",		..expected.syntax_schemas);
+	fields[2] = make_key("parser_parameters",	..expected.parser_parameters);
+	fields[3] = make_key("parse_profile",		..expected.parse_profile);
+	fields[4] = make_key("diagnostic_profile",	..expected.diagnostic_profile);
+	fields[5] = make_key("visible_filename",	path_key(paths.visible_filename));
+	fields[6] = make_key("visible_directory",	path_key(paths.visible_directory));
+	fields[7] = make_key("relative_base",		path_key(paths.relative_base));
+	fields[8] = make_key("resolver_binding",	make_key("NO_RESOLUTION"));
+	fields[9] = make_key("semantic_extension",	make_key("UNSUPPORTED"));
 	return true, make_key(SYNTAX_CONTEXT_DESCRIPTOR, ..fields);
 }
 
-// `ContextID = K("context", [context_schema_identifier, canonical_context_descriptor])`.
+// `ContextID = K("context", [context_schema_identifier, canonical_context_descriptor])`:
 context_id :: (descriptor: []u8) -> []u8 {
 	return make_key("context", xx SYNTAX_CONTEXT_SCHEMA, descriptor);
 }
@@ -276,12 +276,12 @@ Context_Failure :: enum u8 {
 }
 
 Admitted_Context :: struct {
-	identity: []u8;
-	descriptor: []u8;
-	paths: Context_Paths;
+	identity:	[]u8;
+	descriptor:	[]u8;
+	paths:		Context_Paths;
 }
 
-// Parses and validates a `ContextRegistration` against this build, then recomputes its identity; the result owns copies of both byte strings.
+// Parses and validates a `ContextRegistration` against this build, then recomputes its identity; the result owns copies of both byte strings:
 admit_context :: (identity: []u8, descriptor: []u8) -> Context_Failure, Admitted_Context {
 	failure, result := validate_context_registration(identity, descriptor);
 	if failure != .NONE {
@@ -405,20 +405,20 @@ validate_context_registration :: (identity: []u8, descriptor: []u8) -> Context_F
 
 #scope_export
 
-// Parser, lexer and adapter source digests; called at compile time, including from a cross-compiling build's host.
+// Parser, lexer and adapter source digests; called at compile time, including from a cross-compiling build's host:
 build_source_digests :: () -> (parser_digest: [16]u8, lexer_digest: [16]u8, adapter_digest: [16]u8) {
 	return
 		source_digest(.["../module.jai", "../parser.jai", "../resolution.jai"]),
 		source_digest(.["../lexer.jai"]),
-		source_digest(.["canonical.jai", "context.jai", "diagnostics.jai", "digest.jai", "index.jai", "module.jai", "nodes.jai", "projection.jai", "snapshot.jai"]);
+		source_digest(.["canonical.jai", "context.jai", "diagnostics.jai", "digest.jai", "index.jai", "module.jai", "nodes.jai", "projection.jai", "snapshot.jai"]);//QUESTION: shouldn't these lists be compile-time generated?
 }
 
-// Nonempty, NUL-free, and an even byte count for UTF-16LE.
+// Nonempty, NUL-free, and an even byte count for UTF-16LE:
 path_is_valid :: (path: Path_Value) -> bool {
 	return valid_path(path);
 }
 
-// UTF-8 spelling for the parser's filename; POSIX bytes are copied unchanged.
+// UTF-8 spelling for the parser's filename; POSIX bytes are copied unchanged:
 path_spelling :: (path: Path_Value) -> string {
 	ok, spelling := try_path_spelling(path);
 	assert(ok);
@@ -557,17 +557,17 @@ values_equal :: (values: [][]u8, expected: [][]u8) -> bool {
 }
 
 Expected_Values :: struct {
-	producer: [6][]u8;
-	syntax_schemas: [4][]u8;
-	parser_parameters: [5][]u8;
-	parse_profile: [2][]u8;
-	diagnostic_profile: [3][]u8;
+	producer:			[6][]u8;
+	syntax_schemas:		[4][]u8;
+	parser_parameters:	[5][]u8;
+	parse_profile:		[2][]u8;
+	diagnostic_profile:	[3][]u8;
 }
 
-EXPECTED_COMPILER_SDK :: #run make_key("compiler-sdk", COMPILER_VERSION.([]u8), COMPILER_LAYOUT_DIGEST_BYTES);
-EXPECTED_SYNTAX_ADAPTER :: #run syntax_adapter_descriptor();
-EXPECTED_NO_RESOLUTION :: #run make_key("NO_RESOLUTION");
-EXPECTED_UNSUPPORTED_SEMANTICS :: #run make_key("UNSUPPORTED");
+EXPECTED_COMPILER_SDK			:: #run make_key("compiler-sdk", COMPILER_VERSION.([]u8), COMPILER_LAYOUT_DIGEST_BYTES);
+EXPECTED_SYNTAX_ADAPTER			:: #run syntax_adapter_descriptor();
+EXPECTED_NO_RESOLUTION			:: #run make_key("NO_RESOLUTION");
+EXPECTED_UNSUPPORTED_SEMANTICS	:: #run make_key("UNSUPPORTED");
 
 expected_field_values :: () -> Expected_Values {
 	result: Expected_Values;
@@ -608,7 +608,7 @@ boolean_byte :: inline (value: bool) -> []u8 {
 
 #assert Parser.ENABLE_TRIVIA "The full-featured syntax profile requires a trivia-enabled parser.";
 
-// Build identities: digests of the exact sources compiled into this build, taken at compile time.
+// Build identities: digests of the exact sources compiled into this build, taken at compile time:
 source_digest :: (files: []string) -> [16]u8 {
 	state: Digest_State;
 	digest_begin(*state);
@@ -622,7 +622,7 @@ source_digest :: (files: []string) -> [16]u8 {
 }
 
 #if IS_CROSS_COMPILING {
-	// A cross-target `#run` cannot call the target's file bindings; `#run,host` lambdas run outside this module's scope, so they import it.
+	// A cross-target `#run` cannot call the target's file bindings; `#run,host` lambdas run outside this module's scope, so they import it:
 	PARSER_BUILD_DIGEST_BYTES, LEXER_BUILD_DIGEST_BYTES, ADAPTER_BUILD_DIGEST_BYTES :: #run,host -> [16]u8, [16]u8, [16]u8 {
 		#import "Jai_Parser/service";
 		parser, lexer, adapter := build_source_digests();
@@ -632,7 +632,7 @@ source_digest :: (files: []string) -> [16]u8 {
 	PARSER_BUILD_DIGEST_BYTES, LEXER_BUILD_DIGEST_BYTES, ADAPTER_BUILD_DIGEST_BYTES :: #run build_source_digests();
 }
 
-// The compiler layouts the parser overlays, by name, size and member offsets.
+// The compiler layouts the parser overlays, by name, size and member offsets:
 COMPILER_LAYOUT_DIGEST_BYTES :: #run -> [16]u8 {
 	builder: String_Builder;
 	for Parser.TYPES {
@@ -648,11 +648,11 @@ COMPILER_LAYOUT_DIGEST_BYTES :: #run -> [16]u8 {
 
 COMPILER_VERSION :: #run compiler_get_version_info(null);
 
-// File-scope storage, so the views in `expected_field_values` stay valid.
-parser_build_digest := PARSER_BUILD_DIGEST_BYTES;
-lexer_build_digest := LEXER_BUILD_DIGEST_BYTES;
-adapter_build_digest := ADAPTER_BUILD_DIGEST_BYTES;
-compiler_layout_digest := COMPILER_LAYOUT_DIGEST_BYTES;
+// File-scope storage, so the views in `expected_field_values` stay valid;
+parser_build_digest		:= PARSER_BUILD_DIGEST_BYTES;
+lexer_build_digest		:= LEXER_BUILD_DIGEST_BYTES;
+adapter_build_digest	:= ADAPTER_BUILD_DIGEST_BYTES;
+compiler_layout_digest	:= COMPILER_LAYOUT_DIGEST_BYTES;
 
 #import "Compiler";
 #import "File";

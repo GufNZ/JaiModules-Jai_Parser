@@ -2,22 +2,23 @@
 set -uo pipefail
 
 usage() {
-	printf '\e[97m%s\e[0m\n'																					\
-		'Usage: bash run_all_tests.sh [all|x64|llvm] [OPTIONS]'													\
-		'Run standalone tests and corpus checks with unfiltered compiler/test output.'							\
-		'Default: x64 and optimized LLVM, plus native-worker traces on each backend.'							\
-		'--service: only worker/provider/coordinator/host/default and real-worker traces.'						\
-		'--analysis-ticket or --batch-pool: only the focused worker configuration.'								\
-		'--repeat=N: run each compiled configuration N times (1..30; default 1).'								\
-		'--timeout=N: execution timeout in seconds (0 disables; default 240 for service modes, otherwise 0).'	\
-		'--summary: show pass/error summaries and retain full logs under .build/test_runs.'						\
-		'--expect-summaries=N: require exactly N analysis summaries with --analysis-ticket.'					\
-		'--dry-run: print configurations without compiling or executing.'										\
-		'--check: check runner syntax, Git whitespace and worker line width without compiling.'					\
-		'Differential fixtures run once through the bounded differential runner.'								\
-		'Its child compile/runtime logs are printed after it finishes.'											\
+	printf '\e[97m%s\e[0m\n'																							\
+		'Usage: bash run_all_tests.sh [all|x64|llvm] [OPTIONS]'															\
+		'Run standalone tests and corpus checks with unfiltered compiler/test output.'								''	\
+		'Default:              x64 and optimized LLVM, plus native-worker traces on each backend.'					''	\
+		'--service:            only worker/provider/coordinator/host/default and real-worker traces.'					\
+		'--analysis-ticket'																								\
+		' or --batch-pool:     only the focused worker configuration.'													\
+		'--repeat=N:           run each compiled configuration N times (1..30; default 1).'								\
+		'--timeout=N:          execution timeout in seconds (0 disables; default 240 for service modes, otherwise 0).'	\
+		'--summary:            show pass/error summaries and retain full logs under .build/test_runs.'					\
+		'--expect-summaries=N: require exactly N analysis summaries with --analysis-ticket.'							\
+		'--dry-run:            print configurations without compiling or executing.'									\
+		'--check:              check runner syntax, Git whitespace and worker line width without compiling.'			\
+		'--query-operation:    only focused pending-query operation backing checks.'								''	\
+		'Differential fixtures run once through the bounded differential runner.'										\
+		'Its child compile/runtime logs are printed after it finishes.'												''	\
 		'Requires jai on PATH, or JAI=/path/to/jai.exe.  Failures do not stop later tests.'
-	printf '%s\n' '--query-operation: only focused pending-query operation backing checks.'
 }
 
 backend=all
@@ -30,19 +31,20 @@ summary=false
 expected_summaries=0
 for argument in "$@"; do
 	case "$argument" in
-		all|x64|llvm) backend=$argument ;;
-		--service) suite=service ;;
-		--analysis-ticket) suite=analysis-ticket ;;
-		--batch-pool) suite=batch-pool ;;
-		--query-operation) suite=query-operation ;;
-		--repeat=*) repeat=${argument#*=} ;;
-		--timeout=*) timeout_seconds=${argument#*=} ;;
-		--summary) summary=true ;;
-		--expect-summaries=*) expected_summaries=${argument#*=} ;;
-		--dry-run) dry_run=true ;;
-		--check) checks_only=true ;;
-		-?|-h|--help) usage; exit 0 ;;
-		*) usage >&2; exit 2 ;;
+		all|x64|llvm)			backend=$argument;;
+		--service)				suite=service;;
+		--analysis-ticket)		suite=analysis-ticket;;
+		--batch-pool)			suite=batch-pool;;
+		--query-operation)		suite=query-operation;;
+		--repeat=*)				repeat=${argument#*=};;
+		--timeout=*)			timeout_seconds=${argument#*=};;
+		--summary)				summary=true;;
+		--expect-summaries=*)	expected_summaries=${argument#*=};;
+		--dry-run)				dry_run=true;;
+		--check)				checks_only=true;;
+		-?|-h|--help)			usage; exit 0;;
+
+		*)						usage >&2; exit 2;;
 	esac
 done
 
@@ -84,8 +86,16 @@ if [[ $checks_only == true ]]; then
 		status=1
 	fi
 	if ! awk '
-		length($0) > 175 { print FILENAME ":" FNR ":" length($0) ":" $0; count++ }
-		END { print "Worker lines over 175 characters:", count + 0; if (count) { exit 1 } }
+		length($0) > 175 {
+			print FILENAME ":" FNR ":" length($0) ":" $0;
+			count++
+		}
+		END {
+			print "Worker lines over 175 characters:", count + 0;
+			if (count) {
+				exit 1
+			}
+		}
 	' service_worker_test.jai; then
 		status=1
 	fi
@@ -158,17 +168,34 @@ execute_command() {
 		"$@" 2>&1 | tee "$destination" | awk -v require_pass="$require_pass" -v expected="$expected" -v concise="$summary" '
 			{
 				line = $0;
-				if (line ~ /^Service.*PASS/) { passed = 1 }
-				if (line ~ /^X5 analysis candidate|^X5 analysis ticket|^X5 analysis receipt|^X3\/X5 analysis receipt|^Service analysis/) { count++ }
+				if (line ~ /^Service.*PASS/) {
+					passed = 1
+				}
+				if (line ~ /^X5 analysis candidate|^X5 analysis ticket|^X5 analysis receipt|^X3\/X5 analysis receipt|^Service analysis/) {
+					count++
+				}
 				problem = line ~ /Error:|Assertion|assertion|Wrong number|\.jai:|Cleanup callback|Held heap-gate/;
-				if (require_pass == "true" && problem) { failed = 1 }
-				if (concise != "true" || problem || line ~ /^Service.*PASS|Warning:|FAIL/) { print line }
+				if (require_pass == "true" && problem) {
+					failed = 1
+				}
+				if (concise != "true" || problem || line ~ /^Service.*PASS|Warning:|FAIL/) {
+					print line
+				}
 			}
 			END {
-				if (concise == "true" && count) { print "Analysis summaries:", count }
-				if (expected && count != expected) { print "Expected analysis summaries:", expected, "observed:", count + 0; failed = 1 }
-				if (require_pass == "true" && !passed) { print "Missing service PASS summary."; failed = 1 }
-				if (failed) { exit 1 }
+				if (concise == "true" && count) {
+					print "Analysis summaries:", count
+				}
+				if (expected && count != expected) {
+					print "Expected analysis summaries:", expected, "observed:", count + 0; failed = 1
+				}
+				if (require_pass == "true" && !passed) {
+					print "Missing service PASS summary.";
+					failed = 1
+				}
+				if (failed) {
+					exit 1
+				}
 			}'
 		local -a command_status=("${PIPESTATUS[@]}")
 		if (( command_status[0] )); then
@@ -197,9 +224,9 @@ run_test() {
 	fi
 
 	case "$variant" in
-		real-worker|analysis-ticket|batch-pool|query-operation) build+=(- "$variant") ;;
-		self-test) run+=(--self-test) ;;
-		all-fixtures) run+=(--all) ;;
+		real-worker|analysis-ticket|batch-pool|query-operation)	build+=(- "$variant");;
+		self-test)												run+=(--self-test);;
+		all-fixtures)											run+=(--all);;
 	esac
 
 	if [[ $timeout_seconds != 0 ]]; then

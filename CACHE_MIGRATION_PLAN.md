@@ -1737,6 +1737,15 @@ Exit: user decision recorded.
 						No production change was needed for completion-list cleanup qualification; terminal observation backing is a separate requirement above.
 						This closes `resolve_waiter` observation/completion staging and its backing-free qualification, not free-slot/retirement queue safety or the service-wide allocator callback contract.
 					- [ ] Make `release_handle` free-slot growth and `retired_worlds`/`retired_outputs`/`retired_sources` queue admission allocation-safe, including shutdown/release at exhausted capacity.
+						- [x] Make registration free-slot return and reuse allocation-free with intrusive slot links.
+						- [x] Queue retired worlds in an intrusive FIFO, detach the queue under the session gate and reclaim worlds outside it.
+						The coordinator test rejects any allocator call during retirement and checks order; all twelve service configurations pass.
+						- [x] Queue retired outputs in a FIFO using records embedded in their mailboxes; drain the queue outside the session gate before freeing mailbox storage.
+						The coordinator test rejects allocator calls and checks payload transfer, FIFO order and duplicate-release rejection; all twelve service configurations pass.
+						- [x] Queue retired source backing without allocation, counting every detached disk or overlay reference even when several share the same backing.
+						The coordinator test rejects allocator calls, checks FIFO order and verifies that cleanup drops exactly the retired references.
+						All twelve service configurations pass.
+						- [ ] Qualify combined retirement under release and shutdown at exhausted capacity.
 					Owner delegate allocation/free callbacks still require the outstanding no-host-callback-under-gate qualification; checked caller exporters alone do not close it.
 			Internal owner/snapshot/control allocation itself also lacks a recoverable failure boundary.
 			The service-wide no-host-callback-under-gate contract remains open.

@@ -1,27 +1,30 @@
 // Owned syntax snapshot (CACHE_MIGRATION_PLAN.md phase 3 step 1): one owner for source bytes, filename and every parse allocation.
 // Parsed with `resolve_identifiers = false` (E6), so nothing writes into the published tree after parsing.
 
+SYNTAX_SNAPSHOT_SCHEMA :: "jai-cache-syntax-snapshot/1";
+
 Owned_Syntax :: struct {
 	source: string;
 	filename: string;
 	parsed: Parser.Parsed_Source;
-	// Backs the copies, the token/diagnostic arrays, decoded token values and the parser's node pool chunks.
+
+	// Backs the copies, the token/diagnostic arrays, decoded token values and the parser's node pool chunks:
 	storage: Pool;
 }
 
-// Copies `source` and `filename` first, so the caller's buffers can be released or overwritten immediately afterwards.
+// Copies `source` and `filename` first, so the caller's buffers can be released or overwritten immediately afterwards:
 own_parse :: (source: string, filename: string) -> *Owned_Syntax {
 	owned := New(Owned_Syntax);
 	set_allocators(*owned.storage, context.allocator);
-	push_allocator(pool_allocator_proc, *owned.storage);
 
+	push_allocator(pool_allocator_proc, *owned.storage);
 	owned.source = copy_string(source);
 	owned.filename = copy_string(filename);
 	owned.parsed = Parser.parse_file(owned.source, owned.filename, resolve_identifiers = false);
 	return owned;
 }
 
-// Must run on the allocator that was current when `own_parse` created the owner.
+// Must run on the allocator that was current when `own_parse` created the owner:
 release_owned_syntax :: (owned: *Owned_Syntax) {
 	Parser.release_parser_tree(*owned.parsed);
 	Parser.release_parser_names(*owned.parsed);
@@ -29,14 +32,12 @@ release_owned_syntax :: (owned: *Owned_Syntax) {
 	free(owned);
 }
 
-SYNTAX_SNAPSHOT_SCHEMA :: "jai-cache-syntax-snapshot/1";
-
-// The `jai-cache-syntax-snapshot/1` envelope: one exact capture, or no envelope at all if any part fails conversion.
+// The `jai-cache-syntax-snapshot/1` envelope: one exact capture, or no envelope at all if any part fails conversion:
 Syntax_Snapshot :: struct {
 	owner:				*Owned_Syntax;
 	source:				string;
 
-	// -1 only for a safely retained parse with no root, never a fabricated empty file.
+	// -1 only for a safely retained parse with no root, never a fabricated empty file:
 	root:				s64;
 	nodes:				[]Node_Record;
 	helpers:			[]Helper_Record;

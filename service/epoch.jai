@@ -4,10 +4,13 @@
 
 EPOCH_ISSUER_SUPPORTED :: OS == .WINDOWS || OS == .LINUX || OS == .MACOS;
 
-EPOCH_FILE_NAME :: ".jaiParserEpoch";
-EPOCH_FILE_SCHEMA :: "jai-cache-epoch/1";
+EPOCH_FILE_NAME		:: ".jaiParserEpoch";
+EPOCH_FILE_SCHEMA	:: "jai-cache-epoch/1";
+
 EPOCH_FILE_MAXIMUM_BYTES :: 4096;
+
 EPOCH_LOCK_ATTEMPTS :: 500;
+
 EPOCH_LOCK_RETRY_MILLISECONDS :: 10;
 
 Epoch_Failure :: enum u8 {
@@ -69,7 +72,7 @@ decode_epoch_file :: (text: string, authority_namespace: []u8) -> (failure: Epoc
 	return .NONE, value;
 }
 
-// Reserves a fresh epoch greater than both the last recorded one and `floor` (the highest writer epoch in any readable store head).
+// Reserves a fresh epoch greater than both the last recorded one and `floor` (the highest writer epoch in any readable store head):
 reserve_epoch :: (directory: string, authority_namespace: []u8, floor: u64 = 0) -> (ok: bool, epoch: u64, failure: Epoch_Failure) {
 	#if !EPOCH_ISSUER_SUPPORTED {
 		return false, 0, .UNSUPPORTED_PLATFORM;
@@ -156,11 +159,11 @@ reserve_epoch :: (directory: string, authority_namespace: []u8, floor: u64 = 0) 
 		REPLACE;
 	}
 
-	// `shared_lock` drops the exclusion the lock provides; `lock_attempts` shortens contention waits.
+	// `shared_lock` drops the exclusion the lock provides; `lock_attempts` shortens contention waits:
 	Epoch_Test_Hooks :: struct {
-		fail_at: Epoch_Fault_Point;
-		shared_lock: bool;
-		lock_attempts := EPOCH_LOCK_ATTEMPTS;
+		fail_at:		Epoch_Fault_Point;
+		shared_lock:	bool;
+		lock_attempts	:= EPOCH_LOCK_ATTEMPTS;
 	}
 
 	epoch_test_hooks: Epoch_Test_Hooks;
@@ -171,7 +174,7 @@ reserve_epoch :: (directory: string, authority_namespace: []u8, floor: u64 = 0) 
 		Epoch_Lock :: s32;
 	}
 
-	// Holds the lock file the way a `shared_lock` reservation would, standing in for a concurrent holder.
+	// Holds the lock file the way a `shared_lock` reservation would, standing in for a concurrent holder:
 	hold_epoch_lock :: (directory: string) -> bool, Epoch_Lock {
 		path := tprint("%/%.lock", directory, EPOCH_FILE_NAME);
 		#if OS == .WINDOWS {
@@ -202,7 +205,7 @@ reserve_epoch :: (directory: string, authority_namespace: []u8, floor: u64 = 0) 
 	MOVEFILE_WRITE_THROUGH		:: 0x8;
 	ERROR_SHARING_VIOLATION		:: 0x20;
 
-	// Share mode 0 is the exclusive lock; closing the handle releases it.
+	// Share mode 0 is the exclusive lock; closing the handle releases it:
 	acquire_epoch_lock :: (path: string) -> (failure: Epoch_Failure, lock: HANDLE) {
 		attempts := EPOCH_LOCK_ATTEMPTS;
 		share: u32 = 0;
@@ -258,7 +261,7 @@ reserve_epoch :: (directory: string, authority_namespace: []u8, floor: u64 = 0) 
 		return false;
 	}
 
-	// A missing file reads as empty; anything over the bound or unreadable is an error rather than a truncated read.
+	// A missing file reads as empty; anything over the bound or unreadable is an error rather than a truncated read:
 	read_small_file :: (path: string) -> (failure: Epoch_Failure, contents: string) {
 		handle := CreateFileW(utf8_to_wide(path,, temp), FILE_GENERIC_READ, FILE_SHARE_READ, null, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null);
 		if handle == INVALID_HANDLE_VALUE {
@@ -306,13 +309,13 @@ reserve_epoch :: (directory: string, authority_namespace: []u8, floor: u64 = 0) 
 		return WriteFile(handle, text.data, xx text.count, *written, null) && written == xx text.count && FlushFileBuffers(handle);
 	}
 } else #if OS == .LINUX || OS == .MACOS {
-	// Linux bindings only declare the `flock` struct, so bind the function under another name.
+	// Linux bindings only declare the `flock` struct, so bind the function under another name:
 	epoch_flock :: (fd: s32, operation: s32) -> s32 #foreign epoch_libc "flock";
 	epoch_libc :: #library,system "libc";
 
 	EPOCH_FILE_MODE :: S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
 
-	// `flock` excludes other open descriptions, including threads of this process; `O_CLOEXEC` keeps children from inheriting the lock.
+	// `flock` excludes other open descriptions, including threads of this process; `O_CLOEXEC` keeps children from inheriting the lock:
 	acquire_epoch_lock :: (path: string) -> (failure: Epoch_Failure, descriptor: s32) {
 		fd := open(temp_c_string(path), O_RDWR | O_CREAT | O_CLOEXEC, EPOCH_FILE_MODE);
 		if fd < 0 {
@@ -354,7 +357,7 @@ reserve_epoch :: (directory: string, authority_namespace: []u8, floor: u64 = 0) 
 		close(fd);
 	}
 
-	// macOS `fsync` does not flush the drive cache; `F_FULLFSYNC` does, but some filesystems reject it.
+	// macOS `fsync` does not flush the drive cache; `F_FULLFSYNC` does, but some filesystems reject it:
 	flush_descriptor :: (fd: s32) -> bool {
 		#if OS == .MACOS {
 			if fcntl(fd, F_FULLFSYNC) != -1 {
@@ -366,7 +369,7 @@ reserve_epoch :: (directory: string, authority_namespace: []u8, floor: u64 = 0) 
 		return fsync(fd) == 0;
 	}
 
-	// `rename` replaces atomically; flushing the directory makes the new entry durable.
+	// `rename` replaces atomically; flushing the directory makes the new entry durable:
 	replace_epoch_file :: (staging_path: string, epoch_path: string, directory: string) -> bool {
 		if rename(temp_c_string(staging_path), temp_c_string(epoch_path)) {
 			return false;
@@ -384,7 +387,7 @@ reserve_epoch :: (directory: string, authority_namespace: []u8, floor: u64 = 0) 
 		return flush_descriptor(directory_fd);
 	}
 
-	// A missing file reads as empty; anything over the bound or unreadable is an error rather than a truncated read.
+	// A missing file reads as empty; anything over the bound or unreadable is an error rather than a truncated read:
 	read_small_file :: (path: string) -> (failure: Epoch_Failure, contents: string) {
 		fd := open(temp_c_string(path), O_RDONLY | O_CLOEXEC);
 		if fd < 0 {
@@ -398,7 +401,7 @@ reserve_epoch :: (directory: string, authority_namespace: []u8, floor: u64 = 0) 
 
 		defer close(fd);
 
-		// One byte past the bound detects oversized files without `fstat`.
+		// One byte past the bound detects oversized files without `fstat`:
 		buffer := talloc_string(EPOCH_FILE_MAXIMUM_BYTES + 1);
 		total: s64;
 		while total < buffer.count {

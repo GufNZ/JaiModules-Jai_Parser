@@ -2,18 +2,18 @@
 // Snapshot node IDs are authored preorder, so walking them in order yields the declaration-event order; a compound emits its whole binding group when it is reached.
 // The index borrows bytes from its snapshot and must be released first.
 
-DECLARATION_INDEX_SCHEMA :: "jai-cache-syntax-declaration-index/1";
-AUTHORED_EDGES_SCHEMA :: "jai-cache-authored-edges/1";
-SYNTAX_ADAPTER_SCHEMA :: "jai-cache-syntax-adapter/1";
-SYNTAX_REGISTRY_BINDING :: "jai-parser-syntax-registry/1";
+DECLARATION_INDEX_SCHEMA	:: "jai-cache-syntax-declaration-index/1";
+AUTHORED_EDGES_SCHEMA		:: "jai-cache-authored-edges/1";
+SYNTAX_ADAPTER_SCHEMA		:: "jai-cache-syntax-adapter/1";
+SYNTAX_REGISTRY_BINDING		:: "jai-parser-syntax-registry/1";
 
 Adapter_Feature :: struct {
-	name: string;
-	method: string;
-	observation_schema: string;
+	name:				string;
+	method:				string;
+	observation_schema:	string;
 }
 
-// The five capability features in the registry's table order.
+// The five capability features in the registry's table order:
 SYNTAX_ADAPTER_FEATURES :: Adapter_Feature.[
 	.{"authored_edges",				"CAPTURED",			AUTHORED_EDGES_SCHEMA},
 	.{"builder_function_routes",	"RECONSTRUCTED",	"jai-parser-route-correlation/1"},
@@ -22,7 +22,7 @@ SYNTAX_ADAPTER_FEATURES :: Adapter_Feature.[
 	.{"metadata_origins",			"RECONSTRUCTED",	"jai-parser-metadata-correlation/1"}
 ];
 
-// `K("syntax-adapter", [schema_id, registry_binding, K(feature_name, [method_tag, observation_schema])...])`.
+// `K("syntax-adapter", [schema_id, registry_binding, K(feature_name, [method_tag, observation_schema])...])`:
 syntax_adapter_descriptor :: () -> []u8 {
 	fields: [SYNTAX_ADAPTER_FEATURES.count + 2][]u8;
 	fields[0] = xx SYNTAX_ADAPTER_SCHEMA;
@@ -48,7 +48,7 @@ Coverage_Code :: enum u8 {
 	UNREGISTERED_SHARING;
 }
 
-// A set whose bit order is the registry's impact order, so its members are nonduplicated and ordered by construction.
+// A set whose bit order is the registry's impact order, so its members are nonduplicated and ordered by construction:
 Coverage_Impact :: enum_flags u8 {
 	DECLARATION_SET;
 	CONTAINMENT;
@@ -74,30 +74,34 @@ Coverage_Reason :: struct {
 	field_path:		[]Path_Step;
 	impacts:		Coverage_Impact;
 
-	// Null when no origin is available.
+	// Null when no origin is available:
 	origin:			*Origin;
 
 	detail_utf8:	string;
 }
 
 Entry_Name :: struct {
-	kind: enum u8 {
+	kind: enum u8 {//QUESTION: this looks like it would be better as a [tagged] union...
 		SPELLED;
 		ANONYMOUS;
 		MISSING;
 		UNMAPPED;
 	};
-	// Always `.SOURCE` for `.SPELLED`; the insertion or unlocated origin for `.MISSING`.
-	origin: Origin;
-	spelling_bytes: []u8;
-	// `.SPELLED` and `.UNMAPPED`.
-	producer_name_bytes: []u8;
+
+	// Always `.SOURCE` for `.SPELLED`; the insertion or unlocated origin for `.MISSING`:
+	origin:			Origin;
+
+	spelling_bytes:	[]u8;
+
+	// `.SPELLED` and `.UNMAPPED`:
+	producer_name_bytes:	[]u8;
 	form: enum u8 {
 		IDENTIFIER;
 		OPERATOR;
 	};
-	recovery_origins: []Origin;
-	// `.UNMAPPED` only.
+	recovery_origins:		[]Origin;
+
+	// `.UNMAPPED` only:
 	reason: Coverage_Reason;
 }
 
@@ -107,7 +111,8 @@ Container :: struct {
 		DECLARATION;
 		SHARED_REGION;
 	};
-	// Entry ID for `.DECLARATION`, region ID for `.SHARED_REGION`.
+
+	// Entry ID for `.DECLARATION`, region ID for `.SHARED_REGION`:
 	local_id: u64;
 }
 
@@ -123,7 +128,7 @@ Scope_Directive_Tag :: enum u8 {
 	RECOVERED_UNKNOWN;
 }
 
-// Snapshot node IDs; -1 means not set.
+// Snapshot node IDs; -1 means not set:
 Scope_Basis :: struct {
 	statement_list_node_id:			s64 = -1;
 	preceding_directive_node_id:	s64 = -1;
@@ -143,38 +148,38 @@ Program_Export_Name :: struct {
 Program_Export_Occurrence :: struct {
 	marker_origin: Origin;
 
-	// Null when no string token follows the marker.
+	// Null when no string token follows the marker:
 	name_argument: *Program_Export_Name;
 }
 
 Recovery_Status :: struct {
-	kind: enum u8 {
+	kind: enum u8 {//QUESTION: this looks like maybe it would be better as a [tagged] union...
 		PARSED;
 		RECOVERED;
 		UNCLASSIFIED;
 	};
 
-	// `.UNCLASSIFIED` only.//FIXME: field comments should end in : not .
+	// `.UNCLASSIFIED` only://FIXME: field comments should end in : not .
 	reason: Coverage_Reason;
 }
 
 Index_Entry :: struct {
-	local_entry_id: u64;
-	declaration_node_id: u64;
-	name: Entry_Name;
+	local_entry_id:			u64;
+	declaration_node_id:	u64;
+	name:					Entry_Name;
 	syntax_kind: enum u8 {
 		DECLARATION;
 		COMPOUND_BINDING;
 		ENUM_MEMBER;
 	};
-	declaration_origin: Origin;
-	container: Container;
-	visibility_syntax: Visibility_Syntax;
+	declaration_origin:		Origin;
+	container:				Container;
+	visibility_syntax:		Visibility_Syntax;
 
-	// Null when the declaration has no `#program_export` prefix.  Every binding of one compound shares one occurrence.
-	program_export_syntax: *Program_Export_Occurrence;
+	// Null when the declaration has no `#program_export` prefix.  Every binding of one compound shares one occurrence:
+	program_export_syntax:	*Program_Export_Occurrence;
 
-	recovery_status: Recovery_Status;
+	recovery_status:		Recovery_Status;
 }
 
 Shared_Region :: struct {
@@ -225,26 +230,26 @@ release_declaration_index :: (index: *Declaration_Index) {
 Index_Builder :: struct {
 	snapshot: *Syntax_Snapshot;
 
-	// Owning node, top-level owning field and that field's list position (-1 when not a list element), per node ID.
+	// Owning node, top-level owning field and that field's list position (-1 when not a list element), per node ID:
 	parents:		[]s64;
 	edges:			[]string;
 	edge_elements:	[]s64;
 	path:			[..]Path_Step;
 
-	// Container of the node itself, and the container its owned children inherit.
+	// Container of the node itself, and the container its owned children inherit:
 	outer:		[]Container;
 	inner:		[]Container;
 	region_ids:	[]s64;
 
-	// Nearest owning statement list and the position of the statement containing the node, or -1.
+	// Nearest owning statement list and the position of the statement containing the node, or -1:
 	anchor_lists:		[]s64;
 	anchor_positions:	[]s64;
 	enum_mode:			[]bool;
 
-	// Per statement list: the last direct scope directive reached so far in preorder.
+	// Per statement list: the last direct scope directive reached so far in preorder:
 	last_directive:	[]s64;
 
-	// Entry of an ordinary declaration or bare enum member node, or -1.
+	// Entry of an ordinary declaration or bare enum member node, or -1:
 	entry_of_node:	[]s64;
 	entries:		[..]Index_Entry;
 	regions:		[..]Shared_Region;
@@ -257,7 +262,7 @@ Name_Pair :: struct {
 	token:	string;
 }
 
-// Multi-character operator-declaration names from `parse_operator_declaration_name`, with the token each consumes.
+// Multi-character operator-declaration names from `parse_operator_declaration_name`, with the token each consumes:
 NAMED_OPERATOR_SPELLINGS :: Name_Pair.[
 	.{"==",		"ISEQUAL"},
 	.{"!=",		"ISNOTEQUAL"},
@@ -287,7 +292,7 @@ NAMED_OPERATOR_SPELLINGS :: Name_Pair.[
 
 SINGLE_CHARACTER_OPERATORS :: "+-*/%<>=.!~&|^";
 
-// Compound assignment operators (`operator_type` names) and the shared operator token each records.
+// Compound assignment operators (`operator_type` names) and the shared operator token each records:
 ASSIGNMENT_OPERATOR_TOKENS :: Name_Pair.[
 	.{"PLUS_ASSIGN",			"PLUSEQUALS"},
 	.{"MINUS_ASSIGN",			"MINUSEQUALS"},
@@ -305,25 +310,26 @@ ASSIGNMENT_OPERATOR_TOKENS :: Name_Pair.[
 	.{"LOGICAL_OR_ASSIGN",		"LOGICAL_OR_EQUALS"}
 ];
 
-RECOVERY_ATTRIBUTION_DETAIL :: "A recovery event's recorded owner is not part of the published syntax, so it cannot be attributed to declarations.";
-AMBIGUOUS_RECOVERY_DETAIL :: "A recovery event at this declaration's first token may have been recorded before or after its builder began.";
+RECOVERY_ATTRIBUTION_DETAIL	:: "A recovery event's recorded owner is not part of the published syntax, so it cannot be attributed to declarations.";
+AMBIGUOUS_RECOVERY_DETAIL	:: "A recovery event at this declaration's first token may have been recorded before or after its builder began.";
 
 fill_declaration_index :: (index: *Declaration_Index) -> Projection_Fault {
 	b: Index_Builder;
 	b.snapshot = index.snapshot;
 	nodes := b.snapshot.nodes;
 	count := nodes.count;
-	b.parents = NewArray(count, s64);
-	b.edges = NewArray(count, string);
-	b.edge_elements = NewArray(count, s64);
-	b.outer = NewArray(count, Container);
-	b.inner = NewArray(count, Container);
-	b.region_ids = NewArray(count, s64);
-	b.anchor_lists = NewArray(count, s64);
-	b.anchor_positions = NewArray(count, s64);
-	b.enum_mode = NewArray(count, bool);
-	b.last_directive = NewArray(count, s64);
-	b.entry_of_node = NewArray(count, s64);
+	b.parents			= NewArray(count, s64);
+	b.edges				= NewArray(count, string);
+	b.edge_elements		= NewArray(count, s64);
+	b.outer				= NewArray(count, Container);
+	b.inner				= NewArray(count, Container);
+	b.region_ids		= NewArray(count, s64);
+	b.anchor_lists		= NewArray(count, s64);
+	b.anchor_positions	= NewArray(count, s64);
+	b.enum_mode			= NewArray(count, bool);
+	b.last_directive	= NewArray(count, s64);
+	b.entry_of_node		= NewArray(count, s64);
+
 	for 0..count - 1 {
 		b.parents[it] = -1;
 		b.last_directive[it] = -1;
@@ -377,7 +383,7 @@ fill_declaration_index :: (index: *Declaration_Index) -> Projection_Fault {
 		direct_statement := parent_kind == "BLOCK" && edge == "statements";
 		if record.kind == {
 			case "DECLARATION";
-				// A compound's shared properties are a helper declaration, not an entry.
+				// A compound's shared properties are a helper declaration, not an entry:
 				if parent_kind != "COMPOUND_DECLARATION" || edge != "declaration_properties" {
 					entry := emit_declaration(*b, id);
 					b.inner[id] = .{kind = .DECLARATION, local_id = entry};
@@ -416,13 +422,15 @@ fill_declaration_index :: (index: *Declaration_Index) -> Projection_Fault {
 	index.entries = b.entries;
 	index.shared_regions = b.regions;
 	index.coverage = .{
-		kind = ifx b.reasons.count then .PARTIAL_SYNTAX_TRAVERSAL else .COMPLETE_SYNTAX_TRAVERSAL,
+		kind = ifx b.reasons.count
+			then .PARTIAL_SYNTAX_TRAVERSAL
+			else .COMPLETE_SYNTAX_TRAVERSAL,
 		reasons = b.reasons
 	};
 	return .{};
 }
 
-// Records each node's single owner and owning field, looking through helper records.
+// Records each node's single owner and owning field, looking through helper records:
 link :: (b: *Index_Builder, value: Field_Value, owner: s64) {
 	nodes := b.snapshot.nodes;
 	if value.kind == {
@@ -667,7 +675,7 @@ correlate_prefix :: (b: *Index_Builder, id: s64, first: s64, flags: Field_Value,
 	return i, export, !baked;
 }
 
-// The last name token of an operator declaration starting at `first`, or -1 when the tokens do not spell the producer's name.
+// The last name token of an operator declaration starting at `first`, or -1 when the tokens do not spell the producer's name:
 operator_name_end :: (b: *Index_Builder, first: s64, name: string) -> s64 {
 	open := token_is(b, first, byte_tag(#char "[")) && token_is(b, first + 1, byte_tag(#char "]"));
 	if name == {
@@ -706,7 +714,7 @@ attribute_recoveries :: (b: *Index_Builder) {
 	recoveries := b.snapshot.recoveries;
 	for recoveries {
 		if !it.discarded && it.owner == .UNPUBLISHED {
-			// Without a published owner no entry can be shown free of this event.
+			// Without a published owner no entry can be shown free of this event:
 			if b.entries.count {
 				reason := Coverage_Reason.{code = .UNCLASSIFIED_ROUTE, impacts = .RECOVERY, detail_utf8 = RECOVERY_ATTRIBUTION_DETAIL};
 				array_insert_at(*b.reasons, reason, 0);
@@ -752,7 +760,7 @@ attribute_recoveries :: (b: *Index_Builder) {
 	}
 
 
-	// An event recorded at a descendant declaration's first token, without covering earlier tokens, may belong to either builder.
+	// An event recorded at a descendant declaration's first token, without covering earlier tokens, may belong to either builder:
 	for event: recoveries {
 		if event.discarded || event.owner != .NODE || event.token_span.first < event.cursor {
 			continue;
@@ -814,7 +822,7 @@ emit_declaration :: (b: *Index_Builder, id: s64) -> u64 {
 			last = next;
 		}
 
-		// `parse_declaration_node` requires `:` after the name; a quick-lambda parameter is a bare identifier with no prefix.
+		// `parse_declaration_node` requires `:` after the name; a quick-lambda parameter is a bare identifier with no prefix:
 		quick := header_slot && edge == "arguments" && next == first && form == .IDENTIFIER;
 		if last >= 0 && (token_is(b, last + 1, byte_tag(#char ":")) || quick) {
 			name = spelled_name(b, start, last, producer, form);
@@ -837,7 +845,7 @@ emit_declaration :: (b: *Index_Builder, id: s64) -> u64 {
 	);
 }
 
-// An unnamed type-only parameter or return slot: its declaration starts at its type and has no value.
+// An unnamed type-only parameter or return slot: its declaration starts at its type and has no value:
 is_anonymous_slot :: (b: *Index_Builder, id: s64) -> bool {
 	record := *b.snapshot.nodes[id];
 	type_inst := field_of(record.fields, "type_inst");
@@ -846,7 +854,7 @@ is_anonymous_slot :: (b: *Index_Builder, id: s64) -> bool {
 		&& b.snapshot.nodes[type_inst.signed].token_span.first == record.token_span.first;
 }
 
-// Declared targets follow the recorded tokens: `.DECLARE`, or no modifier under a shared `:`.
+// Declared targets follow the recorded tokens: `.DECLARE`, or no modifier under a shared `:`:
 emit_compound :: (b: *Index_Builder, id: s64) {
 	nodes := b.snapshot.nodes;
 	tokens := b.snapshot.tokens;
@@ -875,7 +883,7 @@ emit_compound :: (b: *Index_Builder, id: s64) {
 		}
 	}
 
-	// -1 means recovery inserted the shared `:`.
+	// -1 means recovery inserted the shared `:`:
 	if (operator_token == -1 && !declares) || (operator_token != -1 && !token_is(b, operator_token, expected)) {
 		fail(b, .CONFLICTING_EVIDENCE, "operator_token", id);
 		return;
@@ -908,7 +916,7 @@ emit_compound :: (b: *Index_Builder, id: s64) {
 				then token_is(b, modifier_token, byte_tag(#char "="))
 				else modifier_token == -1;
 
-		// The last target has no separator unless recovery stopped after its comma.
+		// The last target has no separator unless recovery stopped after its comma:
 		separator_ok := (
 			token_is(b, separator_token, byte_tag(#char ","))
 			|| (separator_token == -1 && it_index == arguments.count - 1)
@@ -920,7 +928,7 @@ emit_compound :: (b: *Index_Builder, id: s64) {
 
 
 		declared := modifier == "DECLARE" || (modifier == "NONE" && declares);
-		// The builder diagnoses a declared target that is not an identifier and binds nothing for it.
+		// The builder diagnoses a declared target that is not an identifier and binds nothing for it:
 		if !declared || nodes[target].kind != "IDENT" {
 			continue;
 		}
@@ -963,7 +971,7 @@ emit_compound :: (b: *Index_Builder, id: s64) {
 	);
 }
 
-// `parse_enum_member` builds a bare member from exactly `IDENT ;`.
+// `parse_enum_member` builds a bare member from exactly `IDENT ;`:
 emit_enum_member :: (b: *Index_Builder, id: s64) {
 	record := *b.snapshot.nodes[id];
 	producer := field_of(record.fields, "name").bytes;
@@ -989,7 +997,7 @@ emit_enum_member :: (b: *Index_Builder, id: s64) {
 	b.entry_of_node[id] = b.entries.count - 1;
 }
 
-// Enum-member mode runs along the enum body and the branches of non-switch static ifs that are direct statements of such a block.
+// Enum-member mode runs along the enum body and the branches of non-switch static ifs that are direct statements of such a block:
 is_enum_member_block :: (b: *Index_Builder, id: s64) -> bool {
 	parent := b.parents[id];
 	if parent < 0 {

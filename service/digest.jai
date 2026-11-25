@@ -17,8 +17,8 @@ Digest_State :: struct {
 	meow: meow_state;
 }
 
-// Meow reads from the source pointer even for empty input, so empty views use this buffer.
 #scope_file
+// Meow reads from the source pointer even for empty input, so empty views use this buffer:
 empty_input: [1]u8;
 #scope_export
 

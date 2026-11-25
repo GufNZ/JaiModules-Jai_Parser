@@ -1,9 +1,9 @@
 // Canonical B/K/V encodings from CACHE_CONTRACTS.md ("Canonical Identity and Payload Refinement", milestone 2 "Canonical Values").
 // These bytes are equality and digest inputs; they never depend on Jai struct layout, padding or pointers.
 
-KEY_MAGIC :: "jai-cache-key";
-KEY_SCHEMA_VERSION : u32 : 1;
-INTERFACE_SCHEMA_PREFIX :: #run sprint("jai-cache-interface/%/", KEY_SCHEMA_VERSION);	//QUESTION: what is the 1 for, and does this make sense?  If so, apply everywhere?
+KEY_MAGIC				:: "jai-cache-key";
+KEY_SCHEMA_VERSION		:u32: 1;
+INTERFACE_SCHEMA_PREFIX	:: #run sprint("jai-cache-interface/%/", KEY_SCHEMA_VERSION);	//QUESTION: what is the 1 for, and does this make sense?  If so, apply everywhere?
 
 append_bytes :: (bytes: *[..]u8, data: []u8) {
 	old_count := bytes.count;

@@ -4,9 +4,9 @@
 
 Service :: #import "Jai_Parser/service"(TEST_HOOKS = true);
 
-NAMESPACE :: "test-provider";
-HOST :: "test-host";
-WORKSPACE :: "test-workspace";
+NAMESPACE	:: "test-provider";
+HOST		:: "test-host";
+WORKSPACE	:: "test-workspace";
 
 main :: () {
 	test_open_session();
@@ -15,8 +15,81 @@ main :: () {
 	test_supersession();
 	test_analysis_requests();
 	test_shutdown_and_limits();
+	test_world_retirement_without_allocation();
+	test_output_retirement_without_allocation();
+	test_source_retirement_without_allocation();
 	test_negative_controls();
 	print("Service coordinator \e[92mPASS\e[0m.\n");
+}
+
+reject_retirement_allocation :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+	assert(false, "Retirement invoked the allocator.");
+	return null;
+}
+
+test_world_retirement_without_allocation :: () {
+	session: Service.Session;
+	first := Service.World.{references = 2};
+	second := Service.World.{references = 1};
+	array_add(*session.worlds, *first);
+	array_add(*session.worlds, *second);
+	defer array_free(session.worlds);
+
+	{
+		push_allocator(Allocator.{proc = reject_retirement_allocation});
+		Service.release_world(*session, *first);
+		assert(first.references == 1 && !session.retired_world_head);
+		Service.release_world(*session, *second);
+		Service.release_world(*session, *first);
+	}
+
+	assert(!session.worlds.count && !first.references && !second.references);
+	assert(session.retired_world_head == *second && session.retired_world_tail == *first);
+	assert(second.next_retired == *first && !first.next_retired);
+}
+
+test_output_retirement_without_allocation :: () {
+	session: Service.Session;
+	syntax: [1]Service.Member_Syntax;
+	diagnostics: Service.Diagnostics_Projection;
+	first := Service.Mailbox.{session = *session, syntax = syntax};
+	second := Service.Mailbox.{session = *session, diagnostics = *diagnostics};
+	{
+		push_allocator(Allocator.{proc = reject_retirement_allocation});
+		Service.release_mailbox_output(*first);
+		Service.release_mailbox_output(*second);
+		Service.release_mailbox_output(*first);
+	}
+
+	assert(!first.syntax.data && !second.diagnostics);
+	assert(session.retired_output_head == *first.retired_output && session.retired_output_tail == *second.retired_output);
+	assert(first.retired_output.next_retired == *second.retired_output && !second.retired_output.next_retired);
+	assert(first.retired_output.syntax.data == syntax.data && first.retired_output.syntax.count == syntax.count);
+	assert(second.retired_output.diagnostics == *diagnostics);
+}
+
+test_source_retirement_without_allocation :: () {
+	fixture := open();
+	defer close(*fixture);
+
+	session := fixture.session;
+	shared := Service.Source_Backing.{references = 3};
+	other := Service.Source_Backing.{references = 2};
+	{
+		push_allocator(Allocator.{proc = reject_retirement_allocation});
+		Service.retire_source(session, *shared);
+		Service.retire_source(session, *other);
+		Service.retire_source(session, *shared);
+	}
+
+	assert(session.retired_source_head == *shared && session.retired_source_tail == *other);
+	assert(shared.next_retired == *other && !other.next_retired);
+	assert(shared.retired_references == 2 && other.retired_references == 1);
+	assert(shared.references == 3 && other.references == 2);
+	Service.cleanup_owned(session);
+	assert(shared.references == 1 && other.references == 1);
+	assert(!shared.retired_references && !other.retired_references && !shared.next_retired && !other.next_retired);
+	assert(!session.retired_source_head && !session.retired_source_tail && !session.cleanup_pins);
 }
 
 new_service :: () -> *Service.Service {

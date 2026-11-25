@@ -3,8 +3,8 @@
 // It holds source selection only; parsing, worlds and tickets belong to the coordinator.
 // Accepted bytes are copied into reference-counted backings, so a capture that retains one keeps it exact after later events.
 
-INTERFACE_VERSION :: "jai-cache-interface/1";
-SOURCE_PROVIDER_SCHEMA :: "jai-cache-source-provider/1";
+INTERFACE_VERSION		:: "jai-cache-interface/1";
+SOURCE_PROVIDER_SCHEMA	:: "jai-cache-source-provider/1";
 
 Path_Platform :: enum u8 {
 	WINDOWS_UTF16LE;
@@ -38,14 +38,14 @@ Lease_Capability :: struct {
 }
 
 Provider_Adapter_Descriptor :: struct {
-	adapter_schema: string;
-	authority_identity: []u8;
-	document_policy_version: u32;
-	path_platform: Path_Platform;
-	case_alias_link_policy: Alias_Policy;
-	reappearance_policy: Reappearance_Policy;
-	consistency_capabilities: Consistency_Capability;
-	lease_capabilities: Lease_Capability;
+	adapter_schema:				string;
+	authority_identity:			[]u8;
+	document_policy_version:	u32;
+	path_platform:				Path_Platform;
+	case_alias_link_policy:		Alias_Policy;
+	reappearance_policy:		Reappearance_Policy;
+	consistency_capabilities:	Consistency_Capability;
+	lease_capabilities:			Lease_Capability;
 }
 
 Provider_Failure :: enum u8 {
@@ -58,7 +58,7 @@ Provider_Failure :: enum u8 {
 }
 
 // Only what this build implements: distinct host-issued keys and copied inline bytes.
-// No alias validator or lease schema is registered.
+// No alias validator or lease schema is registered:
 validate_provider_descriptor :: (descriptor: Provider_Adapter_Descriptor) -> Provider_Failure {
 	if descriptor.adapter_schema != SOURCE_PROVIDER_SCHEMA {
 		return .SCHEMA;
@@ -83,12 +83,12 @@ validate_provider_descriptor :: (descriptor: Provider_Adapter_Descriptor) -> Pro
 	return ifx descriptor.lease_capabilities.kind == .COPY_ONLY then .NONE else .LEASE;
 }
 
-// `K("document", [provider_namespace, document_policy_version:u32, provider_document_key])`.
+// `K("document", [provider_namespace, document_policy_version:u32, provider_document_key])`:
 document_id :: (provider_namespace: []u8, policy_version: u32, document_key: []u8) -> []u8 {
 	return make_key("document", provider_namespace, little_endian(policy_version, 4), document_key);
 }
 
-// `K("source", [u32 1, u64 byte_count, DIGEST128(bytes)])`.
+// `K("source", [u32 1, u64 byte_count, DIGEST128(bytes)])`:
 source_revision_of :: (bytes: []u8) -> []u8 {
 	digest := digest_128(bytes);
 	return make_key("source", little_endian(1, 4), little_endian(xx bytes.count, 8), digest.bytes);
@@ -103,9 +103,9 @@ provider_frontier_id :: (provider_namespace: []u8, session: Session_ID, token: u
 }
 
 Document_Binding :: struct {
-	document: []u8;
-	absolute_path: Path_Value;
-	provider_policy_version: u32;
+	document:					[]u8;
+	absolute_path:				Path_Value;
+	provider_policy_version:	u32;
 }
 
 Source_Input :: struct {
@@ -121,28 +121,30 @@ Consistency :: struct {
 		IMMUTABLE_CAPTURE;
 		COHERENT_CAPTURE;
 	};
-	provider_namespace: []u8;
-	capture_token: []u8;
+	provider_namespace:	[]u8;
+	capture_token:		[]u8;
 }
 
 Observation_Provenance :: struct {
-	provider_identity: []u8;
-	observation_token: []u8;
-	consistency: Consistency;
+	provider_identity:	[]u8;
+	observation_token:	[]u8;
+	consistency:		Consistency;
 }
 
 Disk_Observation :: struct {
-	kind: enum u8 {
+	kind: enum u8 {//QUESTION: this looks like it would be better as a [tagged] union...
 		PRESENT;
 		ABSENT;
 	};
-	// `.PRESENT` only.
-	source: Source_Input;
-	source_revision: []u8;
-	// `.ABSENT` only.
-	provider_revision: []u8;
-	syntax_context: []u8;
-	provenance: Observation_Provenance;
+
+	// `.PRESENT` only:
+	source:				Source_Input;
+	source_revision:	[]u8;
+
+	// `.ABSENT` only:
+	provider_revision:	[]u8;
+	syntax_context:		[]u8;
+	provenance:			Observation_Provenance;
 }
 
 Expected_Provider_State :: struct {
@@ -159,20 +161,22 @@ Confirmation_Action :: enum u8 {
 }
 
 Host_Confirmation :: struct {
-	host_authority: []u8;
-	confirmation_token: []u8;
-	document: []u8;
-	expected_provider_state: Expected_Provider_State;
-	action: Confirmation_Action;
-	// Empty means null.
-	source_revision: []u8;
-	recovery_candidate: []u8;
+	host_authority:				[]u8;
+	confirmation_token:			[]u8;
+	document:					[]u8;
+	expected_provider_state:	Expected_Provider_State;
+	action:						Confirmation_Action;
+
+	// Empty means null:
+	source_revision:			[]u8;
+
+	recovery_candidate:			[]u8;
 }
 
 Range_Edit :: struct {
-	start_byte: u64;
-	end_byte: u64;
-	replacement: []u8;
+	start_byte:		u64;
+	end_byte:		u64;
+	replacement:	[]u8;
 }
 
 Event_Kind :: enum u8 {
@@ -185,32 +189,32 @@ Event_Kind :: enum u8 {
 	RENAME;
 }
 
-// One record for every arm; each kind reads only its own payload fields.
+// One record for every arm; each kind reads only its own payload fields:
 Document_Event :: struct {
-	document: []u8;
-	expected_provider_state: Expected_Provider_State;
-	source_context: []u8;
-	binding: *Document_Binding;
-	kind: Event_Kind;
+	document:					[]u8;
+	expected_provider_state:	Expected_Provider_State;
+	source_context:				[]u8;
+	binding:					*Document_Binding;
+	kind:						Event_Kind;//QUESTION: this looks like it would be better as a [tagged] union...
 
-	// `.SET_OVERLAY` and `.RESTORE_OVERLAY`.
+	// `.SET_OVERLAY` and `.RESTORE_OVERLAY`:
 	source: Source_Input;
 
-	// `.EDIT_OVERLAY`.
-	base_source_revision: []u8;
-	edits: []Range_Edit;
+	// `.EDIT_OVERLAY`:
+	base_source_revision:	[]u8;
+	edits:					[]Range_Edit;
 
-	// `.OBSERVE_DISK`, `.ACK_SAVE` and `.RESET_OVERLAY`.
+	// `.OBSERVE_DISK`, `.ACK_SAVE` and `.RESET_OVERLAY`:
 	disk: Disk_Observation;
 
-	// `.ACK_SAVE`.
-	written_source_revision: []u8;
-	expected_overlay_revision: []u8;
+	// `.ACK_SAVE`:
+	written_source_revision:	[]u8;
+	expected_overlay_revision:	[]u8;
 
-	// `.RESET_OVERLAY` and `.RESTORE_OVERLAY`.
-	host_confirmation: Host_Confirmation;
-	recovery_candidate: []u8;
-	resulting_provider_revision: []u8;
+	// `.RESET_OVERLAY` and `.RESTORE_OVERLAY`:
+	host_confirmation:				Host_Confirmation;
+	recovery_candidate:				[]u8;
+	resulting_provider_revision:	[]u8;
 }
 
 Context_Registration :: struct {
@@ -219,11 +223,11 @@ Context_Registration :: struct {
 }
 
 Source_Batch :: struct {
-	version: string;
-	session: Session_ID;
-	expected_frontier: []u8;
-	contexts: []Context_Registration;
-	events: []Document_Event;
+	version:			string;
+	session:			Session_ID;
+	expected_frontier:	[]u8;
+	contexts:			[]Context_Registration;
+	events:				[]Document_Event;
 }
 
 Operation_Error_Code :: enum u8 {
@@ -264,26 +268,28 @@ Admission_Reason :: struct {
 		SOURCE_ACQUISITION;
 		RESOURCE_EXHAUSTED;
 	};
-	limit: Limit_Name;
-	schema: string;
+	limit:	Limit_Name;
+	schema:	string;
 }
 
-// Only the arm selected by `code` is meaningful.
+// Only the arm selected by `code` is meaningful:
 Operation_Error :: struct {
-	code: Operation_Error_Code;
-	path: []Path_Step;
-	rule: Argument_Rule;
-	scope: Base_Scope;
-	document: []u8;
-	event_tag: string;
-	admission: Admission_Reason;
-	handle_kind: Handle_Kind;
+	code:			Operation_Error_Code;
+	path:			[]Path_Step;
+	rule:			Argument_Rule;
+	scope:			Base_Scope;
+	document:		[]u8;
+	event_tag:		string;
+	admission:		Admission_Reason;
+	handle_kind:	Handle_Kind;
 }
 
 Source_Backing :: struct {
-	revision:	[]u8;
-	bytes:		[]u8;
-	references:	s64;
+	revision:			[]u8;
+	bytes:				[]u8;
+	references:			s64;
+	retired_references:	s64;
+	next_retired:		*Source_Backing;
 }
 
 retain_source :: (backing: *Source_Backing) {
@@ -315,10 +321,10 @@ Disk_State :: struct {
 		ABSENT;
 		UNAVAILABLE;
 	};
-	source: *Source_Backing;
-	syntax_context: []u8;
-	provenance: Observation_Provenance;
-	reason: Unavailable_Reason;
+	source:			*Source_Backing;
+	syntax_context:	[]u8;
+	provenance:		Observation_Provenance;
+	reason:			Unavailable_Reason;
 }
 
 Overlay_Origin :: enum u8 {
@@ -327,49 +333,51 @@ Overlay_Origin :: enum u8 {
 }
 
 Overlay_State :: struct {
-	installation_revision: []u8;
-	source: *Source_Backing;
-	syntax_context: []u8;
-	origin: Overlay_Origin;
+	installation_revision:	[]u8;
+	source:					*Source_Backing;
+	syntax_context:			[]u8;
+	origin:					Overlay_Origin;
 }
 
 Document_State :: struct {
-	document: []u8;
-	provider_revision: []u8;
-	binding: Document_Binding;
-	disk: Disk_State;
-	has_overlay: bool;
-	overlay: Overlay_State;
-	// Every provider revision accepted for this document; a token is never reassigned.
-	used_revisions: [..][]u8;
+	document:			[]u8;
+	provider_revision:	[]u8;
+	binding:			Document_Binding;
+	disk:				Disk_State;
+	has_overlay:		bool;
+	overlay:			Overlay_State;
+
+	// Every provider revision accepted for this document; a token is never reassigned:
+	used_revisions:		[..][]u8;
 }
 
 Selected_Document :: struct {
-	document: []u8;
-	provider_revision: []u8;
-	syntax_context: []u8;
-	kind: enum u8 {
+	document:			[]u8;
+	provider_revision:	[]u8;
+	syntax_context:		[]u8;
+	kind: enum u8 {//QUESTION: this looks like it would be better as a [tagged] union...
 		PRESENT;
 		ABSENT;
 		UNKNOWN;
 		UNAVAILABLE;
 	};
-	source: *Source_Backing;
+	source:				*Source_Backing;
 	selection: enum u8 {
 		OVERLAY;
 		DISK;
 		RESTORED_OVERLAY;
 	};
 
-	// Set for overlay selections only.
-	overlay_revision: []u8;
+	// Set for overlay selections only:
+	overlay_revision:	[]u8;
 
 	// Null for host overlays.
-	provenance: *Observation_Provenance;
-	reason: Unavailable_Reason;
+	provenance:			*Observation_Provenance;
+
+	reason:				Unavailable_Reason;
 }
 
-// An overlay takes precedence over the acknowledged disk branch.
+// An overlay takes precedence over the acknowledged disk branch:
 selected_document :: (state: *Document_State) -> Selected_Document {
 	result := Selected_Document.{document = state.document, provider_revision = state.provider_revision};
 	if state.has_overlay {
@@ -418,12 +426,12 @@ Provider_Model :: struct {
 	frontier_counter:	Identity_Counter;
 	accepted_frontier:	[]u8;
 
-	// Each accepted batch's copied identities and metadata; released with the model.
+	// Each accepted batch's copied identities and metadata; released with the model:
 	batch_storage:		[..]*Pool;
 }
 
 // The descriptor must already have passed `validate_provider_descriptor`.
-// The initial frontier precedes every accepted batch.
+// The initial frontier precedes every accepted batch:
 open_provider_model :: (descriptor: Provider_Adapter_Descriptor, provider_namespace: []u8, session: Session_ID, host_authority: []u8, limits: Limits) -> *Provider_Model {
 	model := New(Provider_Model);
 	model.descriptor = descriptor;
@@ -465,7 +473,7 @@ find_document :: (model: *Provider_Model, document: []u8) -> *Document_State {
 	return null;
 }
 
-// Tracked documents in canonical `DocumentID` order; the states stay owned by the model.
+// Tracked documents in canonical `DocumentID` order; the states stay owned by the model:
 tracked_documents :: (model: *Provider_Model) -> []*Document_State {
 	result := array_copy(model.documents,, temp);
 	for i: 1..result.count - 1 {
@@ -494,7 +502,7 @@ find_context :: (model: *Provider_Model, identity: []u8) -> *Admitted_Context {
 	return null;
 }
 
-// Session-level registrations from `OpenSession`; all are admitted or none.
+// Session-level registrations from `OpenSession`; all are admitted or none:
 register_contexts :: (model: *Provider_Model, registrations: []Context_Registration) -> bool, Operation_Error {
 	admitted: [..]Admitted_Context;
 	for registrations {
@@ -528,7 +536,7 @@ register_contexts :: (model: *Provider_Model, registrations: []Context_Registrat
 	return true, .{};
 }
 
-// Validates the whole batch against staged copies, then commits every member and one new frontier together, or nothing.
+// Validates the whole batch against staged copies, then commits every member and one new frontier together, or nothing:
 apply_source_batch :: (model: *Provider_Model, batch: Source_Batch) -> (ok: bool, frontier: []u8, error: Operation_Error) {
 	storage := try_source_batch_pool();
 	if !storage {
@@ -979,7 +987,7 @@ stage_batch :: (staging: *Batch_Staging, batch: Source_Batch) -> bool {
 	}
 
 
-	// Each new registration must be used by this batch.
+	// Each new registration must be used by this batch:
 	for staging.contexts {
 		used := false;
 		for referenced: staging.referenced_contexts {
@@ -1017,7 +1025,7 @@ known_context :: (staging: *Batch_Staging, identity: []u8) -> bool {
 	return false;
 }
 
-// A host-issued key under this provider's namespace and policy version.
+// A host-issued key under this provider's namespace and policy version:
 valid_document_key :: (model: *Provider_Model, document: []u8) -> bool {
 	ok, fields := key_fields(document, "document", 3);
 	if !ok || !bytes_equal(fields[0], model.provider_namespace) || !fields[2].count {
@@ -1080,7 +1088,7 @@ valid_provenance :: (staging: *Batch_Staging, provenance: Observation_Provenance
 	return true;
 }
 
-// Applies a disk observation to `state.disk`, checking its revision claim against the bytes rather than trusting it.
+// Applies a disk observation to `state.disk`, checking its revision claim against the bytes rather than trusting it:
 stage_disk :: (staging: *Batch_Staging, state: *Document_State, observation: Disk_Observation, resulting: []u8) -> bool {
 	if !known_context(staging, observation.syntax_context) {
 		return argument(staging, .INCONSISTENT_BINDING, "disk", "context");
@@ -1265,7 +1273,7 @@ stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Docum
 	}
 
 
-	// The expected state is checked against the authoritative tracked state before anything is acquired.
+	// The expected state is checked against the authoritative tracked state before anything is acquired:
 	if event.expected_provider_state.kind == .UNTRACKED {
 		if existing {
 			return base_mismatch(staging, .DOCUMENT, event.document);
@@ -1327,7 +1335,7 @@ stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Docum
 	}
 
 
-	// Stage a private copy of the tracked state; the model is untouched until commit.
+	// Stage a private copy of the tracked state; the model is untouched until commit:
 	state_ok, state_storage := try_output_array(staging.state_allocator, 1, Document_State);
 	if !state_ok {
 		staging.error = .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
@@ -1432,7 +1440,7 @@ stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Docum
 			}
 
 
-			// Only the overlay installation the host saved is cleared, and only if its bytes are what was written.
+			// Only the overlay installation the host saved is cleared, and only if its bytes are what was written:
 			if state.has_overlay && bytes_equal(state.overlay.installation_revision, event.expected_overlay_revision) {
 				if !bytes_equal(state.overlay.source.revision, event.written_source_revision) {
 					return argument(staging, .INCONSISTENT_BINDING, "expected_overlay_revision");
@@ -1478,7 +1486,7 @@ stage_event :: (staging: *Batch_Staging, event: Document_Event, existing: *Docum
 	}
 
 
-	// The event's context names the resulting selection; an older acknowledged disk context may differ under a newer overlay.
+	// The event's context names the resulting selection; an older acknowledged disk context may differ under a newer overlay:
 	selected := selected_document(state);
 	if (selected.kind != .PRESENT && selected.kind != .ABSENT) || !bytes_equal(selected.syntax_context, event.source_context) {
 		return argument(staging, .INCONSISTENT_BINDING, "source_context");

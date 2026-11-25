@@ -1,17 +1,17 @@
 Owned_Allocation :: struct {
-	previous: *Owned_Allocation;
-	next: *Owned_Allocation;
-	size: s64;
-	heap: *Owned_Heap;
+	previous:	*Owned_Allocation;
+	next:		*Owned_Allocation;
+	size:		s64;
+	heap:		*Owned_Heap;
 }
 
 Owned_Heap :: struct {
-	gate: Mutex;
-	service: *Service;
-	delegate: Allocator;
-	first: *Owned_Allocation;
-	allocations: s64;
-	bytes: s64;
+	gate:			Mutex;
+	service:		*Service;
+	delegate:		Allocator;
+	first:			*Owned_Allocation;
+	allocations:	s64;
+	bytes:			s64;
 }
 
 #if TEST_HOOKS {
@@ -451,7 +451,7 @@ try_source_batch_storage :: (model: *Provider_Model, allocator: Allocator = cont
 }
 
 #if TEST_HOOKS {
-	//QUESTION: these are all very similar - can we generate them to cut down on boilerplate?
+	//QUESTION: these are all very similar - can we generate/macro them to cut down on boilerplate?
 	source_batch_revisions_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
 		session := data.(*Session);
 		if mode == .ALLOCATE || mode == .RESIZE {
@@ -663,10 +663,10 @@ try_source_batch_storage :: (model: *Provider_Model, allocator: Allocator = cont
 }
 
 Source_Provider_Backing :: struct {
-	model: *Provider_Model;
-	documents: []*Document_State;
-	contexts: []Admitted_Context;
-	states_count: s64;
+	model:			*Provider_Model;
+	documents:		[]*Document_State;
+	contexts:		[]Admitted_Context;
+	states_count:	s64;
 }
 
 #if TEST_HOOKS {
@@ -1578,10 +1578,10 @@ free_source_candidate_task_backing :: (backing: *Source_Candidate_Task_Backing, 
 	backing.* = .{};
 }
 
-Source_Candidate_World_Backing :: struct {
-	world: *World;
-	identity: [] u8;
-	worlds: [] *World;
+Source_Candidate_World_Backing :: struct {//FIXME: I think I'd prefer the struct definitions weren't mixed in with the procs, unless it's used only locally, in which case perhaps it could be defined inside the proc?
+	world:		*World;
+	identity:	[] u8;
+	worlds:		[] *World;
 }
 
 try_source_candidate_world_backing :: (
@@ -1975,9 +1975,9 @@ free_source_candidate_capture :: (capture: *Source_Candidate_Capture, allocator:
 }
 
 Source_Update_Backing :: struct {
-	operation: *Operation;
-	documents: [][]u8;
-	identity: []u8;
+	operation:	*Operation;
+	documents:	[][]u8;
+	identity:	[]u8;
 }
 
 #if TEST_HOOKS {

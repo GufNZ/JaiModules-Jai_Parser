@@ -25,8 +25,8 @@ issue_token :: (counter: *Identity_Counter) -> bool, u64 {
 }
 
 Service_Incarnation :: struct {
-	namespace: []u8;
-	session_counter: Identity_Counter;
+	namespace:			[]u8;
+	session_counter:	Identity_Counter;
 }
 
 // One per service bootstrap; `epoch` must come from the trusted issuer and never repeat for this authority.
@@ -39,10 +39,10 @@ clock_identity :: (incarnation: Service_Incarnation) -> []u8 {
 }
 
 Session_Identities :: struct {
-	session: Session_ID;
-	world_counter: Identity_Counter;
-	result_counter: Identity_Counter;
-	operation_counter: Identity_Counter;
+	session:			Session_ID;
+	world_counter:		Identity_Counter;
+	result_counter:		Identity_Counter;
+	operation_counter:	Identity_Counter;
 }
 
 issue_session :: (incarnation: *Service_Incarnation) -> bool, Session_Identities {

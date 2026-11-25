@@ -391,27 +391,27 @@ reaper_job :: (thread: *Thread) -> s64 {
 
 cleanup_owned :: (session: *Session) {
 	push_allocator(owner_allocator(session));
-	worlds:		[..]*World;
-	outputs:	[..]Retired_Output;
-	sources:	[..]*Source_Backing;
+	worlds:		*World;
+	outputs:	*Retired_Output;
+	sources:	*Source_Backing;
 	lock(
 		*session.gate,
 		#code {
-			worlds = session.retired_worlds;
-			outputs = session.retired_outputs;
-			sources = session.retired_sources;
-			if !worlds.count && !outputs.count && !sources.count {
+			worlds = session.retired_world_head;
+			outputs = session.retired_output_head;
+			sources = session.retired_source_head;
+			if !worlds && !outputs && !sources {
 				check_stopped(session);
 				return;
 			}
 
 
-			empty_worlds: [..] *World;
-			empty_outputs: [..] Retired_Output;
-			empty_sources: [..] *Source_Backing;
-			session.retired_worlds = empty_worlds;
-			session.retired_outputs = empty_outputs;
-			session.retired_sources = empty_sources;
+			session.retired_world_head = null;
+			session.retired_world_tail = null;
+			session.retired_output_head = null;
+			session.retired_output_tail = null;
+			session.retired_source_head = null;
+			session.retired_source_tail = null;
 			session.cleanup_pins += 1;
 		}
 	);
@@ -420,12 +420,14 @@ cleanup_owned :: (session: *Session) {
 		worker_pause(session, .CLEANUP);
 	}
 
-	for worlds {
-		for * it.syntax {
+	while worlds {
+		world := worlds;
+		worlds = world.next_retired;
+		for * world.syntax {
 			release_member_syntax(it);
 		}
 
-		for member: it.members {
+		for member: world.members {
 			if member.source {
 				release_source(member.source);
 			}
@@ -433,29 +435,37 @@ cleanup_owned :: (session: *Session) {
 			free(member.filename);
 		}
 
-		array_free(it.syntax);
-		array_free(it.members);
-		free(it);
+		array_free(world.syntax);
+		array_free(world.members);
+		free(world);
 	}
 
-	for outputs {
-		for * it.syntax {
+	while outputs {
+		output := outputs;
+		outputs = output.next_retired;
+		for * output.syntax {
 			release_member_syntax(it);
 		}
 
-		array_free(it.syntax);
-		if it.diagnostics {
-			release_diagnostics_projection(it.diagnostics);
+		array_free(output.syntax);
+		if output.diagnostics {
+			release_diagnostics_projection(output.diagnostics);
+		}
+
+		output.* = .{};
+	}
+
+	while sources {
+		source := sources;
+		sources = source.next_retired;
+		retired_references := source.retired_references;
+		source.next_retired = null;
+		source.retired_references = 0;
+		for 1..retired_references {
+			release_source(source);
 		}
 	}
 
-	for sources {
-		release_source(it);
-	}
-
-	array_free(worlds);
-	array_free(outputs);
-	array_free(sources);
 	lock(
 		*session.gate,
 		#code {

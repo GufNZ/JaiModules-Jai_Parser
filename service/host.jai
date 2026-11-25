@@ -3,28 +3,30 @@
 //  issues provider revisions, observation tokens and host confirmations, reads disk for observations
 //  and drains completions through a serial dispatcher.  It never writes source files; only the issuer writes `.jaiParserEpoch`.
 
-HARNESS_AUTHORITY_PREFIX :: "jai-parser-harness:";
-HARNESS_POLICY_VERSION :: 1;
+HARNESS_AUTHORITY_PREFIX	:: "jai-parser-harness:";
+HARNESS_POLICY_VERSION		:: 1;
 
 Harness_Host :: struct {
-	service: *Service;
-	session: Handle(.SESSION);
-	session_identity: Session_ID;
+	service:			*Service;
+	session:			Handle(.SESSION);
+	session_identity:	Session_ID;
 
-	// Absolute, `/`-separated, without a trailing separator.
-	root: string;
-	epoch: u64;
-	workspace: []u8;
-	provider_namespace: []u8;
-	host_authority: []u8;
-	revisions: Identity_Counter;
-	observations: Identity_Counter;
-	confirmations: Identity_Counter;
+	// Absolute, `/`-separated, without a trailing separator:
+	root:				string;
 
-	// Context identities the session already owns.
-	registered: [..][]u8;
-	dispatching: bool;
-	dispatch_failures: s64;
+	epoch:				u64;
+	workspace:			[]u8;
+	provider_namespace:	[]u8;
+	host_authority:		[]u8;
+	revisions:			Identity_Counter;
+	observations:		Identity_Counter;
+	confirmations:		Identity_Counter;
+
+	// Context identities the session already owns:
+	registered:			[..][]u8;
+
+	dispatching:		bool;
+	dispatch_failures:	s64;
 }
 
 Host_Failure :: enum u8 {
@@ -99,7 +101,7 @@ open_harness_host :: (root: string, ceilings: Limits, minima: Limits, requested_
 	return .NONE, host, .{};
 }
 
-// Shuts the session down, waits for `.STOPPED` and releases the session; child handles the caller still owns stay valid.
+// Shuts the session down, waits for `.STOPPED` and releases the session; child handles the caller still owns stay valid:
 close_harness_host :: (host: *Harness_Host) -> bool, Operation_Error {
 	ok, shutdown, error := request_shutdown(host.service, host.session);
 	if !ok {
@@ -122,7 +124,7 @@ harness_document :: (host: *Harness_Host, relative: string) -> []u8 {
 	return document_id(host.provider_namespace, HARNESS_POLICY_VERSION, xx relative);
 }
 
-// Relative paths stay inside the root: no absolute, drive or backslash spellings and no empty, `.` or `..` segments.
+// Relative paths stay inside the root: no absolute, drive or backslash spellings and no empty, `.` or `..` segments:
 valid_relative :: (relative: string) -> bool {
 	if !relative.count || relative[0] == #char "/" || find_index_from_left(relative, #char "\\") >= 0 || find_index_from_left(relative, #char ":") >= 0 {
 		return false;
@@ -140,13 +142,13 @@ valid_relative :: (relative: string) -> bool {
 }
 
 Host_Batch :: struct {
-	host: *Harness_Host;
-	description: Session_Description;
-	events: [..]Document_Event;
-	contexts: [..]Context_Registration;
+	host:			*Harness_Host;
+	description:	Session_Description;
+	events:			[..]Document_Event;
+	contexts:		[..]Context_Registration;
 }
 
-// Snapshots the accepted frontier and tracked states the batch's expected bases come from.
+// Snapshots the accepted frontier and tracked states the batch's expected bases come from:
 begin_batch :: (host: *Harness_Host) -> Host_Batch {
 	_, description := describe_session(host.service, host.session);
 	return .{host = host, description = description};
@@ -164,7 +166,7 @@ set_overlay :: (batch: *Host_Batch, relative: string, text: string) -> bool {
 	return true;
 }
 
-// Edits apply to the tracked overlay's bytes, each to the previous edit's result.
+// Edits apply to the tracked overlay's bytes, each to the previous edit's result:
 edit_overlay :: (batch: *Host_Batch, relative: string, edits: []Range_Edit) -> bool {
 	tracked := find_tracked(batch, relative);
 	event := prepare(batch, relative);
@@ -179,7 +181,7 @@ edit_overlay :: (batch: *Host_Batch, relative: string, edits: []Range_Edit) -> b
 	return true;
 }
 
-// Present bytes, confirmed absence, or `false` when the file exists but cannot be read; a read failure is never absence.
+// Present bytes, confirmed absence, or `false` when the file exists but cannot be read; a read failure is never absence:
 observe_disk :: (batch: *Host_Batch, relative: string) -> bool {
 	event := prepare(batch, relative);
 	if !event {
@@ -193,7 +195,7 @@ observe_disk :: (batch: *Host_Batch, relative: string) -> bool {
 	return ok;
 }
 
-// The host saved an overlay installation's bytes itself (default: the current one); clearing it needs matching bytes.
+// The host saved an overlay installation's bytes itself (default: the current one); clearing it needs matching bytes:
 ack_save :: (batch: *Host_Batch, relative: string, installation: []u8 = .[]) -> bool {
 	tracked := find_tracked(batch, relative);
 	event := prepare(batch, relative);
@@ -232,7 +234,7 @@ reset_overlay :: (batch: *Host_Batch, relative: string) -> bool {
 	return ok;
 }
 
-// The host confirms restoring `text` from `candidate`; the confirmation binds both.
+// The host confirms restoring `text` from `candidate`; the confirmation binds both:
 restore_overlay :: (batch: *Host_Batch, relative: string, text: string, candidate: []u8) -> bool {
 	event := prepare(batch, relative);
 	if !event || !candidate.count {
@@ -344,7 +346,7 @@ find_tracked :: (batch: *Host_Batch, relative: string) -> *Tracked_Document {
 	return null;
 }
 
-// Fills the identity, base, context, binding and a fresh provider revision shared by every event kind.
+// Fills the identity, base, context, binding and a fresh provider revision shared by every event kind:
 prepare :: (batch: *Host_Batch, relative: string) -> *Document_Event {
 	if !valid_relative(relative) {
 		return null;
@@ -412,7 +414,7 @@ disk_observation :: (host: *Harness_Host, event: *Document_Event) -> bool, Disk_
 	return true, observation;
 }
 
-// The document key is the relative path itself.
+// The document key is the relative path itself:
 relative_of :: (host: *Harness_Host, document: []u8) -> string {
 	_, view := parse_key(document, 3,, temp);//QUESTION: why is this unchecked?
 	return xx view.fields[2];

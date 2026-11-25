@@ -2,11 +2,11 @@
 // of `jai-cache-syntax-snapshot/1`, per CACHE_CONTRACTS.md "Recovery and Raw Diagnostics" and the registry's token sections.
 // Records borrow bytes from their `Owned_Syntax`; a projection must be released before its owner.
 
-TOKEN_TAGS_SCHEMA :: "jai-cache-token-tags/1";
-SOURCE_TOKENS_SCHEMA :: "jai-cache-source-tokens/1";
-RECOVERY_SCHEMA :: "jai-cache-recovery/1";
+TOKEN_TAGS_SCHEMA		:: "jai-cache-token-tags/1";
+SOURCE_TOKENS_SCHEMA	:: "jai-cache-source-tokens/1";
+RECOVERY_SCHEMA			:: "jai-cache-recovery/1";
 
-// The closed `.NAMED` registry, in the registry's table order.
+// The closed `.NAMED` registry, in the registry's table order:
 TOKEN_TAG_NAMES :: string.[//QUESTION: why not enum?
 	"IDENT",
 	"NUMBER",
@@ -87,7 +87,7 @@ TOKEN_TAG_NAMES :: string.[//QUESTION: why not enum?
 	"ERROR"
 ];
 
-// Producer values from 256 upwards, indexing TOKEN_TAG_NAMES or -1; aliases (`__FIRST_KEYWORD`, `__LAST_KEYWORD`) share their target's value.
+// Producer values from 256 upwards, indexing TOKEN_TAG_NAMES or -1; aliases (`__FIRST_KEYWORD`, `__LAST_KEYWORD`) share their target's value:
 NAMED_TOKEN_TAG_BASE :: 256;
 NAMED_TOKEN_TAG_BY_VALUE :: #run -> [] s16 {
 	info := type_info(Parser.Token_Type);
@@ -117,7 +117,7 @@ NAMED_TOKEN_TAG_BY_VALUE :: #run -> [] s16 {
 	return table;
 };
 
-KNOWN_VALUE_FLAGS : u32 : 0x1070_001F;
+KNOWN_VALUE_FLAGS :u32: 0x1070_001F;
 
 Token_Tag :: struct {
 	kind: enum u8 {
@@ -125,6 +125,7 @@ Token_Tag :: struct {
 		NAMED;
 	};
 	byte: u8;
+
 	// Registered name without the leading dot; empty for `.BYTE_CHAR`.
 	name: string;
 }
@@ -135,8 +136,8 @@ operator == :: (a: Token_Tag, b: Token_Tag) -> bool {
 
 // Half-open byte range of the owner's exact source.
 Byte_Span :: struct {
-	start: s64;
-	end: s64;
+	start:	s64;
+	end:	s64;
 }
 
 Coordinates :: struct {
@@ -148,8 +149,8 @@ Coordinates :: struct {
 
 // Signed producer observation; not dereferenceable without a separate range check.
 Token_Span_Observation :: struct {
-	first: s64;
-	one_past_last: s64;
+	first:			s64;
+	one_past_last:	s64;
 }
 
 Token_Value :: struct {
@@ -160,44 +161,44 @@ Token_Value :: struct {
 		STRING_BYTES;
 		NO_VALUE;
 	};
-	bytes: []u8;
-	bits: u64;
+	bytes:	[]u8;
+	bits:	u64;
 }
 
 Token_Record :: struct {
-	tag: Token_Tag;
-	origin: Byte_Span;
-	coordinates: Coordinates;
-	value_flags: u32;
-	ident_is_backticked: bool;
-	original: Byte_Span;
-	preceding: Byte_Span;
-	value: Token_Value;
+	tag:					Token_Tag;
+	origin:					Byte_Span;
+	coordinates:			Coordinates;
+	value_flags:			u32;
+	ident_is_backticked:	bool;
+	original:				Byte_Span;
+	preceding:				Byte_Span;
+	value:					Token_Value;
 }
 
 Synthetic_Token_Record :: struct {
-	insertion_index: s64;
-	tag: Token_Tag;
-	coordinates: Coordinates;
-	value_flags: u32;
-	ident_is_backticked: bool;
-	value: Token_Value;
+	insertion_index:		s64;
+	tag:					Token_Tag;
+	coordinates:			Coordinates;
+	value_flags:			u32;
+	ident_is_backticked:	bool;
+	value:					Token_Value;
 }
 
 Recovery_Observation :: struct {
-	kind: enum u8 {
+	kind: enum u8 {//QUESTION: this looks like it maybe would be better as a [tagged] union...
 		MISSING_TOKEN;
 		EXPECTED_EXPRESSION;
 		SKIPPED_TOKENS;
 		ERROR_SPAN;
 	};
-	token_span: Token_Span_Observation;
-	diagnostic_index: s64;
-	synthetic_token_index: s64;
-	cursor: s64;
-	discarded: bool;
+	token_span:				Token_Span_Observation;
+	diagnostic_index:		s64;
+	synthetic_token_index:	s64;
+	cursor:					s64;
+	discarded:				bool;
 
-	// `.UNPUBLISHED` until the snapshot envelope maps the owner to a node ID; token projections alone never resolve it.
+	// `.UNPUBLISHED` until the snapshot envelope maps the owner to a node ID; token projections alone never resolve it:
 	owner: enum u8 {
 		NONE;
 		NODE;
@@ -226,21 +227,21 @@ Diagnostic_Recovery_Action :: enum u8 {
 }
 
 Raw_Related_Diagnostic :: struct {
-	token_span: Token_Span_Observation;
-	message_bytes: []u8;
+	token_span:		Token_Span_Observation;
+	message_bytes:	[]u8;
 }
 
 Raw_Diagnostic :: struct {
-	code: Diagnostic_Code;
-	severity: Diagnostic_Severity;
-	token_span: Token_Span_Observation;
-	message_bytes: []u8;
-	expected_token: Token_Tag;
-	actual_token: Token_Tag;
-	recovery_action: Diagnostic_Recovery_Action;
-	lexer_line: s32;
-	lexer_column: s32;
-	related: []Raw_Related_Diagnostic;
+	code:				Diagnostic_Code;
+	severity:			Diagnostic_Severity;
+	token_span:			Token_Span_Observation;
+	message_bytes:		[]u8;
+	expected_token:		Token_Tag;
+	actual_token:		Token_Tag;
+	recovery_action:	Diagnostic_Recovery_Action;
+	lexer_line:			s32;
+	lexer_column:		s32;
+	related:			[]Raw_Related_Diagnostic;
 }
 
 Parse_Status_Observation :: enum u8 {
@@ -266,21 +267,21 @@ Projection_Failure :: enum u8 {
 	CONFLICTING_EVIDENCE;
 }
 
-// Which record failed conversion; `index` is its position in the producer array.
+// Which record failed conversion; `index` is its position in the producer array:
 Projection_Fault :: struct {
-	failure: Projection_Failure;
-	record: string;
-	index: s64;
+	failure:	Projection_Failure;
+	record:		string;
+	index:		s64;
 }
 
 Token_Projection :: struct {
-	owner: *Owned_Syntax;
-	tokens: []Token_Record;
-	synthetic_tokens: []Synthetic_Token_Record;
-	recoveries: []Recovery_Observation;
-	diagnostics: []Raw_Diagnostic;
-	parse_status: Parse_Status_Observation;
-	storage: Pool;
+	owner:				*Owned_Syntax;
+	tokens:				[]Token_Record;
+	synthetic_tokens:	[]Synthetic_Token_Record;
+	recoveries:			[]Recovery_Observation;
+	diagnostics:		[]Raw_Diagnostic;
+	parse_status:		Parse_Status_Observation;
+	storage:			Pool;
 }
 
 token_tag :: (type: Parser.Token_Type) -> bool, Token_Tag {
@@ -299,7 +300,7 @@ token_tag :: (type: Parser.Token_Type) -> bool, Token_Tag {
 	return true, .{kind = .NAMED, name = TOKEN_TAG_NAMES[NAMED_TOKEN_TAG_BY_VALUE[slot]]};
 }
 
-// On success the projection holds one record per producer record, in producer order.
+// On success the projection holds one record per producer record, in producer order:
 project_tokens :: (owner: *Owned_Syntax) -> Projection_Fault, *Token_Projection {
 	projection := New(Token_Projection);
 	projection.owner = owner;
@@ -349,7 +350,7 @@ fill_token_projection :: (projection: *Token_Projection) -> Projection_Fault {
 		}
 
 
-		// `add_missing_token` is the only producer and never sets a union member.
+		// `add_missing_token` is the only producer and never sets a union member:
 		projection.synthetic_tokens[it_index] = .{
 			insertion_index = it.insertion_index.(s64),
 			tag = tag,
@@ -444,7 +445,7 @@ project_source_token :: (record: *Token_Record, token: *Parser.Parser_Token, sou
 			value = .{kind = .STRING_BYTES, bytes = token.string_value.([] u8)};
 
 		case;
-			// Keywords copy their name; every other route, including `.ERROR` from `get_unused_token`, sets no union member.
+			// Keywords copy their name; every other route, including `.ERROR` from `get_unused_token`, sets no union member:
 			is_keyword := token.type >= .__FIRST_KEYWORD && token.type <= .__LAST_KEYWORD;
 			value = ifx is_keyword
 				then Token_Value.{kind = .NAME, bytes = token.ident_value.name.(string).([] u8)}
@@ -520,7 +521,7 @@ project_raw_diagnostic :: (record: *Raw_Diagnostic, diagnostic: *Parser.Parse_Di
 	return .NONE;
 }
 
-// The view must lie inside `source` exactly at `expected`; an empty view may carry no pointer, so only its expected offsets are checked.
+// The view must lie inside `source` exactly at `expected`; an empty view may carry no pointer, so only its expected offsets are checked:
 source_slice_matches :: (source: string, view: string, expected: Byte_Span) -> bool {
 	if expected.start < 0 || expected.end < expected.start || expected.end > source.count {
 		return false;
