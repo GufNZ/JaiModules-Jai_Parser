@@ -6,6 +6,6 @@
 	TRACK_AST_REUSE			:= false
 );
 
-#load "lexer.jai";
-#load "parser.jai";
-#load "resolution.jai";
+#load "lexer.jai";		// digest: lexer
+#load "parser.jai";		// digest: parser
+#load "resolution.jai";	// digest: parser

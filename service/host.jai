@@ -182,30 +182,46 @@ edit_overlay :: (batch: *Host_Batch, relative: string, edits: []Range_Edit) -> b
 
 // Present bytes, confirmed absence, or `false` when the file exists but cannot be read; a read failure is never absence:
 observe_disk :: (batch: *Host_Batch, relative: string) -> bool {
+	context_count := batch.contexts.count;
 	event := prepare(batch, relative);
 	if !event {
 		return false;
 	}
 
 
-	ok, disk := disk_observation(batch.host, event);
+	ok, disk := disk_observation(batch.host, event, relative);
+	if !ok {
+		batch.events.count -= 1;
+		batch.contexts.count = context_count;
+		return false;
+	}
+
+
 	event.kind = .OBSERVE_DISK;
 	event.disk = disk;
-	return ok;
+	return true;
 }
 
 // The host saved an overlay installation's bytes itself (default: the current one); clearing it needs matching bytes:
 ack_save :: (batch: *Host_Batch, relative: string, installation: []u8 = .[]) -> bool {
 	tracked := find_tracked(batch, relative);
+	context_count := batch.contexts.count;
 	event := prepare(batch, relative);
 	if !event || !tracked || !tracked.has_overlay {
 		return false;
 	}
 
 
-	ok, disk := disk_observation(batch.host, event);
+	ok, disk := disk_observation(batch.host, event, relative);
+	if !ok {
+		batch.events.count -= 1;
+		batch.contexts.count = context_count;
+		return false;
+	}
+
+
 	event.kind = .ACK_SAVE;
-	if !ok || disk.kind != .PRESENT {
+	if disk.kind != .PRESENT {
 		event.ack_save = .{disk = disk};
 		return false;
 	}
@@ -224,28 +240,49 @@ ack_save :: (batch: *Host_Batch, relative: string, installation: []u8 = .[]) -> 
 }
 
 reset_overlay :: (batch: *Host_Batch, relative: string) -> bool {
+	context_count := batch.contexts.count;
 	event := prepare(batch, relative);
 	if !event || event.expected_provider_state.kind == .UNTRACKED {
 		return false;
 	}
 
 
-	host_confirmation := confirmation(batch.host, event, .RESET);
-	ok, disk := disk_observation(batch.host, event);
+	confirmed, host_confirmation := confirmation(batch.host, event, .RESET);
+	observed: bool;
+	disk: Disk_Observation;
+	if confirmed {
+		observed, disk = disk_observation(batch.host, event, relative);
+	}
+
+	if !observed {
+		batch.events.count -= 1;
+		batch.contexts.count = context_count;
+		return false;
+	}
+
+
 	event.kind = .RESET_OVERLAY;
 	event.reset_overlay = .{disk = disk, host_confirmation = host_confirmation};
-	return ok;
+	return true;
 }
 
 // The host confirms restoring `text` from `candidate`; the confirmation binds both:
 restore_overlay :: (batch: *Host_Batch, relative: string, text: string, candidate: []u8) -> bool {
+	context_count := batch.contexts.count;
 	event := prepare(batch, relative);
 	if !event || !candidate.count {
 		return false;
 	}
 
 
-	host_confirmation := confirmation(batch.host, event, .RESTORE);
+	ok, host_confirmation := confirmation(batch.host, event, .RESTORE);
+	if !ok {
+		batch.events.count -= 1;
+		batch.contexts.count = context_count;
+		return false;
+	}
+
+
 	host_confirmation.source_revision = source_revision_of(xx text);
 	host_confirmation.recovery_candidate = candidate;
 	event.kind = .RESTORE_OVERLAY;
@@ -353,6 +390,7 @@ find_tracked :: (batch: *Host_Batch, relative: string) -> *Tracked_Document {
 }
 
 // Fills the identity, base, context, binding and a fresh provider revision shared by every event kind:
+// Derive these from the batch's captured state so an event cannot silently adopt a later base.
 prepare :: (batch: *Host_Batch, relative: string) -> *Document_Event {
 	if !valid_relative(relative) {
 		return null;
@@ -360,6 +398,12 @@ prepare :: (batch: *Host_Batch, relative: string) -> *Document_Event {
 
 
 	host := batch.host;
+	ok, token := issue_token(*host.revisions);
+	if !ok {
+		return null;
+	}
+
+
 	registration := context_registration(host, relative);
 	known := false;
 	for host.registered {
@@ -375,7 +419,6 @@ prepare :: (batch: *Host_Batch, relative: string) -> *Document_Event {
 	}
 
 	tracked := find_tracked(batch, relative);
-	_, token := issue_token(*host.revisions);//QUESTION: why is this unchecked?
 	event := array_add(*batch.events);
 	event.document = harness_document(host, relative);
 	event.source_context = registration.identity;
@@ -394,10 +437,15 @@ prepare :: (batch: *Host_Batch, relative: string) -> *Document_Event {
 	return event;
 }
 
-disk_observation :: (host: *Harness_Host, event: *Document_Event) -> bool, Disk_Observation {
-	_, token := issue_token(*host.observations);//QUESTION: why is this unchecked?
+disk_observation :: (host: *Harness_Host, event: *Document_Event, relative: string) -> bool, Disk_Observation {
+	ok, token := issue_token(*host.observations);
+	if !ok {
+		return false, .{};
+	}
+
+
 	provenance := Observation_Provenance.{provider_identity = host.provider_namespace, observation_token = little_endian(token, 8,, temp)};
-	path := tprint("%/%", host.root, relative_of(host, event.document));
+	path := tprint("%/%", host.root, relative);
 	text, read_ok := read_entire_file(path, log_errors = false,, temp);
 	if read_ok {
 		return true, disk_present(
@@ -417,15 +465,14 @@ disk_observation :: (host: *Harness_Host, event: *Document_Event) -> bool, Disk_
 	return true, disk_absent(event.source_context, provenance, event.resulting_provider_revision);
 }
 
-// The document key is the relative path itself:
-relative_of :: (host: *Harness_Host, document: []u8) -> string {
-	_, view := parse_key(document, 3,, temp);//QUESTION: why is this unchecked?
-	return xx view.fields[2];
-}
+confirmation :: (host: *Harness_Host, event: *Document_Event, action: Confirmation_Action) -> bool, Host_Confirmation {
+	ok, token := issue_token(*host.confirmations);
+	if !ok {
+		return false, .{};
+	}
 
-confirmation :: (host: *Harness_Host, event: *Document_Event, action: Confirmation_Action) -> Host_Confirmation {
-	_, token := issue_token(*host.confirmations);//QUESTION: why is this unchecked?
-	return .{
+
+	return true, .{
 		host_authority = host.host_authority,
 		confirmation_token = make_key("harness-confirmation", host.host_authority, little_endian(token, 8),, temp),
 		document = event.document,

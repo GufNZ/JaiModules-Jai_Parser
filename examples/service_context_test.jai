@@ -164,7 +164,6 @@ test_schema_tuples :: () {
 	assert(implemented.declaration_index == "jai-cache-syntax-declaration-index/1" && implemented.diagnostics == "jai-cache-syntax-diagnostics/1");
 	assert(implemented.snapshot == "jai-cache-syntax-snapshot/1" && implemented.authored_edges == "jai-cache-authored-edges/1");
 	assert(implemented.syntax_adapter == "jai-cache-syntax-adapter/1");
-	assert(Service.IMPLEMENTED_QUERY_KINDS.count == 3 && Service.IMPLEMENTED_QUERY_KINDS[2] == "SYNTAX_DECLARATION_INDEX");
 
 	ok, single := Service.configuration_id(.[implemented]);
 	assert(ok);
@@ -254,7 +253,8 @@ test_descriptor_layout :: () {
 
 	parser_digest := digest_of(.["../module.jai", "../parser.jai", "../resolution.jai"]);
 	lexer_digest := digest_of(.["../lexer.jai"]);
-	assert(Service.bytes_equal(producer[1], parser_digest) && Service.bytes_equal(producer[3], lexer_digest), "\e[91mBuild digests match the sources on disk.\e[0m");
+	adapter_digest := digest_of(.["canonical.jai", "context.jai", "diagnostics.jai", "digest.jai", "index.jai", "module.jai", "nodes.jai", "projection.jai", "snapshot.jai"]);
+	assert(Service.bytes_equal(producer[1], parser_digest) && Service.bytes_equal(producer[3], lexer_digest) && Service.bytes_equal(producer[4], adapter_digest), "\e[91mBuild digests match the sources on disk.\e[0m");
 
 	sdk_ok, sdk := Service.parse_key(producer[2], 2);
 	assert(sdk_ok && sdk.tag.(string) == "compiler-sdk" && begins_with(sdk.fields[0].(string), "beta ") && sdk.fields[1].count == 16);

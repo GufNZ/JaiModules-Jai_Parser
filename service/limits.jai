@@ -96,6 +96,7 @@ within_limit :: (limits: Limits, name: Limit_Name, value: s64) -> bool {
 }
 
 // All-or-nothing: either every amount is reserved or none is:
+// Aggregate repeated charges before checking limits.  Record nothing until every category fits so callers do not have to undo partial charges when a multi-resource request fails.
 reserve :: (ledger: *Resource_Ledger, amounts: .. Ledger_Amount) -> bool {
 	pending: [LIMIT_COUNT]s64;
 	for amounts {

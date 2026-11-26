@@ -1,3 +1,9 @@
+/*
+Session-owned storage and fallible preparation for coordinator operations live here.
+Prepare replacement storage before publishing state so allocation failure cannot leave live arrays partially updated.
+When preparation runs outside the session gate, the coordinator must revalidate what it planned to change before using that storage: another call may have advanced the session meanwhile.
+*/
+
 Owned_Allocation :: struct {
 	previous:	*Owned_Allocation;
 	next:		*Owned_Allocation;
@@ -387,6 +393,8 @@ try_source_batch_frontier :: (model: *Provider_Model, allocator: Allocator = con
 	return true, identity, counter;
 }
 
+// Prepare capacity for provider publication without replacing the live arrays.
+// They must keep serving the old frontier if a later allocation or validation fails.
 try_source_batch_commit :: (
 	model: *Provider_Model,
 	additional_documents: s64,
@@ -2022,19 +2030,19 @@ prepare_ticket_waiter_observation :: (session: *Session, operation: *Operation, 
 			}
 
 
-			ok, backing.provider_frontier = try_output_bytes(allocator, operation.frontier);
+			ok, backing.provider_frontier = try_output_bytes(allocator, operation.update_data.frontier);
 			if !ok {
 				return false;
 			}
 
 
-			ok, backing.documents = try_output_array(allocator, operation.documents.count, []u8);
+			ok, backing.documents = try_output_array(allocator, operation.update_data.documents.count, []u8);
 			if !ok {
 				return false;
 			}
 
 
-			for operation.documents {
+			for operation.update_data.documents {
 				ok, backing.documents[it_index] = try_output_bytes(allocator, it);
 				if !ok {
 					return false;
@@ -2090,13 +2098,13 @@ prepare_query_waiter_observation :: (session: *Session, operation: *Operation, b
 			}
 
 
-			ok, backing.document = try_output_bytes(allocator, operation.world.members[operation.member].document);
+			ok, backing.document = try_output_bytes(allocator, operation.world.members[operation.query_data.member].document);
 			if !ok {
 				return false;
 			}
 
 
-			ok, backing.context_identity = try_output_bytes(allocator, operation.world.members[operation.member].context_identity);
+			ok, backing.context_identity = try_output_bytes(allocator, operation.world.members[operation.query_data.member].context_identity);
 			if !ok {
 				return false;
 			}
@@ -2109,7 +2117,7 @@ prepare_query_waiter_observation :: (session: *Session, operation: *Operation, b
 	);
 
 	backing.kind = .QUERY;
-	backing.query_kind = operation.query_kind;
+	backing.query_kind = operation.query_data.query_kind;
 	return prepared;
 }
 

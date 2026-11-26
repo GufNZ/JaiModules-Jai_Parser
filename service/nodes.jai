@@ -152,7 +152,7 @@ Helper_Layout :: enum u8 {
 }
 
 HELPER_LAYOUT_NAMES :: string.[
-	"",//TODO: document this blank.
+	"",	// `.NONE` marks a node, not a helper, so this name is never emitted.
 	"Parser_Argument",
 	"Parser_Context_Modification",
 	"Parser_Comma_Separated_Argument",
@@ -375,7 +375,8 @@ fill_node_projection :: (projection: *Node_Projection) -> Projection_Fault {
 	}
 
 
-	// Phase 1 assigns IDs in preorder; phase 2 records fields once every referenced ID is known.
+	// Ownership determines preorder and IDs.  Write fields in a second pass so an alias can
+	// refer to a later node without changing its ID or treating the alias as another owner.
 	order: [..]Walk_Item;
 	stack: [..]Walk_Item;
 	array_add(*stack, .{pointer = root});
@@ -428,9 +429,19 @@ fill_node_projection :: (projection: *Node_Projection) -> Projection_Fault {
 
 		fields := sorted_fields(*projector);
 		if item.layout == .NONE {
-			_, id := table_find(*projector.node_ids, item.pointer);//QUESTION: why is this unchecked?
+			found, id := table_find(*projector.node_ids, item.pointer);
+			if !found {
+				return .{.INVALID_REFERENCE, "nodes", -1};
+			}
+
+
 			node := item.pointer.(*Parser.Parser_Node);
-			_, kind_name := node_kind_name(node.kind);//QUESTION: why is this unchecked?
+			registered, kind_name := node_kind_name(node.kind);
+			if !registered {
+				return .{.UNREGISTERED_NODE_KIND, kind_name, id};
+			}
+
+
 			span := Token_Span_Observation.{node.first_token.(s64), node.one_past_last_token.(s64)};
 			record := *projection.nodes[id];
 			record.* = .{
@@ -447,7 +458,12 @@ fill_node_projection :: (projection: *Node_Projection) -> Projection_Fault {
 			};
 			record.has_origin, record.origin = token_span_origin(projector.parsed, span);
 		} else {
-			_, id := table_find(*projector.helper_ids, item.pointer);//QUESTION: why is this unchecked?
+			found, id := table_find(*projector.helper_ids, item.pointer);
+			if !found {
+				return .{.INVALID_REFERENCE, "helpers", -1};
+			}
+
+
 			projection.helpers[id] = .{
 				local_helper_id = xx id,
 				layout = HELPER_LAYOUT_NAMES[item.layout],
@@ -651,66 +667,67 @@ empty_list :: (p: *Node_Projector, list: []$T, field_name: string) -> Field_Valu
 
 INACTIVE :: Field_Value.{kind = .INACTIVE};
 
-REGISTERED_NODE_KINDS :: string.[//QUESTION: why string and not enum?
-	"ASM",
-	"BINARY_OPERATOR",
-	"BLOCK",
-	"CASE",
-	"CAST",
-	"COMMA_SEPARATED_ARGUMENTS",
-	"COMPOUND_DECLARATION",
-	"CONTEXT",
-	"DECLARATION",
-	"DEFER",
-	"DIRECTIVE_ADD_CONTEXT",
-	"DIRECTIVE_BAKE",
-	"DIRECTIVE_BYTES",
-	"DIRECTIVE_CODE",
-	"DIRECTIVE_CONTEXT_TYPE",
-	"DIRECTIVE_EXISTS",
-	"DIRECTIVE_IMPORT",
-	"DIRECTIVE_INSERT",
-	"DIRECTIVE_LIBRARY",
-	"DIRECTIVE_LOAD",
-	"DIRECTIVE_LOCATION",
-	"DIRECTIVE_MODIFY",
-	"DIRECTIVE_MODULE_PARAMETERS",
-	"DIRECTIVE_OVERLAY",
-	"DIRECTIVE_POKE_NAME",
-	"DIRECTIVE_PROCEDURE_NAME",
-	"DIRECTIVE_RUN",
-	"DIRECTIVE_SCOPE",
-	"DIRECTIVE_THIS",
-	"DIRECTIVE_THROUGH",
-	"DIRECTIVE_WILDCARD",
-	"ENUM",
-	"EXPRESSION_QUERY",
-	"FOR",
-	"IDENT",
-	"IF",
-	"LITERAL",
-	"LOOP_CONTROL",
-	"NOTE",
-	"PLACEHOLDER",
-	"PROCEDURE_BODY",
-	"PROCEDURE_CALL",
-	"PROCEDURE_HEADER",
-	"PUSH_CONTEXT",
-	"RETURN",
-	"STRUCT",
-	"TYPE_INSTANTIATION",
-	"TYPE_QUERY",
-	"UNARY_OPERATOR",
-	"USING",
-	"WHILE"
+Node_Kind :: type_of(Parser.Parser_Node.kind);
+
+REGISTERED_NODE_KINDS :: Node_Kind.[
+	.ASM,
+	.BINARY_OPERATOR,
+	.BLOCK,
+	.CASE,
+	.CAST,
+	.COMMA_SEPARATED_ARGUMENTS,
+	.COMPOUND_DECLARATION,
+	.CONTEXT,
+	.DECLARATION,
+	.DEFER,
+	.DIRECTIVE_ADD_CONTEXT,
+	.DIRECTIVE_BAKE,
+	.DIRECTIVE_BYTES,
+	.DIRECTIVE_CODE,
+	.DIRECTIVE_CONTEXT_TYPE,
+	.DIRECTIVE_EXISTS,
+	.DIRECTIVE_IMPORT,
+	.DIRECTIVE_INSERT,
+	.DIRECTIVE_LIBRARY,
+	.DIRECTIVE_LOAD,
+	.DIRECTIVE_LOCATION,
+	.DIRECTIVE_MODIFY,
+	.DIRECTIVE_MODULE_PARAMETERS,
+	.DIRECTIVE_OVERLAY,
+	.DIRECTIVE_POKE_NAME,
+	.DIRECTIVE_PROCEDURE_NAME,
+	.DIRECTIVE_RUN,
+	.DIRECTIVE_SCOPE,
+	.DIRECTIVE_THIS,
+	.DIRECTIVE_THROUGH,
+	.DIRECTIVE_WILDCARD,
+	.ENUM,
+	.EXPRESSION_QUERY,
+	.FOR,
+	.IDENT,
+	.IF,
+	.LITERAL,
+	.LOOP_CONTROL,
+	.NOTE,
+	.PLACEHOLDER,
+	.PROCEDURE_BODY,
+	.PROCEDURE_CALL,
+	.PROCEDURE_HEADER,
+	.PUSH_CONTEXT,
+	.RETURN,
+	.STRUCT,
+	.TYPE_INSTANTIATION,
+	.TYPE_QUERY,
+	.UNARY_OPERATOR,
+	.USING,
+	.WHILE
 ];
 
-node_kind_name :: (kind: $T) -> bool, string {
-	info := type_info(T);
+node_kind_name :: (kind: Node_Kind) -> bool, string {
+	info := type_info(Node_Kind);
 	for info.values {
 		if it == kind.(s64) {
-			name := info.names[it_index];
-			return array_find(REGISTERED_NODE_KINDS, name), name;
+			return array_find(REGISTERED_NODE_KINDS, kind), info.names[it_index];
 		}
 	}
 
@@ -1098,7 +1115,7 @@ describe_node :: (p: *Node_Projector, pointer: *void) {
 			field(p, flags_value(p, "PUSH_CONTEXT", flags, PUSH_CONTEXT_FLAGS), "push_context_flags");
 			field(p, node_value(p, push.to_push), "to_push");
 			// The `.DEFER_POP` route has no body:
-			if flags & 0x2 {//FIXME: name this magic number
+			if push.push_context_flags & .DEFER_POP {
 				if push.block {
 					fail(p, .UNEXPECTED_ACTIVE_FIELD, "Parser_Push_Context.block");
 				}
@@ -1504,12 +1521,15 @@ describe_type_instantiation :: (p: *Node_Projector, wrapper: *Parser.Parser_Type
 		wrapper.array_dimension
 	];
 
-	TYPE_VALUED			:: 0;//QUESTION: why not an enum?
-	MUST_IMPLEMENT		:: 1;
-	POINTER_TO			:: 2;
-	DIRECTIVE_TARGET	:: 3;
-	ELEMENT				:: 4;
-	DIMENSION			:: 5;
+	Child_Slot :: enum s64 {
+		TYPE_VALUED;
+		MUST_IMPLEMENT;
+		POINTER_TO;
+		DIRECTIVE_TARGET;
+		ELEMENT;
+		DIMENSION;
+		NONE :: -1;
+	}
 
 	// A parenthesised type's interval starts at `(`; the form's own leading token follows:
 	leading: Parser.Token_Type = .ERROR;
@@ -1524,48 +1544,51 @@ describe_type_instantiation :: (p: *Node_Projector, wrapper: *Parser.Parser_Type
 		first += 1;
 	}
 
-	active: [2]s64 = .[-1, -1];
+	active: [2]Child_Slot = .[.NONE, .NONE];
 	if flags & 0x1 {
-		active[0] = ELEMENT;
+		active[0] = .ELEMENT;
 	} else if flags & 0x8 {
-		active[0] = DIRECTIVE_TARGET;
+		active[0] = .DIRECTIVE_TARGET;
 	} else if flags & (0x40 | 0x2) {
-		active[0] = ELEMENT;
+		active[0] = .ELEMENT;
 	} else if flags & 0x4 {
-		active[0] = TYPE_VALUED;
+		active[0] = .TYPE_VALUED;
 	} else if wrapper.type_valued_expression {
-		active[0] = TYPE_VALUED;
+		active[0] = .TYPE_VALUED;
 		expression := wrapper.type_valued_expression;
 		is_polymorphic := expression.kind == .IDENT && !!(expression.(*Parser.Parser_Ident).flags & 0x1);
 		if is_polymorphic && (wrapper.must_implement || consumed_constraint(p, expression)) {
-			active[1] = MUST_IMPLEMENT;
+			active[1] = .MUST_IMPLEMENT;
 		}
 	} else if wrapper.pointer_to || leading == #char "*" {
-		active[0] = POINTER_TO;
+		active[0] = .POINTER_TO;
 	} else if wrapper.array_dimension || wrapper.array_element_type || leading == #char "[" {
-		active[0] = DIMENSION;
-		active[1] = ELEMENT;
+		active[0] = .DIMENSION;
+		active[1] = .ELEMENT;
 	} else {
-		active[0] = TYPE_VALUED;
+		active[0] = .TYPE_VALUED;
 	}
 
 	for children {
-		if it && it_index != active[0] && it_index != active[1] {
+		slot := it_index.(Child_Slot);
+		if it && slot != active[0] && slot != active[1] {
 			fail(p, .UNEXPECTED_ACTIVE_FIELD, TYPE_CHILD_FIELDS[it_index]);
 			return;
 		}
 	}
 
 
-	for slot: 0..TYPE_CHILD_FIELDS.count - 1 {
+	for TYPE_CHILD_FIELDS {
+		slot := it_index.(Child_Slot);
 		if slot != active[0] && slot != active[1] {
-			field(p, INACTIVE, TYPE_CHILD_FIELDS[slot]);
+			field(p, INACTIVE, it);
 		}
 	}
 
 	for slot: active {
-		if slot >= 0 {
-			field(p, node_value(p, children[slot]), TYPE_CHILD_FIELDS[slot]);
+		if slot != .NONE {
+			index := slot.(s64);
+			field(p, node_value(p, children[index]), TYPE_CHILD_FIELDS[index]);
 		}
 	}
 }

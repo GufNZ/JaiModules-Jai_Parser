@@ -16,9 +16,13 @@ PRODUCER_NAMESPACE :: "jai-parser-service";
 
 SYNTAX_CONTEXT_DESCRIPTOR :: "syntax-context-descriptor";
 
-//TODO: replace these with #run enum_name(Path_Encoding.$VALUE);
-WINDOWS_UTF16LE	:: "WINDOWS_UTF16LE";
-POSIX_BYTES		:: "POSIX_BYTES";
+Path_Encoding :: enum u8 {
+	WINDOWS_UTF16LE;
+	POSIX_BYTES;
+}
+
+WINDOWS_UTF16LE	:: #run enum_names(Path_Encoding)[Path_Encoding.WINDOWS_UTF16LE.(s64)];
+POSIX_BYTES		:: #run enum_names(Path_Encoding)[Path_Encoding.POSIX_BYTES.(s64)];
 
 Schema_Tuple :: struct {
 	token_tags:			string;
@@ -35,10 +39,7 @@ Schema_Tuple :: struct {
 }
 
 Path_Value :: struct {
-	encoding: enum u8 {
-		WINDOWS_UTF16LE;//FIXME: duplicated into string constants...
-		POSIX_BYTES;
-	};
+	encoding: Path_Encoding;
 	code_units: []u8;
 }
 
@@ -82,9 +83,6 @@ IMPLEMENTED_SCHEMA_TUPLE :: Schema_Tuple.{
 	diagnostic_profile	= DIAGNOSTIC_PROFILE
 };
 
-// The `QueryKind` payloads this registry supplies, in registry order:	//QUESTION: is this for tests only?  If so, can we conditionally compile it?
-IMPLEMENTED_QUERY_KINDS :: string.["SYNTAX_SNAPSHOT", "SYNTAX_DIAGNOSTICS", "SYNTAX_DECLARATION_INDEX"];
-
 // `V(SchemaTuple)`: a record of the eleven identifiers in field order:
 schema_tuple_value :: (tuple: Schema_Tuple) -> bool, []u8 {
 	identifiers := string.[
@@ -117,7 +115,8 @@ schema_tuple_value :: (tuple: Schema_Tuple) -> bool, []u8 {
 }
 
 tuple_schema :: () -> []u8 {
-	_, schema := v_ascii(interface_schema("SchemaTuple"));//QUESTION: why is this unchecked?
+	ok, schema := v_ascii(interface_schema("SchemaTuple"));
+	assert(ok);
 	return schema;
 }
 
@@ -135,7 +134,13 @@ configuration_id :: (tuples: []Schema_Tuple) -> bool, []u8 {
 		}
 
 
-		_, values[it_index] = schema_tuple_value(it);//QUESTION: why is this unchecked?
+		ok, value := schema_tuple_value(it);
+		if !ok {
+			return false, .[];
+		}
+
+
+		values[it_index] = value;
 	}
 
 
@@ -226,18 +231,20 @@ path_key :: (path: Path_Value) -> []u8 {
 }
 
 // The ten descriptor fields in schema order:
-SYNTAX_CONTEXT_FIELDS :: string.[//QUESTION: enum?
-	"producer",
-	"syntax_schemas",
-	"parser_parameters",
-	"parse_profile",
-	"diagnostic_profile",
-	"visible_filename",
-	"visible_directory",
-	"relative_base",
-	"resolver_binding",
-	"semantic_extension"
-];
+Syntax_Context_Field :: enum {
+	producer;
+	syntax_schemas;
+	parser_parameters;
+	parse_profile;
+	diagnostic_profile;
+	visible_filename;
+	visible_directory;
+	relative_base;
+	resolver_binding;
+	semantic_extension;
+}
+
+SYNTAX_CONTEXT_FIELDS :: #run enum_names(Syntax_Context_Field);
 
 // `K("syntax-context-descriptor", [K(field_name, values)...])` for this build's producer and the occurrence's paths:
 syntax_context_descriptor :: (paths: Context_Paths) -> bool, []u8 {
@@ -247,17 +254,19 @@ syntax_context_descriptor :: (paths: Context_Paths) -> bool, []u8 {
 
 
 	expected := expected_field_values();
+	using Syntax_Context_Field;
 	fields: [SYNTAX_CONTEXT_FIELDS.count][]u8;
-	fields[0] = make_key("producer",			..expected.producer);
-	fields[1] = make_key("syntax_schemas",		..expected.syntax_schemas);
-	fields[2] = make_key("parser_parameters",	..expected.parser_parameters);
-	fields[3] = make_key("parse_profile",		..expected.parse_profile);
-	fields[4] = make_key("diagnostic_profile",	..expected.diagnostic_profile);
-	fields[5] = make_key("visible_filename",	path_key(paths.visible_filename));
-	fields[6] = make_key("visible_directory",	path_key(paths.visible_directory));
-	fields[7] = make_key("relative_base",		path_key(paths.relative_base));
-	fields[8] = make_key("resolver_binding",	make_key("NO_RESOLUTION"));
-	fields[9] = make_key("semantic_extension",	make_key("UNSUPPORTED"));
+	fields[xx producer]				= make_key(SYNTAX_CONTEXT_FIELDS[xx producer],				..expected.producer);
+	fields[xx syntax_schemas]		= make_key(SYNTAX_CONTEXT_FIELDS[xx syntax_schemas],		..expected.syntax_schemas);
+	fields[xx parser_parameters]	= make_key(SYNTAX_CONTEXT_FIELDS[xx parser_parameters],		..expected.parser_parameters);
+	fields[xx parse_profile]		= make_key(SYNTAX_CONTEXT_FIELDS[xx parse_profile],			..expected.parse_profile);
+	fields[xx diagnostic_profile]	= make_key(SYNTAX_CONTEXT_FIELDS[xx diagnostic_profile],	..expected.diagnostic_profile);
+	fields[xx visible_filename]		= make_key(SYNTAX_CONTEXT_FIELDS[xx visible_filename],		path_key(paths.visible_filename));
+	fields[xx visible_directory]	= make_key(SYNTAX_CONTEXT_FIELDS[xx visible_directory],		path_key(paths.visible_directory));
+	fields[xx relative_base]		= make_key(SYNTAX_CONTEXT_FIELDS[xx relative_base],			path_key(paths.relative_base));
+	fields[xx resolver_binding]		= make_key(SYNTAX_CONTEXT_FIELDS[xx resolver_binding],		make_key("NO_RESOLUTION"));
+	fields[xx semantic_extension]	= make_key(SYNTAX_CONTEXT_FIELDS[xx semantic_extension],	make_key("UNSUPPORTED"));
+
 	return true, make_key(SYNTAX_CONTEXT_DESCRIPTOR, ..fields);
 }
 
@@ -301,6 +310,8 @@ admit_context :: (identity: []u8, descriptor: []u8) -> Context_Failure, Admitted
 
 #scope_module
 
+// An identity can agree with a descriptor that this build cannot reproduce.  Validate the
+// descriptor against the local producer, options, and schema before accepting that identity.
 validate_context_registration :: (identity: []u8, descriptor: []u8) -> Context_Failure, Admitted_Context {
 	root_storage: [SYNTAX_CONTEXT_FIELDS.count][]u8;
 	ok, root := parse_key_into(descriptor, root_storage);
@@ -326,18 +337,18 @@ validate_context_registration :: (identity: []u8, descriptor: []u8) -> Context_F
 
 
 		values := field.fields;
-		if name == {
-			case "producer";
+		if it_index.(Syntax_Context_Field) == {
+			case .producer;
 				if !values_equal(values, expected.producer) {
 					return .UNSUPPORTED_PRODUCER, .{};
 				}
 
-			case "syntax_schemas";
+			case .syntax_schemas;
 				if !values_equal(values, expected.syntax_schemas) {
 					return .UNSUPPORTED_SCHEMAS, .{};
 				}
 
-			case "parser_parameters";
+			case .parser_parameters;
 				if values.count != expected.parser_parameters.count {
 					return .MALFORMED, .{};
 				}
@@ -353,33 +364,33 @@ validate_context_registration :: (identity: []u8, descriptor: []u8) -> Context_F
 					return .UNSUPPORTED_PARAMETERS, .{};
 				}
 
-			case "parse_profile";
+			case .parse_profile;
 				if !values_equal(values, expected.parse_profile) {
 					return .UNSUPPORTED_PROFILE, .{};
 				}
 
-			case "diagnostic_profile";
+			case .diagnostic_profile;
 				if !values_equal(values, expected.diagnostic_profile) {
 					return .UNSUPPORTED_PROFILE, .{};
 				}
 
-			case "visible_filename";	#through;
-			case "visible_directory";	#through;
-			case "relative_base";
+			case .visible_filename;		#through;
+			case .visible_directory;	#through;
+			case .relative_base;
 				path_ok, path := parse_path_key(values);
 				if !path_ok {
 					return .INVALID_PATH, .{};
 				}
 
 
-				path_slots[it_index - 5].* = path;
+				path_slots[it_index - Syntax_Context_Field.visible_filename.(s64)].* = path;
 
-			case "resolver_binding";
+			case .resolver_binding;
 				if values.count != 1 || !bytes_equal(values[0], EXPECTED_NO_RESOLUTION) {
 					return .UNSUPPORTED_RESOLVER, .{};
 				}
 
-			case "semantic_extension";
+			case .semantic_extension;
 				if values.count != 1 || !bytes_equal(values[0], EXPECTED_UNSUPPORTED_SEMANTICS) {
 					return .UNSUPPORTED_SEMANTICS, .{};
 				}
@@ -408,9 +419,9 @@ validate_context_registration :: (identity: []u8, descriptor: []u8) -> Context_F
 // Parser, lexer and adapter source digests; called at compile time, including from a cross-compiling build's host:
 build_source_digests :: () -> (parser_digest: [16]u8, lexer_digest: [16]u8, adapter_digest: [16]u8) {
 	return
-		source_digest(.["../module.jai", "../parser.jai", "../resolution.jai"]),
-		source_digest(.["../lexer.jai"]),
-		source_digest(.["canonical.jai", "context.jai", "diagnostics.jai", "digest.jai", "index.jai", "module.jai", "nodes.jai", "projection.jai", "snapshot.jai"]);//QUESTION: shouldn't these lists be compile-time generated?
+		source_digest(digest_source_paths("../", "parser", include_module = true)),
+		source_digest(digest_source_paths("../", "lexer", include_module = false)),
+		source_digest(digest_source_paths("", "adapter", include_module = true));
 }
 
 // Nonempty, NUL-free, and an even byte count for UTF-16LE:
@@ -608,6 +619,40 @@ boolean_byte :: inline (value: bool) -> []u8 {
 
 #assert Parser.ENABLE_TRIVIA "The full-featured syntax profile requires a trivia-enabled parser.";
 
+// Classify sources at their load declarations so a separate filename list cannot drift.
+// Sort independently of load order because digest input order is part of the build identity.
+digest_source_paths :: (directory: string, group: string, include_module: bool) -> []string {
+	module_path := tprint("%module.jai", directory);
+	source, ok := read_entire_file(tprint("%%", #filepath, module_path));
+	assert(ok, "Unable to read % for the build identity.", module_path);
+	defer free(source.data);
+
+	paths: [..]string;
+	paths.allocator = temp;
+	if include_module {
+		array_add(*paths, module_path);
+	}
+
+	marker := tprint("// digest: %", group);
+	for split(source, "\n",, temp) {
+		line := trim(it, " \t\r");
+		if !ends_with(line, marker) {
+			continue;
+		}
+
+
+		parts := split(line, "\"",, temp);
+		assert(parts.count == 3 && parts[0] == "#load " && parts[1].count && begins_with(parts[2], ";"), "Invalid digest marker in %: %", module_path, line);
+		suffix := parts[2];
+		assert(trim_left(slice(suffix, 1, suffix.count - 1), " \t\r") == marker, "Invalid digest marker in %: %", module_path, line);
+		array_add(*paths, tprint("%%", directory, parts[1]));
+	}
+
+	assert(paths.count > include_module.(s64), "No % source loads found in %.", group, module_path);
+	quick_sort(paths, compare_strings);
+	return paths;
+}
+
 // Build identities: digests of the exact sources compiled into this build, taken at compile time:
 source_digest :: (files: []string) -> [16]u8 {
 	state: Digest_State;
@@ -656,3 +701,4 @@ compiler_layout_digest	:= COMPILER_LAYOUT_DIGEST_BYTES;
 
 #import "Compiler";
 #import "File";
+#import "Sort";

@@ -157,21 +157,23 @@ Ticket_Observation :: struct {
 	waiter:			Handle(.WAITER);
 }
 
-World_Selector :: struct {//QUESTION: this looks like it would be better as a [tagged] union...
-	kind: enum u8 {
+World_Selector :: struct {
+	using payload: union kind: enum u8 {
 		PUBLISHED_UPDATE;
 		HEAD;
+	} {
+		.PUBLISHED_UPDATE,,	update: struct {
+			ticket:		Handle(.TICKET);
+			waiter:		Handle(.WAITER);
+			use_waiter:	bool;
+		};
+
+		.HEAD,,				head: struct {
+			session:			Handle(.SESSION);
+			workspace:			[]u8;
+			expected_frontier:	[]u8;
+		};
 	};
-
-	// `.PUBLISHED_UPDATE`: an update ticket, or an update waiter when `use_waiter` is set:
-	ticket:		Handle(.TICKET);
-	waiter:		Handle(.WAITER);
-	use_waiter:	bool;
-
-	// `.HEAD`:
-	session:			Handle(.SESSION);
-	workspace:			[]u8;
-	expected_frontier:	[]u8;
 }
 
 World_Acquisition :: struct {
@@ -314,27 +316,31 @@ Result_Description :: struct {
 
 Operation :: struct {
 	identity: Operation_ID;
-	kind: enum u8 {//QUESTION: this looks like it would be better as a [tagged] union...
+	using payload: union kind: enum u8 {
 		UPDATE;
 		QUERY;
 		SHUTDOWN;
-	};
-	terminal: bool;
+	} {
+		.UPDATE,,	update_data: struct {
+			frontier:	[]u8;
+			documents:	[][]u8;
+			update:		Ticket_Terminal;
+		};
 
-	// `.UPDATE`:
-	frontier:	[]u8;
-	documents:	[][]u8;
-	update:		Ticket_Terminal;
+		.QUERY,,	query_data: struct {
+			member:		s64;
+			query_kind:	Query_Kind;
+			query:		Query_Terminal;
+			result:		*Query_Result;
+			task:		*Task;
+		};
+	};
+
+	terminal: bool;
 
 	// `.UPDATE` candidate or `.QUERY` world; held until the operation is reaped:
 	world: *World;
 
-	// `.QUERY`:
-	member:			s64;
-	query_kind:		Query_Kind;
-	query:			Query_Terminal;
-	result:			*Query_Result;
-	task:			*Task;
 	registrations:	s64;
 	waiters:		[..]Slot_Reference;
 }
@@ -395,45 +401,64 @@ Retired_Output :: struct {
 	next_retired:	*Retired_Output;
 }
 
-Session :: struct {//TODO: document fields, probably on all the big structs.
+Session :: struct {
+	// Owning service and allocator state for session-owned storage:
 	service:				*Service;
 	heap:					Owned_Heap;
+
+	// Session state lock, change notification, and native worker handles:
 	gate:					Mutex;
 	changed:				Condition_Variable;
 	compute:				Thread;
 	reaper:					Thread;
 	threaded:				bool;
 	worker_joined:			bool;
+
+	// Directory-protected pins held by calls using this session:
 	call_pins:				s64;
+	// Admissions and retired-object cleanup still in progress:
 	active_admissions:		s64;
 	cleanup_pins:			s64;
+	// Session retirement decision and its directory-side counterpart:
 	retiring:				bool;
 	directory_retiring:		bool;
+
+	// Identity issuance, workspace binding, and accepted provider state:
 	identities:				Session_Identities;
 	workspace:				[]u8;
 	lifecycle:				Lifecycle;
 	provider:				*Provider_Model;
+
+	// Resource accounting, public handle slots and registrations, and owned work records:
 	ledger:					Resource_Ledger;
 	registry:				Handle_Registry;
 	registrations:			[..]*Registration;
 	operations:				[..]*Operation;
 	worlds:					[..]*World;
 	tasks:					[..]*Task;
+	// Required and optional runnable work, and observation delivery storage:
 	ready:					[..]*Task;
 	optional_ready:			[..]*Task;
 	mailboxes:				[..]*Mailbox;
+
+	// Retirement queues detached under `gate` for destruction outside it:
 	retired_world_head:		*World;
 	retired_world_tail:		*World;
 	retired_output_head:	*Retired_Output;
 	retired_output_tail:	*Retired_Output;
 	retired_source_head:	*Source_Backing;
 	retired_source_tail:	*Source_Backing;
+	// References queued for completion delivery:
 	completions:			[..]Slot_Reference;
+
+	// Published head and the world selected to become head when ready:
 	head:					*World;
 	head_target:			*World;
+	// Active shutdown operation and preallocated control storage and registration:
 	shutdown:				*Operation;
 	shutdown_control:		*Operation;
 	shutdown_registration:	Handle(.SHUTDOWN);
+	// The public session handle has been released:
 	session_released:		bool;
 
 	// Deterministic monotonic clock, advanced only by `wait`:
@@ -1500,8 +1525,10 @@ submit_source_batch_attempt :: (
 	operation.* = .{
 		identity = xx backing.identity,
 		kind = .UPDATE,
-		frontier = frontier,
-		documents = backing.documents,
+		update_data = .{
+			frontier = frontier,
+			documents = backing.documents,
+		},
 	};
 
 	commit_provider_copy(session.provider, staged, *transfer);
@@ -1518,6 +1545,7 @@ submit_source_batch_attempt :: (
 }
 
 request_analysis :: (service: *Service, handle: Handle(.SESSION), request: Analysis_Request) -> (ok: bool, accepted: Accepted, error: Operation_Error) {
+	// Validate the requested capture against the current session and provider frontier before preparing any ticket or candidate storage:
 	call := use_call(service, handle);
 	session := validate_session(call, handle);
 	if !session {
@@ -1676,6 +1704,8 @@ request_analysis :: (service: *Service, handle: Handle(.SESSION), request: Analy
 		}
 
 
+		// Size the capture under the gate, then prepare its backing outside it.
+		// Re-enter the admission loop after allocation so the earlier checks are not treated as a reservation:
 		if !candidate_snapshot.states.count {
 			sized, metadata_count := analysis_candidate_metadata_count(session.provider, documents);
 			if !sized {
@@ -1698,6 +1728,7 @@ request_analysis :: (service: *Service, handle: Handle(.SESSION), request: Analy
 		}
 
 
+		// Copy the selection evidence while the provider is stable; derive the candidate capture from that snapshot outside the gate rather than reading mutable provider state there:
 		if !capture_prepared {
 			stage_analysis_candidate_snapshot(session.provider, documents, *candidate_snapshot);
 			capture_prepared = true;
@@ -1722,6 +1753,8 @@ request_analysis :: (service: *Service, handle: Handle(.SESSION), request: Analy
 		}
 
 
+		// The capture key determines whether we need storage for a new world and task or can use the existing candidate.
+		// Recheck after each unlocked preparation step:
 		if !find_candidate_world(session, candidate_capture.key) {
 			if session.identities.world_counter.next == U64_MAX {
 				return false, .{}, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
@@ -1814,11 +1847,16 @@ request_analysis :: (service: *Service, handle: Handle(.SESSION), request: Analy
 	operation.* = .{
 		identity = xx backing.identity,
 		kind = .UPDATE,
-		frontier = frontier,
-		documents = documents,
+		update_data = .{
+			frontier = frontier,
+			documents = documents,
+		},
 	};
 	array_add(*session.operations, operation);
 	backing = .{};
+
+	// Commit: bind the prepared capture to live source backing before starting or joining work.
+	// Only then expose the accepted operation through its ticket registration:
 	bind_analysis_candidate_capture(session.provider, documents, *candidate_capture);
 	start_candidate(session, operation, *candidate_capture, *candidate_world, *candidate_task, *candidate_join);
 	ticket := register(session, .TICKET, .{operation = operation});
@@ -1881,15 +1919,15 @@ observe_ticket :: (service: *Service, handle: Handle(.TICKET)) -> (ok: bool, obs
 
 acquire_world :: (service: *Service, selector: World_Selector) -> (ok: bool, acquisition: World_Acquisition, error: Operation_Error) {
 	owner_service := ifx selector.kind == .HEAD
-		then selector.session.owner_service
-		else ifx selector.use_waiter
-			then selector.waiter.owner_service
-			else selector.ticket.owner_service;
+		then selector.head.session.owner_service
+		else ifx selector.update.use_waiter
+			then selector.update.waiter.owner_service
+			else selector.update.ticket.owner_service;
 	owner_token := ifx selector.kind == .HEAD
-		then selector.session.owner_token
-		else ifx selector.use_waiter
-			then selector.waiter.owner_token
-			else selector.ticket.owner_token;
+		then selector.head.session.owner_token
+		else ifx selector.update.use_waiter
+			then selector.update.waiter.owner_token
+			else selector.update.ticket.owner_token;
 	call := use_owner(service, owner_service, owner_token);
 
 	if !call {
@@ -1899,7 +1937,7 @@ acquire_world :: (service: *Service, selector: World_Selector) -> (ok: bool, acq
 			stale(
 				ifx selector.kind == .HEAD
 					then .SESSION
-					else ifx selector.use_waiter
+					else ifx selector.update.use_waiter
 						then .WAITER
 						else .TICKET
 			);
@@ -1909,34 +1947,34 @@ acquire_world :: (service: *Service, selector: World_Selector) -> (ok: bool, acq
 	use_owner_memory(call);
 
 	if selector.kind == .HEAD {
-		session := validate_session(call, selector.session);
+		session := validate_session(call, selector.head.session);
 		if !session {
 			return false, .{}, stale(.SESSION);
 		}
 
 
-		if !bytes_equal(selector.workspace, session.workspace) {
-			return false, .{}, export_argument_error(session, selector.session, .INCONSISTENT_BINDING, "workspace");
+		if !bytes_equal(selector.head.workspace, session.workspace) {
+			return false, .{}, export_argument_error(session, selector.head.session, .INCONSISTENT_BINDING, "workspace");
 		}
 
 
 		head := session.head;
-		if head && bytes_equal(head.frontier, selector.expected_frontier) {
-			ok, acquisition, error := acquire_world_handle(session, selector.session, head);
+		if head && bytes_equal(head.frontier, selector.head.expected_frontier) {
+			ok, acquisition, error := acquire_world_handle(session, selector.head.session, head);
 			return ok, acquisition, error;
 		}
 
 
 		for session.operations {
-			if it.kind == .UPDATE && !it.terminal && bytes_equal(it.frontier, selector.expected_frontier) {
-				ok, acquisition, error := export_world_observation(session, selector.session, pending_observation(it));
+			if it.kind == .UPDATE && !it.terminal && bytes_equal(it.update_data.frontier, selector.head.expected_frontier) {
+				ok, acquisition, error := export_world_observation(session, selector.head.session, pending_observation(it));
 				return ok, acquisition, error;
 			}
 		}
 
 
 		if head {
-			ok, frontier, error := export_bytes(session, selector.session, head.frontier);
+			ok, frontier, error := export_bytes(session, selector.head.session, head.frontier);
 			if !ok {
 				return false, .{}, error;
 			}
@@ -1953,8 +1991,8 @@ acquire_world :: (service: *Service, selector: World_Selector) -> (ok: bool, acq
 	session: *Session;
 	registration: *Registration;
 	observation: Observation;
-	if selector.use_waiter {
-		session, registration = lookup_pinned(call, selector.waiter);
+	if selector.update.use_waiter {
+		session, registration = lookup_pinned(call, selector.update.waiter);
 		if !session || registration.operation.kind != .UPDATE {
 			return false, .{}, stale(.WAITER);
 		}
@@ -1962,7 +2000,7 @@ acquire_world :: (service: *Service, selector: World_Selector) -> (ok: bool, acq
 
 		observation = waiter_observation(session, registration);
 	} else {
-		session, registration = lookup_pinned(call, selector.ticket);
+		session, registration = lookup_pinned(call, selector.update.ticket);
 		if !session {
 			return false, .{}, stale(.TICKET);
 		}
@@ -1976,24 +2014,24 @@ acquire_world :: (service: *Service, selector: World_Selector) -> (ok: bool, acq
 
 	operation := registration.operation;
 	if observation.kind == .PENDING || observation.update.kind != .PUBLISHED {
-		if selector.use_waiter {
-			ok, acquisition, error := export_world_observation(session, selector.waiter, observation);
+		if selector.update.use_waiter {
+			ok, acquisition, error := export_world_observation(session, selector.update.waiter, observation);
 			return ok, acquisition, error;
 		}
 
 
-		ok, acquisition, error := export_world_observation(session, selector.ticket, observation);
+		ok, acquisition, error := export_world_observation(session, selector.update.ticket, observation);
 		return ok, acquisition, error;
 	}
 
 
-	if selector.use_waiter {
-		ok, acquisition, error := acquire_world_handle(session, selector.waiter, operation.world);
+	if selector.update.use_waiter {
+		ok, acquisition, error := acquire_world_handle(session, selector.update.waiter, operation.world);
 		return ok, acquisition, error;
 	}
 
 
-	ok, acquisition, error := acquire_world_handle(session, selector.ticket, operation.world);
+	ok, acquisition, error := acquire_world_handle(session, selector.update.ticket, operation.world);
 	return ok, acquisition, error;
 }
 
@@ -2211,8 +2249,10 @@ query :: (service: *Service, request: Query_Request) -> (ok: bool, started: Quer
 	operation.* = .{
 		kind = .QUERY,
 		world = world,
-		member = member,
-		query_kind = request.kind,
+		query_data = .{
+			member = member,
+			query_kind = request.kind,
+		},
 	};
 
 	world.references += 1;
@@ -2281,7 +2321,7 @@ query :: (service: *Service, request: Query_Request) -> (ok: bool, started: Quer
 	}
 
 	array_add(*task.operations, operation);
-	operation.task = task;
+	operation.query_data.task = task;
 	return true, .{kind = .PENDING, waiter = waiter}, .{};
 }
 
@@ -2433,7 +2473,7 @@ acquire_result :: (service: *Service, handle: Handle(.WAITER)) -> (ok: bool, acq
 	}
 
 
-	result := registration.operation.result;
+	result := registration.operation.query_data.result;
 	result.references += 1;
 	admitted := false;
 	defer {
@@ -2517,15 +2557,15 @@ cancel_waiter :: (service: *Service, handle: Handle(.WAITER)) -> (ok: bool, outc
 			observation = query_observation(
 				operation.identity,
 				operation.world,
-				operation.member,
-				operation.query_kind,
+				operation.query_data.member,
+				operation.query_data.query_kind,
 				.{kind = .CANCELLED, cancellation = .CALLER}
 			);
 		} else {
 			observation = pending_observation(operation);
 			observation.kind = .UPDATE;
-			observation.provider_frontier = operation.frontier;
-			observation.documents = operation.documents;
+			observation.provider_frontier = operation.update_data.frontier;
+			observation.documents = operation.update_data.documents;
 			observation.update = .{kind = .CANCELLED, cancellation = .CALLER};
 		}
 
@@ -3647,6 +3687,8 @@ compute_task :: (session: *Session, mailbox: *Mailbox) {
 
 // Consumes a mailbox once; a duplicate or stale delivery is rejected without touching published state.
 deliver_mailbox :: (session: *Session, mailbox: *Mailbox) -> Delivery {
+	// Claim this delivery once and match it to the active task attempt.
+	// A late mailbox must not complete a newer attempt, even if it still points at the same task:
 	if mailbox.consumed {
 		return .REJECTED;
 	}
@@ -3676,6 +3718,8 @@ deliver_mailbox :: (session: *Session, mailbox: *Mailbox) -> Delivery {
 	}
 
 	if task.kind == .QUERY_PAYLOAD && mailbox.ok && !stopped && consumed {
+		// Result backing preparation can yield the gate.
+		// Recheck both the attempt and its publication authority before turning the mailbox output into a result:
 		result_prepared = session.identities.result_counter.next != U64_MAX;
 		if result_prepared {
 			result_prepared = prepare_immediate_result_backing(session, *result_backing, asynchronous = true);
@@ -3733,6 +3777,8 @@ deliver_mailbox :: (session: *Session, mailbox: *Mailbox) -> Delivery {
 		}
 
 
+		// Head installation is a separate decision because a published world need not be the head.
+		// Transfer syntax ownership to the world before completing update operations:
 		world.syntax = mailbox.syntax;
 		mailbox.syntax = .[];
 		world.state = .PUBLISHED;
@@ -3781,7 +3827,7 @@ deliver_mailbox :: (session: *Session, mailbox: *Mailbox) -> Delivery {
 	mailbox.diagnostics = null;
 	for array_copy(task.operations,, temp) {
 		if !it.terminal {
-			it.result = result;
+			it.query_data.result = result;
 			result.references += 1;
 			finish_query(session, it, .{kind = .AVAILABLE, result_identity = result.identity});
 		}
@@ -3995,12 +4041,13 @@ sort_canonical :: (values: [][]u8) {
 }
 
 new_update_operation :: (session: *Session, frontier: []u8, documents: [][]u8) -> *Operation {
-	_, identity := issue_operation(*session.identities);//QUESTION: why is this unchecked?
+	ok, identity := issue_operation(*session.identities);
+	assert(ok);
 	operation := New(Operation);
 	operation.identity = identity;
 	operation.kind = .UPDATE;
-	operation.frontier = frontier;
-	operation.documents = documents;
+	operation.update_data.frontier = frontier;
+	operation.update_data.documents = documents;
 	array_add(*session.operations, operation);
 	return operation;
 }
@@ -4027,7 +4074,7 @@ find_candidate_task :: (session: *Session, world: *World) -> *Task {
 	return null;
 }
 
-// Captures the selected state of `operation.documents`, joining an equal pending or published candidate, and makes it the head target.
+// Captures the selected state of `operation.update_data.documents`, joining an equal pending or published candidate, and makes it the head target.
 start_candidate :: (
 	session: *Session,
 	operation: *Operation,
@@ -4042,7 +4089,7 @@ start_candidate :: (
 		prepared.* = .{};
 	} else {
 		ok: bool;
-		ok, capture = try_source_candidate_capture(session.provider, session.identities.session, operation.frontier, operation.documents);
+		ok, capture = try_source_candidate_capture(session.provider, session.identities.session, operation.update_data.frontier, operation.update_data.documents);
 		assert(ok);
 	}
 
@@ -4109,14 +4156,15 @@ start_candidate :: (
 			prepared_world.worlds = .{data = previous.data, count = previous.allocated};
 		}
 	} else {
-		_, generated := issue_world(*session.identities);//QUESTION: why is this unchecked?
+		ok, generated := issue_world(*session.identities);
+		assert(ok);
 		identity = generated;
 		world = New(World);
 	}
 
 	world.* = .{
 		identity = identity,
-		frontier = operation.frontier,
+		frontier = operation.update_data.frontier,
 		capture_key = key,
 		members = members,
 		consistency = capture.consistency,
@@ -4174,10 +4222,11 @@ start_candidate :: (
 }
 
 // A new accepted frontier supersedes pending older updates and cancels every unfinished task and query on older worlds.
+// Pending work cannot satisfy the newer frontier, even if it finishes before its replacement.
 supersede_obsolete :: (session: *Session) {
 	successor := session.operations[session.operations.count - 1].identity;
 	for session.operations {
-		if it.terminal || bytes_equal(it.frontier, session.provider.accepted_frontier) {
+		if it.terminal || (it.kind == .UPDATE && bytes_equal(it.update_data.frontier, session.provider.accepted_frontier)) {
 			continue;
 		}
 
@@ -4240,7 +4289,7 @@ finish_update :: (session: *Session, operation: *Operation, outcome: Ticket_Term
 
 
 	operation.terminal = true;
-	operation.update = outcome;
+	operation.update_data.update = outcome;
 	give(session, .IN_FLIGHT_OPERATIONS);
 	observation := update_observation(operation);
 	while operation.waiters.count {
@@ -4256,9 +4305,9 @@ finish_query :: (session: *Session, operation: *Operation, outcome: Query_Termin
 
 
 	operation.terminal = true;
-	operation.query = outcome;
+	operation.query_data.query = outcome;
 	give(session, .IN_FLIGHT_OPERATIONS);
-	task := operation.task;
+	task := operation.query_data.task;
 	if task {
 		for task.operations {
 			if it == operation {
@@ -4276,7 +4325,7 @@ finish_query :: (session: *Session, operation: *Operation, outcome: Query_Termin
 		}
 	}
 
-	observation := query_observation(operation.identity, operation.world, operation.member, operation.query_kind, outcome);
+	observation := query_observation(operation.identity, operation.world, operation.query_data.member, operation.query_data.query_kind, outcome);
 	while operation.waiters.count {
 		if notify {
 			resolve_waiter(session, operation, operation.waiters[0].slot, observation);
@@ -4472,10 +4521,7 @@ resolve_waiter :: (session: *Session, operation: *Operation, slot: u64, observat
 
 pending_observation :: (operation: *Operation) -> Observation {
 	phase := Pending_Phase.QUEUED;
-	task := operation.task;
-	if operation.kind == .UPDATE {
-		task = null;
-	}
+	task := ifx operation.kind == .QUERY then operation.query_data.task;
 
 	if task && task.phase == .RUNNING {
 		phase = .RUNNING;
@@ -4488,9 +4534,9 @@ update_observation :: (operation: *Operation) -> Observation {
 	return .{
 		kind = .UPDATE,
 		operation_identity = operation.identity,
-		provider_frontier = operation.frontier,
-		documents = operation.documents,
-		update = operation.update,
+		provider_frontier = operation.update_data.frontier,
+		documents = operation.update_data.documents,
+		update = operation.update_data.update,
 	};
 }
 
@@ -4579,6 +4625,8 @@ acquire_world_handle :: (session: *Session, source: Handle($K), world: *World) -
 }
 
 // Only the head target at the current frontier replaces the head.
+// A world becoming ready is not itself publication authority: later admission may have selected
+// a different target while its tasks were running.
 install_head :: (session: *Session, world: *World) {
 	if world != session.head_target || !bytes_equal(world.frontier, session.provider.accepted_frontier) || world == session.head {
 		return;
@@ -4812,6 +4860,7 @@ retire_source :: (session: *Session, source: *Source_Backing) {
 }
 
 // Frees terminal operations no registration can observe any more.
+// Shutdown is session state as well as an operation; retirement owns its lifetime.
 reap :: (session: *Session, operation: *Operation) {
 	if !operation.terminal || operation.registrations || operation.kind == .SHUTDOWN {
 		return;
@@ -4824,8 +4873,8 @@ reap :: (session: *Session, operation: *Operation) {
 		}
 	}
 
-	if operation.result {
-		release_result(session, operation.result);
+	if operation.kind == .QUERY && operation.query_data.result {
+		release_result(session, operation.query_data.result);
 	}
 
 	if operation.world {

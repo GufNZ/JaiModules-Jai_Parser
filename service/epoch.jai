@@ -1,6 +1,7 @@
 // R10 epoch issuer: a per-project `.jaiParserEpoch` file beside the store root, holding the authority namespace and the last reserved epoch.
 // Reservation holds an exclusive sibling lock file, writes the successor to a staging file, flushes it and replaces the epoch file.
-// Windows and POSIX (Linux, macOS) implementations exist (R11); only Windows has been run.  Other platforms report the issuer as unavailable.
+// Windows and POSIX (Linux, macOS) implementations exist (R11); only Windows has been run.
+// Other platforms report the issuer as unavailable.
 
 EPOCH_ISSUER_SUPPORTED :: OS == .WINDOWS || OS == .LINUX || OS == .MACOS;
 
@@ -73,6 +74,7 @@ decode_epoch_file :: (text: string, authority_namespace: []u8) -> (failure: Epoc
 }
 
 // Reserves a fresh epoch greater than both the last recorded one and `floor` (the highest writer epoch in any readable store head):
+// Lock a sibling file rather than the epoch file itself: the protected path is replaced during commit, and every issuer must still contend on the same lock across that replacement.
 reserve_epoch :: (directory: string, authority_namespace: []u8, floor: u64 = 0) -> (ok: bool, epoch: u64, failure: Epoch_Failure) {
 	#if !EPOCH_ISSUER_SUPPORTED {
 		return false, 0, .UNSUPPORTED_PLATFORM;

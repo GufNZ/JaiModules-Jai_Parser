@@ -142,6 +142,8 @@ register_handle :: (registry: *Handle_Registry, $kind: Handle_Kind) -> bool, Han
 	return true, .{session = registry.session, slot = xx (registry.slots.count - 1), generation = 1, owner_service = registry.owner_service, owner_token = registry.owner_token};
 }
 
+// Slot numbers are local and reusable.
+// Check owner, session, kind, and generation so a stale handle cannot resolve to a different object merely because it occupies the same slot.
 handle_is_live :: (registry: *Handle_Registry, handle: Handle($K)) -> bool {
 	if handle.slot >= xx registry.slots.count {
 		return false;
@@ -171,6 +173,8 @@ release_handle :: (registry: *Handle_Registry, handle: Handle($K)) -> bool {
 
 	entry := *registry.slots[handle.slot];
 	entry.live = false;
+
+	// Retire an exhausted slot rather than wrapping back to an already issued generation:
 	if entry.generation == U64_MAX {
 		entry.retired = true;
 	} else {

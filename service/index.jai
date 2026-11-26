@@ -314,6 +314,8 @@ ASSIGNMENT_OPERATOR_TOKENS :: Name_Pair.[
 RECOVERY_ATTRIBUTION_DETAIL	:: "A recovery event's recorded owner is not part of the published syntax, so it cannot be attributed to declarations.";
 AMBIGUOUS_RECOVERY_DETAIL	:: "A recovery event at this declaration's first token may have been recorded before or after its builder began.";
 
+// Establish owning edges before emitting entries.  Containment, scope, and recovery attribution
+// all depend on the same owner chain; following aliases as owners could duplicate declarations.
 fill_declaration_index :: (index: *Declaration_Index) -> Projection_Fault {
 	b: Index_Builder;
 	b.snapshot = index.snapshot;
@@ -337,6 +339,8 @@ fill_declaration_index :: (index: *Declaration_Index) -> Projection_Fault {
 		b.entry_of_node[it] = -1;
 	}
 
+	// Entry emission relies on a single owner per node and must wait until those links are checked.
+	// First pass: resolve owning edges into tables keyed by snapshot node ID:
 	for record, id: nodes {
 		for record.fields {
 			b.path.count = 0;
@@ -353,6 +357,8 @@ fill_declaration_index :: (index: *Declaration_Index) -> Projection_Fault {
 	}
 
 
+	// Emit an entire compound's binding group here so its entries precede any declarations in its shared payload.
+	// Second pass: inherit container and scope state in preorder:
 	for record, id: nodes {
 		parent := b.parents[id];
 		edge := b.edges[id];
@@ -414,6 +420,8 @@ fill_declaration_index :: (index: *Declaration_Index) -> Projection_Fault {
 	}
 
 
+	// Nodes without their own entry can still carry evidence that affects an owning declaration or binding group.
+	// Attribute recovery only after entries and shared regions have IDs:
 	attribute_recoveries(*b);
 	if b.fault.failure != .NONE {
 		return b.fault;
@@ -645,9 +653,15 @@ visibility_of :: (b: *Index_Builder, id: s64) -> Visibility_Syntax {
 }
 
 // The `parse_declaration_node` prefix: `#program_export ["name"]`, `#no_reset`, then `$` or `$$`.
-// Returns the first token after it, the export occurrence and whether the prefix agrees with the recorded flags.
+// Returns whether the prefix agrees with the recorded flags, the first token after it and the export occurrence.
 // An uncorrelated export marker reports partial metadata.
-correlate_prefix :: (b: *Index_Builder, id: s64, first: s64, flags: Field_Value, export_name: []u8) -> (next_token: s64, program_export: *Program_Export_Occurrence, prefix_ok: bool) {//QUESTION: why is the bool last and not first?
+correlate_prefix :: (
+	b: *Index_Builder,
+	id: s64,
+	first: s64,
+	flags: Field_Value,
+	export_name: []u8
+) -> (prefix_ok: bool, next_token: s64, program_export: *Program_Export_Occurrence) {
 	i := first;
 	export: *Program_Export_Occurrence;
 	marked := token_is(b, i, byte_tag(#char "#")) && identifier_is(b, i + 1, "program_export");
@@ -674,7 +688,7 @@ correlate_prefix :: (b: *Index_Builder, id: s64, first: s64, flags: Field_Value,
 
 	if token_is(b, i, byte_tag(#char "#")) && identifier_is(b, i + 1, "no_reset") {
 		if !has_name(flags, "NO_RESET") {
-			return i, export, false;
+			return false, i, export;
 		}
 
 
@@ -684,16 +698,16 @@ correlate_prefix :: (b: *Index_Builder, id: s64, first: s64, flags: Field_Value,
 	required := has_name(flags, "AUTO_VALUE_BAKE_IS_REQUIRED");
 	baked := has_name(flags, "AUTO_VALUE_BAKE");
 	if token_is(b, i, byte_tag(#char "$")) {
-		return i + 1, export, required;
+		return required, i + 1, export;
 	}
 
 
 	if token_is(b, i, named_tag("DOUBLE_DOLLAR")) {
-		return i + 1, export, baked && !required;
+		return baked && !required, i + 1, export;
 	}
 
 
-	return i, export, !baked;
+	return !baked, i, export;
 }
 
 // The last name token of an operator declaration starting at `first`, or -1 when the tokens do not spell the producer's name:
@@ -829,7 +843,7 @@ emit_declaration :: (b: *Index_Builder, id: s64) -> u64 {
 		}
 	} else {
 		first := record.token_span.first;
-		next, occurrence, prefix_ok := correlate_prefix(b, id, first, flags, field_bytes(record.fields, "program_export_name"));
+		prefix_ok, next, occurrence := correlate_prefix(b, id, first, flags, field_bytes(record.fields, "program_export_name"));
 		export = occurrence;
 
 		last := -1;
@@ -923,7 +937,23 @@ emit_compound :: (b: *Index_Builder, id: s64) {
 
 	properties_record := *nodes[properties];
 	flags := field_of(properties_record.fields, "flags");
-	_, export := correlate_prefix(b, properties, record.token_span.first, flags, field_bytes(properties_record.fields, "program_export_name"));
+	prefix_ok, _, export := correlate_prefix(
+		b,
+		properties,
+		record.token_span.first,
+		flags,
+		field_bytes(properties_record.fields, "program_export_name")
+	);
+	if !prefix_ok {
+		add_reason(
+			b,
+			.UNCORRELATED_METADATA,
+			properties,
+			.METADATA,
+			"The compound prefix tokens and declaration flags disagree.",
+			"flags"
+		);
+	}
 
 	region_id := b.regions.count;
 	b.region_ids[id] = region_id;

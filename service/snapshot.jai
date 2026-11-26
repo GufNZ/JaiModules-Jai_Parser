@@ -50,6 +50,8 @@ release_owned_syntax :: (owned: *Owned_Syntax) {
 	free(owned);
 }
 
+// Assemble a snapshot only once both projections succeed.
+// Recovery owners can be named only after the node walk establishes which parser nodes are published and assigns their IDs.
 project_snapshot :: (owner: *Owned_Syntax) -> Projection_Fault, *Syntax_Snapshot {
 	token_fault, tokens := project_tokens(owner);
 	if token_fault.failure != .NONE {

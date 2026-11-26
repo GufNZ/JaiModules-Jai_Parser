@@ -3,7 +3,9 @@
 
 KEY_MAGIC				:: "jai-cache-key";
 KEY_SCHEMA_VERSION		:u32: 1;
-INTERFACE_SCHEMA_PREFIX	:: #run sprint("jai-cache-interface/%/", KEY_SCHEMA_VERSION);	//QUESTION: what is the 1 for, and does this make sense?  If so, apply everywhere?
+
+// Logical record schemas can evolve without changing the binary key framing, and vice versa.
+INTERFACE_SCHEMA_PREFIX	:: #run sprint("%/", INTERFACE_VERSION);
 
 append_bytes :: (bytes: *[..]u8, data: []u8) {
 	old_count := bytes.count;
@@ -23,6 +25,7 @@ append_u64_le :: (bytes: *[..]u8, value: u64) {
 	}
 }
 
+// Lengths keep different field boundaries from producing the same key bytes.
 append_framed :: (bytes: *[..]u8, value: []u8) {
 	append_u64_le(bytes, xx value.count);
 	append_bytes(bytes, value);
@@ -218,6 +221,7 @@ read_key_u64 :: (bytes: []u8, cursor: *s64) -> bool, u64 {
 
 read_key_framed :: (bytes: []u8, cursor: *s64) -> bool, []u8 {
 	ok, length := read_key_u64(bytes, cursor);
+	// Check the unsigned length before narrowing it or adding it to the cursor.
 	if !ok || length > xx (bytes.count - cursor.*) {
 		return false, .[];
 	}
@@ -261,6 +265,7 @@ read_key_header :: (bytes: []u8, maximum_fields: u64) -> bool, []u8, u64, s64 {
 #scope_export
 
 // Bounded K decoder: views borrow `bytes`; rejects bad framing, version, counts above `maximum_fields` and trailing bytes.
+// Accepting a valid prefix would let different byte strings decode as the same key.
 parse_key :: (bytes: []u8, maximum_fields: u64) -> bool, Key_View {
 	result: Key_View;
 	header_ok, tag, field_count, cursor := read_key_header(bytes, maximum_fields);

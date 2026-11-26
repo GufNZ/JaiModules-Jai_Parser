@@ -59,7 +59,7 @@ submit :: (batch: *Service.Host_Batch) -> Service.Handle(.TICKET) {
 world_of :: (host: *Service.Harness_Host, ticket: Service.Handle(.TICKET)) -> Service.Handle(.WORLD) {
 	observation := await(host, ticket);
 	assert(observation.update.kind == .PUBLISHED, "\e[91mUpdate ended %.\e[0m", observation.update.kind);
-	ok, acquisition := Service.acquire_world(host.service, .{kind = .PUBLISHED_UPDATE, ticket = ticket});
+	ok, acquisition := Service.acquire_world(host.service, .{kind = .PUBLISHED_UPDATE, update = .{ticket = ticket}});
 	assert(ok && acquisition.kind == .ACQUIRED);
 	return acquisition.world;
 }
@@ -206,6 +206,20 @@ test_absence_and_unavailability :: (root: string) {
 	make_directory_if_it_does_not_exist(tprint("%/folder.jai", root));
 	batch = Service.begin_batch(host);
 	assert(!Service.observe_disk(*batch, "folder.jai"), "\e[91mAn unreadable path was reported.\e[0m");
+	assert(!batch.events.count && !batch.contexts.count);
+
+	EXHAUSTED :: 0xFFFF_FFFF_FFFF_FFFF;
+	host.confirmations.next = EXHAUSTED;
+	assert(!Service.restore_overlay(*batch, "new.jai", "a :: 1;", xx "candidate"));
+	assert(!batch.events.count && !batch.contexts.count);
+
+	host.observations.next = EXHAUSTED;
+	assert(!Service.observe_disk(*batch, "new.jai"));
+	assert(!batch.events.count && !batch.contexts.count);
+
+	host.revisions.next = EXHAUSTED;
+	assert(!Service.set_overlay(*batch, "new.jai", "a :: 1;"));
+	assert(!batch.events.count && !batch.contexts.count);
 
 	Service.release(host.service, world);
 	Service.release(host.service, ticket);

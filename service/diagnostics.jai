@@ -140,6 +140,8 @@ is_valid_utf8 :: (bytes: []u8) -> bool {
 
 #scope_file
 
+// Preserve emission order, even when a later recovery reports an earlier source position.
+// Byte origins locate the evidence; they do not establish the order the parser encountered it.
 fill_diagnostics :: (projection: *Diagnostics_Projection) -> Projection_Fault {
 	tokens := projection.tokens;
 	raw := tokens.diagnostics;

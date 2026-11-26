@@ -1,5 +1,7 @@
 #scope_module
 
+// Pin the session across the caller's whole operation; a successful handle lookup alone does
+// not keep the session alive after the directory lock is released.
 use_call :: (service: *Service, handle: Handle($K)) -> *Session #expand {
 	session := enter_call(service, handle);
 	`defer leave_call(session);
@@ -290,6 +292,11 @@ start_workers :: (session: *Session) -> bool {
 	return true;
 }
 
+/*
+Select work and deliver its result under the same gate, but release the gate for computation.
+The mailbox carries the selected work across that gap.
+Admissions and stop requests can then make progress while parsing runs, and delivery can decide whether the result is still wanted.
+*/
 compute_job :: (thread: *Thread) -> s64 {
 	session := thread.data.(*Session);
 	push_allocator(owner_allocator(session));
@@ -348,6 +355,8 @@ stop_requested :: (session: *Session, task: *Task) -> bool {
 	return stopped;
 }
 
+// Join computation before final reclamation.  Admissions and cleanup keep separate pins because
+// either can still hold session-owned storage after the compute thread has stopped.
 reaper_job :: (thread: *Thread) -> s64 {
 	session := thread.data.(*Session);
 	push_allocator(owner_allocator(session));
@@ -390,6 +399,8 @@ reaper_job :: (thread: *Thread) -> s64 {
 }
 
 cleanup_owned :: (session: *Session) {
+	// New retirements can queue while a detached batch is destroyed.
+	// Detach one batch under the gate and pin cleanup so shutdown cannot complete while detached objects are live:
 	push_allocator(owner_allocator(session));
 	worlds:		*World;
 	outputs:	*Retired_Output;
@@ -420,6 +431,7 @@ cleanup_owned :: (session: *Session) {
 		worker_pause(session, .CLEANUP);
 	}
 
+	// Drop syntax before releasing member sources, since syntax records can borrow their bytes:
 	while worlds {
 		world := worlds;
 		worlds = world.next_retired;

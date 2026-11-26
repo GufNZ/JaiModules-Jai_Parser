@@ -256,6 +256,8 @@ release_token_projection :: (projection: *Token_Projection) {
 
 #scope_file
 
+// Retain producer order and keep inserted tokens separate from source tokens.  Otherwise an
+// insertion could shift the indices in node spans or appear to have bytes in the original source.
 fill_token_projection :: (projection: *Token_Projection) -> Projection_Fault {
 	push_allocator(pool_allocator_proc, *projection.storage);
 	parsed := *projection.owner.parsed;

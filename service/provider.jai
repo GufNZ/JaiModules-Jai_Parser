@@ -457,6 +457,7 @@ selected_provenance :: (selected: Selected_Document) -> *Observation_Provenance 
 }
 
 // An overlay takes precedence over the acknowledged disk branch:
+// Otherwise a disk observation could replace unsaved bytes before the host removes the overlay.
 selected_document :: (state: *Document_State) -> Selected_Document {
 	result := Selected_Document.{document = state.document, provider_revision = state.provider_revision};
 	if state.has_overlay {
@@ -602,6 +603,7 @@ register_contexts :: (model: *Provider_Model, registrations: []Context_Registrat
 }
 
 // Validates the whole batch against staged copies, then commits every member and one new frontier together, or nothing:
+// Readers use a frontier as one source-selection boundary; a partially applied batch would make that boundary describe a workspace the provider never accepted.
 apply_source_batch :: (model: *Provider_Model, batch: Source_Batch) -> (ok: bool, frontier: []u8, error: Operation_Error) {
 	storage := try_source_batch_pool();
 	if !storage {
@@ -665,6 +667,9 @@ apply_source_batch_with_storage :: (
 	staging.path.data = paths.data;
 	staging.path.allocated = paths.count;
 	staging.path.allocator = path_allocator;
+
+	// The staging storage is disposable until the whole batch and its revision claims validate.
+	// Build the proposed document/context state without changing the model readers can see:
 	ok := stage_batch(*staging, batch);
 	if !ok {
 		discard_staging(*staging);
@@ -706,6 +711,8 @@ apply_source_batch_with_storage :: (
 	}
 
 
+	// All fallible preparation has succeeded.
+	// Install any replacement arrays before transferring staged records into them; existing document slots keep their allocations but take staged state:
 	if commit.documents.count {
 		previous := model.documents;
 		model.documents.data = commit.documents.data;
@@ -740,6 +747,8 @@ apply_source_batch_with_storage :: (
 		}
 	}
 
+	// The accepted records can still refer to bytes in the staging pool, so it remains live after commit.
+	// Publish the frontier only after every record is installed:
 	model.frontier_counter = counter;
 	model.accepted_frontier = frontier;
 	frontier = .[];

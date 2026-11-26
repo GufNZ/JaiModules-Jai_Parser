@@ -127,7 +127,7 @@ await :: (trace: *Trace, ticket: Service.Handle(.TICKET)) -> Service.Observation
 world_of :: (trace: *Trace, ticket: Service.Handle(.TICKET)) -> Service.Handle(.WORLD) {
 	observation := await(trace, ticket);
 	assert(observation.update.kind == .PUBLISHED, "\e[91m%: update ended %.\e[0m", trace.name, observation.update.kind);
-	ok, acquisition := Service.acquire_world(trace.host.service, .{kind = .PUBLISHED_UPDATE, ticket = ticket});
+	ok, acquisition := Service.acquire_world(trace.host.service, .{kind = .PUBLISHED_UPDATE, update = .{ticket = ticket}});
 	assert(ok && acquisition.kind == .ACQUIRED);
 	return acquisition.world;
 }

@@ -2386,6 +2386,27 @@ test_declaration_index_controls :: () {
 	}
 
 	{
+		owned, snapshot := project("#program_export x, y: int;");
+		compound := find_node(snapshot.node_projection, "COMPOUND_DECLARATION");
+		properties := get_field(compound.fields, "declaration_properties").node.id;
+		flag_names := string.["PROGRAM_EXPORT", "AUTO_VALUE_BAKE"];
+		for * snapshot.nodes[properties].fields {
+			if it.path[0].name == "flags" {
+				it.value.flags.names = flag_names;
+			}
+		}
+
+		fault, index := Service.project_declaration_index(snapshot);
+		assert(fault.failure == .NONE && index.entries.count == 2);
+		export := index.entries[0].program_export_syntax;
+		assert(export && export == index.entries[1].program_export_syntax);
+		assert(index.coverage.kind == .PARTIAL_SYNTAX_TRAVERSAL && index.coverage.reasons.count == 1);
+		reason := index.coverage.reasons[0];
+		assert(reason.code == .UNCORRELATED_METADATA && reason.impacts == .METADATA && reason.subject.local_node_id == xx properties);
+		release_source_index(owned, snapshot, index);
+	}
+
+	{
 		owned, snapshot := project("E :: enum { A; }");
 		member := find_node(snapshot.node_projection, "IDENT");
 		snapshot.tokens[member.token_span.one_past_last].tag = .{kind = .BYTE_CHAR, byte = #char ","};

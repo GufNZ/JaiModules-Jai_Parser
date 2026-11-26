@@ -251,7 +251,9 @@ world_of :: (fixture: Fixture, ticket: Service.Handle(.TICKET)) -> Service.Handl
 	Service.free_observation(*observation);
 	ok, acquired := Service.acquire_world(fixture.host.service, .{
 		kind = .PUBLISHED_UPDATE,
-		ticket = ticket,
+		update = .{
+			ticket = ticket,
+		},
 	});
 	assert(ok && acquired.kind == .ACQUIRED);
 	return acquired.world;
@@ -647,10 +649,7 @@ test_registration_and_wait :: () {
 
 		ok, attached := Service.observe_ticket(fixture.host.service, ticket);
 		assert(ok);
-		if !it {//TODO: flip
-			assert(attached.terminal && attached.observation.update.kind == .PUBLISHED);
-			Service.free_observation(*attached.observation);
-		} else {
+		if it {
 			assert(!attached.terminal);
 			waiting := Waiting.{service = fixture.host.service, handle = attached.waiter};
 			thread: Thread;
@@ -671,6 +670,9 @@ test_registration_and_wait :: () {
 			assert(waiting.ok && !waiting.outcome.timed_out && waiting.outcome.observation.update.kind == .PUBLISHED);
 			Service.free_observation(*waiting.outcome.observation);
 			release(fixture, attached.waiter);
+		} else {
+			assert(attached.terminal && attached.observation.update.kind == .PUBLISHED);
+			Service.free_observation(*attached.observation);
 		}
 
 		world := world_of(fixture, ticket);
@@ -1312,7 +1314,7 @@ output_interleaving_job :: (thread: *Thread) -> s64 {
 				*fixture.session.gate,
 				#code {
 					operation := fixture.session.registrations[job.drain.first.slot].operation;
-					target = max(job.source_capacity, max(8, (operation.task.operations.count + 1) * 2));
+					target = max(job.source_capacity, max(8, (operation.query_data.task.operations.count + 1) * 2));
 				}
 			);
 
@@ -1322,7 +1324,7 @@ output_interleaving_job :: (thread: *Thread) -> s64 {
 					*fixture.session.gate,
 					#code {
 						operation := fixture.session.registrations[job.drain.first.slot].operation;
-						filled = operation.task.operations.count >= target;
+						filled = operation.query_data.task.operations.count >= target;
 					}
 				);
 
@@ -3574,7 +3576,7 @@ test_source_candidate_join_admission :: (
 					operations_capacity := ifx task then task.operations.allocated else 0;
 					ready_capacity := session.ready.allocated;
 					capture_ok: bool;
-					capture_ok, capture = Service.try_source_candidate_capture(session.provider, session.identities.session, world.frontier, original.documents);
+					capture_ok, capture = Service.try_source_candidate_capture(session.provider, session.identities.session, world.frontier, original.update_data.documents);
 					assert(capture_ok && Service.bytes_equal(capture.key, world.capture_key));
 					if task {
 						if race == .OPERATIONS_CAPACITY {
@@ -3696,7 +3698,7 @@ test_source_candidate_join_admission :: (
 						}
 
 						assert(Service.take(session, .LIVE_HANDLES, .IN_FLIGHT_OPERATIONS));
-						operation := Service.new_update_operation(session, world.frontier, array_copy(original.documents));
+						operation := Service.new_update_operation(session, world.frontier, array_copy(original.update_data.documents));
 						joined = Service.register(session, .TICKET, .{operation = operation});
 						operation.registrations += 1;
 						Service.with_lock(
@@ -3978,7 +3980,7 @@ test_analysis_candidate_join :: (
 				*session.gate,
 				#code {
 					world = session.registrations[target.slot].operation.world;
-					request.documents = session.registrations[target.slot].operation.documents;
+					request.documents = session.registrations[target.slot].operation.update_data.documents;
 					task = Service.find_candidate_task(session, world);
 					if task {
 						push_allocator(Service.owner_allocator(session));
@@ -10568,8 +10570,8 @@ test_analysis_ticket_backing_failures :: (
 
 						expected := Service.make_key("operation", session.identities.session.([]u8), token,, temp);
 						assert(Service.bytes_equal(operation.identity.([]u8), expected));
-						assert(operation.documents.count == request.documents.count && operation.frontier.data != accepted.frontier.data);
-						assert(Service.bytes_equal(operation.documents[0], documents[0]) && operation.documents[0].data != documents[0].data);
+						assert(operation.update_data.documents.count == request.documents.count && operation.update_data.frontier.data != accepted.frontier.data);
+						assert(Service.bytes_equal(operation.update_data.documents[0], documents[0]) && operation.update_data.documents[0].data != documents[0].data);
 						if world || task || combined && new_world {
 							for 0..7 {
 								token[it] = xx ((identities.world_counter.next >> (it * 8)) & 0xFF);
@@ -10599,9 +10601,9 @@ test_analysis_ticket_backing_failures :: (
 						}
 
 						if paired {
-							assert(Service.compare_canonical(operation.documents[0], operation.documents[1]) < 0);
-							assert(Service.bytes_equal(operation.documents[1], paired_documents[0]));
-							assert(operation.documents[1].data != paired_documents[0].data);
+							assert(Service.compare_canonical(operation.update_data.documents[0], operation.update_data.documents[1]) < 0);
+							assert(Service.bytes_equal(operation.update_data.documents[1], paired_documents[0]));
+							assert(operation.update_data.documents[1].data != paired_documents[0].data);
 						}
 					}
 				);
@@ -11270,14 +11272,14 @@ test_analysis_receipt_failures :: () {
 				*fixture.session.gate,
 				#code {
 					operation := fixture.session.registrations[accepted.ticket.slot].operation;
-					assert(Service.bytes_equal(operation.frontier, request.expected_frontier));
+					assert(Service.bytes_equal(operation.update_data.frontier, request.expected_frontier));
 					if negative_control {
 						assert(!accepted.frontier.count, "\e[91mAnalysis admit-before-copy negative control was not detected.\e[0m");
 					} else {
-						assert(Service.bytes_equal(operation.frontier, accepted.frontier));
-						assert(operation.frontier.data != accepted.frontier.data);
+						assert(Service.bytes_equal(operation.update_data.frontier, accepted.frontier));
+						assert(operation.update_data.frontier.data != accepted.frontier.data);
 						accepted.frontier[0] ^= 1;
-						assert(!Service.bytes_equal(operation.frontier, accepted.frontier));
+						assert(!Service.bytes_equal(operation.update_data.frontier, accepted.frontier));
 						assert(Service.bytes_equal(fixture.session.provider.accepted_frontier, request.expected_frontier));
 					}
 				}
@@ -12383,7 +12385,7 @@ coordinator_argument_error :: (test: Coordinator_Argument_Fixture) -> Service.Op
 		case .WORKSPACE;
 			ok, output, failure := Service.acquire_world(
 				fixture.host.service,
-				.{kind = .HEAD, session = fixture.host.session, workspace = xx "wrong-workspace"}
+				.{kind = .HEAD, head = .{session = fixture.host.session, workspace = xx "wrong-workspace"}}
 			);
 
 			assert(!ok && !output.world.owner_token && !output.operation_identity.count);
@@ -12771,42 +12773,53 @@ finish_retain :: (test: Retain_Fixture($K), source_released := false, owner_rele
 	finish_drain(test.drain, held = held);
 }
 
-Registration_Probe :: struct {//FIXME: document all fields:
+Registration_Probe :: struct {
+	// Counted allocations and the one-based ordinals for failure and callback injection (zero disables either):
 	allocations: s64;
 	fail_at: s64;
 	job_at: s64 = 1;
+	// Run the injected job on the allocating thread rather than a separate worker:
 	direct: bool;
+	// Exclude allocations made inside this callback or a guarded probe's callback:
 	running: bool;
 	guard: *Registration_Probe;
-	// Optional exact-free probe whose callback allocations are excluded from preparation ordinals.
+	// Optional exact-free probe whose callback allocations are excluded from preparation ordinals:
 	cleanup: *Pool_Cleanup_Probe;
+	// Whether the injected job completed before the allocation callback returned, and the job to run:
 	gate_progress: bool;
 	job: Output_Interleaving;
+	// Capture shutdown registration references and the live-handle count after the job:
 	track_shutdown: bool;
 	shutdown_references: s64;
 	shutdown_live: s64;
+	// Capture waiter ledger state, optionally while holding the waiter selection:
 	track_waiter: bool;
 	hold_waiter_selection: bool;
-	waiter_ledger: Service.Resource_Ledger;
+	waiter_ledger: Service:Resource_Ledger;
+	// Capture admissions and source references after the job; select a backing directly or by document:
 	track_source: bool;
-	track_source_backing: *Service.Source_Backing;
+	track_source_backing: *Service:Source_Backing;
 	source_active_admissions: s64;
 	source_document: []u8;
 	source_references: s64;
-	track_world: *Service.World;
+	// Optional world whose references are sampled after the job:
+	track_world: *Service:World;
 	world_references: s64;
-	callback_identities: Service.Session_Identities;
-	// Published operation count after the injected callback, excluding any later outer admission.
+	// Identity counters after the injected source or world callback:
+	callback_identities: Service:Session_Identities;
+	// Published operation count after the injected callback, excluding any later outer admission:
 	callback_operations: s64;
-	// Live world count after the callback's own lifecycle/frontier or competing admission actions.
+	// Live world count after the callback's own lifecycle/frontier or competing admission actions:
 	callback_worlds: s64;
-	// Session task count after the injected callback has completed.
+	// Session task count after the injected callback has completed:
 	callback_tasks: s64;
-	// Required-ready queue count after the injected callback has completed.
+	// Required-ready queue count after the injected callback has completed:
 	callback_ready: s64;
-	// Optional-ready queue count after the injected callback has completed.
+	// Optional-ready queue count after the injected callback has completed:
 	callback_optional_ready: s64;
+	// Enable the ready-queue capacity test control:
 	ready_capacity_control: bool;
+	// Optional query result whose references are sampled after the job:
 	track_result: *Service.Query_Result;
 	result_references: s64;
 }
@@ -13507,7 +13520,7 @@ test_result_registration_interleavings :: (direct := false, negative_control := 
 			Service.with_lock(
 				*fixture.session.gate,
 				#code {
-					probe.track_result = fixture.session.registrations[test.drain.first.slot].operation.result;
+					probe.track_result = fixture.session.registrations[test.drain.first.slot].operation.query_data.result;
 					probe.track_world = probe.track_result.world;
 					fixture.session.faults.registration_allocation_hook = registration_allocation_probe;
 					fixture.session.faults.registration_allocation_data = *probe;
@@ -13931,7 +13944,7 @@ query_join_capacity_probe :: (size: s64, data: *void) -> bool {
 			*session.gate,
 			#code {
 				operation := session.registrations[probe.job.drain.first.slot].operation;
-				operation.task.operations.allocated = operation.task.operations.count;
+				operation.query_data.task.operations.allocated = operation.query_data.task.operations.count;
 			}
 		);
 	}
@@ -14172,20 +14185,20 @@ test_query_operation_backing :: (
 					if task_join {
 						push_allocator(Service.owner_allocator(session));
 						operation := session.registrations[test.retained.drain.first.slot].operation;
-						array_reserve(*operation.task.operations, operation.task.operations.count + 1);
+						array_reserve(*operation.query_data.task.operations, operation.query_data.task.operations.count + 1);
 						if cleanup != .NONE {
-							race_probe.task = operation.task;
+							race_probe.task = operation.query_data.task;
 							free_probe.source = world.members[0].source;
 							source_references = free_probe.source.references;
 							if cleanup == .REPLACED_OPERATIONS {
-								free_probe.memory = operation.task.operations.data.(*u8) - size_of(Service.Owned_Allocation);
+								free_probe.memory = operation.query_data.task.operations.data.(*u8) - size_of(Service.Owned_Allocation);
 							} else if cleanup == .UNUSED_OPERATIONS {
-								race_probe.restore_operations_capacity = operation.task.operations.allocated;
+								race_probe.restore_operations_capacity = operation.query_data.task.operations.allocated;
 							}
 						}
 
 						if !late_join {
-							operation.task.operations.allocated = operation.task.operations.count;
+							operation.query_data.task.operations.allocated = operation.query_data.task.operations.count;
 						}
 
 						session.faults.source_candidate_join_allocation_hook = registration_allocation_probe;
@@ -14332,11 +14345,11 @@ test_query_operation_backing :: (
 
 					if admitted {
 						operation := session.registrations[waiter.slot].operation;
-						assert(operation.world == world && operation.kind == .QUERY && operation.query_kind == .SYNTAX_DIAGNOSTICS);
+						assert(operation.world == world && operation.kind == .QUERY && operation.query_data.query_kind == .SYNTAX_DIAGNOSTICS);
 						expected_operations := ifx (task_join || operation_tracking) && !counter
 							then observed.callback_operations
 							else operations;
-						assert(session.operations.count == expected_operations + 1 && operation.task);
+						assert(session.operations.count == expected_operations + 1 && operation.query_data.task);
 						push_allocator(context.default_allocator);
 						token := ifx counter
 							then Service.U64_MAX - 1
@@ -14348,19 +14361,19 @@ test_query_operation_backing :: (
 						free(token_bytes.data);
 						if task_key {
 							assert(session.tasks.count == tasks && session.ready.count == ready);
-							assert_query_task_key(session, world, operation.task);
+							assert_query_task_key(session, world, operation.query_data.task);
 						}
 						if task_join {
-							original := session.registrations[test.retained.drain.first.slot].operation.task;
+							original := session.registrations[test.retained.drain.first.slot].operation.query_data.task;
 							if action == .COMPLETE_WORK {
-								assert(original.phase == .TERMINAL && operation.task != original && session.tasks.count == tasks + 1);
+								assert(original.phase == .TERMINAL && operation.query_data.task != original && session.tasks.count == tasks + 1);
 							} else {
-								assert(operation.task == original && session.tasks.count == tasks);
+								assert(operation.query_data.task == original && session.tasks.count == tasks);
 							}
 
-							assert_query_task_key(session, world, operation.task);
-							assert(operation.task.operations.count <= operation.task.operations.allocated);
-							assert(operation.task.operations[operation.task.operations.count - 1] == operation);
+							assert_query_task_key(session, world, operation.query_data.task);
+							assert(operation.query_data.task.operations.count <= operation.query_data.task.operations.allocated);
+							assert(operation.query_data.task.operations[operation.query_data.task.operations.count - 1] == operation);
 						}
 					} else {
 						if retired {
@@ -14709,12 +14722,12 @@ test_query_task_key_new_task :: (
 					operation := fixture.session.registrations[started.waiter.slot].operation;
 					if action == .START_QUERY_TASK {
 						competing := fixture.session.registrations[probe.job.competing_waiters[0].slot].operation;
-						assert(competing.task == operation.task && operation.task.operations.count == 2);
+						assert(competing.query_data.task == operation.query_data.task && operation.query_data.task.operations.count == 2);
 					} else {
-						assert(operation.task.operations.count == 1 && operation.task.operations[0] == operation);
+						assert(operation.query_data.task.operations.count == 1 && operation.query_data.task.operations[0] == operation);
 					}
 
-					assert_query_task_key(fixture.session, operation.world, operation.task);
+					assert_query_task_key(fixture.session, operation.world, operation.query_data.task);
 				} else {
 					if retired {
 						assert(error.code == .INVALID_HANDLE && error.handle_kind == .WORLD);
@@ -16724,11 +16737,11 @@ test_waiter_backing_interleavings :: (
 													operation.terminal,
 													operation.registrations,
 													operation.waiters.count,
-													operation.query.kind
+													operation.query_data.query.kind
 												);
 
-												if operation.task {
-													print("Waiter task phase: %.\n", operation.task.phase);
+												if operation.query_data.task {
+													print("Waiter task phase: %.\n", operation.query_data.task.phase);
 												}
 											}
 										}
@@ -16917,18 +16930,22 @@ prepared_world_registration :: (scenario: World_Registration_Case, backing_case:
 		assert(ok);
 		test.selector = .{
 			kind = .HEAD,
-			session = fixture.host.session,
-			workspace = array_copy(description.workspace),
-			expected_frontier = array_copy(description.accepted_frontier),
+			head = .{
+				session = fixture.host.session,
+				workspace = array_copy(description.workspace),
+				expected_frontier = array_copy(description.accepted_frontier),
+			},
 		};
 
 		Service.free_description(*description);
 	} else {
 		test.selector = .{
 			kind = .PUBLISHED_UPDATE,
-			ticket = test.ticket,
-			waiter = test.waiter,
-			use_waiter = scenario == .WAITER,
+			update = .{
+				ticket = test.ticket,
+				waiter = test.waiter,
+				use_waiter = scenario == .WAITER,
+			},
 		};
 	}
 
@@ -16974,8 +16991,10 @@ assert_world_registration :: (test: World_Registration_Fixture, handle: Service.
 
 finish_world_registration :: (test: World_Registration_Fixture, source_released := false, selected_released := false, owner_released := false) {
 	fixture := test.retained.drain.fixture;
-	free(test.selector.workspace.data);
-	free(test.selector.expected_frontier.data);
+	if test.selector.kind == .HEAD {
+		free(test.selector.head.workspace.data);
+		free(test.selector.head.expected_frontier.data);
+	}
 	free(test.identity.data);
 	if owner_released {
 		array_free(test.retained.held);
@@ -18579,18 +18598,22 @@ world_output_selector :: (drain: Drain_Fixture, kind: World_Output) -> Service.W
 
 		return .{
 			kind = .HEAD,
-			session = drain.fixture.host.session,
-			workspace = drain.fixture.host.workspace,
-			expected_frontier = frontier,
+			head = .{
+				session = drain.fixture.host.session,
+				workspace = drain.fixture.host.workspace,
+				expected_frontier = frontier,
+			},
 		};
 	}
 
 
 	return .{
 		kind = .PUBLISHED_UPDATE,
-		ticket = drain.ticket,
-		waiter = drain.first,
-		use_waiter = kind == .PENDING_WAITER || kind == .TERMINAL_WAITER,
+		update = .{
+			ticket = drain.ticket,
+			waiter = drain.first,
+			use_waiter = kind == .PENDING_WAITER || kind == .TERMINAL_WAITER,
+		},
 	};
 }
 
@@ -18654,7 +18677,10 @@ test_world_output_failures :: () {
 
 		close_output_probe(*probe);
 		free_world_output(*expected);
-		free(selector.expected_frontier.data);
+		if selector.kind == .HEAD {
+			free(selector.head.expected_frontier.data);
+		}
+
 		finish_drain(drain, held = true);
 	}
 
@@ -18672,7 +18698,7 @@ test_world_output_retirement :: (direct := false) {
 				drain = drain,
 				action = ifx selector.kind == .HEAD
 					then .STOP_AND_RELEASE_SESSION
-					else ifx selector.use_waiter
+					else ifx selector.update.use_waiter
 						then .RELEASE_WAITER
 						else .RELEASE_TICKET,
 			},
@@ -18682,10 +18708,10 @@ test_world_output_retirement :: (direct := false) {
 		ok, output, error := Service.acquire_world(drain.fixture.host.service, selector,, allocator);
 		assert(probe.gate_progress && probe.job.ok && !ok && error.code == .INVALID_HANDLE);
 		if selector.kind != .HEAD {
-			retired_slot := ifx selector.use_waiter
+			retired_slot := ifx selector.update.use_waiter
 				then drain.first.slot
 				else drain.ticket.slot;
-			retired_generation := ifx selector.use_waiter
+			retired_generation := ifx selector.update.use_waiter
 				then drain.first.generation
 				else drain.ticket.generation;
 			assert(probe.job.replacement.slot == retired_slot && probe.job.replacement.generation != retired_generation);
@@ -18694,11 +18720,14 @@ test_world_output_retirement :: (direct := false) {
 
 		free_world_output(*output, allocator);
 		close_output_probe(*probe);
-		free(selector.expected_frontier.data);
+		if selector.kind == .HEAD {
+			free(selector.head.expected_frontier.data);
+		}
+
 		finish_drain(
 			drain,
-			first_released = selector.kind != .HEAD && selector.use_waiter,
-			ticket_released = selector.kind != .HEAD && !selector.use_waiter,
+			first_released = selector.kind != .HEAD && selector.update.use_waiter,
+			ticket_released = selector.kind != .HEAD && !selector.update.use_waiter,
 			session_released = selector.kind == .HEAD,
 			held = selector.kind != .HEAD
 		);
@@ -18741,7 +18770,10 @@ test_world_output_changes :: (direct := false) {
 			free_world_output(*output, allocator);
 			free_world_output(*expected);
 			close_output_probe(*probe);
-			free(selector.expected_frontier.data);
+			if selector.kind == .HEAD {
+				free(selector.head.expected_frontier.data);
+			}
+
 			finish_drain(drain, held = action == .REQUEST_SHUTDOWN);
 		}
 	}
@@ -18769,7 +18801,10 @@ test_world_output_revalidation_control :: () {
 		assert(probe.gate_progress && probe.job.ok && ok && output.kind == .PENDING, "\e[91mStale byte-export negative control was not detected.\e[0m");
 		free_world_output(*output, allocator);
 		close_output_probe(*probe);
-		free(selector.expected_frontier.data);
+		if selector.kind == .HEAD {
+			free(selector.head.expected_frontier.data);
+		}
+
 		if selector.kind != .HEAD {
 			release(drain.fixture, probe.job.replacement);
 		}

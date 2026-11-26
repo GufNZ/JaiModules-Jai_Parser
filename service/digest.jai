@@ -42,6 +42,8 @@ digest_128 :: (bytes: []u8) -> Digest_128 {
 	return digest_from_register(MeowU64From(hash, 0), MeowU64From(hash, 1));
 }
 
+// Stream already-framed inputs so callers need not allocate their full concatenation.
+// Absorb boundaries are not serialized, so callers must frame any meaningful boundaries.
 digest_begin :: (state: *Digest_State) {
 	MeowBegin(*state.meow, MeowDefaultSeed);
 }

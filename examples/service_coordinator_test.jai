@@ -196,7 +196,7 @@ set_text :: (fixture: *Fixture, key: string, text: string) -> Service.Handle(.TI
 }
 
 world_of :: (fixture: *Fixture, ticket: Service.Handle(.TICKET)) -> Service.Handle(.WORLD) {
-	ok, acquisition := Service.acquire_world(fixture.service, .{kind = .PUBLISHED_UPDATE, ticket = ticket});
+	ok, acquisition := Service.acquire_world(fixture.service, .{kind = .PUBLISHED_UPDATE, update = .{ticket = ticket}});
 	assert(ok && acquisition.kind == .ACQUIRED, "\e[91mAcquireWorld: %.\e[0m", acquisition.kind);
 	return acquisition.world;
 }
@@ -341,12 +341,12 @@ test_edit_and_query :: () {
 	assert(!again.count, "\e[91mA completion was delivered twice.\e[0m");
 
 	ticket_b, frontier_b := set_text(*fixture, "main", "b :: 2;\nc :: 3;");
-	head_ok, head := Service.acquire_world(fixture.service, .{kind = .HEAD, session = fixture.handle, workspace = xx WORKSPACE, expected_frontier = frontier_b});
+	head_ok, head := Service.acquire_world(fixture.service, .{kind = .HEAD, head = .{session = fixture.handle, workspace = xx WORKSPACE, expected_frontier = frontier_b}});
 	assert(head_ok && head.kind == .PENDING);
 	Service.executor_run(fixture.session);
-	head_ok, head = Service.acquire_world(fixture.service, .{kind = .HEAD, session = fixture.handle, workspace = xx WORKSPACE, expected_frontier = frontier_b});
+	head_ok, head = Service.acquire_world(fixture.service, .{kind = .HEAD, head = .{session = fixture.handle, workspace = xx WORKSPACE, expected_frontier = frontier_b}});
 	assert(head_ok && head.kind == .ACQUIRED);
-	stale_head_ok, stale_head := Service.acquire_world(fixture.service, .{kind = .HEAD, session = fixture.handle, workspace = xx WORKSPACE, expected_frontier = published.provider_frontier});
+	stale_head_ok, stale_head := Service.acquire_world(fixture.service, .{kind = .HEAD, head = .{session = fixture.handle, workspace = xx WORKSPACE, expected_frontier = published.provider_frontier}});
 	assert(stale_head_ok && stale_head.kind == .UNAVAILABLE && stale_head.unavailable == .FRONTIER_MISMATCH);
 
 	snapshot_b := query(*fixture, head.world, "main", .SYNTAX_SNAPSHOT);
