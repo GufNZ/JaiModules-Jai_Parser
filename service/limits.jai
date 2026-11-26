@@ -51,6 +51,18 @@ Limit_Failure :: enum u8 {
 	LIMIT;
 }
 
+// Aggregate accounting: live + reserved + requested must stay within each effective limit:
+Resource_Ledger :: struct {
+	limits:		Limits;
+	live:		[LIMIT_COUNT]s64;
+	reserved:	[LIMIT_COUNT]s64;
+}
+
+Ledger_Amount :: struct {
+	name:	Limit_Name;
+	amount:	s64;
+}
+
 // `-1` selects the implementation ceiling; a configured value is clamped to the ceiling, and one below the safe minimum rejects rather than being raised:
 negotiate_limits :: (request: Limit_Request, ceilings: Limits, minima: Limits) -> Limit_Failure, Limits, Limit_Name {
 	effective: Limits;
@@ -81,18 +93,6 @@ negotiate_limits :: (request: Limit_Request, ceilings: Limits, minima: Limits) -
 
 within_limit :: (limits: Limits, name: Limit_Name, value: s64) -> bool {
 	return value >= 0 && value <= limits.values[name];
-}
-
-// Aggregate accounting: live + reserved + requested must stay within each effective limit:
-Resource_Ledger :: struct {
-	limits:		Limits;
-	live:		[LIMIT_COUNT]s64;
-	reserved:	[LIMIT_COUNT]s64;
-}
-
-Ledger_Amount :: struct {
-	name:	Limit_Name;
-	amount:	s64;
 }
 
 // All-or-nothing: either every amount is reserved or none is:

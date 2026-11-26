@@ -4,19 +4,22 @@
 SYNTAX_DIAGNOSTICS_SCHEMA :: "jai-cache-syntax-diagnostics/1";
 
 Origin :: struct {
-	kind: enum u8 {//QUESTION: this looks like it would be better as a [tagged] union...
+	using payload: union kind: enum u8 {
 		SOURCE;
 		INSERTED;
 		UNLOCATED;
-	};
+	} {
+		.SOURCE,,		span:Byte_Span;
 
-	// `.SOURCE` span, or the zero-width anchor of an `.INSERTED` origin:
-	span: Byte_Span;
+		.INSERTED,,		inserted: struct {
+			anchor_span:	Byte_Span;
+			expected_token:	Token_Tag;
+		};
 
-	expected_token: Token_Tag;
-	reason: enum u8 {
-		NO_SOURCE_LOCATION;
-		RECOVERED_LOCATION_UNAVAILABLE;
+		.UNLOCATED,,	reason: enum u8 {
+			NO_SOURCE_LOCATION;
+			RECOVERED_LOCATION_UNAVAILABLE;
+		};
 	};
 }
 
@@ -231,7 +234,18 @@ primary_origin :: (tokens: *Token_Projection, diagnostic: Raw_Diagnostic, diagno
 
 
 	anchor := tokens.tokens[insertion].origin.start;
-	return .NONE, .{kind = .INSERTED, span = .{anchor, anchor}, expected_token = synthetic.tag};
+	return
+		.NONE,
+		.{
+			kind = .INSERTED,
+			inserted = .{
+				anchor_span = .{
+					anchor,
+					anchor
+				},
+				expected_token = synthetic.tag
+			}
+		};
 }
 
 // A nonempty span covers its first token's start through its last token's end; an empty one is a zero-width anchor at its token:

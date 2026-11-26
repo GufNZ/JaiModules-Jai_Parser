@@ -42,6 +42,88 @@ free_description :: (description: *Session_Description) {
 
 #scope_module
 
+Source_Batch_Metadata_Allocation :: struct {
+	session: *Session;
+	storage: *Pool;
+}
+
+Source_Batch_Commit_Backing :: struct {
+	documents:	[]*Document_State;
+	contexts:	[]Admitted_Context;
+}
+
+Source_Provider_Backing :: struct {
+	model:			*Provider_Model;
+	documents:		[]*Document_State;
+	contexts:		[]Admitted_Context;
+	states_count:	s64;
+}
+
+Source_Operation_Backing :: struct {
+	storage:		[]*Operation;
+	old_storage:	[]*Operation;
+}
+
+Source_Candidate_Join_Backing :: struct {
+	task:		*Task;
+	operations:	[]*Operation;
+	ready:		[]*Task;
+}
+
+Source_Candidate_Task_Backing :: struct {
+	task:					*Task;
+	key:					[]u8;
+	world_identity_offset:	s64;
+	operations:				[]*Operation;
+	tasks:					[]*Task;
+	ready:					[]*Task;
+}
+
+Source_Candidate_World_Backing :: struct {
+	world:		*World;
+	identity:	[] u8;
+	worlds:		[] *World;
+}
+
+Source_Candidate_Capture :: struct {
+	members:		[]Selected_Member;
+	key:			[]u8;
+	consistency:	Consistency;
+	capturable:		bool;
+}
+
+Analysis_Candidate_Snapshot :: struct {
+	model:		Provider_Model;
+	states:		[]Document_State;
+	documents:	[]*Document_State;
+	contexts:	[]Admitted_Context;
+	metadata:	[]u8;
+}
+
+Source_Update_Backing :: struct {
+	operation:	*Operation;
+	documents:	[][]u8;
+	identity:	[]u8;
+}
+
+Immediate_Result_Backing :: struct {
+	result:		*Query_Result;
+	identity:	[]u8;
+}
+
+Registration_Backing :: struct {
+	slots:				[]Registration_Slot;
+	registrations:		[]*Registration;
+	registration:		*Registration;
+	old_slots:			[]Registration_Slot;
+	old_registrations:	[]*Registration;
+}
+
+Waiter_Backing :: struct {
+	storage:		[]Slot_Reference;
+	old_storage:	[]Slot_Reference;
+}
+
 owner_allocator :: (session: *Session) -> Allocator {
 	return .{proc = owned_allocate, data = *session.heap};
 }
@@ -57,7 +139,7 @@ use_owner_memory :: (session: *Session) #expand {
 	}
 }
 
-try_output_array :: (allocator: Allocator, count: s64, $T: Type) -> bool, []T {
+try_output_array :: (allocator: Allocator, count: s64, $T: Type) -> (ok: bool, array: []T) {
 	if count < 0 || count > S64_MAX / size_of(T) {
 		return false, .[];
 	}
@@ -79,7 +161,7 @@ try_output_array :: (allocator: Allocator, count: s64, $T: Type) -> bool, []T {
 	return true, .{count = count, data = memory.(*T)};
 }
 
-try_output_key :: (allocator: Allocator, tag: string, fields: ..[]u8) -> bool, []u8 {
+try_output_key :: (allocator: Allocator, tag: string, fields: ..[]u8) -> (ok: bool, key: []u8) {
 	count := 8 + KEY_MAGIC.count + 4 + 8 + tag.count + 8;
 	for fields {
 		if it.count < 0 || count > S64_MAX - 8 || it.count > S64_MAX - count - 8 {
@@ -201,7 +283,7 @@ try_source_batch_pool :: (allocator: Allocator = context.allocator) -> *Pool {
 	return storage.data;
 }
 
-try_source_batch_metadata_storage :: (pool: *Pool, count: s64) -> bool, []u8 {
+try_source_batch_metadata_storage :: (pool: *Pool, count: s64) -> (ok: bool, storage: []u8) {
 	if count < 0 {
 		return false, .[];
 	}
@@ -255,7 +337,7 @@ try_source_batch_metadata_storage :: (pool: *Pool, count: s64) -> bool, []u8 {
 	return ok, copied;
 }
 
-try_source_batch_metadata :: (pool: *Pool, source: []u8) -> bool, []u8 {
+try_source_batch_metadata :: (pool: *Pool, source: []u8) -> (ok: bool, bytes: []u8) {
 	ok, storage := try_source_batch_metadata_storage(pool, source.count);
 	if ok && source.count {
 		memcpy(storage.data, source.data, source.count);
@@ -283,12 +365,7 @@ source_batch_metadata_pool_allocate :: (mode: Allocator_Mode, size: s64, old_siz
 	return pool_allocator_proc(mode, size, old_size, old_memory, data);
 }
 
-Source_Batch_Metadata_Allocation :: struct {
-	session: *Session;
-	storage: *Pool;
-}
-
-try_source_batch_frontier :: (model: *Provider_Model, allocator: Allocator = context.allocator) -> bool, []u8, Identity_Counter {
+try_source_batch_frontier :: (model: *Provider_Model, allocator: Allocator = context.allocator) -> (ok: bool, frontier: []u8, counter: Identity_Counter) {
 	counter := model.frontier_counter;
 	ok, token := issue_token(*counter);
 	if !ok {
@@ -310,17 +387,12 @@ try_source_batch_frontier :: (model: *Provider_Model, allocator: Allocator = con
 	return true, identity, counter;
 }
 
-Source_Batch_Commit_Backing :: struct {
-	documents:	[]*Document_State;
-	contexts:	[]Admitted_Context;
-}
-
 try_source_batch_commit :: (
 	model: *Provider_Model,
 	additional_documents: s64,
 	additional_contexts: s64,
 	allocator: Allocator = context.allocator
-) -> bool, Source_Batch_Commit_Backing {
+) -> (ok: bool, backing: Source_Batch_Commit_Backing) {
 	result: Source_Batch_Commit_Backing;
 	if (additional_documents < 0 || additional_contexts < 0
 		|| model.documents.count > S64_MAX - additional_documents
@@ -376,7 +448,7 @@ try_source_batch_commit :: (
 	return true, result;
 }
 
-try_source_batch_references :: (event_count: s64, allocator: Allocator = context.allocator) -> bool, [..][]u8 {//FIXME: name returns everywhere there is >1
+try_source_batch_references :: (event_count: s64, allocator: Allocator = context.allocator) -> (allocated: bool, references: [..][]u8) {
 	result: [..][]u8;
 	if event_count < 0 || event_count > S64_MAX / 2 {
 		return false, result;
@@ -395,7 +467,7 @@ try_source_batch_references :: (event_count: s64, allocator: Allocator = context
 	return true, result;
 }
 
-try_source_batch_revisions :: (existing: *Document_State, allocator: Allocator = context.allocator) -> bool, [..][]u8 {
+try_source_batch_revisions :: (existing: *Document_State, allocator: Allocator = context.allocator) -> (allocated: bool, revisions: [..][]u8) {
 	result: [..][]u8;
 	count := ifx existing
 		then existing.used_revisions.count
@@ -451,12 +523,12 @@ try_source_batch_storage :: (model: *Provider_Model, allocator: Allocator = cont
 }
 
 #if TEST_HOOKS {
-	//QUESTION: these are all very similar - can we generate/macro them to cut down on boilerplate?
-	source_batch_revisions_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
+	hooked_owner_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void, $hook_prefix: string) -> *void {
 		session := data.(*Session);
 		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_revisions_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_revisions_allocation_data) {
+			hook := #insert #run tprint("session.faults.%_allocation_hook;", hook_prefix);
+			hook_data := #insert #run tprint("session.faults.%_allocation_data;", hook_prefix);
+			if hook && !hook(size, hook_data) {
 				return null;
 			}
 		}
@@ -465,6 +537,29 @@ try_source_batch_storage :: (model: *Provider_Model, allocator: Allocator = cont
 		allocator := owner_allocator(session);
 		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
 	}
+
+	hooked_owner_allocate_with_cleanup :: (
+		mode: Allocator_Mode,
+		size: s64,
+		old_size: s64,
+		old_memory: *void,
+		data: *void,
+		$hook_prefix: string,
+		$cleanup_data_kind: string
+	) -> *void {
+		if mode == .FREE && old_memory {
+			session := data.(*Session);
+			hook := #insert #run tprint("session.faults.%_cleanup_hook;", hook_prefix);
+			if hook {
+				hook_data := #insert #run tprint("session.faults.%_%_data;", hook_prefix, cleanup_data_kind);
+				hook(size, hook_data);
+			}
+		}
+
+		return hooked_owner_allocate(mode, size, old_size, old_memory, data, hook_prefix);
+	}
+
+	source_batch_revisions_allocate :: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_revisions");
 
 	source_batch_metadata_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
 		allocation := data.(*Source_Batch_Metadata_Allocation);
@@ -479,210 +574,23 @@ try_source_batch_storage :: (model: *Provider_Model, allocator: Allocator = cont
 		return source_batch_metadata_pool_allocate(mode, size, old_size, old_memory, allocation.storage);
 	}
 
-	source_batch_frontier_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_frontier_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_frontier_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-
-	source_batch_commit_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_commit_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_commit_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-
-	source_batch_path_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_path_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_path_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-
-	source_batch_context_list_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_context_list_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_context_list_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-
-	source_batch_reference_list_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_reference_list_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_reference_list_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-
-	source_batch_state_list_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_state_list_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_state_list_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-
-	source_batch_edit_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_edit_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_edit_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-
-	source_batch_source_identity_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_source_identity_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_source_identity_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-
-	source_batch_source_bytes_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_source_bytes_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_source_bytes_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-
-	source_batch_source_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_source_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_source_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-
-	source_batch_state_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_state_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_state_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-
-	source_batch_storage_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_storage_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_storage_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-
-	source_batch_pool_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_batch_pool_allocation_hook;
-			if hook && !hook(size, session.faults.source_batch_pool_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-}
-
-Source_Provider_Backing :: struct {
-	model:			*Provider_Model;
-	documents:		[]*Document_State;
-	contexts:		[]Admitted_Context;
-	states_count:	s64;
+	source_batch_frontier_allocate			:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_frontier");
+	source_batch_commit_allocate			:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_commit");
+	source_batch_path_allocate				:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_path");
+	source_batch_context_list_allocate		:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_context_list");
+	source_batch_reference_list_allocate	:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_reference_list");
+	source_batch_state_list_allocate		:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_state_list");
+	source_batch_edit_allocate				:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_edit");
+	source_batch_source_identity_allocate	:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_source_identity");
+	source_batch_source_bytes_allocate		:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_source_bytes");
+	source_batch_source_allocate			:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_source");
+	source_batch_state_allocate				:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_state");
+	source_batch_storage_allocate			:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_storage");
+	source_batch_pool_allocate				:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_batch_pool");
 }
 
 #if TEST_HOOKS {
-	source_provider_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_provider_allocation_hook;
-			if hook && !hook(size, session.faults.source_provider_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
+	source_provider_allocate :: #bake_arguments hooked_owner_allocate(hook_prefix = "source_provider");
 }
 
 prepare_source_provider_backing :: (session: *Session, backing: *Source_Provider_Backing) -> bool {
@@ -710,24 +618,10 @@ source_provider_arrays_ready :: (session: *Session, backing: *Source_Provider_Ba
 }
 
 #if TEST_HOOKS {
-	source_provider_arrays_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_provider_arrays_allocation_hook;
-			if hook && !hook(size, session.faults.source_provider_arrays_allocation_data) {
-				return null;
-			}
-		} else if mode == .FREE && old_memory {
-			hook := session.faults.source_provider_arrays_cleanup_hook;
-			if hook {
-				hook(size, session.faults.source_provider_arrays_cleanup_data);
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
+	source_provider_arrays_allocate :: #bake_arguments hooked_owner_allocate_with_cleanup(
+		hook_prefix = "source_provider_arrays",
+		cleanup_data_kind = "cleanup",
+	);
 }
 
 prepare_source_provider_arrays :: (session: *Session, backing: *Source_Provider_Backing) -> bool {
@@ -779,24 +673,10 @@ source_provider_states_ready :: (session: *Session, backing: *Source_Provider_Ba
 }
 
 #if TEST_HOOKS {
-	source_provider_states_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_provider_states_allocation_hook;
-			if hook && !hook(size, session.faults.source_provider_states_allocation_data) {
-				return null;
-			}
-		} else if mode == .FREE && old_memory {
-			hook := session.faults.source_provider_states_cleanup_hook;
-			if hook {
-				hook(size, session.faults.source_provider_states_cleanup_data);
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
+	source_provider_states_allocate :: #bake_arguments hooked_owner_allocate_with_cleanup(
+		hook_prefix = "source_provider_states",
+		cleanup_data_kind = "cleanup",
+	);
 }
 
 source_provider_revisions_ready :: (session: *Session, backing: *Source_Provider_Backing) -> bool {
@@ -816,24 +696,10 @@ source_provider_revisions_ready :: (session: *Session, backing: *Source_Provider
 }
 
 #if TEST_HOOKS {
-	source_provider_revisions_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_provider_revisions_allocation_hook;
-			if hook && !hook(size, session.faults.source_provider_revisions_allocation_data) {
-				return null;
-			}
-		} else if mode == .FREE && old_memory {
-			hook := session.faults.source_provider_revisions_cleanup_hook;
-			if hook {
-				hook(size, session.faults.source_provider_revisions_cleanup_data);
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
+	source_provider_revisions_allocate :: #bake_arguments hooked_owner_allocate_with_cleanup(
+		hook_prefix = "source_provider_revisions",
+		cleanup_data_kind = "cleanup",
+	);
 }
 
 finish_source_provider_revisions :: (session: *Session, backing: *Source_Provider_Backing) {
@@ -1015,11 +881,6 @@ finish_source_provider_backing :: (session: *Session, backing: *Source_Provider_
 	backing.* = .{};
 }
 
-Source_Operation_Backing :: struct {
-	storage:		[]*Operation;
-	old_storage:	[]*Operation;
-}
-
 source_operation_backing_ready :: (session: *Session) -> bool {
 	return session.operations.count < session.operations.allocated;
 }
@@ -1040,24 +901,10 @@ finish_source_operation_backing :: (session: *Session, backing: *Source_Operatio
 }
 
 #if TEST_HOOKS {
-	source_operation_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_operation_allocation_hook;
-			if hook && !hook(size, session.faults.source_operation_allocation_data) {
-				return null;
-			}
-		} else if mode == .FREE && old_memory {
-			hook := session.faults.source_operation_cleanup_hook;
-			if hook {
-				hook(size, session.faults.source_operation_allocation_data);
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
+	source_operation_allocate :: #bake_arguments hooked_owner_allocate_with_cleanup(
+		hook_prefix = "source_operation",
+		cleanup_data_kind = "allocation",
+	);
 }
 
 prepare_source_operation_backing :: (session: *Session) -> bool {
@@ -1109,60 +956,12 @@ prepare_source_operation_backing :: (session: *Session) -> bool {
 }
 
 #if TEST_HOOKS {
-	source_candidate_capture_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_candidate_capture_allocation_hook;
-			if hook && !hook(size, session.faults.source_candidate_capture_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
+	source_candidate_capture_allocate	:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_candidate_capture");
+	source_candidate_world_allocate		:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_candidate_world");
+	source_candidate_task_allocate		:: #bake_arguments hooked_owner_allocate(hook_prefix = "source_candidate_task");
 }
 
-#if TEST_HOOKS {
-	source_candidate_world_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_candidate_world_allocation_hook;
-			if hook && !hook(size, session.faults.source_candidate_world_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-}
-
-#if TEST_HOOKS {
-	source_candidate_task_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_candidate_task_allocation_hook;
-			if hook && !hook(size, session.faults.source_candidate_task_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-}
-
-Source_Candidate_Join_Backing :: struct {
-	task:		*Task;
-	operations:	[]*Operation;
-	ready:		[]*Task;
-}
-
-prepare_source_candidate_join_backing :: (session: *Session, key: []u8) -> bool, Source_Candidate_Join_Backing {
+prepare_source_candidate_join_backing :: (session: *Session, key: []u8) -> (ok: bool, backing: Source_Candidate_Join_Backing) {
 	world := find_candidate_world(session, key);
 	if !world || world.state == .PUBLISHED {
 		return true, .{};
@@ -1245,26 +1044,14 @@ adopt_source_candidate_join_backing :: (session: *Session, backing: *Source_Cand
 }
 
 #if TEST_HOOKS {
-	source_candidate_join_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_candidate_join_allocation_hook;
-			if hook && !hook(size, session.faults.source_candidate_join_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
+	source_candidate_join_allocate :: #bake_arguments hooked_owner_allocate(hook_prefix = "source_candidate_join");
 }
 
 try_source_candidate_join_backing :: (
 	operations_capacity: s64,
 	ready_capacity: s64,
 	allocator: Allocator = context.allocator
-) -> bool, Source_Candidate_Join_Backing {
+) -> (ok: bool, backing: Source_Candidate_Join_Backing) {
 	if operations_capacity < 0 || ready_capacity < 0 {
 		return false, .{};
 	}
@@ -1310,15 +1097,6 @@ free_source_candidate_join_backing :: (backing: *Source_Candidate_Join_Backing, 
 	free(backing.operations.data,, allocator);
 	free(backing.ready.data,, allocator);
 	backing.* = .{};
-}
-
-Source_Candidate_Task_Backing :: struct {
-	task:					*Task;
-	key:					[]u8;
-	world_identity_offset:	s64;
-	operations:				[]*Operation;
-	tasks:					[]*Task;
-	ready:					[]*Task;
 }
 
 prepare_query_task_key :: (session: *Session, world: *World, member: s64, backing: *Source_Candidate_Task_Backing) -> bool {
@@ -1480,7 +1258,7 @@ try_source_candidate_task_backing :: (
 	tasks_capacity: s64,
 	ready_capacity: s64,
 	allocator: Allocator = context.allocator
-) -> bool, Source_Candidate_Task_Backing {
+) -> (ok: bool, backing: Source_Candidate_Task_Backing) {
 	if tasks_capacity < 0 || ready_capacity < 0 {
 		return false, .{};
 	}
@@ -1578,17 +1356,11 @@ free_source_candidate_task_backing :: (backing: *Source_Candidate_Task_Backing, 
 	backing.* = .{};
 }
 
-Source_Candidate_World_Backing :: struct {//FIXME: I think I'd prefer the struct definitions weren't mixed in with the procs, unless it's used only locally, in which case perhaps it could be defined inside the proc?
-	world:		*World;
-	identity:	[] u8;
-	worlds:		[] *World;
-}
-
 try_source_candidate_world_backing :: (
 	identity: Session_ID,
 	capacity: s64,
 	allocator: Allocator = context.allocator
-) -> bool, Source_Candidate_World_Backing {
+) -> (ok: bool, backing: Source_Candidate_World_Backing) {
 	if capacity < 0 {
 		return false, .{};
 	}
@@ -1649,25 +1421,10 @@ free_source_candidate_world_backing :: (backing: *Source_Candidate_World_Backing
 	backing.* = .{};
 }
 
-Source_Candidate_Capture :: struct {
-	members:		[]Selected_Member;
-	key:			[]u8;
-	consistency:	Consistency;
-	capturable:		bool;
-}
-
-Analysis_Candidate_Snapshot :: struct {
-	model:		Provider_Model;
-	states:		[]Document_State;
-	documents:	[]*Document_State;
-	contexts:	[]Admitted_Context;
-	metadata:	[]u8;
-}
-
 free_analysis_candidate_snapshot :: (snapshot: *Analysis_Candidate_Snapshot, allocator: Allocator = context.allocator) {
 	push_allocator(allocator);
 	for * snapshot.states {
-		source := selected_document(it).source;
+		source := selected_source(selected_document(it));
 		if source {
 			release_source(source);
 		}
@@ -1684,7 +1441,7 @@ try_analysis_candidate_snapshot :: (
 	count: s64,
 	metadata_count: s64,
 	allocator: Allocator = context.allocator
-) -> bool, Analysis_Candidate_Snapshot {
+) -> (ok: bool, snapshot: Analysis_Candidate_Snapshot) {
 	if count < 0 || metadata_count < 0 {
 		return false, .{};
 	}
@@ -1727,7 +1484,7 @@ try_analysis_candidate_snapshot :: (
 	return true, result;
 }
 
-analysis_candidate_metadata_count :: (model: *Provider_Model, documents: [][]u8) -> bool, s64 {
+analysis_candidate_metadata_count :: (model: *Provider_Model, documents: [][]u8) -> (ok: bool, count: s64) {
 	count: s64;
 	for documents {
 		state := find_document(model, it);
@@ -1744,8 +1501,9 @@ analysis_candidate_metadata_count :: (model: *Provider_Model, documents: [][]u8)
 
 
 		consistency: Consistency;
-		if selected.provenance {
-			consistency = selected.provenance.consistency;
+		provenance := selected_provenance(selected);
+		if provenance {
+			consistency = provenance.consistency;
 		}
 
 		counts := s64.[
@@ -1792,28 +1550,30 @@ stage_analysis_candidate_snapshot :: (model: *Provider_Model, documents: [][]u8,
 		};
 
 		consistency: Consistency;
-		if selected.provenance {
+		provenance := selected_provenance(selected);
+		if provenance {
 			consistency = .{
-				kind = selected.provenance.consistency.kind,
-				provider_namespace = analysis_snapshot_bytes(snapshot, *cursor, selected.provenance.consistency.provider_namespace),
-				capture_token = analysis_snapshot_bytes(snapshot, *cursor, selected.provenance.consistency.capture_token),
+				kind = provenance.consistency.kind,
+				provider_namespace = analysis_snapshot_bytes(snapshot, *cursor, provenance.consistency.provider_namespace),
+				capture_token = analysis_snapshot_bytes(snapshot, *cursor, provenance.consistency.capture_token),
 			};
 		}
 
+		source := selected_source(selected);
 		if state.has_overlay {
 			copy.has_overlay = true;
-			copy.overlay = .{source = selected.source, syntax_context = context_identity};
+			copy.overlay = .{source = source, syntax_context = context_identity};
 		} else {
 			copy.disk = .{
 				kind = state.disk.kind,
-				source = selected.source,
+				source = source,
 				syntax_context = context_identity,
 				provenance = .{consistency = consistency},
 			};
 		}
 
-		if selected.source {
-			retain_source(selected.source);
+		if source {
+			retain_source(source);
 		}
 
 		snapshot.states[it_index] = copy;
@@ -1846,8 +1606,9 @@ bind_analysis_candidate_capture :: (model: *Provider_Model, documents: [] [] u8,
 		it.provider_revision = state.provider_revision;
 		it.context_identity = selected.syntax_context;
 		if !it_index && capture.consistency.kind == .COHERENT_CAPTURE {
-			assert(!!selected.provenance);
-			capture.consistency = selected.provenance.consistency;
+			provenance := selected_provenance(selected);
+			assert(!!provenance);
+			capture.consistency = provenance.consistency;
 		}
 	}
 }
@@ -1873,7 +1634,7 @@ try_source_candidate_capture :: (
 	frontier: []u8,
 	documents: [][]u8,
 	allocator: Allocator = context.allocator
-) -> bool, Source_Candidate_Capture {
+) -> (ok: bool, capture: Source_Candidate_Capture) {
 	result := Source_Candidate_Capture.{capturable = true};
 	members_ok, members := try_output_array(allocator, documents.count, Selected_Member);
 	if !members_ok {
@@ -1908,10 +1669,11 @@ try_source_candidate_capture :: (
 	for documents {
 		state := find_document(model, it);
 		selected := selected_document(state);
-		coherent &&= selected.provenance && selected.provenance.consistency.kind == .COHERENT_CAPTURE;
+		provenance := selected_provenance(selected);
+		coherent &&= provenance && provenance.consistency.kind == .COHERENT_CAPTURE;
 		if coherent {
-			coherent = !capture.capture_token.count || bytes_equal(capture.capture_token, selected.provenance.consistency.capture_token);
-			capture = selected.provenance.consistency;
+			coherent = !capture.capture_token.count || bytes_equal(capture.capture_token, provenance.consistency.capture_token);
+			capture = provenance.consistency;
 		}
 
 		admitted := find_context(model, selected.syntax_context);
@@ -1926,7 +1688,7 @@ try_source_candidate_capture :: (
 			provider_revision = state.provider_revision,
 			context_identity = selected.syntax_context,
 			state = xx selected.kind,
-			source = selected.source,
+			source = selected_source(selected),
 			filename = filename,
 		};
 
@@ -1974,26 +1736,8 @@ free_source_candidate_capture :: (capture: *Source_Candidate_Capture, allocator:
 	capture.* = .{};
 }
 
-Source_Update_Backing :: struct {
-	operation:	*Operation;
-	documents:	[][]u8;
-	identity:	[]u8;
-}
-
 #if TEST_HOOKS {
-	source_update_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.source_update_allocation_hook;
-			if hook && !hook(size, session.faults.source_update_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
+	source_update_allocate :: #bake_arguments hooked_owner_allocate(hook_prefix = "source_update");
 }
 
 prepare_query_operation_identity :: (session: *Session, backing: *Source_Update_Backing) -> bool {
@@ -2096,11 +1840,6 @@ finish_query_operation_backing :: (session: *Session, backing: *Source_Update_Ba
 	finish_source_update_backing(session, backing);
 }
 
-Immediate_Result_Backing :: struct {
-	result:		*Query_Result;
-	identity:	[]u8;
-}
-
 prepare_immediate_result_backing :: (session: *Session, backing: *Immediate_Result_Backing, asynchronous := false) -> bool {
 	allocator := owner_allocator(session);
 	#if TEST_HOOKS {
@@ -2126,19 +1865,7 @@ prepare_immediate_result_backing :: (session: *Session, backing: *Immediate_Resu
 }
 
 #if TEST_HOOKS {
-	query_result_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.query_result_allocation_hook;
-			if hook && !hook(size, session.faults.query_result_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
+	query_result_allocate :: #bake_arguments hooked_owner_allocate(hook_prefix = "query_result");
 }
 
 finish_immediate_result_backing :: (session: *Session, backing: *Immediate_Result_Backing) {
@@ -2152,14 +1879,6 @@ finish_immediate_result_backing :: (session: *Session, backing: *Immediate_Resul
 	);
 
 	backing.* = .{};
-}
-
-Registration_Backing :: struct {
-	slots:				[]Registration_Slot;
-	registrations:		[]*Registration;
-	registration:		*Registration;
-	old_slots:			[]Registration_Slot;
-	old_registrations:	[]*Registration;
 }
 
 registration_backing_ready :: (session: *Session) -> bool {
@@ -2183,19 +1902,7 @@ finish_registration_backing :: (session: *Session, backing: *Registration_Backin
 }
 
 #if TEST_HOOKS {
-	registration_backing_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.registration_allocation_hook;
-			if hook && !hook(size, session.faults.registration_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
+	registration_backing_allocate :: #bake_arguments hooked_owner_allocate(hook_prefix = "registration");
 }
 
 prepare_registration_backing :: (session: *Session) -> bool {
@@ -2354,19 +2061,7 @@ prepare_ticket_waiter_observation :: (session: *Session, operation: *Operation, 
 }
 
 #if TEST_HOOKS {
-	ticket_waiter_observation_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.ticket_waiter_observation_allocation_hook;
-			if hook && !hook(size, session.faults.ticket_waiter_observation_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
+	ticket_waiter_observation_allocate :: #bake_arguments hooked_owner_allocate(hook_prefix = "ticket_waiter_observation");
 }
 
 prepare_query_waiter_observation :: (session: *Session, operation: *Operation, backing: *Observation) -> bool {
@@ -2429,19 +2124,7 @@ finish_waiter_observation_backing :: (session: *Session, backing: *Observation) 
 }
 
 #if TEST_HOOKS {
-	query_waiter_observation_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.query_waiter_observation_allocation_hook;
-			if hook && !hook(size, session.faults.query_waiter_observation_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
+	query_waiter_observation_allocate :: #bake_arguments hooked_owner_allocate(hook_prefix = "query_waiter_observation");
 }
 
 completion_backing_ready :: (session: *Session) -> bool {
@@ -2498,24 +2181,7 @@ prepare_completion_backing :: (session: *Session) -> bool {
 }
 
 #if TEST_HOOKS {
-	completion_backing_allocate :: (mode: Allocator_Mode, size: s64, old_size: s64, old_memory: *void, data: *void) -> *void {
-		session := data.(*Session);
-		if mode == .ALLOCATE || mode == .RESIZE {
-			hook := session.faults.completion_allocation_hook;
-			if hook && !hook(size, session.faults.completion_allocation_data) {
-				return null;
-			}
-		}
-
-
-		allocator := owner_allocator(session);
-		return allocator.proc(mode, size, old_size, old_memory, allocator.data);
-	}
-}
-
-Waiter_Backing :: struct {
-	storage:		[]Slot_Reference;
-	old_storage:	[]Slot_Reference;
+	completion_backing_allocate :: #bake_arguments hooked_owner_allocate(hook_prefix = "completion");
 }
 
 finish_waiter_backing :: (session: *Session, backing: *Waiter_Backing) {
@@ -2529,7 +2195,7 @@ finish_waiter_backing :: (session: *Session, backing: *Waiter_Backing) {
 	);
 }
 
-lookup_waiter_source :: (session: *Session, source: Handle($K)) -> *Session, *Registration {
+lookup_waiter_source :: (session: *Session, source: Handle($K)) -> (current: *Session, registration: *Registration) {
 	current, registration := lookup_pinned(session, source);
 	#if TEST_HOOKS {
 		if (
@@ -2609,7 +2275,7 @@ prepare_waiter_backing :: (session: *Session, source: Handle($K), operation: *Op
 	return true;
 }
 
-issue_shutdown_identity :: (session: *Session) -> bool, Operation_ID {
+issue_shutdown_identity :: (session: *Session) -> (ok: bool, identity: Operation_ID) {
 	ok, token := issue_token(*session.identities.operation_counter);
 	if !ok {
 		return false, .[];
@@ -2624,7 +2290,7 @@ issue_shutdown_identity :: (session: *Session) -> bool, Operation_ID {
 	return true, identity;
 }
 
-try_output_bytes :: (allocator: Allocator, source: []u8) -> bool, []u8 {
+try_output_bytes :: (allocator: Allocator, source: []u8) -> (ok: bool, bytes: []u8) {
 	ok, bytes := try_output_array(allocator, source.count, u8);
 	if ok && source.count {
 		memcpy(bytes.data, source.data, source.count);
@@ -2656,7 +2322,7 @@ try_output_argument_error :: (
 	return .{code = .INVALID_ARGUMENT, rule = rule, path = path};
 }
 
-try_output_operation_error :: (allocator: Allocator, source: Operation_Error) -> bool, Operation_Error {
+try_output_operation_error :: (allocator: Allocator, source: Operation_Error) -> (ok: bool, error: Operation_Error) {
 	path_ok, path := try_output_array(allocator, source.path.count, Path_Step);
 	if !path_ok {
 		return false, .{code = .ADMISSION_DENIED, admission = .{kind = .RESOURCE_EXHAUSTED}};
@@ -2778,7 +2444,7 @@ export_bytes :: (session: *Session, handle: Handle($K), source: []u8) -> (ok: bo
 	return true, output, .{};
 }
 
-export_query_terminal :: (session: *Session, handle: Handle(.WORLD), observation: Observation) -> bool, Query_Start, Operation_Error {
+export_query_terminal :: (session: *Session, handle: Handle(.WORLD), observation: Observation) -> (ok: bool, start: Query_Start, error: Operation_Error) {
 	ok, output, error := export_observation(session, handle, observation);
 	#if TEST_HOOKS {
 		if !ok && error.code == .ADMISSION_DENIED && session.faults.allow_failed_terminal_query {
@@ -2795,7 +2461,7 @@ export_query_terminal :: (session: *Session, handle: Handle(.WORLD), observation
 	return true, .{kind = .TERMINAL, observation = output}, .{};
 }
 
-export_world_observation :: (session: *Session, handle: Handle($K), observation: Observation) -> bool, World_Acquisition, Operation_Error {
+export_world_observation :: (session: *Session, handle: Handle($K), observation: Observation) -> (ok: bool, acquisition: World_Acquisition, error: Operation_Error) {
 	if observation.kind == .PENDING {
 		ok, identity, error := export_bytes(session, handle, xx observation.operation_identity);
 		if !ok {
@@ -2816,7 +2482,7 @@ export_world_observation :: (session: *Session, handle: Handle($K), observation:
 	return true, .{kind = .UNAVAILABLE, unavailable = .UPDATE_TERMINAL, observation = output}, .{};
 }
 
-try_output_tracked_document :: (allocator: Allocator, source: Tracked_Document) -> bool, Tracked_Document {
+try_output_tracked_document :: (allocator: Allocator, source: Tracked_Document) -> (ok: bool, document: Tracked_Document) {
 	result := source;
 	result.document = .[];
 	result.provider_revision = .[];
@@ -2869,7 +2535,7 @@ try_output_tracked_document :: (allocator: Allocator, source: Tracked_Document) 
 	return true, result;
 }
 
-try_output_description :: (allocator: Allocator, source: Session_Description) -> bool, Session_Description {
+try_output_description :: (allocator: Allocator, source: Session_Description) -> (ok: bool, description: Session_Description) {
 	result := source;
 	result.session_identity = .[];
 	result.workspace = .[];
@@ -2924,7 +2590,7 @@ try_output_description :: (allocator: Allocator, source: Session_Description) ->
 	return true, result;
 }
 
-try_output_observation :: (allocator: Allocator, source: Observation) -> bool, Observation {
+try_output_observation :: (allocator: Allocator, source: Observation) -> (ok: bool, observation: Observation) {
 	result := source;
 	result.operation_identity = .[];
 	result.provider_frontier = .[];
@@ -2996,7 +2662,7 @@ free_output_records :: (allocator: Allocator, records: []Completion_Record) {
 	free(records.data,, allocator);
 }
 
-try_output_records :: (allocator: Allocator, snapshots: []Completion_Record) -> bool, []Completion_Record {
+try_output_records :: (allocator: Allocator, snapshots: []Completion_Record) -> (ok: bool, records: []Completion_Record) {
 	ok, records := try_output_array(allocator, snapshots.count, Completion_Record);
 	if !ok {
 		return false, .[];
@@ -3041,7 +2707,7 @@ release_drain_copies :: (
 	);
 }
 
-export_observation :: (session: *Session, handle: Handle($K), source: Observation) -> bool, Observation, Operation_Error {
+export_observation :: (session: *Session, handle: Handle($K), source: Observation) -> (ok: bool, observation: Observation, error: Operation_Error) {
 	allocator := output_allocator();
 	snapshot := owned_observation(source);
 	ok: bool;

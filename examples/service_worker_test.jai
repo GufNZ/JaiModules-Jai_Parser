@@ -2925,14 +2925,15 @@ test_source_registration_failures :: (
 					operations = fixture.session.operations.count;
 					documents = fixture.session.provider.documents.count;
 					provider_contexts = fixture.session.provider.contexts.count;
-					source = Service.selected_document(Service.find_document(fixture.session.provider, batch.events[0].document)).source;
+					source = Service.selected_source(Service.selected_document(Service.find_document(fixture.session.provider, batch.events[0].document)));
 					assert(!!source);
 					source_references = source.references;
 					event := *batch.events[0];
+					event_source := event.source;
 					event.kind = event_kind;
 					if event_kind == {
 						case .EDIT_OVERLAY;
-							event.base_source_revision = source.revision;
+							event.edit_overlay.base_source_revision = source.revision;
 							first := ifx edit_pair
 								then "x :: 1;"
 								else submitted;
@@ -2946,23 +2947,22 @@ test_source_registration_failures :: (
 								replacement = xx submitted,
 							};
 
-							event.edits = edits;
-							event.edits.count = ifx edit_pair
+							event.edit_overlay.edits = edits;
+							event.edit_overlay.edits.count = ifx edit_pair
 								then 2
 								else 1;
 
 						case .OBSERVE_DISK;
 							expected_world = source.bytes.(string);
-							event.disk = .{
-								kind = .PRESENT,
-								source = event.source,
-								source_revision = disk_revision,
-								syntax_context = event.source_context,
-								provenance = .{
+							event.disk = Service.disk_present(
+								event.source_context,
+								.{
 									provider_identity = fixture.session.provider.provider_namespace,
 									observation_token = xx "source-construction-test",
 								},
-							};
+								event_source,
+								disk_revision
+							);
 					}
 
 					if path_error {
@@ -3109,7 +3109,7 @@ test_source_registration_failures :: (
 						assert(fixture.session.provider.frontier_counter.next == frontier_counter.next);
 						assert(fixture.session.provider.documents.count == documents);
 						assert(fixture.session.provider.contexts.count == provider_contexts);
-						assert(Service.selected_document(Service.find_document(fixture.session.provider, batch.events[0].document)).source == source);
+						assert(Service.selected_source(Service.selected_document(Service.find_document(fixture.session.provider, batch.events[0].document))) == source);
 						assert(source.references == source_references);
 						assert(fixture.session.operations.count == operations && fixture.session.registry.slots.count == slots.count && fixture.session.registry.free_slots.count == free_count);
 						for slots {
@@ -3137,7 +3137,7 @@ test_source_registration_failures :: (
 							assert(fixture.session.provider.documents.count == documents + 1);
 							added := Service.find_document(fixture.session.provider, batch.events[1].document);
 							assert(!!added);
-							assert(Service.bytes_equal(Service.selected_document(added).source.bytes, xx "second :: 2;"));
+							assert(Service.bytes_equal(Service.selected_source(Service.selected_document(added)).bytes, xx "second :: 2;"));
 							assert(fixture.session.provider.contexts.count == provider_contexts + 1);
 							registration := batch.contexts[0];
 							admitted := Service.find_context(fixture.session.provider, registration.identity);
@@ -5024,22 +5024,21 @@ test_source_candidate_capture_admission :: (
 						edit[0] = .{end_byte = xx original.overlay.source.bytes.count, replacement = xx "answer :: 77;"};
 						event := *batch.events[1];
 						event.kind = .EDIT_OVERLAY;
-						event.base_source_revision = original.overlay.source.revision;
-						event.edits = edit;
+						event.edit_overlay = .{base_source_revision = original.overlay.source.revision, edits = edit};
 					} else if event_kind == .OBSERVE_DISK {
 						expected_world = original.overlay.source.bytes.(string);
 						event := *batch.events[1];
+						event_source := event.source;
 						event.kind = .OBSERVE_DISK;
-						event.disk = .{
-							kind = .PRESENT,
-							source = event.source,
-							source_revision = disk_revision,
-							syntax_context = event.source_context,
-							provenance = .{
+						event.disk = Service.disk_present(
+							event.source_context,
+							.{
 								provider_identity = fixture.session.provider.provider_namespace,
 								observation_token = xx "combined-candidate-test",
 							},
-						};
+							event_source,
+							disk_revision
+						);
 					}
 
 					if combined {
@@ -5774,9 +5773,10 @@ test_source_batch_storage_admission :: (
 				documents = fixture.session.provider.documents.count;
 				contexts = fixture.session.provider.contexts.count;
 				event := *batch.events[event_index];
+				event_source := event.source;
 				event.kind = event_kind;
 				if event_kind == .EDIT_OVERLAY {
-					source := Service.selected_document(Service.find_document(fixture.session.provider, event.document)).source;
+					source := Service.selected_source(Service.selected_document(Service.find_document(fixture.session.provider, event.document)));
 					assert(!!source);
 					edits[0] = .{
 						end_byte = xx source.bytes.count,
@@ -5790,24 +5790,22 @@ test_source_batch_storage_admission :: (
 						};
 					}
 
-					event.base_source_revision = source.revision;
-					event.edits = edits;
-					event.edits.count = ifx sequential_edits then 2 else 1;
+					event.edit_overlay = .{base_source_revision = source.revision, edits = edits};
+					event.edit_overlay.edits.count = ifx sequential_edits then 2 else 1;
 				} else if event_kind == .OBSERVE_DISK {
 					state := Service.find_document(fixture.session.provider, event.document);
 					assert(state && state.has_overlay && state.overlay.source);
 					expected_world = state.overlay.source.bytes.(string);
 					disk_source = state.disk.source;
-					event.disk = .{
-						kind = .PRESENT,
-						source = event.source,
-						source_revision = disk_revision,
-						syntax_context = event.source_context,
-						provenance = .{
+					event.disk = Service.disk_present(
+						event.source_context,
+						.{
 							provider_identity = fixture.session.provider.provider_namespace,
 							observation_token = xx "source-callback-test",
 						},
-					};
+						event_source,
+						disk_revision
+					);
 				}
 
 				if path_error {
@@ -7164,26 +7162,25 @@ test_source_batch_pool_cleanup :: (
 				}
 
 				event.kind = .EDIT_OVERLAY;
-				event.base_source_revision = state.overlay.source.revision;
-				event.edits = edits;
-				event.edits.count = ifx sequential_edits then 2 else 1;
+				event.edit_overlay = .{base_source_revision = state.overlay.source.revision, edits = edits};
+				event.edit_overlay.edits.count = ifx sequential_edits then 2 else 1;
 			} else if event_kind == .OBSERVE_DISK {
 				event := *source.events[event_index];
 				state := Service.find_document(fixture.session.provider, event.document);
 				assert(state && state.has_overlay && state.overlay.source);
 				expected_world = state.overlay.source.bytes.(string);
 				disk_source = state.disk.source;
+				event_source := event.source;
 				event.kind = .OBSERVE_DISK;
-				event.disk = .{
-					kind = .PRESENT,
-					source = event.source,
-					source_revision = disk_revision,
-					syntax_context = event.source_context,
-					provenance = .{
+				event.disk = Service.disk_present(
+					event.source_context,
+					.{
 						provider_identity = fixture.session.provider.provider_namespace,
 						observation_token = xx "source-callback-test",
 					},
-				};
+					event_source,
+					disk_revision
+				);
 			}
 
 			if path_error && !validation {
@@ -7430,7 +7427,7 @@ test_source_batch_pool_cleanup :: (
 				added := Service.find_document(fixture.session.provider, batch.events[0].document);
 				assert(!!added == ok);
 				if added {
-					assert(Service.bytes_equal(Service.selected_document(added).source.bytes, xx "answer :: 77;"));
+					assert(Service.bytes_equal(Service.selected_source(Service.selected_document(added)).bytes, xx "answer :: 77;"));
 				}
 			}
 
@@ -8589,26 +8586,25 @@ test_source_registration_receipt_retry :: (
 					}
 
 					event.kind = .EDIT_OVERLAY;
-					event.base_source_revision = state.overlay.source.revision;
-					event.edits = edits;
-					event.edits.count = ifx sequential_edits then 2 else 1;
+					event.edit_overlay = .{base_source_revision = state.overlay.source.revision, edits = edits};
+					event.edit_overlay.edits.count = ifx sequential_edits then 2 else 1;
 				} else if event_kind == .OBSERVE_DISK {
 					event := *batch.events[event_index];
 					state := Service.find_document(fixture.session.provider, event.document);
 					assert(state && state.has_overlay && state.overlay.source);
 					expected_world = state.overlay.source.bytes.(string);
 					disk_source = state.disk.source;
+					event_source := event.source;
 					event.kind = .OBSERVE_DISK;
-					event.disk = .{
-						kind = .PRESENT,
-						source = event.source,
-						source_revision = disk_revision,
-						syntax_context = event.source_context,
-						provenance = .{
+					event.disk = Service.disk_present(
+						event.source_context,
+						.{
 							provider_identity = fixture.session.provider.provider_namespace,
 							observation_token = xx "source-callback-test",
 						},
-					};
+						event_source,
+						disk_revision
+					);
 				}
 
 				if path_error {
@@ -17904,14 +17900,15 @@ prepare_provider_error :: (
 
 		case .CAPABILITY;
 			batch.events[0].kind = .OBSERVE_DISK;
-			batch.events[0].disk = .{
-				syntax_context = batch.events[0].source_context,
-				source = .{kind = .PROVIDER_LEASE},
-				provenance = .{
+			batch.events[0].disk = Service.disk_present(
+				batch.events[0].source_context,
+				.{
 					provider_identity = xx "provider",
 					observation_token = xx "observation",
 				},
-			};
+				.{kind = .PROVIDER_LEASE},
+				.[]
+			);
 
 		case .SOURCE_LIMIT;
 			batch.events[0].source.bytes = oversized_source;

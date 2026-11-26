@@ -569,6 +569,11 @@ diagnostics_match :: (projection: *Service.Diagnostics_Projection, fresh: *Parse
 
 
 		origin := record.primary_origin;
+		span := ifx origin.kind == .SOURCE
+			then origin.span
+			else ifx origin.kind == .INSERTED
+				then origin.inserted.anchor_span;
+
 		if producer.recovery_action == .INSERT_MISSING_TOKEN {
 			synthetic_index := -1;
 			for fresh.recovery_records {
@@ -584,17 +589,17 @@ diagnostics_match :: (projection: *Service.Diagnostics_Projection, fresh: *Parse
 
 			insertion := fresh.synthetic_tokens[synthetic_index].insertion_index.(s64);
 			anchor := fresh.tokens[insertion].byte_start;
-			if origin.kind != .INSERTED || origin.span.start != anchor || origin.span.end != anchor {
+			if origin.kind != .INSERTED || span.start != anchor || span.end != anchor {
 				return false, tprint("diagnostic % inserted origin", index);
 			}
 		} else {
 			located, start, end := expected_origin(fresh, producer.span.first.(s64), producer.span.one_past_last.(s64));
-			if located != (origin.kind == .SOURCE) || (located && (origin.span.start != start || origin.span.end != end)) {
+			if located != (origin.kind == .SOURCE) || (located && (span.start != start || span.end != end)) {
 				return false, tprint("diagnostic % source origin", index);
 			}
 		}
 
-		if origin.kind != .UNLOCATED && (origin.span.start < 0 || origin.span.end < origin.span.start || origin.span.end > source.count) {
+		if origin.kind != .UNLOCATED && (span.start < 0 || span.end < span.start || span.end > source.count) {
 			return false, tprint("diagnostic % origin outside the source", index);
 		}
 
@@ -625,14 +630,19 @@ test_snapshot_and_diagnostics :: () {
 		// The parser reports expected-expression holes at end of input, then inserts the missing `;`.
 		inserted := 0;
 		for diagnostics.records {
-			assert(it.primary_origin.span.start == SOURCE.count && it.primary_origin.span.end == SOURCE.count, "\e[91mEvery diagnostic here anchors at end of input.\e[0m");
+			origin := it.primary_origin;
+			span: Service.Byte_Span;
 			if it.parser_observation.recovery_action == .INSERT_MISSING_TOKEN {
 				inserted += 1;
-				assert(it.primary_origin.kind == .INSERTED && it.primary_origin.expected_token == it.parser_observation.expected_token);
-				assert(it.primary_origin.expected_token.kind == .BYTE_CHAR && it.primary_origin.expected_token.byte == #char ";");
+				assert(origin.kind == .INSERTED && origin.inserted.expected_token == it.parser_observation.expected_token);
+				assert(origin.inserted.expected_token.kind == .BYTE_CHAR && origin.inserted.expected_token.byte == #char ";");
+				span = origin.inserted.anchor_span;
 			} else {
-				assert(it.code == .EXPECTED_EXPRESSION && it.primary_origin.kind == .SOURCE);
+				assert(it.code == .EXPECTED_EXPRESSION && origin.kind == .SOURCE);
+				span = origin.span;
 			}
+
+			assert(span.start == SOURCE.count && span.end == SOURCE.count, "\e[91mEvery diagnostic here anchors at end of input.\e[0m");
 		}
 
 		assert(inserted == 1 && diagnostics.records.count == 3 && diagnostics.parse_status != .COMPLETE);
@@ -773,36 +783,36 @@ node_projection_invariants :: (projection: *Service.Node_Projection) -> bool, st
 	check_value :: (value: Service.Field_Value, owner: s64, node_owners: []s64, helper_owners: []s64) -> bool {
 		if value.kind == {
 			case .NODE;
-				if value.signed == -1 {
+				if value.node.id == -1 {
 					return true;
 				}
 
 
 				// Aliases name an existing node without owning it.
-				if value.relationship == .ALIAS {
-					return value.signed >= 0 && value.signed < node_owners.count;
+				if value.node.relationship == .ALIAS {
+					return value.node.id >= 0 && value.node.id < node_owners.count;
 				}
 
 
-				if value.signed <= 0 || value.signed >= node_owners.count || node_owners[value.signed] != -1 {
+				if value.node.id <= 0 || value.node.id >= node_owners.count || node_owners[value.node.id] != -1 {
 					return false;
 				}
 
 
-				node_owners[value.signed] = owner;
+				node_owners[value.node.id] = owner;
 
 			case .HELPER;
-				if value.signed == -1 {
+				if value.helper_id == -1 {
 					return true;
 				}
 
 
-				if value.signed < 0 || value.signed >= helper_owners.count || helper_owners[value.signed] != -1 {
+				if value.helper_id < 0 || value.helper_id >= helper_owners.count || helper_owners[value.helper_id] != -1 {
 					return false;
 				}
 
 
-				helper_owners[value.signed] = owner;
+				helper_owners[value.helper_id] = owner;
 
 			case .LIST;
 				for value.elements {
@@ -987,17 +997,17 @@ test_node_vectors :: () {
 		assert(kinds(projection) == "BLOCK DECLARATION BINARY_OPERATOR IDENT LITERAL ", "\e[91mKinds: %\e[0m", kinds(projection));
 		nodes := projection.nodes;
 		statements := get_field(nodes[0].fields, "statements");
-		assert(statements.kind == .LIST && statements.elements.count == 1 && statements.elements[0].signed == 1);
-		assert(get_field(nodes[0].fields, "block_type").name == "DATA_DECLARATIONS");
+		assert(statements.kind == .LIST && statements.elements.count == 1 && statements.elements[0].node.id == 1);
+		assert(get_field(nodes[0].fields, "block_type").enumeration.name == "DATA_DECLARATIONS");
 		assert(get_field(nodes[1].fields, "entry", "name").bytes.(string) == "a");
-		assert(get_field(nodes[1].fields, "expression").signed == 2 && get_field(nodes[1].fields, "type_inst").signed == -1);
+		assert(get_field(nodes[1].fields, "expression").node.id == 2 && get_field(nodes[1].fields, "type_inst").node.id == -1);
 		declaration_flags := get_field(nodes[1].fields, "flags");
-		assert(declaration_flags.names.count == 1 && declaration_flags.names[0] == "IS_CONSTANT");
+		assert(declaration_flags.flags.names.count == 1 && declaration_flags.flags.names[0] == "IS_CONSTANT");
 		operator_field := get_field(nodes[2].fields, "operator_type");
-		assert(operator_field.kind == .OPERATOR && operator_field.tag.kind == .BYTE_CHAR && operator_field.tag.byte == #char "+");
-		assert(get_field(nodes[2].fields, "left").signed == 3 && get_field(nodes[2].fields, "right").signed == 4);
+		assert(operator_field.kind == .OPERATOR && operator_field.operator_tag.kind == .BYTE_CHAR && operator_field.operator_tag.byte == #char "+");
+		assert(get_field(nodes[2].fields, "left").node.id == 3 && get_field(nodes[2].fields, "right").node.id == 4);
 		assert(get_field(nodes[3].fields, "name").bytes.(string) == "b");
-		assert(get_field(nodes[4].fields, "value_type").name == "NUMBER" && get_field(nodes[4].fields, "values", "_u64").unsigned == 1);
+		assert(get_field(nodes[4].fields, "value_type").enumeration.name == "NUMBER" && get_field(nodes[4].fields, "values", "_u64").unsigned == 1);
 		assert(nodes[2].has_origin && slice(owned.source, nodes[2].origin.start, nodes[2].origin.end - nodes[2].origin.start) == "b + 1");
 		assert(projection.helpers.count == 0);
 	}
@@ -1013,21 +1023,21 @@ test_node_vectors :: () {
 			kinds(projection)
 		);
 		nodes := projection.nodes;
-		assert(get_field(nodes[1].fields, "comma_separated_assignment").signed == 2 && get_field(nodes[1].fields, "declaration_properties").signed == 5);
+		assert(get_field(nodes[1].fields, "comma_separated_assignment").node.id == 2 && get_field(nodes[1].fields, "declaration_properties").node.id == 5);
 		// `:=` lexes as `:` then `=`; the shared operator is the colon at token 3 and records operator value 0.
 		operator_field := get_field(nodes[1].fields, "operator_type");
-		assert(operator_field.tag.kind == .BYTE_CHAR && operator_field.tag.byte == 0 && get_field(nodes[1].fields, "operator_token").signed == 3);
+		assert(operator_field.operator_tag.kind == .BYTE_CHAR && operator_field.operator_tag.byte == 0 && get_field(nodes[1].fields, "operator_token").signed == 3);
 		arguments := get_field(nodes[2].fields, "arguments");
-		assert(arguments.elements.count == 2 && arguments.elements[0].signed == 0 && arguments.elements[1].signed == 1);
+		assert(arguments.elements.count == 2 && arguments.elements[0].helper_id == 0 && arguments.elements[1].helper_id == 1);
 		assert(projection.helpers.count == 4);
 		assert(projection.helpers[0].layout == "Parser_Comma_Separated_Argument" && get_field(projection.helpers[0].fields, "separator_token").signed == 1);
 		assert(get_field(projection.helpers[1].fields, "separator_token").signed == -1);
-		assert(get_field(nodes[5].fields, "expression").signed == 6);
-		assert(get_field(nodes[6].fields, "procedure_expression").signed == 7 && get_field(nodes[6].fields, "context_modification").signed == -1);
+		assert(get_field(nodes[5].fields, "expression").node.id == 6);
+		assert(get_field(nodes[6].fields, "procedure_expression").node.id == 7 && get_field(nodes[6].fields, "context_modification").node.id == -1);
 		call_arguments := get_field(nodes[6].fields, "arguments_unsorted");
-		assert(call_arguments.elements.count == 2 && call_arguments.elements[0].signed == 2 && call_arguments.elements[1].signed == 3);
-		assert(get_field(projection.helpers[2].fields, "name").signed == -1 && get_field(projection.helpers[2].fields, "expression").signed == 8);
-		assert(get_field(projection.helpers[3].fields, "name").signed == 9 && get_field(projection.helpers[3].fields, "expression").signed == 10);
+		assert(call_arguments.elements.count == 2 && call_arguments.elements[0].helper_id == 2 && call_arguments.elements[1].helper_id == 3);
+		assert(get_field(projection.helpers[2].fields, "name").node.id == -1 && get_field(projection.helpers[2].fields, "expression").node.id == 8);
+		assert(get_field(projection.helpers[3].fields, "name").node.id == 9 && get_field(projection.helpers[3].fields, "expression").node.id == 10);
 	}
 
 	{
@@ -1054,14 +1064,14 @@ test_node_vectors :: () {
 		}
 
 		pointer := find(projection, "TYPE_INSTANTIATION");
-		assert(get_field(pointer.fields, "pointer_to").signed == pointer.local_node_id.(s64) + 1 && get_field(pointer.fields, "array_dimension").kind == .INACTIVE);
+		assert(get_field(pointer.fields, "pointer_to").node.id == pointer.local_node_id.(s64) + 1 && get_field(pointer.fields, "array_dimension").kind == .INACTIVE);
 		array := find(projection, "TYPE_INSTANTIATION", 1);
-		dimension := get_field(array.fields, "array_dimension").signed;
-		element := get_field(array.fields, "array_element_type").signed;
+		dimension := get_field(array.fields, "array_dimension").node.id;
+		element := get_field(array.fields, "array_element_type").node.id;
 		assert(dimension > 0 && element > dimension, "\e[91mFixed arrays visit the dimension before the element.\e[0m");
 		null_count: s64;
 		for projection.nodes {
-			if it.kind == "LITERAL" && get_field(it.fields, "value_type").name == "POINTER" {
+			if it.kind == "LITERAL" && get_field(it.fields, "value_type").enumeration.name == "POINTER" {
 				assert(get_field(it.fields, "values", "pointer_literal_info").kind == .SOURCE_NULL);
 				null_count += 1;
 			}
@@ -1070,16 +1080,16 @@ test_node_vectors :: () {
 		assert(null_count == 1);
 
 		prefix := find(projection, "CAST");
-		assert(get_field(prefix.fields, "target_type").signed < get_field(prefix.fields, "expression").signed, "\e[91mPrefix casts visit the target first.\e[0m");
+		assert(get_field(prefix.fields, "target_type").node.id < get_field(prefix.fields, "expression").node.id, "\e[91mPrefix casts visit the target first.\e[0m");
 		auto := find(projection, "CAST", 1);
-		assert(get_field(auto.fields, "target_type").kind == .INACTIVE && get_field(auto.fields, "cast_flags").names[0] == "IS_AUTO");
+		assert(get_field(auto.fields, "target_type").kind == .INACTIVE && get_field(auto.fields, "cast_flags").flags.names[0] == "IS_AUTO");
 		postfix := find(projection, "CAST", 2);
-		assert(get_field(postfix.fields, "expression").signed < get_field(postfix.fields, "target_type").signed, "\e[91mPostfix casts visit the expression first.\e[0m");
+		assert(get_field(postfix.fields, "expression").node.id < get_field(postfix.fields, "target_type").node.id, "\e[91mPostfix casts visit the expression first.\e[0m");
 
-		assert(get_field(find(projection, "TYPE_QUERY").fields, "query_kind").name == "SIZE_OF");
-		assert(get_field(find(projection, "EXPRESSION_QUERY").fields, "query_kind").name == "TYPE_OF");
+		assert(get_field(find(projection, "TYPE_QUERY").fields, "query_kind").enumeration.name == "SIZE_OF");
+		assert(get_field(find(projection, "EXPRESSION_QUERY").fields, "query_kind").enumeration.name == "TYPE_OF");
 		unary := find(projection, "UNARY_OPERATOR");
-		assert(get_field(unary.fields, "operator_type").tag.byte == #char "-");
+		assert(get_field(unary.fields, "operator_type").operator_tag.byte == #char "-");
 		find(projection, "DIRECTIVE_THIS");
 
 		array_helper_count: s64;
@@ -1087,11 +1097,11 @@ test_node_vectors :: () {
 		for projection.helpers {
 			if it.layout == "Parser_Array_Literal_Info" {
 				array_helper_count += 1;
-				assert(get_field(it.fields, "array_literal_flags").names[0] == "WAS_UNTYPED");
+				assert(get_field(it.fields, "array_literal_flags").flags.names[0] == "WAS_UNTYPED");
 				assert(get_field(it.fields, "array_members").elements.count == 2);
 			} else if it.layout == "Parser_Struct_Literal_Info" {
 				struct_helper_count += 1;
-				assert(get_field(it.fields, "type_expression").signed > 0 && get_field(it.fields, "arguments").elements.count == 2);
+				assert(get_field(it.fields, "type_expression").node.id > 0 && get_field(it.fields, "arguments").elements.count == 2);
 			}
 		}
 
@@ -1108,8 +1118,8 @@ test_node_vectors :: () {
 		for projection.nodes {
 			if it.kind == "BINARY_OPERATOR" || it.kind == "UNARY_OPERATOR" {
 				operator_field := get_field(it.fields, "operator_type");
-				assert(operator_field.kind == .OPERATOR && operator_field.tag.kind == .NAMED, "\e[91mOperator % is not named.\e[0m", operator_field.tag);
-				array_add(*names, operator_field.tag.name,, temp);
+				assert(operator_field.kind == .OPERATOR && operator_field.operator_tag.kind == .NAMED, "\e[91mOperator % is not named.\e[0m", operator_field.operator_tag);
+				array_add(*names, operator_field.operator_tag.name,, temp);
 			}
 		}
 
@@ -1260,7 +1270,7 @@ test_node_negative_controls :: () {
 	binary_fields := projection.nodes[2].fields;
 	for * binary_fields {
 		if it.path[0].name == "right" {
-			it.value.signed = 3;
+			it.value.node.id = 3;
 		}
 	}
 
@@ -1268,7 +1278,7 @@ test_node_negative_controls :: () {
 	assert(!valid, "\e[91mInvariant checker missed a repeated owning reference.\e[0m");
 	for * binary_fields {
 		if it.path[0].name == "right" {
-			it.value.signed = 4;
+			it.value.node.id = 4;
 		}
 	}
 
@@ -1299,7 +1309,7 @@ find_node :: (projection: *Service.Node_Projection, kind: string, occurrence := 
 }
 
 has_flag :: (value: Service.Field_Value, name: string) -> bool {
-	return array_find(value.names, name);
+	return value.kind == .FLAGS && array_find(value.flags.names, name);
 }
 
 node_id :: (record: *Service.Node_Record) -> s64 {
@@ -1333,41 +1343,41 @@ END
 		arguments := get_field(header.fields, "arguments").elements;
 		usings := get_field(header.fields, "parameter_usings").elements;
 		assert(arguments.count == 3 && usings.count == 1);
-		assert(usings[0].signed > arguments[0].signed && usings[0].signed < arguments[1].signed, "\e[91mA parameter using precedes its argument.\e[0m");
-		using_record := *projection.nodes[usings[0].signed];
+		assert(usings[0].node.id > arguments[0].node.id && usings[0].node.id < arguments[1].node.id, "\e[91mA parameter using precedes its argument.\e[0m");
+		using_record := *projection.nodes[usings[0].node.id];
 		using_target := get_field(using_record.fields, "expression");
-		assert(using_target.relationship == .ALIAS && using_target.signed == arguments[1].signed, "\e[91mThe using expression is an alias to its argument.\e[0m");
+		assert(using_target.node.relationship == .ALIAS && using_target.node.id == arguments[1].node.id, "\e[91mThe using expression is an alias to its argument.\e[0m");
 		assert(get_field(header.fields, "returns").elements.count == 1);
-		body := get_field(header.fields, "body_or_null").signed;
+		body := get_field(header.fields, "body_or_null").node.id;
 		assert(projection.nodes[body].kind == "PROCEDURE_BODY");
 
 		switch := find_node(projection, "IF");
 		assert(has_flag(get_field(switch.fields, "if_flags"), "IS_SWITCH_STATEMENT"));
 		first_case := find_node(projection, "CASE");
 		default_case := find_node(projection, "CASE", 1);
-		assert(get_field(first_case.fields, "marked_as_fallthrough").boolean && get_field(first_case.fields, "condition").signed > 0);
-		assert(!get_field(default_case.fields, "marked_as_fallthrough").boolean && get_field(default_case.fields, "condition").signed == -1);
+		assert(get_field(first_case.fields, "marked_as_fallthrough").boolean && get_field(first_case.fields, "condition").node.id > 0);
+		assert(!get_field(default_case.fields, "marked_as_fallthrough").boolean && get_field(default_case.fields, "condition").node.id == -1);
 
 		loop := find_node(projection, "FOR");
 		loop_flags := get_field(loop.fields, "for_flags");
-		assert(has_flag(loop_flags, "REVERSE") && has_flag(loop_flags, "POINTER") && loop_flags.names[0] == "POINTER", "\e[91mFlags: %\e[0m", loop_flags.names);
-		it_name := get_field(loop.fields, "ident_it").signed;
-		index_name := get_field(loop.fields, "ident_it_index").signed;
-		iteration := get_field(loop.fields, "iteration_expression").signed;
-		assert(it_name > 0 && index_name > it_name && iteration > index_name && get_field(loop.fields, "block").signed > iteration);
-		assert(get_field(loop.fields, "want_reverse_expression").signed == -1 && get_field(loop.fields, "iteration_expression_right").signed == -1);
+		assert(has_flag(loop_flags, "REVERSE") && has_flag(loop_flags, "POINTER") && loop_flags.flags.names[0] == "POINTER", "\e[91mFlags: %\e[0m", loop_flags.flags.names);
+		it_name := get_field(loop.fields, "ident_it").node.id;
+		index_name := get_field(loop.fields, "ident_it_index").node.id;
+		iteration := get_field(loop.fields, "iteration_expression").node.id;
+		assert(it_name > 0 && index_name > it_name && iteration > index_name && get_field(loop.fields, "block").node.id > iteration);
+		assert(get_field(loop.fields, "want_reverse_expression").node.id == -1 && get_field(loop.fields, "iteration_expression_right").node.id == -1);
 		control := find_node(projection, "LOOP_CONTROL");
-		assert(get_field(control.fields, "control_type").name == "BREAK" && get_field(control.fields, "target_ident").signed > 0);
+		assert(get_field(control.fields, "control_type").enumeration.name == "BREAK" && get_field(control.fields, "target_ident").node.id > 0);
 
 		loop_while := find_node(projection, "WHILE");
-		assert(get_field(loop_while.fields, "condition").signed < get_field(loop_while.fields, "block").signed);
-		assert(get_field(find_node(projection, "DEFER").fields, "block").signed > 0);
+		assert(get_field(loop_while.fields, "condition").node.id < get_field(loop_while.fields, "block").node.id);
+		assert(get_field(find_node(projection, "DEFER").fields, "block").node.id > 0);
 		conditional := find_node(projection, "IF", 1);
-		assert(has_flag(get_field(conditional.fields, "if_flags"), "IS_IFX") && get_field(conditional.fields, "else_block").signed > 0);
+		assert(has_flag(get_field(conditional.fields, "if_flags"), "IS_IFX") && get_field(conditional.fields, "else_block").node.id > 0);
 
 		return_record := find_node(projection, "RETURN");
 		assert(get_field(return_record.fields, "arguments_unsorted").elements.count == 1);
-		assert(!get_field(return_record.fields, "return_flags").names.count);
+		assert(!get_field(return_record.fields, "return_flags").flags.names.count);
 	}
 
 	{
@@ -1390,14 +1400,14 @@ END
 
 		aggregate := find_node(projection, "STRUCT");
 		assert(has_flag(get_field(aggregate.fields, "textual_flags"), "NO_PADDING"));
-		parameters := get_field(aggregate.fields, "arguments_block").signed;
-		assert(parameters > 0 && parameters < get_field(aggregate.fields, "block").signed, "\e[91mStruct parameters precede the body.\e[0m");
-		assert(get_field(projection.nodes[parameters].fields, "block_type").name == "STRUCT_ARGUMENTS");
+		parameters := get_field(aggregate.fields, "arguments_block").node.id;
+		assert(parameters > 0 && parameters < get_field(aggregate.fields, "block").node.id, "\e[91mStruct parameters precede the body.\e[0m");
+		assert(get_field(projection.nodes[parameters].fields, "block_type").enumeration.name == "STRUCT_ARGUMENTS");
 		union_record := find_node(projection, "STRUCT", 1);
-		assert(has_flag(get_field(union_record.fields, "textual_flags"), "UNION") && get_field(union_record.fields, "arguments_block").signed == -1);
+		assert(has_flag(get_field(union_record.fields, "textual_flags"), "UNION") && get_field(union_record.fields, "arguments_block").node.id == -1);
 		enumeration := find_node(projection, "ENUM");
 		assert(get_field(enumeration.fields, "is_flags").boolean && get_field(enumeration.fields, "marked_as_specified").boolean);
-		assert(get_field(enumeration.fields, "internal_type_inst").signed < get_field(enumeration.fields, "block").signed);
+		assert(get_field(enumeration.fields, "internal_type_inst").node.id < get_field(enumeration.fields, "block").node.id);
 	}
 
 	{
@@ -1406,7 +1416,7 @@ END
 		defer Service.release_node_projection(projection);
 
 		push := find_node(projection, "PUSH_CONTEXT");
-		assert(get_field(push.fields, "to_push").signed < get_field(push.fields, "block").signed);
+		assert(get_field(push.fields, "to_push").node.id < get_field(push.fields, "block").node.id);
 	}
 
 	print("Statement and procedure vectors \e[92mPASS\e[0m\n");
@@ -1422,15 +1432,15 @@ test_directive_vectors :: () {
 
 		import_record := find_node(projection, "DIRECTIVE_IMPORT");
 		assert(get_field(import_record.fields, "name").bytes.(string) == "Module");
-		call_id := get_field(import_record.fields, "module_parameters_call").signed;
-		assert(call_id > node_id(import_record) && get_field(import_record.fields, "program_parameters_call").signed == -1);
+		call_id := get_field(import_record.fields, "module_parameters_call").node.id;
+		assert(call_id > node_id(import_record) && get_field(import_record.fields, "program_parameters_call").node.id == -1);
 		callee := get_field(projection.nodes[call_id].fields, "procedure_expression");
-		assert(callee.relationship == .ALIAS && callee.signed == node_id(import_record), "\e[91mAn import parameter call's callee is an alias to its import.\e[0m");
+		assert(callee.node.relationship == .ALIAS && callee.node.id == node_id(import_record), "\e[91mAn import parameter call's callee is an alias to its import.\e[0m");
 		assert(get_field(projection.nodes[call_id].fields, "arguments_unsorted").elements.count == 1);
 		assert(get_field(find_node(projection, "DIRECTIVE_LOAD").fields, "short_name").bytes.(string) == "other.jai");
 		library := find_node(projection, "DIRECTIVE_LIBRARY");
 		assert(get_field(library.fields, "name").bytes.(string) == "kernel32" && has_flag(get_field(library.fields, "library_flags"), "IS_SYSTEM_LIBRARY"));
-		assert(get_field(find_node(projection, "DIRECTIVE_SCOPE").fields, "scope_type").name == "FILE");
+		assert(get_field(find_node(projection, "DIRECTIVE_SCOPE").fields, "scope_type").enumeration.name == "FILE");
 	}
 
 	{
@@ -1439,12 +1449,12 @@ test_directive_vectors :: () {
 		defer Service.release_node_projection(projection);
 
 		run := find_node(projection, "DIRECTIVE_RUN");
-		header := get_field(run.fields, "procedure").signed;
+		header := get_field(run.fields, "procedure").node.id;
 		assert(header > node_id(run) && projection.nodes[header].kind == "PROCEDURE_HEADER");
-		body := get_field(projection.nodes[header].fields, "body_or_null").signed;
-		block := get_field(projection.nodes[body].fields, "block").signed;
+		body := get_field(projection.nodes[header].fields, "body_or_null").node.id;
+		block := get_field(projection.nodes[body].fields, "block").node.id;
 		expression := get_field(run.fields, "expression");
-		assert(expression.relationship == .ALIAS && expression.signed == block, "\e[91mAn arrow run's expression is an alias to its header's body block.\e[0m");
+		assert(expression.node.relationship == .ALIAS && expression.node.id == block, "\e[91mAn arrow run's expression is an alias to its header's body block.\e[0m");
 	}
 
 	{
@@ -1453,11 +1463,11 @@ test_directive_vectors :: () {
 		defer Service.release_node_projection(projection);
 
 		location := find_node(projection, "DIRECTIVE_LOCATION");
-		assert(get_field(location.fields, "is_caller_location").boolean && get_field(location.fields, "expression").signed == -1);
+		assert(get_field(location.fields, "is_caller_location").boolean && get_field(location.fields, "expression").node.id == -1);
 		null_code := find_node(projection, "DIRECTIVE_CODE");
 		assert(has_flag(get_field(null_code.fields, "code_flags"), "NULL") && get_field(null_code.fields, "expression").kind == .INACTIVE);
 		ordinary_code := find_node(projection, "DIRECTIVE_CODE", 1);
-		assert(get_field(ordinary_code.fields, "expression").signed > node_id(ordinary_code));
+		assert(get_field(ordinary_code.fields, "expression").node.id > node_id(ordinary_code));
 	}
 
 	// A typed array literal's parenthesised element type yields a wrapper whose interval starts at `(`, yet its form is the fixed array inside.
@@ -1474,8 +1484,8 @@ test_directive_vectors :: () {
 
 
 			arrays += 1;
-			dimension := get_field(it.fields, "array_dimension").signed;
-			assert(dimension > 0 && get_field(it.fields, "array_element_type").signed > dimension && get_field(it.fields, "type_valued_expression").kind == .INACTIVE);
+			dimension := get_field(it.fields, "array_dimension").node.id;
+			assert(dimension > 0 && get_field(it.fields, "array_element_type").node.id > dimension && get_field(it.fields, "type_valued_expression").kind == .INACTIVE);
 			first := owned.parsed.tokens[it.token_span.first].type;
 			assert(first == #char "(", "\e[91mThe fixed-array wrapper should start at the parenthesis.\e[0m");
 		}
@@ -1524,17 +1534,17 @@ test_route_vectors :: () {
 	}
 
 	exists_with_sync := find_node(projection, "DIRECTIVE_EXISTS", 1);
-	assert(get_field(exists_with_sync.fields, "sync_expression").signed > 0);
-	assert(get_field(find_node(projection, "DIRECTIVE_PROCEDURE_NAME").fields, "argument").signed == -1);
-	assert(get_field(find_node(projection, "DIRECTIVE_PROCEDURE_NAME", 1).fields, "argument").signed > 0);
+	assert(get_field(exists_with_sync.fields, "sync_expression").node.id > 0);
+	assert(get_field(find_node(projection, "DIRECTIVE_PROCEDURE_NAME").fields, "argument").node.id == -1);
+	assert(get_field(find_node(projection, "DIRECTIVE_PROCEDURE_NAME", 1).fields, "argument").node.id > 0);
 	imports := string.["PATH_TO_FILE", "PATH_TO_DIRECTORY", "FULL_TEXT"];
 	for imports {
-		assert(get_field(find_node(projection, "DIRECTIVE_IMPORT", it_index).fields, "import_type").name == it);
+		assert(get_field(find_node(projection, "DIRECTIVE_IMPORT", it_index).fields, "import_type").enumeration.name == it);
 	}
 
 	filters := string.["ONLY", "EXCEPT", "MAP"];
 	for filters {
-		assert(get_field(find_node(projection, "USING", it_index).fields, "filter_type").name == it);
+		assert(get_field(find_node(projection, "USING", it_index).fields, "filter_type").enumeration.name == it);
 	}
 
 	// A populated semantic backreference is never traversed or recorded.
@@ -1611,8 +1621,8 @@ test_assembly_vectors :: () {
 	statement_ids := get_field(assembly.fields, "statements").elements;
 	assert(statement_ids.count == 5);
 	helper :: (projection: *Service.Node_Projection, value: Service.Field_Value) -> *Service.Helper_Record {
-		assert(value.kind == .HELPER && value.signed >= 0, "\e[91mExpected a helper, got %.\e[0m", value.kind);
-		return *projection.helpers[value.signed];
+		assert(value.kind == .HELPER && value.helper_id >= 0, "\e[91mExpected a helper, got %.\e[0m", value.kind);
+		return *projection.helpers[value.helper_id];
 	}
 
 	statements: [5]*Service.Helper_Record;
@@ -1622,36 +1632,36 @@ test_assembly_vectors :: () {
 	}
 
 	declaration := statements[1];
-	assert(get_field(declaration.fields, "kind").name == "REGISTER_DECLARATION" && get_field(declaration.fields, "instruction").kind == .INACTIVE);
+	assert(get_field(declaration.fields, "kind").enumeration.name == "REGISTER_DECLARATION" && get_field(declaration.fields, "instruction").kind == .INACTIVE);
 	register := helper(projection, get_field(declaration.fields, "register_declaration"));
-	assert(!get_field(register.fields, "is_inferred").boolean && get_field(register.fields, "register_class").signed > 0);
+	assert(!get_field(register.fields, "is_inferred").boolean && get_field(register.fields, "register_class").node.id > 0);
 
 	fixed := helper(projection, get_field(statements[0].fields, "instruction"));
 	fixed_size := helper(projection, get_field(fixed.fields, "size"));
-	assert(get_field(fixed_size.fields, "kind").name == "FIXED" && get_field(fixed_size.fields, "polymorphic_name").kind == .INACTIVE);
+	assert(get_field(fixed_size.fields, "kind").enumeration.name == "FIXED" && get_field(fixed_size.fields, "polymorphic_name").kind == .INACTIVE);
 	polymorphic := helper(projection, get_field(statements[4].fields, "instruction"));
 	polymorphic_size := helper(projection, get_field(polymorphic.fields, "size"));
-	assert(get_field(polymorphic_size.fields, "kind").name == "POLYMORPHIC" && get_field(polymorphic_size.fields, "polymorphic_name").signed > 0);
+	assert(get_field(polymorphic_size.fields, "kind").enumeration.name == "POLYMORPHIC" && get_field(polymorphic_size.fields, "polymorphic_name").node.id > 0);
 
 	gather := helper(projection, get_field(statements[2].fields, "instruction"));
 	address := helper(projection, get_field(gather.fields, "operands").elements[1]);
-	assert(get_field(address.fields, "kind").name == "MEMORY" && get_field(address.fields, "value").kind == .INACTIVE);
+	assert(get_field(address.fields, "kind").enumeration.name == "MEMORY" && get_field(address.fields, "value").kind == .INACTIVE);
 	memory := helper(projection, get_field(address.fields, "memory"));
 	base_value := helper(projection, get_field(memory.fields, "base"));
 	index_value := helper(projection, get_field(memory.fields, "index"));
 	scale_value := helper(projection, get_field(memory.fields, "scale"));
 	assert(get_field(memory.fields, "displacement").kind == .INACTIVE, "\e[91mAn unused displacement slot is inactive.\e[0m");
-	base_node := get_field(base_value.fields, "expression").signed;
-	index_node := get_field(index_value.fields, "expression").signed;
-	assert(base_node > 0 && index_node > base_node && get_field(scale_value.fields, "expression").signed > index_node);
+	base_node := get_field(base_value.fields, "expression").node.id;
+	index_node := get_field(index_value.fields, "expression").node.id;
+	assert(base_node > 0 && index_node > base_node && get_field(scale_value.fields, "expression").node.id > index_node);
 
 	masked := helper(projection, get_field(statements[3].fields, "instruction"));
 	operands := get_field(masked.fields, "operands").elements;
 	masked_declaration := helper(projection, operands[0]);
 	ampersand := helper(projection, get_field(masked_declaration.fields, "modifiers").elements[0]);
-	assert(get_field(ampersand.fields, "kind").name == "AMPERSAND_STAR" && get_field(ampersand.fields, "argument").kind == .HELPER);
+	assert(get_field(ampersand.fields, "kind").enumeration.name == "AMPERSAND_STAR" && get_field(ampersand.fields, "argument").kind == .HELPER);
 	bang := helper(projection, get_field(helper(projection, operands[1]).fields, "modifiers").elements[0]);
-	assert(get_field(bang.fields, "kind").name == "BANG_Z" && get_field(bang.fields, "argument").kind == .INACTIVE);
+	assert(get_field(bang.fields, "kind").enumeration.name == "BANG_Z" && get_field(bang.fields, "argument").kind == .INACTIVE);
 
 	print("Assembly vectors \e[92mPASS\e[0m\n");
 }
@@ -1680,14 +1690,14 @@ declaration_index_invariants :: (index: *Service.Declaration_Index, snapshot: *S
 				}
 
 			case .NODE;
-				if value.signed >= 0 && value.relationship == .OWNED {
-					owners[value.signed] = owner;
-					owner_fields[value.signed] = field;
+				if value.node.id >= 0 && value.node.relationship == .OWNED {
+					owners[value.node.id] = owner;
+					owner_fields[value.node.id] = field;
 				}
 
 			case .HELPER;
-				if value.signed >= 0 {
-					for snapshot.helpers[value.signed].fields {
+				if value.helper_id >= 0 {
+					for snapshot.helpers[value.helper_id].fields {
 						collect(it.value, owner, field, snapshot, owners, owner_fields);
 					}
 				}
@@ -1779,21 +1789,21 @@ declaration_index_invariants :: (index: *Service.Declaration_Index, snapshot: *S
 
 
 		if it.kind == "ENUM" {
-			block := get_field(it.fields, "block").signed;
+			block := get_field(it.fields, "block").node.id;
 			if block >= 0 {
 				for statement: get_field(nodes[block].fields, "statements").elements {
-					if nodes[statement.signed].kind != "IDENT" {
+					if nodes[statement.node.id].kind != "IDENT" {
 						continue;
 					}
 
 
 					found := false;
 					for entries {
-						found ||= it.syntax_kind == .ENUM_MEMBER && it.declaration_node_id == xx statement.signed;
+						found ||= it.syntax_kind == .ENUM_MEMBER && it.declaration_node_id == xx statement.node.id;
 					}
 
 					if !found {
-						return false, tprint("bare enum member % has no entry", statement.signed);
+						return false, tprint("bare enum member % has no entry", statement.node.id);
 					}
 				}
 			}
@@ -1848,27 +1858,28 @@ declaration_index_invariants :: (index: *Service.Declaration_Index, snapshot: *S
 		directive := -1;
 		if list >= 0 {
 			for get_field(nodes[list].fields, "statements").elements {
-				if it.signed == statement {
+				if it.node.id == statement {
 					break;
 				}
 
 
-				if nodes[it.signed].kind == "DIRECTIVE_SCOPE" {
-					directive = it.signed;
+				if nodes[it.node.id].kind == "DIRECTIVE_SCOPE" {
+					directive = it.node.id;
 				}
 			}
 		}
 
 		visibility := entry.visibility_syntax;
 		tag := Service.Scope_Directive_Tag.UNSPECIFIED;		if directive >= 0 {
-			if get_field(nodes[directive].fields, "scope_type").name == {
+			if get_field(nodes[directive].fields, "scope_type").enumeration.name == {
 				case "EXPORT";		tag = .SCOPE_EXPORT;
 				case "INTERNAL";	tag = .SCOPE_MODULE;
 				case "FILE";		tag = .SCOPE_FILE;
 			}
 		}
 
-		observed := ifx visibility.observations.count == 1 then visibility.observations[0].span;
+		observation := ifx visibility.observations.count == 1 then visibility.observations[0];
+		observed := ifx observation.kind == .SOURCE then observation.span;
 		if (visibility.scope_basis.statement_list_node_id != list
 			|| visibility.scope_basis.preceding_directive_node_id != directive
 			|| visibility.scope_directive != tag
@@ -1881,21 +1892,21 @@ declaration_index_invariants :: (index: *Service.Declaration_Index, snapshot: *S
 
 		name := entry.name;
 		if name.kind == .SPELLED {
-			span := name.origin.span;
-			if name.origin.kind != .SOURCE || span.start < 0 || span.end > source.count || span.end <= span.start {
+			span := ifx name.spelled.origin.kind == .SOURCE then name.spelled.origin.span;
+			if name.spelled.origin.kind != .SOURCE || span.start < 0 || span.end > source.count || span.end <= span.start {
 				return false, tprint("entry % name origin is invalid", entry_index);
 			}
 
 
-			spelling := name.spelling_bytes.(string);
-			producer := name.producer_name_bytes.(string);
+			spelling := name.spelled.spelling_bytes.(string);
+			producer := name.spelled.producer_name_bytes.(string);
 			if spelling != slice(source, span.start, span.end - span.start) {
 				return false, tprint("entry % spelling is not its source slice", entry_index);
 			}
 
 
 			// The lexer drops a leading backtick, and each backslash inside an identifier together with the spaces after it (Invaders uses both).
-			if name.form == .IDENTIFIER {
+			if name.spelled.form == .IDENTIFIER {
 				builder: String_Builder;
 				skipping := false;
 				for spelling {
@@ -1925,7 +1936,7 @@ declaration_index_invariants :: (index: *Service.Declaration_Index, snapshot: *S
 		} else if name.kind == .UNMAPPED {
 			found := false;
 			for index.coverage.reasons {
-				found ||= it.code == .UNMAPPED_NAME && it.subject.local_node_id == name.reason.subject.local_node_id;
+				found ||= it.code == .UNMAPPED_NAME && it.subject.local_node_id == name.unmapped.reason.subject.local_node_id;
 			}
 
 			if !found {
@@ -1967,6 +1978,11 @@ declaration_index_invariants :: (index: *Service.Declaration_Index, snapshot: *S
 
 		export := entry.program_export_syntax;
 		if export {
+			if export.marker_origin.kind != .SOURCE {
+				return false, tprint("entry % export marker has no source span", entry_index);
+			}
+
+
 			marker := export.marker_origin.span;
 			marker_text := slice(source, marker.start, marker.end - marker.start);
 			if !begins_with(marker_text, "#") || !ends_with(marker_text, "program_export") {
@@ -1974,13 +1990,13 @@ declaration_index_invariants :: (index: *Service.Declaration_Index, snapshot: *S
 			}
 
 
-			if export.name_argument && source[export.name_argument.origin.span.start] != #char "\"" {
+			if export.name_argument && (export.name_argument.origin.kind != .SOURCE || source[export.name_argument.origin.span.start] != #char "\"") {
 				return false, tprint("entry % export name is not a string token", entry_index);
 			}
 
 
 			properties := ifx entry.syntax_kind == .COMPOUND_BINDING
-				then get_field(nodes[node].fields, "declaration_properties").signed
+				then get_field(nodes[node].fields, "declaration_properties").node.id
 				else node;
 			if !has_flag(get_field(nodes[properties].fields, "flags"), "PROGRAM_EXPORT") {
 				return false, tprint("entry % has an export occurrence without the flag", entry_index);
@@ -2002,13 +2018,13 @@ declaration_index_invariants :: (index: *Service.Declaration_Index, snapshot: *S
 
 
 		fields := nodes[compound].fields;
-		declares := get_field(fields, "operator_type").tag == Service.Token_Tag.{kind = .BYTE_CHAR, byte = 0};
-		comma := get_field(fields, "comma_separated_assignment").signed;
+		declares := get_field(fields, "operator_type").operator_tag == Service.Token_Tag.{kind = .BYTE_CHAR, byte = 0};
+		comma := get_field(fields, "comma_separated_assignment").node.id;
 		declared := 0;
 		for get_field(nodes[comma].fields, "arguments").elements {
-			argument := snapshot.helpers[it.signed].fields;
-			modifier := get_field(argument, "modifier").name;
-			target := get_field(argument, "node").signed;
+			argument := snapshot.helpers[it.helper_id].fields;
+			modifier := get_field(argument, "modifier").enumeration.name;
+			target := get_field(argument, "node").node.id;
 			if (modifier == "DECLARE" || (modifier == "NONE" && declares)) && nodes[target].kind == "IDENT" {
 				declared += 1;
 			}
@@ -2095,7 +2111,7 @@ index_summary :: (index: *Service.Declaration_Index) -> string {
 		}
 
 		name := ifx it.name.kind == .SPELLED
-			then it.name.spelling_bytes.(string)
+			then it.name.spelled.spelling_bytes.(string)
 			else ifx it.name.kind == .ANONYMOUS
 				then "#anon"
 				else "#unmapped";
@@ -2175,16 +2191,18 @@ END
 
 	{
 		owned, snapshot, index := project_source_index("`bt :: 1; operator [ ] = :: (a: *T, i: int, v: int) {}");
-		assert(index.entries[0].name.producer_name_bytes.(string) == "bt" && index.entries[0].name.form == .IDENTIFIER);
-		assert(index.entries[1].name.producer_name_bytes.(string) == "[]=" && index.entries[1].name.form == .OPERATOR);
-		assert(!index.entries[1].name.recovery_origins.count);
+		identifier := index.entries[0].name;
+		operator_name := index.entries[1].name;
+		assert(identifier.kind == .SPELLED && identifier.spelled.producer_name_bytes.(string) == "bt" && identifier.spelled.form == .IDENTIFIER);
+		assert(operator_name.kind == .SPELLED && operator_name.spelled.producer_name_bytes.(string) == "[]=" && operator_name.spelled.form == .OPERATOR);
+		assert(!operator_name.spelled.recovery_origins.count);
 		release_source_index(owned, snapshot, index);
 	}
 
 	{
 		owned, snapshot, index := project_source_index("long\\  _name :: 1;");
 		name := index.entries[0].name;
-		assert(name.spelling_bytes.(string) == "long\\  _name" && name.producer_name_bytes.(string) == "long_name", "\e[91mIdentifier continuations stay in the spelling only.\e[0m");
+		assert(name.kind == .SPELLED && name.spelled.spelling_bytes.(string) == "long\\  _name" && name.spelled.producer_name_bytes.(string) == "long_name", "\e[91mIdentifier continuations stay in the spelling only.\e[0m");
 		release_source_index(owned, snapshot, index);
 	}
 
@@ -2195,7 +2213,7 @@ END
 		assert(index_summary(index) == "D + R -; D a D0 -; D b D0 -; D #anon D0 -; D ! R -; D a D4 -; D #anon D4 -; D ^ R -; D a D7 -; D b D7 -; D #anon D7 -");
 		for i: s64.[0, 4, 7] {
 			name := index.entries[i].name;
-			assert(name.form == .OPERATOR && name.producer_name_bytes.(string) == name.spelling_bytes.(string));
+			assert(name.kind == .SPELLED && name.spelled.form == .OPERATOR && name.spelled.producer_name_bytes.(string) == name.spelled.spelling_bytes.(string));
 		}
 
 		release_source_index(owned, snapshot, index);
@@ -2227,8 +2245,8 @@ END
 		}
 
 		named := index.entries[0].program_export_syntax;
-		assert(named && text(named.marker_origin.span) == "#program_export" && named.name_argument);
-		assert(named.name_argument.value_bytes.(string) == "name" && text(named.name_argument.origin.span) == "\"name\"");
+		assert(named && named.marker_origin.kind == .SOURCE && text(named.marker_origin.span) == "#program_export" && named.name_argument);
+		assert(named.name_argument.origin.kind == .SOURCE && named.name_argument.value_bytes.(string) == "name" && text(named.name_argument.origin.span) == "\"name\"");
 		assert(index.entries[1].program_export_syntax && !index.entries[1].program_export_syntax.name_argument, "\e[91mA bare marker has no name argument.\e[0m");
 		empty := index.entries[2].program_export_syntax;
 		assert(empty && empty.name_argument && !empty.name_argument.value_bytes.count, "\e[91mAn explicit empty name is present.\e[0m");
@@ -2298,7 +2316,7 @@ test_declaration_index_controls :: () {
 	{
 		owned, snapshot := project("a:, b = f();");
 		comma := find_node(snapshot.node_projection, "COMMA_SEPARATED_ARGUMENTS");
-		first := snapshot.helpers[get_field(comma.fields, "arguments").elements[0].signed];
+		first := snapshot.helpers[get_field(comma.fields, "arguments").elements[0].helper_id];
 		modifier_token := get_field(first.fields, "modifier_token").signed;
 		snapshot.tokens[modifier_token].tag = .{kind = .BYTE_CHAR, byte = #char "="};
 		fault, index := Service.project_declaration_index(snapshot);
@@ -2318,7 +2336,7 @@ test_declaration_index_controls :: () {
 	{
 		owned, snapshot := project("a :: 1; b :: 2;");
 		statements := get_field(snapshot.nodes[0].fields, "statements").elements;
-		statements[1].signed = statements[0].signed;
+		statements[1].node.id = statements[0].node.id;
 		fault, index := Service.project_declaration_index(snapshot);
 		assert(fault.failure == .INVALID_REFERENCE && !index, "\e[91mA node with two owners fails conversion.\e[0m");
 		release_source_index(owned, snapshot, null);
@@ -2336,7 +2354,7 @@ test_declaration_index_controls :: () {
 		fault, index := Service.project_declaration_index(snapshot);
 		assert(fault.failure == .NONE);
 		name := index.entries[0].name;
-		assert(name.kind == .UNMAPPED && name.producer_name_bytes.(string) == "zz" && name.reason.code == .UNMAPPED_NAME, "\e[91mA producer name that its token does not spell is unmapped, not guessed.\e[0m");
+		assert(name.kind == .UNMAPPED && name.unmapped.producer_name_bytes.(string) == "zz" && name.unmapped.reason.code == .UNMAPPED_NAME, "\e[91mA producer name that its token does not spell is unmapped, not guessed.\e[0m");
 		assert(index.coverage.kind == .PARTIAL_SYNTAX_TRAVERSAL && index.coverage.reasons[0].subject.local_node_id == xx node_id(declaration));
 		valid, problem := declaration_index_invariants(index, snapshot);
 		assert(valid, problem);
@@ -2348,7 +2366,13 @@ test_declaration_index_controls :: () {
 		declaration := find_node(snapshot.node_projection, "DECLARATION");
 		for * declaration.fields {
 			if it.path[0].name == "flags" {
-				it.value.names.count = 0;
+				it.value = .{
+					kind = .ENUM,
+					enumeration = .{
+						domain = "test",
+						name = "PROGRAM_EXPORT"
+					}
+				};
 			}
 		}
 
@@ -2380,6 +2404,8 @@ test_declaration_index_controls :: () {
 		assert(fault.failure == .NONE && index.coverage.reasons.count == 1 && index.coverage.reasons[0].subject.kind == .DOCUMENT);
 		for index.entries {
 			assert(it.recovery_status.kind == .UNCLASSIFIED, "\e[91mAn event without a published owner leaves every entry unclassified.\e[0m");
+			reason := it.recovery_status.reason;
+			assert(reason.code == .UNCLASSIFIED_ROUTE && reason.impacts == .RECOVERY && reason.subject.kind == .DOCUMENT);
 		}
 
 		release_source_index(owned, snapshot, index);
@@ -2479,15 +2505,15 @@ tally_routes :: (projection: *Service.Node_Projection) {
 	tally_value :: (owner: string, path: []Service.Path_Step, value: Service.Field_Value) {
 		if value.kind == {
 			case .ENUM;
-				tally(tprint("enum:%=%", value.domain, value.name));
+				tally(tprint("enum:%=%", value.enumeration.domain, value.enumeration.name));
 
 			case .FLAGS;
-				for value.names {
-					tally(tprint("flag:%.%", value.domain, it));
+				for value.flags.names {
+					tally(tprint("flag:%.%", value.flags.domain, it));
 				}
 
 			case .NODE;
-				if value.signed >= 0 {
+				if value.node.id >= 0 {
 					tally(tprint("child:%.%", owner, path[0].name));
 				}
 

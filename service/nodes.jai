@@ -15,7 +15,7 @@ Path_Step :: struct {
 }
 
 Field_Value :: struct {
-	kind: enum u8 {//QUESTION: this looks like it would be better as a [tagged] union...
+	using payload: union kind: enum u8 {
 		INACTIVE;
 		BOOL;
 		SIGNED;
@@ -31,27 +31,45 @@ Field_Value :: struct {
 		LIST;
 		TOKEN_SPAN;
 		SOURCE_NULL;
+	} {
+		.BOOL,,			boolean: bool;
+
+		.SIGNED,,		signed: s64;
+
+		.UNSIGNED,,		unsigned: u64;
+
+		.FLOAT64_BITS,,	float64_bits: u64;
+
+		.BYTES,,		bytes: []u8;
+
+		.TOKEN_TAG,,	tag: Token_Tag;
+
+		.OPERATOR,,		operator_tag: Token_Tag;
+
+		.ENUM,,			enumeration: struct {
+			domain:	string;
+			name:	string;
+		};
+
+		.FLAGS,,		flags: struct {
+			domain:	string;
+			names:	[]string;
+		};
+
+		.NODE,,			node: struct {
+			id: s64;
+			relationship: enum u8 {
+				OWNED;
+				ALIAS;
+			};
+		};
+
+		.HELPER,,		helper_id: s64;
+
+		.LIST,,			elements: []Field_Value;
+
+		.TOKEN_SPAN,,	span: Token_Span_Observation;
 	};
-	relationship: enum u8 {
-		OWNED;
-		ALIAS;
-	};
-	boolean: bool;
-
-	// `.SIGNED` value, or the referenced ID for `.NODE` and `.HELPER` (-1 when the pointer is null):
-	signed: s64;
-
-	// `.UNSIGNED` value or `.FLOAT64_BITS` bits:
-	unsigned:	u64;
-	bytes:		[]u8;
-
-	// `.TOKEN_TAG` tag, or for `.OPERATOR` a byte character or a declared `Operator_Type` name:
-	tag:		Token_Tag;
-	domain:		string;
-	name:		string;
-	names:		[]string;
-	elements:	[]Field_Value;
-	span:		Token_Span_Observation;
 }
 
 Field_Observation :: struct {
@@ -466,7 +484,7 @@ field :: (p: *Node_Projector, value: Field_Value, names: .. string) {
 // Records an owning edge and queues the child for the walk; returns its ID once known:
 node_value :: (p: *Node_Projector, node: *$T) -> Field_Value {
 	if !node {
-		return .{kind = .NODE, signed = -1};
+		return .{kind = .NODE, node = .{id = -1}};
 	}
 
 
@@ -474,15 +492,17 @@ node_value :: (p: *Node_Projector, node: *$T) -> Field_Value {
 	found, id := table_find(*p.node_ids, node);
 	return .{
 		kind = .NODE,
-		signed = ifx found
-			then id
-			else -1
+		node = .{
+			id = ifx found
+				then id
+				else -1
+		}
 	};
 }
 
 helper_value :: (p: *Node_Projector, pointer: *void, layout: Helper_Layout) -> Field_Value {
 	if !pointer {
-		return .{kind = .HELPER, signed = -1};
+		return .{kind = .HELPER, helper_id = -1};
 	}
 
 
@@ -490,7 +510,7 @@ helper_value :: (p: *Node_Projector, pointer: *void, layout: Helper_Layout) -> F
 	found, id := table_find(*p.helper_ids, pointer);
 	return .{
 		kind = .HELPER,
-		signed = ifx found
+		helper_id = ifx found
 			then id
 			else -1
 	};
@@ -529,7 +549,7 @@ flags_value :: (p: *Node_Projector, domain: string, bits: u64, names: []Flag_Nam
 
 
 	if !p.recording {
-		return .{kind = .FLAGS, domain = domain};
+		return .{kind = .FLAGS, flags = .{domain = domain}};
 	}
 
 
@@ -542,7 +562,7 @@ flags_value :: (p: *Node_Projector, domain: string, bits: u64, names: []Flag_Nam
 		}
 	}
 
-	return .{kind = .FLAGS, domain = domain, names = selected};
+	return .{kind = .FLAGS, flags = .{domain = domain, names = selected}};
 }
 
 // `domain` names the producer field; every admitted value must be a declared name of its enum type:
@@ -550,7 +570,7 @@ enum_value :: (p: *Node_Projector, domain: string, value: $T) -> Field_Value {
 	info := type_info(T);
 	for info.values {
 		if it == value.(s64) {
-			return .{kind = .ENUM, domain = domain, name = info.names[it_index]};
+			return .{kind = .ENUM, enumeration = .{domain = domain, name = info.names[it_index]}};
 		}
 	}
 
@@ -565,12 +585,12 @@ operator_value :: (p: *Node_Projector, operator_type: $T) -> Field_Value {
 	info := type_info(T);
 	for info.values {
 		if it == value {
-			return .{kind = .OPERATOR, tag = .{kind = .NAMED, name = info.names[it_index]}};
+			return .{kind = .OPERATOR, operator_tag = .{kind = .NAMED, name = info.names[it_index]}};
 		}
 	}
 
 	if value >= 0 && value < 256 {
-		return .{kind = .OPERATOR, tag = .{kind = .BYTE_CHAR, byte = xx value}};
+		return .{kind = .OPERATOR, operator_tag = .{kind = .BYTE_CHAR, byte = xx value}};
 	}
 
 
@@ -595,10 +615,12 @@ alias_value :: (p: *Node_Projector, node: *void) -> Field_Value {
 	found, id := table_find(*p.node_ids, node);
 	return .{
 		kind = .NODE,
-		relationship = .ALIAS,
-		signed = ifx found
-			then id
-			else -1
+		node = .{
+			id = ifx found
+				then id
+				else -1,
+			relationship = .ALIAS
+		}
 	};
 }
 
@@ -1424,7 +1446,7 @@ describe_literal :: (p: *Node_Projector, literal: *Parser.Parser_Literal) {
 	if literal.value_type == {
 		case .NUMBER;
 			if flags & 0x4 {
-				field(p, .{kind = .FLOAT64_BITS,	unsigned = literal._u64}, "values", "_float64");
+				field(p, .{kind = .FLOAT64_BITS,	float64_bits = literal._u64}, "values", "_float64");
 			} else {
 				field(p, .{kind = .UNSIGNED,		unsigned = literal._u64}, "values", "_u64");
 			}

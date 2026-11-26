@@ -1,156 +1,341 @@
-#1	d:/jai/modules/Jai_Parser/lexer.jai#1089
+Context: `> |` marks the source comment; the surrounding lines help relocate it if the link drifts.
+After an edit, check nearby snippets against the changed ranges and refresh affected snippets and shifted links.
+Remove an entry when its source comment is gone and the fix is verified.
+
+#1	file:///d%3A/jai/modules/Jai_Parser/lexer.jai#1089
 	FIXME: @Speed: Why are we counting in a post-pass, when we already had to look at each character??
+	  | 	}
+	  |
+	> | 	net_lines := count_herestring_lines(lexer, result);		//FIXME: @Speed: Why are we counting in a post-pass, when we already had to look at each character??
+	  |
+	  | 	// The here-string body goes from string_start to string_end.
 
-#2	d:/jai/modules/Jai_Parser/lexer.jai#1583
+#2	file:///d%3A/jai/modules/Jai_Parser/lexer.jai#1583
 	QUESTION: @Speed: Reverse these ifs, because this is less than all our overflow_check_lower_bound values, so we can get away with 1 if statement for almost all numbers.
+	  | 					pre_add := digit_accumulator;
+	  |
+	> | 					if (digit_accumulator > 0x7FFF_FFFF_FFFF_FFFF) && (base == 10) {	//QUESTION: @Speed: Reverse these ifs, because this is less than all our overflow_check_lower_bound values, so we can get away with 1 if statement for almost all numbers.
+	  | 						result_can_only_be_u64_if_it_is_an_integer_at_the_end = true;
+	  | 					}
 
-#3	d:/jai/modules/Jai_Parser/lexer.jai#1659
+#3	file:///d%3A/jai/modules/Jai_Parser/lexer.jai#1659
 	HACK: Find the right thing here.  @Cleanup.
+	  |
+	  | 		use_float64 := false;
+	> | 		if significant_figures > 8 {	//HACK: Find the right thing here.  @Cleanup.
+	  | 			use_float64 = true;
+	  | 			result.value_flags |= .REQUIRES_FLOAT64_DUE_TO_SIGNIFICANT_DIGITS;
 
-#4	d:/jai/modules/Jai_Parser/lexer.jai#1686
+#4	file:///d%3A/jai/modules/Jai_Parser/lexer.jai#1686
 	LATER: @Cleanup.
+	  | 			// We are just setting it to hack the output.
+	  |
+	> | 			//LATER: @Cleanup.
+	  |
+	  | 			numeric_flags |= .HEX;
 
-#5	d:/jai/modules/Jai_Parser/lexer.jai#1810
+#5	file:///d%3A/jai/modules/Jai_Parser/lexer.jai#1810
 	NOTE: Do not fall through to the bottom.
+	  | 						source_end = lexer.input_cursor;
+	  |
+	> | 						continue;	// NOTE: Do not fall through to the bottom.
+	  |
+	  | 					case #char "\"";		c = #char "\"";		eat_character(lexer);
 
-#6	d:/jai/modules/Jai_Parser/lexer.jai#1814
+#6	file:///d%3A/jai/modules/Jai_Parser/lexer.jai#1814
 	HACK: Using ASCII 32 (unit separator) as a placeholder for '%'.
+	  | 					case #char "\"";		c = #char "\"";		eat_character(lexer);
+	  | 					case #char "\\";		c = #char "\\";		eat_character(lexer);
+	> | 					case #char "%";			c = 31;				eat_character(lexer);	//HACK: Using ASCII 32 (unit separator) as a placeholder for '%'.
+	  |
+	  | 					case;
 
-#7	d:/jai/modules/Jai_Parser/lexer.jai#1824
+#7	file:///d%3A/jai/modules/Jai_Parser/lexer.jai#1824
 	NOTE: In the case of Unicode characters, we continue rather than falling through to the bottom, so don't depend on that!
+	  |
+	  | 		source_end = lexer.input_cursor;
+	> | 		// NOTE: In the case of Unicode characters, we continue rather than falling through to the bottom, so don't depend on that!
+	  | 		append(*builder, c.(u8));
+	  | 	}
 
-#8	d:/jai/modules/Jai_Parser/lexer.jai#1929
+#8	file:///d%3A/jai/modules/Jai_Parser/lexer.jai#1929
 	LATER: If that spelling should instead be plain comment text, the opener test here needs a stricter boundary rule.
+	  |
+	  | // Nested block comments treat an adjacent `/*` as another opener, even inside runs of slashes like `/////*`.
+	> | //LATER: If that spelling should instead be plain comment text, the opener test here needs a stricter boundary rule.
+	  | eat_input_due_to_block_comment :: (lexer: *Lexer) {
+	  | 	comment_depth: s32 = 1;
 
-#9	d:/jai/modules/Jai_Parser/lexer.jai#2289
+#9	file:///d%3A/jai/modules/Jai_Parser/lexer.jai#2289
 	HACK: because check_for_equals calls eat_character immediately.
+	  | 					}
+	  | 				} else {
+	> | 					unwind_one_character(lexer);	//HACK: because check_for_equals calls eat_character immediately.
+	  | 					result = check_for_equals(lexer, c.(Token_Type), .MINUSEQUALS);
+	  | 				}
 
-#10	d:/jai/modules/Jai_Parser/lexer.jai#2443
+#10	file:///d%3A/jai/modules/Jai_Parser/lexer.jai#2443
 	HACK: !
+	  | 				if doubled {
+	  | 					result = make_one_character_token(lexer, .DOUBLE_DOLLAR);
+	> | 					result.c0 -= 1;		//HACK: !
+	  | 				} else {
+	  | 					result = make_one_character_token(lexer, #char "$");
 
-#11	d:/jai/modules/Jai_Parser/lexer.jai#2459
+#11	file:///d%3A/jai/modules/Jai_Parser/lexer.jai#2459
 	HACK: Overwrite this to a Note token.
+	  |
+	  |
+	> | 					//HACK: Overwrite this to a Note token.
+	  | 					// This will change later when we do structured notes, probably.
+	  |
 
-#12	d:/jai/modules/Jai_Parser/lexer.jai#2481
+#12	file:///d%3A/jai/modules/Jai_Parser/lexer.jai#2481
 	LATER: decide if we want these errors as an option?
+	  | 				if other_c == UTF8_NON_BREAKING_SPACE_TRAIL_BYTE {
+	  | 					/*
+	> | 					if (!did_nbsp_warning) {	//LATER: decide if we want these errors as an option?
+	  | 						// Don't spam!
+	  | 						interp.report(REPORT_WARNING, this, null, "A Unicode non-breaking space character is here, outside of a string.  Skipping.\n");
 
-#13	d:/jai/modules/Jai_Parser/lexer.jai#2556
+#13	file:///d%3A/jai/modules/Jai_Parser/lexer.jai#2556
 	LATER: @Speed: Use some heuristic to size the storage so we don't pay for expansions?
+	  | set_input_from_file :: (lexer: *Lexer, file_path: string) -> bool {
+	  | 	// File input is lexer-owned and released on reset; optional identifier storage must copy names out of that buffer so retained names survive the reset.
+	> | 	//LATER: @Speed: Use some heuristic to size the storage so we don't pay for expansions?
+	  |
+	  | 	assert(file_path != "");
 
 
-#14	d:/jai/modules/Jai_Parser/service/provider.jai#135
+Tagged unions and variant payloads
+
+#40	file:///d%3A/jai/modules/Jai_Parser/service/coordinator.jai#160
 	QUESTION: this looks like it would be better as a [tagged] union...
+	  | }
+	  |
+	> | World_Selector :: struct {//QUESTION: this looks like it would be better as a [tagged] union...
+	  | 	kind: enum u8 {
+	  | 		PUBLISHED_UPDATE;
 
-#15	d:/jai/modules/Jai_Parser/service/provider.jai#198
+#41	file:///d%3A/jai/modules/Jai_Parser/service/coordinator.jai#317
 	QUESTION: this looks like it would be better as a [tagged] union...
+	  | Operation :: struct {
+	  | 	identity: Operation_ID;
+	> | 	kind: enum u8 {//QUESTION: this looks like it would be better as a [tagged] union...
+	  | 		UPDATE;
+	  | 		QUERY;
 
-#16	d:/jai/modules/Jai_Parser/service/provider.jai#358
-	QUESTION: this looks like it would be better as a [tagged] union...
 
-#17	d:/jai/modules/Jai_Parser/service/provider.jai#523
-	QUESTION: this feels like something we could integrate into the literal above, perhaps via array_copy of a literal?
+Unchecked results and failure handling
 
-#18	d:/jai/modules/Jai_Parser/service/projection.jai#10
-	QUESTION: why not enum?
-
-#19	d:/jai/modules/Jai_Parser/service/projection.jai#189
-	QUESTION: this looks like it maybe would be better as a [tagged] union...
-
-#20	d:/jai/modules/Jai_Parser/service/ownership.jai#379
-	FIXME: name returns everywhere there is >1
-
-#21	d:/jai/modules/Jai_Parser/service/ownership.jai#454
-	QUESTION: these are all very similar - can we generate/macro them to cut down on boilerplate?
-
-#22	d:/jai/modules/Jai_Parser/service/ownership.jai#1581
-	FIXME: I think I'd prefer the struct definitions weren't mixed in with the procs, unless it's used only locally, in which case perhaps it could be defined inside the proc?
-
-#23	d:/jai/modules/Jai_Parser/service/nodes.jai#18
-	QUESTION: this looks like it would be better as a [tagged] union...
-
-#24	d:/jai/modules/Jai_Parser/service/nodes.jai#137
-	TODO: document this blank.
-
-#25	d:/jai/modules/Jai_Parser/service/nodes.jai#413
+#25	file:///d%3A/jai/modules/Jai_Parser/service/nodes.jai#431
 	QUESTION: why is this unchecked?
+	  | 		fields := sorted_fields(*projector);
+	  | 		if item.layout == .NONE {
+	> | 			_, id := table_find(*projector.node_ids, item.pointer);//QUESTION: why is this unchecked?
+	  | 			node := item.pointer.(*Parser.Parser_Node);
+	  | 			_, kind_name := node_kind_name(node.kind);//QUESTION: why is this unchecked?
 
-#26	d:/jai/modules/Jai_Parser/service/nodes.jai#415
+#26	file:///d%3A/jai/modules/Jai_Parser/service/nodes.jai#433
 	QUESTION: why is this unchecked?
+	  | 			_, id := table_find(*projector.node_ids, item.pointer);//QUESTION: why is this unchecked?
+	  | 			node := item.pointer.(*Parser.Parser_Node);
+	> | 			_, kind_name := node_kind_name(node.kind);//QUESTION: why is this unchecked?
+	  | 			span := Token_Span_Observation.{node.first_token.(s64), node.one_past_last_token.(s64)};
+	  | 			record := *projection.nodes[id];
 
-#27	d:/jai/modules/Jai_Parser/service/nodes.jai#432
+#27	file:///d%3A/jai/modules/Jai_Parser/service/nodes.jai#450
 	QUESTION: why is this unchecked?
+	  | 			record.has_origin, record.origin = token_span_origin(projector.parsed, span);
+	  | 		} else {
+	> | 			_, id := table_find(*projector.helper_ids, item.pointer);//QUESTION: why is this unchecked?
+	  | 			projection.helpers[id] = .{
+	  | 				local_helper_id = xx id,
 
-#28	d:/jai/modules/Jai_Parser/service/nodes.jai#632
+#35	file:///d%3A/jai/modules/Jai_Parser/service/host.jai#378
+	QUESTION: why is this unchecked?
+	  |
+	  | 	tracked := find_tracked(batch, relative);
+	> | 	_, token := issue_token(*host.revisions);//QUESTION: why is this unchecked?
+	  | 	event := array_add(*batch.events);
+	  | 	event.document = harness_document(host, relative);
+
+#36	file:///d%3A/jai/modules/Jai_Parser/service/host.jai#398
+	QUESTION: why is this unchecked?
+	  |
+	  | disk_observation :: (host: *Harness_Host, event: *Document_Event) -> bool, Disk_Observation {
+	> | 	_, token := issue_token(*host.observations);//QUESTION: why is this unchecked?
+	  | 	provenance := Observation_Provenance.{provider_identity = host.provider_namespace, observation_token = little_endian(token, 8,, temp)};
+	  | 	path := tprint("%/%", host.root, relative_of(host, event.document));
+
+#37	file:///d%3A/jai/modules/Jai_Parser/service/host.jai#422
+	QUESTION: why is this unchecked?
+	  | // The document key is the relative path itself:
+	  | relative_of :: (host: *Harness_Host, document: []u8) -> string {
+	> | 	_, view := parse_key(document, 3,, temp);//QUESTION: why is this unchecked?
+	  | 	return xx view.fields[2];
+	  | }
+
+#38	file:///d%3A/jai/modules/Jai_Parser/service/host.jai#427
+	QUESTION: why is this unchecked?
+	  |
+	  | confirmation :: (host: *Harness_Host, event: *Document_Event, action: Confirmation_Action) -> Host_Confirmation {
+	> | 	_, token := issue_token(*host.confirmations);//QUESTION: why is this unchecked?
+	  | 	return .{
+	  | 		host_authority = host.host_authority,
+
+#43	file:///d%3A/jai/modules/Jai_Parser/service/coordinator.jai#3998
+	QUESTION: why is this unchecked?
+	  |
+	  | new_update_operation :: (session: *Session, frontier: []u8, documents: [][]u8) -> *Operation {
+	> | 	_, identity := issue_operation(*session.identities);//QUESTION: why is this unchecked?
+	  | 	operation := New(Operation);
+	  | 	operation.identity = identity;
+
+#44	file:///d%3A/jai/modules/Jai_Parser/service/coordinator.jai#4112
+	QUESTION: why is this unchecked?
+	  | 		}
+	  | 	} else {
+	> | 		_, generated := issue_world(*session.identities);//QUESTION: why is this unchecked?
+	  | 		identity = generated;
+	  | 		world = New(World);
+
+#47	file:///d%3A/jai/modules/Jai_Parser/service/context.jai#120
+	QUESTION: why is this unchecked?
+	  |
+	  | tuple_schema :: () -> []u8 {
+	> | 	_, schema := v_ascii(interface_schema("SchemaTuple"));//QUESTION: why is this unchecked?
+	  | 	return schema;
+	  | }
+
+#48	file:///d%3A/jai/modules/Jai_Parser/service/context.jai#138
+	QUESTION: why is this unchecked?
+	  |
+	  |
+	> | 		_, values[it_index] = schema_tuple_value(it);//QUESTION: why is this unchecked?
+	  | 	}
+	  |
+
+
+Enums, schema spellings and generated tables
+
+#28	file:///d%3A/jai/modules/Jai_Parser/service/nodes.jai#654
 	QUESTION: why string and not enum?
+	  | INACTIVE :: Field_Value.{kind = .INACTIVE};
+	  |
+	> | REGISTERED_NODE_KINDS :: string.[//QUESTION: why string and not enum?
+	  | 	"ASM",
+	  | 	"BINARY_OPERATOR",
 
-#29	d:/jai/modules/Jai_Parser/service/nodes.jai#1079
-	FIXME: name this magic number
-
-#30	d:/jai/modules/Jai_Parser/service/nodes.jai#1485
+#30	file:///d%3A/jai/modules/Jai_Parser/service/nodes.jai#1507
 	QUESTION: why not an enum?
+	  | 	];
+	  |
+	> | 	TYPE_VALUED			:: 0;//QUESTION: why not an enum?
+	  | 	MUST_IMPLEMENT		:: 1;
+	  | 	POINTER_TO			:: 2;
 
-#31	d:/jai/modules/Jai_Parser/service/index.jai#84
-	QUESTION: this looks like it would be better as a [tagged] union...
-
-#32	d:/jai/modules/Jai_Parser/service/index.jai#156
-	QUESTION: this looks like maybe it would be better as a [tagged] union...
-
-#33	d:/jai/modules/Jai_Parser/service/index.jai#162
-	FIXME: field comments should end in : not .
-
-#34	d:/jai/modules/Jai_Parser/service/index.jai#629
-	QUESTION: why is the bool last and not first?
-
-#35	d:/jai/modules/Jai_Parser/service/host.jai#372
-	QUESTION: why is this unchecked?
-
-#36	d:/jai/modules/Jai_Parser/service/host.jai#392
-	QUESTION: why is this unchecked?
-
-#37	d:/jai/modules/Jai_Parser/service/host.jai#419
-	QUESTION: why is this unchecked?
-
-#38	d:/jai/modules/Jai_Parser/service/host.jai#424
-	QUESTION: why is this unchecked?
-
-#39	d:/jai/modules/Jai_Parser/service/diagnostics.jai#7
-	QUESTION: this looks like it would be better as a [tagged] union...
-
-#40	d:/jai/modules/Jai_Parser/service/coordinator.jai#177
-	QUESTION: this looks like it would be better as a [tagged] union...
-
-#41	d:/jai/modules/Jai_Parser/service/coordinator.jai#341
-	QUESTION: this looks like it would be better as a [tagged] union...
-
-#42	d:/jai/modules/Jai_Parser/service/coordinator.jai#422
-	TODO: document fields, probably on all the big structs.
-
-#43	d:/jai/modules/Jai_Parser/service/coordinator.jai#3998
-	QUESTION: why is this unchecked?
-
-#44	d:/jai/modules/Jai_Parser/service/coordinator.jai#4112
-	QUESTION: why is this unchecked?
-
-#45	d:/jai/modules/Jai_Parser/service/context.jai#19
+#45	file:///d%3A/jai/modules/Jai_Parser/service/context.jai#19
 	TODO: replace these with #run enum_name(Path_Encoding.$VALUE);
+	  | SYNTAX_CONTEXT_DESCRIPTOR :: "syntax-context-descriptor";
+	  |
+	> | //TODO: replace these with #run enum_name(Path_Encoding.$VALUE);
+	  | WINDOWS_UTF16LE	:: "WINDOWS_UTF16LE";
+	  | POSIX_BYTES		:: "POSIX_BYTES";
 
-#46	d:/jai/modules/Jai_Parser/service/context.jai#65
-	QUESTION: is this for tests only?  If so, can we conditionally compile it?
-
-#47	d:/jai/modules/Jai_Parser/service/context.jai#100
-	QUESTION: why is this unchecked?
-
-#48	d:/jai/modules/Jai_Parser/service/context.jai#118
-	QUESTION: why is this unchecked?
-
-#49	d:/jai/modules/Jai_Parser/service/context.jai#142
+#49	file:///d%3A/jai/modules/Jai_Parser/service/context.jai#39
 	FIXME: duplicated into string constants...
+	  | Path_Value :: struct {
+	  | 	encoding: enum u8 {
+	> | 		WINDOWS_UTF16LE;//FIXME: duplicated into string constants...
+	  | 		POSIX_BYTES;
+	  | 	};
 
-#50	d:/jai/modules/Jai_Parser/service/context.jai#223
+#50	file:///d%3A/jai/modules/Jai_Parser/service/context.jai#229
 	QUESTION: enum?
+	  |
+	  | // The ten descriptor fields in schema order:
+	> | SYNTAX_CONTEXT_FIELDS :: string.[//QUESTION: enum?
+	  | 	"producer",
+	  | 	"syntax_schemas",
 
-#51	d:/jai/modules/Jai_Parser/service/context.jai#413
+#51	file:///d%3A/jai/modules/Jai_Parser/service/context.jai#413
 	QUESTION: shouldn't these lists be compile-time generated?
+	  | 		source_digest(.["../module.jai", "../parser.jai", "../resolution.jai"]),
+	  | 		source_digest(.["../lexer.jai"]),
+	> | 		source_digest(.["canonical.jai", "context.jai", "diagnostics.jai", "digest.jai", "index.jai", "module.jai", "nodes.jai", "projection.jai", "snapshot.jai"]);//QUESTION: shouldn't these lists be compile-time generated?
+	  | }
+	  |
 
-#52	d:/jai/modules/Jai_Parser/service/canonical.jai#6
+
+Procedure conventions and implementation structure
+
+#34	file:///d%3A/jai/modules/Jai_Parser/service/index.jai#650
+	QUESTION: why is the bool last and not first?
+	  | // Returns the first token after it, the export occurrence and whether the prefix agrees with the recorded flags.
+	  | // An uncorrelated export marker reports partial metadata.
+	> | correlate_prefix :: (b: *Index_Builder, id: s64, first: s64, flags: Field_Value, export_name: []u8) -> (next_token: s64, program_export: *Program_Export_Occurrence, prefix_ok: bool) {//QUESTION: why is the bool last and not first?
+	  | 	i := first;
+	  | 	export: *Program_Export_Occurrence;
+
+#46	file:///d%3A/jai/modules/Jai_Parser/service/context.jai#85
+	QUESTION: is this for tests only?  If so, can we conditionally compile it?
+	  | };
+	  |
+	> | // The `QueryKind` payloads this registry supplies, in registry order:	//QUESTION: is this for tests only?  If so, can we conditionally compile it?
+	  | IMPLEMENTED_QUERY_KINDS :: string.["SYNTAX_SNAPSHOT", "SYNTAX_DIAGNOSTICS", "SYNTAX_DECLARATION_INDEX"];
+	  |
+
+
+Documentation and unexplained constants
+
+#24	file:///d%3A/jai/modules/Jai_Parser/service/nodes.jai#155
+	TODO: document this blank.
+	  |
+	  | HELPER_LAYOUT_NAMES :: string.[
+	> | 	"",//TODO: document this blank.
+	  | 	"Parser_Argument",
+	  | 	"Parser_Context_Modification",
+
+#29	file:///d%3A/jai/modules/Jai_Parser/service/nodes.jai#1101
+	FIXME: name this magic number
+	  | 			field(p, node_value(p, push.to_push), "to_push");
+	  | 			// The `.DEFER_POP` route has no body:
+	> | 			if flags & 0x2 {//FIXME: name this magic number
+	  | 				if push.block {
+	  | 					fail(p, .UNEXPECTED_ACTIVE_FIELD, "Parser_Push_Context.block");
+
+#42	file:///d%3A/jai/modules/Jai_Parser/service/coordinator.jai#398
+	TODO: document fields, probably on all the big structs.
+	  | }
+	  |
+	> | Session :: struct {//TODO: document fields, probably on all the big structs.
+	  | 	service:				*Service;
+	  | 	heap:					Owned_Heap;
+
+#52	file:///d%3A/jai/modules/Jai_Parser/service/canonical.jai#6
 	QUESTION: what is the 1 for, and does this make sense?  If so, apply everywhere?
+	  | KEY_MAGIC				:: "jai-cache-key";
+	  | KEY_SCHEMA_VERSION		:u32: 1;
+	> | INTERFACE_SCHEMA_PREFIX	:: #run sprint("jai-cache-interface/%/", KEY_SCHEMA_VERSION);	//QUESTION: what is the 1 for, and does this make sense?  If so, apply everywhere?
+	  |
+	  | append_bytes :: (bytes: *[..]u8, data: []u8) {
+
+
+Worker test maintenance
+
+#103	file:///d%3A/jai/modules/Jai_Parser/examples/service_worker_test.jai#650
+	TODO: flip
+	  | 		ok, attached := Service.observe_ticket(fixture.host.service, ticket);
+	  | 		assert(ok);
+	> | 		if !it {//TODO: flip
+	  | 			assert(attached.terminal && attached.observation.update.kind == .PUBLISHED);
+	  | 			Service.free_observation(*attached.observation);
+
+#104	file:///d%3A/jai/modules/Jai_Parser/examples/service_worker_test.jai#12774
+	FIXME: document all fields:
+	  | }
+	  |
+	> | Registration_Probe :: struct {//FIXME: document all fields:
+	  | 	allocations: s64;
+	  | 	fail_at: s64;

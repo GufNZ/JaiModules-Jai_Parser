@@ -149,6 +149,11 @@ with_leading :: (leading: [][]u8, rest: [][]u8) -> [][]u8 {
 }
 #scope_export
 
+Key_View :: struct {
+	tag: []u8;
+	fields: [..][]u8;
+}
+
 v_record :: (schema: []u8, fields: .. []u8) -> []u8 {
 	return make_key("record", ..with_leading(.[schema], fields));
 }
@@ -185,11 +190,6 @@ compare_canonical :: (a: []u8, b: []u8) -> s64 {
 
 bytes_equal :: (a: []u8, b: []u8) -> bool {
 	return a.count == b.count && (!a.count || memcmp(a.data, b.data, a.count) == 0);
-}
-
-Key_View :: struct {
-	tag: []u8;
-	fields: [..][]u8;
 }
 
 #scope_module

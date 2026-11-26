@@ -74,13 +74,6 @@ Query_Terminal :: struct {
 	failure:			Failure;
 }
 
-Pending_Phase :: enum u8 {
-	QUEUED;
-	RUNNING;
-	QUIESCING;
-	DRAINING;
-}
-
 // Flattened `Observation`: only the fields of the arm selected by `kind` are meaningful.
 // Identity bytes are immutable session-owned values that outlive every registration that can observe them.
 Observation :: struct {
@@ -100,10 +93,6 @@ Observation :: struct {
 	query_kind:			Query_Kind;
 	query:				Query_Terminal;
 	phase:				Pending_Phase;
-}
-
-is_terminal :: (observation: Observation) -> bool {
-	return observation.kind != .PENDING;
 }
 
 Session_Options :: struct {
@@ -130,12 +119,6 @@ Tracked_Document :: struct {
 	overlay_context:				[]u8;
 	overlay_origin:					Overlay_Origin;
 	selection:						type_of(Selected_Document.selection);
-}
-
-Store_Mode :: enum u8 {
-	ENABLED;
-	DISABLED;
-	DEGRADED;
 }
 
 Session_Description :: struct {
@@ -260,13 +243,6 @@ Diagnostics_Status :: struct {
 	parse_status:	Parse_Status_Observation;
 	error_count:	u64;
 	warning_count:	u64;
-}
-
-Member_State :: enum u8 {
-	PRESENT;
-	ABSENT;
-	UNKNOWN;
-	UNAVAILABLE;
 }
 
 Selected_Member :: struct {
@@ -514,6 +490,30 @@ Service :: struct {
 	ceilings:		Limits;
 	minima:			Limits;
 	sessions:		[..]*Session;
+}
+
+Pending_Phase :: enum u8 {
+	QUEUED;
+	RUNNING;
+	QUIESCING;
+	DRAINING;
+}
+
+is_terminal :: (observation: Observation) -> bool {
+	return observation.kind != .PENDING;
+}
+
+Store_Mode :: enum u8 {
+	ENABLED;
+	DISABLED;
+	DEGRADED;
+}
+
+Member_State :: enum u8 {
+	PRESENT;
+	ABSENT;
+	UNKNOWN;
+	UNAVAILABLE;
 }
 
 // `epoch` must come from the trusted issuer (phase 2 `reserve_epoch`).

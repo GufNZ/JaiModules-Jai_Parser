@@ -178,7 +178,10 @@ set_text :: (fixture: *Fixture, key: string, text: string) -> Service.Handle(.TI
 		source_context = registration().identity,
 		binding = ifx !state then binding,
 		kind = .SET_OVERLAY,
-		source = .{kind = .INLINE_BYTES, bytes = xx text},
+		source = .{
+			kind = .INLINE_BYTES,
+			bytes = xx text,
+		},
 		resulting_provider_revision = Service.provider_revision_id(xx NAMESPACE, session.identities.session, document, xx tprint("%", fixture.revisions)),
 	};
 	batch := Service.Source_Batch.{
@@ -257,8 +260,16 @@ test_open_session :: () {
 	expect(service, tiny, .ADMISSION_DENIED, "below the handle minimum");
 
 	forged := options();
-	forged.contexts = .[.{identity = registration("D:/project/other.jai").identity, descriptor = registration().descriptor}];
-	expect(service, forged, .INVALID_ARGUMENT, "forged context");
+	forged.contexts = .[
+		registration(),
+		.{identity = registration("D:/project/other.jai").identity, descriptor = registration().descriptor},
+	];
+	forged_ok, _, forged_error := Service.open_session(service, forged);
+	assert(!forged_ok && forged_error.code == .INVALID_ARGUMENT && forged_error.rule == .INVALID_ENCODING);
+	assert(forged_error.path.count == 2);
+	assert(forged_error.path[0].kind == .FIELD && forged_error.path[0].name == "contexts");
+	assert(forged_error.path[1].kind == .ELEMENT && forged_error.path[1].index == 1);
+	assert(!service.sessions.count);
 
 	fixture := open();
 	ok, description := Service.describe_session(fixture.service, fixture.handle);

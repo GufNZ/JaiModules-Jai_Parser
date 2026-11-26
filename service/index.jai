@@ -13,6 +13,140 @@ Adapter_Feature :: struct {
 	observation_schema:	string;
 }
 
+Coverage_Subject :: struct {
+	kind: enum u8 {
+		DOCUMENT;
+		NODE;
+	};
+	local_node_id: u64;
+}
+
+Coverage_Reason :: struct {
+	code:			Coverage_Code;
+	subject:		Coverage_Subject;
+	field_path:		[]Path_Step;
+	impacts:		Coverage_Impact;
+
+	// Null when no origin is available:
+	origin:			*Origin;
+
+	detail_utf8:	string;
+}
+
+Entry_Name :: struct {
+	using payload: union kind: enum u8 {
+		SPELLED;
+		ANONYMOUS;
+		MISSING;
+		UNMAPPED;
+	} {
+		.SPELLED,, spelled: struct {
+			origin:					Origin;
+			spelling_bytes:			[]u8;
+			producer_name_bytes:	[]u8;
+			form: enum u8 {
+				IDENTIFIER;
+				OPERATOR;
+			};
+			recovery_origins:		[]Origin;
+		};
+
+		.MISSING,, missing_origin:	Origin;
+
+		.UNMAPPED,, unmapped: struct {
+			producer_name_bytes:	[]u8;
+			reason:					Coverage_Reason;
+		};
+	};
+}
+
+Container :: struct {
+	kind: enum u8 {
+		ROOT;
+		DECLARATION;
+		SHARED_REGION;
+	};
+
+	// Entry ID for `.DECLARATION`, region ID for `.SHARED_REGION`:
+	local_id: u64;
+}
+
+// Snapshot node IDs; -1 means not set:
+Scope_Basis :: struct {
+	statement_list_node_id:			s64 = -1;
+	preceding_directive_node_id:	s64 = -1;
+}
+
+Visibility_Syntax :: struct {
+	scope_directive:	Scope_Directive_Tag;
+	scope_basis:		Scope_Basis;
+	observations:		[]Origin;
+}
+
+Program_Export_Name :: struct {
+	origin:			Origin;
+	value_bytes:	[]u8;
+}
+
+Program_Export_Occurrence :: struct {
+	marker_origin: Origin;
+
+	// Null when no string token follows the marker:
+	name_argument: *Program_Export_Name;
+}
+
+Recovery_Status :: struct {
+	using payload: union kind: enum u8 {
+		PARSED;
+		RECOVERED;
+		UNCLASSIFIED;
+	} {
+		.UNCLASSIFIED,, reason: Coverage_Reason;
+	};
+}
+
+Index_Entry :: struct {
+	local_entry_id:			u64;
+	declaration_node_id:	u64;
+	name:					Entry_Name;
+	syntax_kind: enum u8 {
+		DECLARATION;
+		COMPOUND_BINDING;
+		ENUM_MEMBER;
+	};
+	declaration_origin:		Origin;
+	container:				Container;
+	visibility_syntax:		Visibility_Syntax;
+
+	// Null when the declaration has no `#program_export` prefix.  Every binding of one compound shares one occurrence:
+	program_export_syntax:	*Program_Export_Occurrence;
+
+	recovery_status:		Recovery_Status;
+}
+
+Shared_Region :: struct {
+	local_region\_id:	u64;
+	compound_node_id:	u64;
+	parent_container:	Container;
+	binding_entries:	[]u64;
+}
+
+Index_Coverage :: struct {
+	kind: enum u8 {
+		COMPLETE_SYNTAX_TRAVERSAL;
+		PARTIAL_SYNTAX_TRAVERSAL;
+	};
+	reasons: []Coverage_Reason;
+}
+
+Declaration_Index :: struct {
+	snapshot:		*Syntax_Snapshot;
+	coverage:		Index_Coverage;
+	entries:		[]Index_Entry;
+	shared_regions:	[]Shared_Region;
+	storage:		Pool;
+}
+
 // The five capability features in the registry's table order:
 SYNTAX_ADAPTER_FEATURES :: Adapter_Feature.[
 	.{"authored_edges",				"CAPTURED",			AUTHORED_EDGES_SCHEMA},
@@ -60,62 +194,6 @@ Coverage_Impact :: enum_flags u8 {
 	RECOVERY;
 }
 
-Coverage_Subject :: struct {
-	kind: enum u8 {
-		DOCUMENT;
-		NODE;
-	};
-	local_node_id: u64;
-}
-
-Coverage_Reason :: struct {
-	code:			Coverage_Code;
-	subject:		Coverage_Subject;
-	field_path:		[]Path_Step;
-	impacts:		Coverage_Impact;
-
-	// Null when no origin is available:
-	origin:			*Origin;
-
-	detail_utf8:	string;
-}
-
-Entry_Name :: struct {
-	kind: enum u8 {//QUESTION: this looks like it would be better as a [tagged] union...
-		SPELLED;
-		ANONYMOUS;
-		MISSING;
-		UNMAPPED;
-	};
-
-	// Always `.SOURCE` for `.SPELLED`; the insertion or unlocated origin for `.MISSING`:
-	origin:			Origin;
-
-	spelling_bytes:	[]u8;
-
-	// `.SPELLED` and `.UNMAPPED`:
-	producer_name_bytes:	[]u8;
-	form: enum u8 {
-		IDENTIFIER;
-		OPERATOR;
-	};
-	recovery_origins:		[]Origin;
-
-	// `.UNMAPPED` only:
-	reason: Coverage_Reason;
-}
-
-Container :: struct {
-	kind: enum u8 {
-		ROOT;
-		DECLARATION;
-		SHARED_REGION;
-	};
-
-	// Entry ID for `.DECLARATION`, region ID for `.SHARED_REGION`:
-	local_id: u64;
-}
-
 operator == :: (a: Container, b: Container) -> bool {
 	return a.kind == b.kind && a.local_id == b.local_id;
 }
@@ -126,83 +204,6 @@ Scope_Directive_Tag :: enum u8 {
 	SCOPE_MODULE;
 	SCOPE_FILE;
 	RECOVERED_UNKNOWN;
-}
-
-// Snapshot node IDs; -1 means not set:
-Scope_Basis :: struct {
-	statement_list_node_id:			s64 = -1;
-	preceding_directive_node_id:	s64 = -1;
-}
-
-Visibility_Syntax :: struct {
-	scope_directive:	Scope_Directive_Tag;
-	scope_basis:		Scope_Basis;
-	observations:		[]Origin;
-}
-
-Program_Export_Name :: struct {
-	origin:			Origin;
-	value_bytes:	[]u8;
-}
-
-Program_Export_Occurrence :: struct {
-	marker_origin: Origin;
-
-	// Null when no string token follows the marker:
-	name_argument: *Program_Export_Name;
-}
-
-Recovery_Status :: struct {
-	kind: enum u8 {//QUESTION: this looks like maybe it would be better as a [tagged] union...
-		PARSED;
-		RECOVERED;
-		UNCLASSIFIED;
-	};
-
-	// `.UNCLASSIFIED` only://FIXME: field comments should end in : not .
-	reason: Coverage_Reason;
-}
-
-Index_Entry :: struct {
-	local_entry_id:			u64;
-	declaration_node_id:	u64;
-	name:					Entry_Name;
-	syntax_kind: enum u8 {
-		DECLARATION;
-		COMPOUND_BINDING;
-		ENUM_MEMBER;
-	};
-	declaration_origin:		Origin;
-	container:				Container;
-	visibility_syntax:		Visibility_Syntax;
-
-	// Null when the declaration has no `#program_export` prefix.  Every binding of one compound shares one occurrence:
-	program_export_syntax:	*Program_Export_Occurrence;
-
-	recovery_status:		Recovery_Status;
-}
-
-Shared_Region :: struct {
-	local_region\_id:	u64;
-	compound_node_id:	u64;
-	parent_container:	Container;
-	binding_entries:	[]u64;
-}
-
-Index_Coverage :: struct {
-	kind: enum u8 {
-		COMPLETE_SYNTAX_TRAVERSAL;
-		PARTIAL_SYNTAX_TRAVERSAL;
-	};
-	reasons: []Coverage_Reason;
-}
-
-Declaration_Index :: struct {
-	snapshot:		*Syntax_Snapshot;
-	coverage:		Index_Coverage;
-	entries:		[]Index_Entry;
-	shared_regions:	[]Shared_Region;
-	storage:		Pool;
 }
 
 project_declaration_index :: (snapshot: *Syntax_Snapshot) -> Projection_Fault, *Declaration_Index {
@@ -442,13 +443,13 @@ link :: (b: *Index_Builder, value: Field_Value, owner: s64) {
 			}
 
 		case .NODE;
-			child := value.signed;
+			child := value.node.id;
 			if child == -1 {
 				return;
 			}
 
 
-			if value.relationship == .ALIAS {
+			if value.node.relationship == .ALIAS {
 				if child < 0 || child >= nodes.count {
 					fail(b, .INVALID_REFERENCE, "nodes", owner);
 				}
@@ -470,7 +471,7 @@ link :: (b: *Index_Builder, value: Field_Value, owner: s64) {
 				else -1;
 
 		case .HELPER;
-			helper := value.signed;
+			helper := value.helper_id;
 			if helper == -1 {
 				return;
 			}
@@ -513,7 +514,12 @@ field_of :: (fields: []Field_Observation, first: string, second := "") -> Field_
 }
 
 has_name :: (value: Field_Value, name: string) -> bool {
-	return array_find(value.names, name);
+	return value.kind == .FLAGS && array_find(value.flags.names, name);
+}
+
+field_bytes :: (fields: []Field_Observation, first: string, second := "") -> []u8 {
+	value := field_of(fields, first, second);
+	return ifx value.kind == .BYTES then value.bytes;
 }
 
 add_reason :: (b: *Index_Builder, code: Coverage_Code, subject_node: s64, impacts: Coverage_Impact, detail: string, path: .. string) -> Coverage_Reason {
@@ -577,16 +583,30 @@ declaration_origin :: (b: *Index_Builder, id: s64) -> Origin {
 	return origin;
 }
 
-spelled_name :: (b: *Index_Builder, first: s64, last: s64, producer: []u8, form: type_of(Entry_Name.form)) -> Entry_Name {
+spelled_name :: (b: *Index_Builder, first: s64, last: s64, producer: []u8, form: type_of(Entry_Name.spelled.form)) -> Entry_Name {
 	origin := token_origin(b, first, last);
 	source := b.snapshot.source;
 	spelling := string.{origin.span.end - origin.span.start, source.data + origin.span.start};
-	return .{kind = .SPELLED, origin = origin, spelling_bytes = xx spelling, producer_name_bytes = producer, form = form};
+	return .{
+		kind = .SPELLED,
+		spelled = .{
+			origin = origin,
+			spelling_bytes = xx spelling,
+			producer_name_bytes = producer,
+			form = form
+		}
+	};
 }
 
 unmapped_name :: (b: *Index_Builder, id: s64, producer: []u8, path: .. string) -> Entry_Name {
 	reason := add_reason(b, .UNMAPPED_NAME, id, .NAMES | .SOURCE_MAPPING, "The name's source tokens could not be correlated with its producer value.", ..path);
-	return .{kind = .UNMAPPED, producer_name_bytes = producer, reason = reason};
+	return .{
+		kind = .UNMAPPED,
+		unmapped = .{
+			producer_name_bytes = producer,
+			reason = reason
+		}
+	};
 }
 
 visibility_of :: (b: *Index_Builder, id: s64) -> Visibility_Syntax {
@@ -604,7 +624,8 @@ visibility_of :: (b: *Index_Builder, id: s64) -> Visibility_Syntax {
 
 	tag: Scope_Directive_Tag;
 	scope_type := field_of(b.snapshot.nodes[directive].fields, "scope_type");
-	if scope_type.name == {
+	scope_name := ifx scope_type.kind == .ENUM then scope_type.enumeration.name;
+	if scope_name == {
 		case "EXPORT";		tag = .SCOPE_EXPORT;
 		case "INTERNAL";	tag = .SCOPE_MODULE;
 		case "FILE";		tag = .SCOPE_FILE;
@@ -791,7 +812,7 @@ emit_declaration :: (b: *Index_Builder, id: s64) -> u64 {
 	record := *b.snapshot.nodes[id];
 	parent := b.parents[id];
 	edge := b.edges[id];
-	producer := field_of(record.fields, "entry", "name").bytes;
+	producer := field_bytes(record.fields, "entry", "name");
 	flags := field_of(record.fields, "flags");
 	header_slot := parent >= 0 && b.snapshot.nodes[parent].kind == "PROCEDURE_HEADER" && (edge == "arguments" || edge == "returns");
 
@@ -808,11 +829,11 @@ emit_declaration :: (b: *Index_Builder, id: s64) -> u64 {
 		}
 	} else {
 		first := record.token_span.first;
-		next, occurrence, prefix_ok := correlate_prefix(b, id, first, flags, field_of(record.fields, "program_export_name").bytes);
+		next, occurrence, prefix_ok := correlate_prefix(b, id, first, flags, field_bytes(record.fields, "program_export_name"));
 		export = occurrence;
 
 		last := -1;
-		form: type_of(Entry_Name.form);
+		form: type_of(Entry_Name.spelled.form);
 		start := next;
 		if prefix_ok && token_is(b, next, named_tag("KEYWORD_OPERATOR")) {
 			form = .OPERATOR;
@@ -850,8 +871,8 @@ is_anonymous_slot :: (b: *Index_Builder, id: s64) -> bool {
 	record := *b.snapshot.nodes[id];
 	type_inst := field_of(record.fields, "type_inst");
 	expression := field_of(record.fields, "expression");
-	return type_inst.kind == .NODE && type_inst.signed > id && expression.kind == .NODE && expression.signed == -1
-		&& b.snapshot.nodes[type_inst.signed].token_span.first == record.token_span.first;
+	return type_inst.kind == .NODE && type_inst.node.id > id && expression.kind == .NODE && expression.node.id == -1
+		&& b.snapshot.nodes[type_inst.node.id].token_span.first == record.token_span.first;
 }
 
 // Declared targets follow the recorded tokens: `.DECLARE`, or no modifier under a shared `:`:
@@ -859,16 +880,26 @@ emit_compound :: (b: *Index_Builder, id: s64) {
 	nodes := b.snapshot.nodes;
 	tokens := b.snapshot.tokens;
 	record := *nodes[id];
-	comma := field_of(record.fields, "comma_separated_assignment").signed;
-	properties := field_of(record.fields, "declaration_properties").signed;
+	comma_field := field_of(record.fields, "comma_separated_assignment");
+	properties_field := field_of(record.fields, "declaration_properties");
+	comma := ifx comma_field.kind == .NODE then comma_field.node.id;
+	properties := ifx properties_field.kind == .NODE then properties_field.node.id;
 	if comma <= id || properties <= id || comma >= nodes.count || properties >= nodes.count {
 		fail(b, .INVALID_REFERENCE, "nodes", id);
 		return;
 	}
 
 
-	shared := field_of(record.fields, "operator_type").tag;
-	operator_token := field_of(record.fields, "operator_token").signed;
+	operator_field := field_of(record.fields, "operator_type");
+	operator_index := field_of(record.fields, "operator_token");
+	if operator_field.kind != .OPERATOR || operator_index.kind != .SIGNED {
+		fail(b, .CONFLICTING_EVIDENCE, "operator_token", id);
+		return;
+	}
+
+
+	shared := operator_field.operator_tag;
+	operator_token := operator_index.signed;
 	declares := shared == byte_tag(0);
 	expected: Token_Tag;
 	if declares {
@@ -892,24 +923,35 @@ emit_compound :: (b: *Index_Builder, id: s64) {
 
 	properties_record := *nodes[properties];
 	flags := field_of(properties_record.fields, "flags");
-	_, export := correlate_prefix(b, properties, record.token_span.first, flags, field_of(properties_record.fields, "program_export_name").bytes);
+	_, export := correlate_prefix(b, properties, record.token_span.first, flags, field_bytes(properties_record.fields, "program_export_name"));
 
 	region_id := b.regions.count;
 	b.region_ids[id] = region_id;
 	bindings: [..]u64;
-	arguments := field_of(nodes[comma].fields, "arguments").elements;
+	arguments_field := field_of(nodes[comma].fields, "arguments");
+	arguments := ifx arguments_field.kind == .LIST then arguments_field.elements;
 	for value: arguments {
-		if value.kind != .HELPER || value.signed < 0 || value.signed >= b.snapshot.helpers.count {
+		if value.kind != .HELPER || value.helper_id < 0 || value.helper_id >= b.snapshot.helpers.count {
 			fail(b, .INVALID_REFERENCE, "helpers", id);
 			return;
 		}
 
 
-		helper := b.snapshot.helpers[value.signed].fields;
-		target := field_of(helper, "node").signed;
-		modifier := field_of(helper, "modifier").name;
-		modifier_token := field_of(helper, "modifier_token").signed;
-		separator_token := field_of(helper, "separator_token").signed;
+		helper := b.snapshot.helpers[value.helper_id].fields;
+		target_field := field_of(helper, "node");
+		modifier_field := field_of(helper, "modifier");
+		modifier_index := field_of(helper, "modifier_token");
+		separator_index := field_of(helper, "separator_token");
+		if target_field.kind != .NODE || modifier_field.kind != .ENUM || modifier_index.kind != .SIGNED || separator_index.kind != .SIGNED {
+			fail(b, .CONFLICTING_EVIDENCE, "Parser_Comma_Separated_Argument", value.helper_id);
+			return;
+		}
+
+
+		target := target_field.node.id;
+		modifier := modifier_field.enumeration.name;
+		modifier_token := modifier_index.signed;
+		separator_token := separator_index.signed;
 		modifier_ok := ifx modifier == "DECLARE"
 			then token_is(b, modifier_token, byte_tag(#char ":"))
 			else ifx modifier == "ASSIGN"
@@ -922,7 +964,7 @@ emit_compound :: (b: *Index_Builder, id: s64) {
 			|| (separator_token == -1 && it_index == arguments.count - 1)
 		);
 		if !modifier_ok || !separator_ok || target <= comma || target >= nodes.count {
-			fail(b, .CONFLICTING_EVIDENCE, "Parser_Comma_Separated_Argument", value.signed);
+			fail(b, .CONFLICTING_EVIDENCE, "Parser_Comma_Separated_Argument", value.helper_id);
 			return;
 		}
 
@@ -935,7 +977,7 @@ emit_compound :: (b: *Index_Builder, id: s64) {
 
 
 		target_record := *nodes[target];
-		producer := field_of(target_record.fields, "name").bytes;
+		producer := field_bytes(target_record.fields, "name");
 		span := target_record.token_span;
 		name := ifx span.one_past_last == span.first + 1 && identifier_is(b, span.first, producer.(string))
 			then spelled_name(b, span.first, span.first, producer, .IDENTIFIER)
@@ -974,7 +1016,7 @@ emit_compound :: (b: *Index_Builder, id: s64) {
 // `parse_enum_member` builds a bare member from exactly `IDENT ;`:
 emit_enum_member :: (b: *Index_Builder, id: s64) {
 	record := *b.snapshot.nodes[id];
-	producer := field_of(record.fields, "name").bytes;
+	producer := field_bytes(record.fields, "name");
 	first := record.token_span.first;
 	if record.token_span.one_past_last != first + 1 || !identifier_is(b, first, producer.(string)) || !token_is(b, first + 1, byte_tag(#char ";")) {
 		add_reason(b, .UNCLASSIFIED_ROUTE, id, .DECLARATION_SET | .NAMES, "An identifier statement in an enum body lacks bare-member evidence.");

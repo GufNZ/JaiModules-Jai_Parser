@@ -12,6 +12,24 @@ Owned_Syntax :: struct {
 	storage: Pool;
 }
 
+// The `jai-cache-syntax-snapshot/1` envelope: one exact capture, or no envelope at all if any part fails conversion:
+Syntax_Snapshot :: struct {
+	owner:				*Owned_Syntax;
+	source:				string;
+
+	// -1 only for a safely retained parse with no root, never a fabricated empty file:
+	root:				s64;
+	nodes:				[]Node_Record;
+	helpers:			[]Helper_Record;
+	tokens:				[]Token_Record;
+	synthetic_tokens:	[]Synthetic_Token_Record;
+	recoveries:			[]Recovery_Observation;
+	diagnostics:		[]Raw_Diagnostic;
+	parse_status:		Parse_Status_Observation;
+	token_projection:	*Token_Projection;
+	node_projection:	*Node_Projection;
+}
+
 // Copies `source` and `filename` first, so the caller's buffers can be released or overwritten immediately afterwards:
 own_parse :: (source: string, filename: string) -> *Owned_Syntax {
 	owned := New(Owned_Syntax);
@@ -30,24 +48,6 @@ release_owned_syntax :: (owned: *Owned_Syntax) {
 	Parser.release_parser_names(*owned.parsed);
 	release(*owned.storage);
 	free(owned);
-}
-
-// The `jai-cache-syntax-snapshot/1` envelope: one exact capture, or no envelope at all if any part fails conversion:
-Syntax_Snapshot :: struct {
-	owner:				*Owned_Syntax;
-	source:				string;
-
-	// -1 only for a safely retained parse with no root, never a fabricated empty file:
-	root:				s64;
-	nodes:				[]Node_Record;
-	helpers:			[]Helper_Record;
-	tokens:				[]Token_Record;
-	synthetic_tokens:	[]Synthetic_Token_Record;
-	recoveries:			[]Recovery_Observation;
-	diagnostics:		[]Raw_Diagnostic;
-	parse_status:		Parse_Status_Observation;
-	token_projection:	*Token_Projection;
-	node_projection:	*Node_Projection;
 }
 
 project_snapshot :: (owner: *Owned_Syntax) -> Projection_Fault, *Syntax_Snapshot {

@@ -13,6 +13,48 @@ Identity_Counter :: struct {
 	next: u64 = 1;
 }
 
+Service_Incarnation :: struct {
+	namespace:			[]u8;
+	session_counter:	Identity_Counter;
+}
+
+Session_Identities :: struct {
+	session:			Session_ID;
+	world_counter:		Identity_Counter;
+	result_counter:		Identity_Counter;
+	operation_counter:	Identity_Counter;
+}
+
+Handle :: struct (KIND: Handle_Kind) {
+	session:		Session_ID;
+	slot:			u64;
+	generation:		u64;
+	owner_service:	*void;
+	owner_token:	u64;
+}
+
+Registration_Slot :: struct {
+	generation:	u64;
+	next_free:	u64;
+	kind:		Handle_Kind;
+	live:		bool;
+	retired:	bool;
+}
+
+Free_Registration_Slots :: struct {
+	head:	u64;
+	count:	s64;
+}
+
+// Slots are zero-based and start at generation 1; a reused slot gets the next generation, and a slot whose generation reaches U64_MAX is retired permanently.
+Handle_Registry :: struct {
+	session:		Session_ID;
+	owner_service:	*void;
+	owner_token:	u64;
+	slots:			[..]Registration_Slot;
+	free_slots:		Free_Registration_Slots;
+}
+
 issue_token :: (counter: *Identity_Counter) -> bool, u64 {
 	if counter.next == U64_MAX {
 		return false, 0;
@@ -24,11 +66,6 @@ issue_token :: (counter: *Identity_Counter) -> bool, u64 {
 	return true, value;
 }
 
-Service_Incarnation :: struct {
-	namespace:			[]u8;
-	session_counter:	Identity_Counter;
-}
-
 // One per service bootstrap; `epoch` must come from the trusted issuer and never repeat for this authority.
 make_service_incarnation :: (authority_namespace: []u8, epoch: u64) -> Service_Incarnation {
 	return .{namespace = make_key("service-incarnation", authority_namespace, little_endian(epoch, 8))};
@@ -36,13 +73,6 @@ make_service_incarnation :: (authority_namespace: []u8, epoch: u64) -> Service_I
 
 clock_identity :: (incarnation: Service_Incarnation) -> []u8 {
 	return make_key("service-clock", incarnation.namespace);
-}
-
-Session_Identities :: struct {
-	session:			Session_ID;
-	world_counter:		Identity_Counter;
-	result_counter:		Identity_Counter;
-	operation_counter:	Identity_Counter;
 }
 
 issue_session :: (incarnation: *Service_Incarnation) -> bool, Session_Identities {
@@ -92,36 +122,6 @@ Handle_Kind :: enum u8 {
 	WAITER;
 	RESULT;
 	SHUTDOWN;
-}
-
-Handle :: struct (KIND: Handle_Kind) {
-	session:		Session_ID;
-	slot:			u64;
-	generation:		u64;
-	owner_service:	*void;
-	owner_token:	u64;
-}
-
-Registration_Slot :: struct {
-	generation:	u64;
-	next_free:	u64;
-	kind:		Handle_Kind;
-	live:		bool;
-	retired:	bool;
-}
-
-Free_Registration_Slots :: struct {
-	head:	u64;
-	count:	s64;
-}
-
-// Slots are zero-based and start at generation 1; a reused slot gets the next generation, and a slot whose generation reaches U64_MAX is retired permanently.
-Handle_Registry :: struct {
-	session:		Session_ID;
-	owner_service:	*void;
-	owner_token:	u64;
-	slots:			[..]Registration_Slot;
-	free_slots:		Free_Registration_Slots;
 }
 
 register_handle :: (registry: *Handle_Registry, $kind: Handle_Kind) -> bool, Handle(kind) {

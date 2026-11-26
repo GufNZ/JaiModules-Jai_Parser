@@ -10,6 +10,7 @@ POLICY :: 1;
 
 main :: () {
 	test_descriptor();
+	test_selected_document_without_source();
 	test_overlay_chain();
 	test_atomic_batch();
 	test_save_race();
@@ -81,13 +82,7 @@ provenance :: () -> Service.Observation_Provenance {
 }
 
 present :: (text: string, syntax_context: []u8) -> Service.Disk_Observation {
-	return .{
-		kind = .PRESENT,
-		source = inline_source(text),
-		source_revision = Service.source_revision_of(xx text),
-		syntax_context = syntax_context,
-		provenance = provenance(),
-	};
+	return Service.disk_present(syntax_context, provenance(), inline_source(text), Service.source_revision_of(xx text));
 }
 
 set_overlay :: (document: []u8, expected: Service.Expected_Provider_State, syntax_context: []u8, text: string, resulting: []u8) -> Service.Document_Event {
@@ -125,8 +120,22 @@ selected_text :: (model: *Service.Provider_Model, document: []u8) -> string, Ser
 	state := Service.find_document(model, document);
 	assert(state != null);
 	selected := Service.selected_document(state);
-	text := ifx selected.source then selected.source.bytes.(string);
+	source := Service.selected_source(selected);
+	text := ifx source then source.bytes.(string);
 	return text, selected;
+}
+
+test_selected_document_without_source :: () {
+	state: Service.Document_State;
+	unknown := Service.selected_document(*state);
+	assert(unknown.kind == .UNKNOWN && unknown.selection == .DISK);
+	assert(!Service.selected_source(unknown) && !Service.selected_provenance(unknown));
+
+	state.disk = .{kind = .UNAVAILABLE, reason = .PROVIDER_UNAVAILABLE};
+	unavailable := Service.selected_document(*state);
+	assert(unavailable.kind == .UNAVAILABLE && unavailable.selection == .DISK);
+	assert(unavailable.reason == .PROVIDER_UNAVAILABLE);
+	assert(!Service.selected_source(unavailable) && !Service.selected_provenance(unavailable));
 }
 
 test_descriptor :: () {
@@ -163,8 +172,10 @@ test_overlay_chain :: () {
 
 	// V7: a capture that retained the old backing keeps its exact bytes after the overlay is replaced.
 	text, selected := selected_text(model, main_doc);
-	assert(text == "abc" && selected.selection == .OVERLAY && Service.bytes_equal(selected.overlay_revision, rev(model, main_doc, "1")));
-	retained := selected.source;
+	assert(text == "abc" && selected.kind == .PRESENT && selected.selection == .OVERLAY);
+	assert(Service.bytes_equal(selected.present.overlay_revision, rev(model, main_doc, "1")));
+	assert(!Service.selected_provenance(selected));
+	retained := selected.present.source;
 	Service.retain_source(retained);
 
 	// Edits apply in order, each to the previous edit's result.
@@ -173,11 +184,13 @@ test_overlay_chain :: () {
 		expected_provider_state = revision_state(rev(model, main_doc, "1")),
 		source_context = context_a.identity,
 		kind = .EDIT_OVERLAY,
-		base_source_revision = Service.source_revision_of(xx "abc"),
-		edits = .[
-			.{start_byte = 1, end_byte = 2, replacement = xx "XY"},
-			.{start_byte = 0, end_byte = 1},
-		],
+		edit_overlay = .{
+			base_source_revision = Service.source_revision_of(xx "abc"),
+			edits = .[
+				.{start_byte = 1, end_byte = 2, replacement = xx "XY"},
+				.{start_byte = 0, end_byte = 1},
+			],
+		},
 		resulting_provider_revision = rev(model, main_doc, "2"),
 	};
 	ok, error = submit(model, .[], edit);
@@ -197,19 +210,19 @@ test_overlay_chain :: () {
 	assert(error.scope == .SOURCE);
 
 	stale = edit;
-	stale.base_source_revision = Service.source_revision_of(xx "XYc");
+	stale.edit_overlay.base_source_revision = Service.source_revision_of(xx "XYc");
 	stale.resulting_provider_revision = rev(model, main_doc, "3");
 	ok, error = submit(model, .[], stale);
 	expect_rejected(model, ok, error, .BASE_MISMATCH, frontier, "stale provider revision");
 	assert(error.scope == .DOCUMENT && Service.bytes_equal(error.document, main_doc));
 
 	stale.expected_provider_state = revision_state(rev(model, main_doc, "2"));
-	stale.edits = .[.{start_byte = 2, end_byte = 4}];
+	stale.edit_overlay.edits = .[.{start_byte = 2, end_byte = 4}];
 	ok, error = submit(model, .[], stale);
 	expect_rejected(model, ok, error, .INVALID_ARGUMENT, frontier, "edit past the end");
 	assert(error.rule == .OUT_OF_RANGE && error.path.count == 4 && error.path[3].index == 0);
 
-	stale.edits = .[.{start_byte = 0, end_byte = 1}];
+	stale.edit_overlay.edits = .[.{start_byte = 0, end_byte = 1}];
 	stale.resulting_provider_revision = rev(model, main_doc, "1");
 	ok, error = submit(model, .[], stale);
 	expect_rejected(model, ok, error, .INVALID_ARGUMENT, frontier, "reused provider revision");
@@ -298,9 +311,11 @@ test_save_race :: () {
 		expected_provider_state = revision_state(rev(model, main_doc, "2")),
 		source_context = context_a.identity,
 		kind = .ACK_SAVE,
-		disk = present("B", context_a.identity),
-		written_source_revision = Service.source_revision_of(xx "B"),
-		expected_overlay_revision = rev(model, main_doc, "1"),
+		ack_save = .{
+			disk = present("B", context_a.identity),
+			written_source_revision = Service.source_revision_of(xx "B"),
+			expected_overlay_revision = rev(model, main_doc, "1"),
+		},
 		resulting_provider_revision = rev(model, main_doc, "3"),
 	};
 	ok, error = submit(model, .[], save);
@@ -312,21 +327,21 @@ test_save_race :: () {
 	// Acknowledging the current installation clears it only when the written bytes are the overlay's bytes.
 	frontier := model.accepted_frontier;
 	save.expected_provider_state = revision_state(rev(model, main_doc, "3"));
-	save.expected_overlay_revision = rev(model, main_doc, "2");
+	save.ack_save.expected_overlay_revision = rev(model, main_doc, "2");
 	save.resulting_provider_revision = rev(model, main_doc, "4");
 	ok, error = submit(model, .[], save);
 	expect_rejected(model, ok, error, .INVALID_ARGUMENT, frontier, "save of different bytes");
 
-	save.disk = present("C", context_a.identity);
-	save.written_source_revision = Service.source_revision_of(xx "C");
+	save.ack_save.disk = present("C", context_a.identity);
+	save.ack_save.written_source_revision = Service.source_revision_of(xx "C");
 	ok, error = submit(model, .[], save);
 	assert(ok, "\e[91mACK_SAVE failed: %.\e[0m", error);
 	text, selected = selected_text(model, main_doc);
-	assert(text == "C" && selected.selection == .DISK && selected.provenance != null);
+	assert(text == "C" && selected.selection == .DISK && Service.selected_provenance(selected) != null);
 
 	save.expected_provider_state = revision_state(rev(model, main_doc, "4"));
 	save.resulting_provider_revision = rev(model, main_doc, "5");
-	save.disk.kind = .ABSENT;
+	save.ack_save.disk = Service.disk_absent(save.ack_save.disk.syntax_context, save.ack_save.disk.provenance, save.resulting_provider_revision);
 	frontier = model.accepted_frontier;
 	ok, error = submit(model, .[], save);
 	expect_rejected(model, ok, error, .INVALID_ARGUMENT, frontier, "absent save");
@@ -349,13 +364,15 @@ test_reset_restore :: () {
 		expected_provider_state = revision_state(rev(model, main_doc, "1")),
 		source_context = context_a.identity,
 		kind = .RESET_OVERLAY,
-		disk = present("disk", context_a.identity),
-		host_confirmation = .{
-			host_authority = xx "someone-else",
-			confirmation_token = xx "confirm",
-			document = main_doc,
-			expected_provider_state = revision_state(rev(model, main_doc, "1")),
-			action = .RESET,
+		reset_overlay = .{
+			disk = present("disk", context_a.identity),
+			host_confirmation = .{
+				host_authority = xx "someone-else",
+				confirmation_token = xx "confirm",
+				document = main_doc,
+				expected_provider_state = revision_state(rev(model, main_doc, "1")),
+				action = .RESET,
+			},
 		},
 		resulting_provider_revision = rev(model, main_doc, "2"),
 	};
@@ -364,12 +381,12 @@ test_reset_restore :: () {
 	expect_rejected(model, ok, error, .INVALID_ARGUMENT, frontier, "foreign confirmation");
 	assert(error.rule == .INVALID_CONFIRMATION);
 
-	reset.host_confirmation.host_authority = xx HOST;
-	reset.host_confirmation.action = .RESTORE;
+	reset.reset_overlay.host_confirmation.host_authority = xx HOST;
+	reset.reset_overlay.host_confirmation.action = .RESTORE;
 	ok, error = submit(model, .[], reset);
 	expect_rejected(model, ok, error, .INVALID_ARGUMENT, frontier, "confirmation for another action");
 
-	reset.host_confirmation.action = .RESET;
+	reset.reset_overlay.host_confirmation.action = .RESET;
 	ok, error = submit(model, .[], reset);
 	assert(ok, "\e[91mRESET_OVERLAY failed: %.\e[0m", error);
 	text, selected := selected_text(model, main_doc);
@@ -380,24 +397,26 @@ test_reset_restore :: () {
 		expected_provider_state = revision_state(rev(model, main_doc, "2")),
 		source_context = context_a.identity,
 		kind = .RESTORE_OVERLAY,
-		source = inline_source("unsaved"),
-		host_confirmation = .{
-			host_authority = xx HOST,
-			confirmation_token = xx "confirm-restore",
-			document = main_doc,
-			expected_provider_state = revision_state(rev(model, main_doc, "2")),
-			action = .RESTORE,
-			source_revision = Service.source_revision_of(xx "unsaved"),
-			recovery_candidate = xx "candidate",
+		restore_overlay = .{
+			source = inline_source("unsaved"),
+			host_confirmation = .{
+				host_authority = xx HOST,
+				confirmation_token = xx "confirm-restore",
+				document = main_doc,
+				expected_provider_state = revision_state(rev(model, main_doc, "2")),
+				action = .RESTORE,
+				source_revision = Service.source_revision_of(xx "unsaved"),
+				recovery_candidate = xx "candidate",
+			},
+			recovery_candidate = xx "other-candidate",
 		},
-		recovery_candidate = xx "other-candidate",
 		resulting_provider_revision = rev(model, main_doc, "3"),
 	};
 	frontier = model.accepted_frontier;
 	ok, error = submit(model, .[], restore);
 	expect_rejected(model, ok, error, .INVALID_ARGUMENT, frontier, "confirmation for another candidate");
 
-	restore.recovery_candidate = xx "candidate";
+	restore.restore_overlay.recovery_candidate = xx "candidate";
 	ok, error = submit(model, .[], restore);
 	assert(ok, "\e[91mRESTORE_OVERLAY failed: %.\e[0m", error);
 	text, selected = selected_text(model, main_doc);
@@ -462,6 +481,7 @@ test_contexts_and_bindings :: () {
 
 	edit := event;
 	edit.kind = .EDIT_OVERLAY;
+	edit.edit_overlay = .{};
 	ok, error = submit(model, .[context_a], edit);
 	expect_rejected(model, ok, error, .BASE_MISMATCH, frontier, "edit of an untracked document");
 
@@ -552,7 +572,7 @@ test_capabilities_and_limits :: () {
 	expect_rejected(model, ok, error, .ADMISSION_DENIED, frontier, "coherent capture without the capability");
 
 	claimed := observe;
-	claimed.disk.source_revision = Service.source_revision_of(xx "other");
+	claimed.disk.present.source_revision = Service.source_revision_of(xx "other");
 	ok, error = submit(model, .[context_a], claimed);
 	expect_rejected(model, ok, error, .INVALID_ARGUMENT, frontier, "disk revision claim");
 
@@ -562,10 +582,11 @@ test_capabilities_and_limits :: () {
 	expect_rejected(model, ok, error, .INVALID_ARGUMENT, frontier, "missing provenance");
 
 	absent := observe;
-	absent.disk = .{kind = .ABSENT, provider_revision = observe.resulting_provider_revision, syntax_context = context_a.identity, provenance = provenance()};
+	absent.disk = Service.disk_absent(context_a.identity, provenance(), observe.resulting_provider_revision);
 	ok, error = submit(model, .[context_a], absent);
 	assert(ok, "\e[91mAbsent observation failed: %.\e[0m", error);
 	_, selected := selected_text(model, main_doc);
-	assert(selected.kind == .ABSENT && selected.selection == .DISK && !selected.source);
+	assert(selected.kind == .ABSENT && selected.selection == .DISK && !Service.selected_source(selected));
+	assert(Service.selected_provenance(selected) != null);
 	print("Capabilities and limits \e[92mPASS\e[0m\n");
 }

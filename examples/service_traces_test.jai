@@ -233,7 +233,7 @@ trace_t2 :: () {
 
 	stale := Service.begin_batch(trace.host);
 	assert(Service.edit_overlay(*stale, "a.jai", .[.{start_byte = 0, end_byte = 1, replacement = xx "x"}]));
-	stale.events[0].base_source_revision = Service.source_revision_of(xx "a :: 1;");
+	stale.events[0].edit_overlay.base_source_revision = Service.source_revision_of(xx "a :: 1;");
 	error := reject(*stale, .BASE_MISMATCH);
 	assert(error.scope == .SOURCE);
 
@@ -627,7 +627,7 @@ trace_v5 :: () {
 	batch := Service.begin_batch(trace.host);
 	assert(Service.set_overlay(*batch, "new.jai", "n :: 1;"));
 	assert(Service.edit_overlay(*batch, "a.jai", .[.{start_byte = 0, end_byte = 1, replacement = xx "z"}]));
-	batch.events[1].base_source_revision = Service.source_revision_of(xx "stale");
+	batch.events[1].edit_overlay.base_source_revision = Service.source_revision_of(xx "stale");
 	reject(*batch, .BASE_MISMATCH);
 
 	batch = Service.begin_batch(trace.host);

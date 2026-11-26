@@ -34,6 +34,26 @@ Schema_Tuple :: struct {
 	diagnostic_profile:	string;
 }
 
+Path_Value :: struct {
+	encoding: enum u8 {
+		WINDOWS_UTF16LE;//FIXME: duplicated into string constants...
+		POSIX_BYTES;
+	};
+	code_units: []u8;
+}
+
+Context_Paths :: struct {
+	visible_filename: Path_Value;
+	visible_directory: Path_Value;
+	relative_base: Path_Value;
+}
+
+Admitted_Context :: struct {
+	identity:	[]u8;
+	descriptor:	[]u8;
+	paths:		Context_Paths;
+}
+
 operator == :: (a: Schema_Tuple, b: Schema_Tuple) -> bool {
 	return a.token_tags			== b.token_tags
 		&& a.source_tokens		== b.source_tokens
@@ -137,14 +157,6 @@ configuration_id :: (tuples: []Schema_Tuple) -> bool, []u8 {
 	return true, make_key("syntax-configuration", v_sequence(tuple_schema(), ..values));
 }
 
-Path_Value :: struct {
-	encoding: enum u8 {
-		WINDOWS_UTF16LE;//FIXME: duplicated into string constants...
-		POSIX_BYTES;
-	};
-	code_units: []u8;
-}
-
 // Exact UTF-16LE code units of a UTF-8 spelling; rejects invalid UTF-8, NUL and empty input:
 windows_path_value :: (spelling: string) -> bool, Path_Value {
 	if !spelling.count || !is_valid_utf8(xx spelling) {
@@ -213,12 +225,6 @@ path_key :: (path: Path_Value) -> []u8 {
 	return make_key("path", xx tag, path.code_units);
 }
 
-Context_Paths :: struct {
-	visible_filename: Path_Value;
-	visible_directory: Path_Value;
-	relative_base: Path_Value;
-}
-
 // The ten descriptor fields in schema order:
 SYNTAX_CONTEXT_FIELDS :: string.[//QUESTION: enum?
 	"producer",
@@ -273,12 +279,6 @@ Context_Failure :: enum u8 {
 	UNSUPPORTED_RESOLVER;
 	UNSUPPORTED_SEMANTICS;
 	IDENTITY_MISMATCH;
-}
-
-Admitted_Context :: struct {
-	identity:	[]u8;
-	descriptor:	[]u8;
-	paths:		Context_Paths;
 }
 
 // Parses and validates a `ContextRegistration` against this build, then recomputes its identity; the result owns copies of both byte strings:
@@ -475,6 +475,14 @@ try_path_spelling :: (path: Path_Value, allocator: Allocator = context.allocator
 
 #scope_file
 
+Expected_Values :: struct {
+	producer:			[6][]u8;
+	syntax_schemas:		[4][]u8;
+	parser_parameters:	[5][]u8;
+	parse_profile:		[2][]u8;
+	diagnostic_profile:	[3][]u8;
+}
+
 append_utf16_unit :: (units: *[..]u8, unit: u32) {
 	array_add(units, (unit & 0xFF).(u8));
 	array_add(units, (unit >> 8).(u8));
@@ -554,14 +562,6 @@ values_equal :: (values: [][]u8, expected: [][]u8) -> bool {
 
 
 	return true;
-}
-
-Expected_Values :: struct {
-	producer:			[6][]u8;
-	syntax_schemas:		[4][]u8;
-	parser_parameters:	[5][]u8;
-	parse_profile:		[2][]u8;
-	diagnostic_profile:	[3][]u8;
 }
 
 EXPECTED_COMPILER_SDK			:: #run make_key("compiler-sdk", COMPILER_VERSION.([]u8), COMPILER_LAYOUT_DIGEST_BYTES);

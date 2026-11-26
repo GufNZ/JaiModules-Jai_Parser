@@ -29,6 +29,13 @@ Harness_Host :: struct {
 	dispatch_failures:	s64;
 }
 
+Host_Batch :: struct {
+	host:			*Harness_Host;
+	description:	Session_Description;
+	events:			[..]Document_Event;
+	contexts:		[..]Context_Registration;
+}
+
 Host_Failure :: enum u8 {
 	NONE;
 	INVALID_ROOT;
@@ -141,13 +148,6 @@ valid_relative :: (relative: string) -> bool {
 	return true;
 }
 
-Host_Batch :: struct {
-	host:			*Harness_Host;
-	description:	Session_Description;
-	events:			[..]Document_Event;
-	contexts:		[..]Context_Registration;
-}
-
 // Snapshots the accepted frontier and tracked states the batch's expected bases come from:
 begin_batch :: (host: *Harness_Host) -> Host_Batch {
 	_, description := describe_session(host.service, host.session);
@@ -176,8 +176,7 @@ edit_overlay :: (batch: *Host_Batch, relative: string, edits: []Range_Edit) -> b
 
 
 	event.kind = .EDIT_OVERLAY;
-	event.base_source_revision = tracked.overlay_source_revision;
-	event.edits = edits;
+	event.edit_overlay = .{base_source_revision = tracked.overlay_source_revision, edits = edits};
 	return true;
 }
 
@@ -189,9 +188,9 @@ observe_disk :: (batch: *Host_Batch, relative: string) -> bool {
 	}
 
 
+	ok, disk := disk_observation(batch.host, event);
 	event.kind = .OBSERVE_DISK;
-	ok: bool;
-	ok, event.disk = disk_observation(batch.host, event);
+	event.disk = disk;
 	return ok;
 }
 
@@ -204,19 +203,23 @@ ack_save :: (batch: *Host_Batch, relative: string, installation: []u8 = .[]) -> 
 	}
 
 
+	ok, disk := disk_observation(batch.host, event);
 	event.kind = .ACK_SAVE;
-	ok: bool;
-	ok, event.disk = disk_observation(batch.host, event);
-	if !ok || event.disk.kind != .PRESENT {
+	if !ok || disk.kind != .PRESENT {
+		event.ack_save = .{disk = disk};
 		return false;
 	}
 
 
-	event.written_source_revision = event.disk.source_revision;
-	event.expected_overlay_revision = ifx installation.count
+	expected_overlay_revision := ifx installation.count
 		then installation
 		else tracked.overlay_installation_revision;
 
+	event.ack_save = .{
+		disk = disk,
+		written_source_revision = disk.present.source_revision,
+		expected_overlay_revision = expected_overlay_revision,
+	};
 	return true;
 }
 
@@ -227,10 +230,10 @@ reset_overlay :: (batch: *Host_Batch, relative: string) -> bool {
 	}
 
 
+	host_confirmation := confirmation(batch.host, event, .RESET);
+	ok, disk := disk_observation(batch.host, event);
 	event.kind = .RESET_OVERLAY;
-	event.host_confirmation = confirmation(batch.host, event, .RESET);
-	ok: bool;
-	ok, event.disk = disk_observation(batch.host, event);
+	event.reset_overlay = .{disk = disk, host_confirmation = host_confirmation};
 	return ok;
 }
 
@@ -242,12 +245,15 @@ restore_overlay :: (batch: *Host_Batch, relative: string, text: string, candidat
 	}
 
 
+	host_confirmation := confirmation(batch.host, event, .RESTORE);
+	host_confirmation.source_revision = source_revision_of(xx text);
+	host_confirmation.recovery_candidate = candidate;
 	event.kind = .RESTORE_OVERLAY;
-	event.source = .{kind = .INLINE_BYTES, bytes = xx text};
-	event.recovery_candidate = candidate;
-	event.host_confirmation = confirmation(batch.host, event, .RESTORE);
-	event.host_confirmation.source_revision = source_revision_of(xx text);
-	event.host_confirmation.recovery_candidate = candidate;
+	event.restore_overlay = .{
+		source = .{kind = .INLINE_BYTES, bytes = xx text},
+		host_confirmation = host_confirmation,
+		recovery_candidate = candidate,
+	};
 	return true;
 }
 
@@ -390,17 +396,16 @@ prepare :: (batch: *Host_Batch, relative: string) -> *Document_Event {
 
 disk_observation :: (host: *Harness_Host, event: *Document_Event) -> bool, Disk_Observation {
 	_, token := issue_token(*host.observations);//QUESTION: why is this unchecked?
-	observation := Disk_Observation.{
-		syntax_context = event.source_context,
-		provenance = .{provider_identity = host.provider_namespace, observation_token = little_endian(token, 8,, temp)},
-	};
+	provenance := Observation_Provenance.{provider_identity = host.provider_namespace, observation_token = little_endian(token, 8,, temp)};
 	path := tprint("%/%", host.root, relative_of(host, event.document));
 	text, read_ok := read_entire_file(path, log_errors = false,, temp);
 	if read_ok {
-		observation.kind = .PRESENT;
-		observation.source = .{kind = .INLINE_BYTES, bytes = xx text};
-		observation.source_revision = source_revision_of(xx text);
-		return true, observation;
+		return true, disk_present(
+			event.source_context,
+			provenance,
+			.{kind = .INLINE_BYTES, bytes = xx text},
+			source_revision_of(xx text)
+		);
 	}
 
 
@@ -409,9 +414,7 @@ disk_observation :: (host: *Harness_Host, event: *Document_Event) -> bool, Disk_
 	}
 
 
-	observation.kind = .ABSENT;
-	observation.provider_revision = event.resulting_provider_revision;
-	return true, observation;
+	return true, disk_absent(event.source_context, provenance, event.resulting_provider_revision);
 }
 
 // The document key is the relative path itself:

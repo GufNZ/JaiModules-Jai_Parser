@@ -6,90 +6,14 @@ TOKEN_TAGS_SCHEMA		:: "jai-cache-token-tags/1";
 SOURCE_TOKENS_SCHEMA	:: "jai-cache-source-tokens/1";
 RECOVERY_SCHEMA			:: "jai-cache-recovery/1";
 
-// The closed `.NAMED` registry, in the registry's table order:
-TOKEN_TAG_NAMES :: string.[//QUESTION: why not enum?
-	"IDENT",
-	"NUMBER",
-	"STRING",
-	"PLUSEQUALS",
-	"MINUSEQUALS",
-	"TIMESEQUALS",
-	"DIVEQUALS",
-	"MODEQUALS",
-	"ISEQUAL",
-	"ISNOTEQUAL",
-	"LOGICAL_AND",
-	"LOGICAL_OR",
-	"LESSEQUALS",
-	"GREATEREQUALS",
-	"RIGHT_ARROW",
-	"DOUBLE_DOT",
-	"DOUBLE_DOLLAR",
-	"SHIFT_LEFT",
-	"SHIFT_RIGHT",
-	"ROTATE_LEFT",
-	"ROTATE_RIGHT",
-	"TRIPLE_EQUALS",
-	"SHIFT_LEFT_EQUALS",
-	"SHIFT_RIGHT_EQUALS",
-	"ROTATE_LEFT_EQUALS",
-	"ROTATE_RIGHT_EQUALS",
-	"BITWISE_AND_EQUALS",
-	"BITWISE_OR_EQUALS",
-	"BITWISE_XOR_EQUALS",
-	"LOGICAL_AND_EQUALS",
-	"LOGICAL_OR_EQUALS",
-	"POSTFIX_DEREFERENCE",
-	"PREFIX_DEREFERENCE",
-	"ISEQUAL_FOR_SWITCH_STATEMENT",
-	"DOUBLE_MINUS",
-	"TRIPLE_MINUS",
-	"DOUBLE_COMMA",
-	"BEGIN_STRUCT_LITERAL",
-	"BEGIN_ARRAY_LITERAL",
-	"KEYWORD_FOR",
-	"KEYWORD_IF",
-	"KEYWORD_IFX",
-	"KEYWORD_THEN",
-	"KEYWORD_ELSE",
-	"KEYWORD_CASE",
-	"KEYWORD_RETURN",
-	"KEYWORD_STRUCT",
-	"KEYWORD_WHILE",
-	"KEYWORD_BREAK",
-	"KEYWORD_CONTINUE",
-	"KEYWORD_REMOVE",
-	"KEYWORD_USING",
-	"KEYWORD_DEFER",
-	"KEYWORD_SIZE_OF",
-	"KEYWORD_TYPE_OF",
-	"KEYWORD_CODE_OF",
-	"KEYWORD_INITIALIZER_OF",
-	"KEYWORD_TYPE_INFO",
-	"KEYWORD_NULL",
-	"KEYWORD_ENUM",
-	"KEYWORD_TRUE",
-	"KEYWORD_FALSE",
-	"KEYWORD_INLINE",
-	"KEYWORD_NO_INLINE",
-	"KEYWORD_CAST",
-	"KEYWORD_AUTO_CAST",
-	"KEYWORD_CONTEXT",
-	"KEYWORD_PUSH_CONTEXT",
-	"KEYWORD_OPERATOR",
-	"KEYWORD_IS_CONSTANT",
-	"KEYWORD_ENUM_FLAGS",
-	"KEYWORD_UNION",
-	"KEYWORD_INTERFACE",
-	"QUICK_LAMBDA",
-	"NOTE",
-	"END_OF_INPUT",
-	"ERROR"
-];
-
-// Producer values from 256 upwards, indexing TOKEN_TAG_NAMES or -1; aliases (`__FIRST_KEYWORD`, `__LAST_KEYWORD`) share their target's value:
 NAMED_TOKEN_TAG_BASE :: 256;
-NAMED_TOKEN_TAG_BY_VALUE :: #run -> [] s16 {
+
+Named_Token_Registry :: struct {
+	names:		[]string;
+	by_value:	[]s16;
+}
+
+NAMED_TOKEN_REGISTRY :: #run -> Named_Token_Registry {
 	info := type_info(Parser.Token_Type);
 	highest: s64;
 	for info.values {
@@ -101,21 +25,29 @@ NAMED_TOKEN_TAG_BY_VALUE :: #run -> [] s16 {
 		it.* = -1;
 	}
 
-	for name, name_index: TOKEN_TAG_NAMES {
-		found := false;
-		for info.names {
-			if it == name {
-				table[info.values[it_index] - NAMED_TOKEN_TAG_BASE] = xx name_index;
-				found = true;
-				break;
-			}
+	names: [..]string;
+	for name: info.names {
+		value := info.values[it_index];
+		if (value < NAMED_TOKEN_TAG_BASE
+			|| name == "__FIRST_KEYWORD" || name == "__LAST_KEYWORD"
+			// These subscript operators label AST nodes and never appear in the lexer token stream:
+			|| value == xx Parser.Token_Type.OPERATOR_ARRAY_SUBSCRIPT
+			|| value == xx Parser.Token_Type.OPERATOR_ASSIGNMENT_TO_ARRAY_SUBSCRIPT
+		) {
+			continue;
 		}
 
-		assert(found, "Registered token tag % is not a producer Token_Type name.", name);
+
+		slot := value - NAMED_TOKEN_TAG_BASE;
+		assert(table[slot] < 0, "Duplicate producer value for named token tag %.", name);
+		table[slot] = xx names.count;
+		array_add(*names, name);
 	}
 
-	return table;
+	return .{names = names, by_value = table};
 };
+
+TOKEN_TAG_NAMES :: #run NAMED_TOKEN_REGISTRY.names;
 
 KNOWN_VALUE_FLAGS :u32: 0x1070_001F;
 
@@ -186,7 +118,7 @@ Synthetic_Token_Record :: struct {
 }
 
 Recovery_Observation :: struct {
-	kind: enum u8 {//QUESTION: this looks like it maybe would be better as a [tagged] union...
+	kind: enum u8 {
 		MISSING_TOKEN;
 		EXPECTED_EXPRESSION;
 		SKIPPED_TOKENS;
@@ -292,12 +224,13 @@ token_tag :: (type: Parser.Token_Type) -> bool, Token_Tag {
 
 
 	slot := value - NAMED_TOKEN_TAG_BASE;
-	if slot < 0 || slot >= NAMED_TOKEN_TAG_BY_VALUE.count || NAMED_TOKEN_TAG_BY_VALUE[slot] < 0 {
+	by_value := NAMED_TOKEN_REGISTRY.by_value;
+	if slot < 0 || slot >= by_value.count || by_value[slot] < 0 {
 		return false, .{};
 	}
 
 
-	return true, .{kind = .NAMED, name = TOKEN_TAG_NAMES[NAMED_TOKEN_TAG_BY_VALUE[slot]]};
+	return true, .{kind = .NAMED, name = TOKEN_TAG_NAMES[by_value[slot]]};
 }
 
 // On success the projection holds one record per producer record, in producer order:
