@@ -8254,6 +8254,44 @@ test_aggregate_literals :: () {
 	assert(array_literal.array_literal_info.array_members.count == 3);
 	assert(array_literal.array_literal_info.array_members[2].(*Extended.Parser_Literal)._u64 == 3);
 
+	for string.["[]", "[1]", "[1, 4, 9]", "[[1], [2, 3]]", "[{1}, .{2}]"] {
+		bare_array := Extended.parse_expression(it);
+		assert(bare_array.status == .COMPLETE && bare_array.diagnostics.count == 0);
+		assert(bare_array.root.kind == .LITERAL);
+		bare_literal := bare_array.root.(*Extended.Parser_Literal);
+		assert(bare_literal.value_type == .ARRAY && !!(bare_literal.array_literal_info.array_literal_flags & .WAS_UNTYPED));
+		assert(Extended.reconstruct_source(*bare_array) == it);
+	}
+
+	for string.["[] int", "[3] int", "[..] int", "[2][3]int", "[size(1, 2)] int", "*[] int"] {
+		array_type := Extended.parse_expression(it);
+		assert(array_type.status == .COMPLETE && array_type.diagnostics.count == 0);
+		assert(array_type.root.kind == .TYPE_INSTANTIATION);
+	}
+
+	indexed_literal := Extended.parse_expression("[1, 2][0]");
+	assert(indexed_literal.status == .COMPLETE && indexed_literal.diagnostics.count == 0);
+	assert(indexed_literal.root.kind == .BINARY_OPERATOR);
+	subscript := indexed_literal.root.(*Extended.Parser_Binary_Operator);
+	assert(subscript.operator_type == .ARRAY_SUBSCRIPT);
+	assert(subscript.left.(*Extended.Parser_Literal).array_literal_info.array_members.count == 2);
+
+	array_initializer := Extended.parse_block("{ values: [] int = [1, 4, 9]; }");
+	assert(array_initializer.status == .COMPLETE && array_initializer.diagnostics.count == 0);
+	values := array_initializer.root.(*Extended.Parser_Block).statements[0].(*Extended.Parser_Declaration);
+	assert(values.expression.kind == .LITERAL);
+	assert(values.expression.(*Extended.Parser_Literal).array_literal_info.array_members[2].(*Extended.Parser_Literal)._u64 == 9);
+
+	SPREAD_ARRAY_SOURCE :: "join(.. [\"one\", \"two\"], \", \" )";
+	spread_array := Extended.parse_expression(SPREAD_ARRAY_SOURCE);
+	assert(spread_array.status == .COMPLETE && spread_array.diagnostics.count == 0);
+	spread_call := spread_array.root.(*Extended.Parser_Procedure_Call);
+	assert(spread_call.arguments_unsorted.count == 2);
+	spread_expression := spread_call.arguments_unsorted[0].expression;
+	assert(spread_expression.kind == .LITERAL && !!(spread_expression.node_flags & .EXPRESSION_IS_SPREAD));
+	assert(spread_expression.(*Extended.Parser_Literal).array_literal_info.array_members.count == 2);
+	assert(Extended.reconstruct_source(*spread_array) == SPREAD_ARRAY_SOURCE);
+
 	typed_array := Extended.parse_expression("u8.[1, 2]");
 	typed_array_literal := typed_array.root.(*Extended.Parser_Literal);
 	assert(typed_array_literal.array_literal_info.element_type.type_valued_expression.(*Extended.Parser_Ident).name == "u8");

@@ -1041,7 +1041,7 @@ test_node_vectors :: () {
 	}
 
 	{
-		SOURCE :: "p: *[4]int = null; c := cast(u8) n; x := xx w; s := size_of(int); t := type_of(c); u := .[1, 2]; q := Point.{1, 2}; e := -n; d := #this; v := m.(u16);";
+		SOURCE :: "p: *[4]int = null; c := cast(u8) n; x := xx w; s := size_of(int); t := type_of(c); u := .[1, 2]; q := Point.{1, 2}; e := -n; d := #this; v := m.(u16); k := code_of(c);";
 		owned, projection := project_source_nodes(SOURCE);
 		defer Service.release_owned_syntax(owned);
 		defer Service.release_node_projection(projection);
@@ -1088,6 +1088,7 @@ test_node_vectors :: () {
 
 		assert(get_field(find(projection, "TYPE_QUERY").fields, "query_kind").enumeration.name == "SIZE_OF");
 		assert(get_field(find(projection, "EXPRESSION_QUERY").fields, "query_kind").enumeration.name == "TYPE_OF");
+		assert(get_field(find(projection, "EXPRESSION_QUERY", 1).fields, "query_kind").enumeration.name == "CODE_OF");
 		unary := find(projection, "UNARY_OPERATOR");
 		assert(get_field(unary.fields, "operator_type").operator_tag.byte == #char "-");
 		find(projection, "DIRECTIVE_THIS");

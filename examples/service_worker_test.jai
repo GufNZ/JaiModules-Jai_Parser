@@ -12795,18 +12795,18 @@ Registration_Probe :: struct {
 	// Capture waiter ledger state, optionally while holding the waiter selection:
 	track_waiter: bool;
 	hold_waiter_selection: bool;
-	waiter_ledger: Service:Resource_Ledger;
+	waiter_ledger: Service.Resource_Ledger;
 	// Capture admissions and source references after the job; select a backing directly or by document:
 	track_source: bool;
-	track_source_backing: *Service:Source_Backing;
+	track_source_backing: *Service.Source_Backing;
 	source_active_admissions: s64;
 	source_document: []u8;
 	source_references: s64;
 	// Optional world whose references are sampled after the job:
-	track_world: *Service:World;
+	track_world: *Service.World;
 	world_references: s64;
 	// Identity counters after the injected source or world callback:
-	callback_identities: Service:Session_Identities;
+	callback_identities: Service.Session_Identities;
 	// Published operation count after the injected callback, excluding any later outer admission:
 	callback_operations: s64;
 	// Live world count after the callback's own lifecycle/frontier or competing admission actions:

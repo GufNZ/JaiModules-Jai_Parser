@@ -5298,13 +5298,80 @@ binary_operator_info :: (token_type: Token_Type) -> (bool, Operator_Type, s32, b
 	return true, operator_type, precedence, false;
 }
 
+// Only a single dimension can introduce an array type.
+// Commas inside a nested expression do not rule out a dimension.
+bracket_starts_array_type :: (parser: *Parser, lookahead: s64) -> bool {
+	if parser_peek(parser, lookahead + 1).type == .DOUBLE_DOT && parser_peek(parser, lookahead + 2).type == #char "]" {
+		return true;
+	}
+
+
+	depth: s64;
+	while true {
+		lookahead += 1;
+		if parser_peek(parser, lookahead).type == {
+			case .END_OF_INPUT;
+				return false;
+
+			case #char ","; #through;
+			case #char ";";
+				if !depth {
+					return false;
+				}
+
+			case #char "(";				#through;
+			case #char "[";				#through;
+			case #char "{";				#through;
+			case .BEGIN_ARRAY_LITERAL;	#through;
+			case .BEGIN_STRUCT_LITERAL;
+				depth += 1;
+
+			case #char ")"; #through;
+			case #char "}";
+				if !depth {
+					return false;
+				}
+
+
+				depth -= 1;
+
+			case #char "]";
+				if depth {
+					depth -= 1;
+					continue;
+				}
+
+
+				if parser_peek(parser, lookahead + 1).type == {
+					case .IDENT;				#through;
+					case .DOUBLE_DOT;			#through;
+					case .KEYWORD_STRUCT;		#through;
+					case .KEYWORD_UNION;		#through;
+					case .KEYWORD_ENUM;			#through;
+					case .KEYWORD_ENUM_FLAGS;	#through;
+					case #char "*";				#through;
+					case #char "[";				#through;
+					case #char "(";				#through;
+					case #char "$";				#through;
+					case #char "#";
+						return true;
+
+					case;
+						return false;
+				}
+		}
+	}
+
+
+	return false;
+}
+
 // Recognize explicit type prefixes before unary operators, since the same punctuation can begin either form.
-// `[3]T` and `*[]T` are type-valued expressions; `-3` stays a signed literal, and a leading `.` binds to its immediate primary before later postfix access.
 parse_prefix :: (parser: *Parser) -> *Parser_Node {
 	first := parser.cursor;
 	token := parser_peek(parser);
 	negative_number := parser_peek_if(parser, #char "-", .NUMBER);
-	starts_explicit_type := token.type == #char "["
+	starts_explicit_type := token.type == #char "[" && bracket_starts_array_type(parser, 0)
 		|| token.type == .DOUBLE_DOT
 		|| token.type == #char "$"
 		|| token.type == #char "*" && parser_peek(parser, 1).type == #char "[";
@@ -5611,6 +5678,12 @@ parse_procedure_call :: (parser: *Parser, procedure: *Parser_Node, first: s64) -
 			finish_node(parser, argument.name, name_first);
 		}
 
+		expression_first := parser.cursor;
+		spread_array := parser_peek_if(parser, .DOUBLE_DOT, #char "[") && !bracket_starts_array_type(parser, 1);
+		if spread_array {
+			parser_eat(parser);
+		}
+
 		argument.expression = parse_value_expression(parser, 2);
 		if !argument.expression {
 			add_expected_expression(parser);
@@ -5618,6 +5691,10 @@ parse_procedure_call :: (parser: *Parser, procedure: *Parser_Node, first: s64) -
 			break;
 		}
 
+		if spread_array {
+			argument.expression.node_flags |= .EXPRESSION_IS_SPREAD;
+			finish_node(parser, argument.expression, expression_first);
+		}
 
 		array_add(*arguments, argument);
 
@@ -5659,7 +5736,7 @@ make_type_instantiation :: (parser: *Parser, expression: *Parser_Node) -> *Parse
 	return result;
 }
 
-// Build array or struct literals in either typed postfix form (`T.[1]`, `T.{x=1}`) or untyped primary form (`.[1]`, `.{x=1}`), retaining the contextual type separately.
+// Typed postfix forms carry a type expression; untyped primaries use the same member parser with either opener spelling.
 parse_aggregate_literal :: (
 	parser: *Parser,
 	value_type: type_of(Code_Literal.value_type),
@@ -5874,11 +5951,12 @@ parse_primary :: (parser: *Parser) -> *Parser_Node {
 			finish_node(parser, result, first);
 			return result;
 
-		// Untyped array literal `.[1, 2]`.
-		case .BEGIN_ARRAY_LITERAL;
+		// Untyped array literal `[1, 2]` or `.[1, 2]`.
+		case .BEGIN_ARRAY_LITERAL; #through;
+		case #char "[";
 			return parse_aggregate_literal(parser, .ARRAY, null, first);
 
-		// Struct literal `.{x=1}`; bare `{x=1}` only where a value is expected.
+		// Struct literal `{x=1}` or `.{x=1}`; only where a value is expected.
 		case .BEGIN_STRUCT_LITERAL; #through;
 		case #char "{";
 			return ifx token.type == #char "{" && !parser.allow_unprefixed_struct_literal
