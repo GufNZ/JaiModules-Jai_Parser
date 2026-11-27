@@ -155,6 +155,14 @@ fi
 
 failures=()
 configurations=0
+configurations_per_backend=${#tests[@]}
+if [[ $suite == all || $suite == service ]]; then
+	configurations_per_backend=$((configurations_per_backend + 1))
+fi
+total_configurations=$((configurations_per_backend * ${#backends[@]}))
+if [[ $suite == all ]]; then
+	total_configurations=$((total_configurations + 2))
+fi
 declare -A build_status=()
 
 execute_command() {
@@ -240,7 +248,7 @@ run_test() {
 	fi
 
 	configurations=$((configurations + 1))
-	printf '\n\e[96m=== %s ===\e[0m\n' "$label"
+	printf '\n\e[96m=== Step \e[93m%s\e[96m/\e[93m%s\e[96m: %s ===\e[0m\n' "$configurations" "$total_configurations" "$label"
 	printf -v build_key '%q ' "${build[@]}"
 	if [[ ! ${build_status[$build_key]+present} ]]; then
 		printf '%s\n' "$build_key"

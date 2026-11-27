@@ -57,7 +57,14 @@ main :: () {
 	reduced := path_to_string(reduce_path(parse_path(path)));
 
 	filenames: [..]string;
-	visit_files(reduced, true, *filenames, visit, visit_symlinks = false);
+	visit_files(
+		reduced,
+		true,
+		*filenames,
+		visit,
+		visit_directories = true,
+		visit_symlinks = false
+	);
 
 	lexer: Parser_Lexer.Lexer;
 	total_tokens: s64;
@@ -91,8 +98,8 @@ main :: () {
 			total_tokens += 1;
 		}
 
-		assert(source_cursor == lexer.input.count);
-		assert(!lexer.reported_error);
+		assert(source_cursor == lexer.input.count, "Incomplete source coverage in %.", name);
+		assert(!lexer.reported_error, "Lexer reported an error in %.", name);
 	}
 
 	print("Validated % tokens across % files.\n", total_tokens, filenames.count);
@@ -475,7 +482,11 @@ consume_source_span :: (input: string, cursor: *s64, span: string) {
 }
 
 visit :: (info: *File_Visit_Info, results: *[..]string) {
-	if ends_with(info.short_name, ".jai") {
+	if info.is_directory {
+		if info.short_name == ".build" {
+			info.descend_into_directory = false;
+		}
+	} else if ends_with(info.short_name, ".jai") {
 		array_add(results, copy_string(info.full_name));
 	}
 }
