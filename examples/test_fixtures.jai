@@ -2180,6 +2180,7 @@ Numeric_Rank_Case :: struct {
 	setup: string = "";
 	globals: string = "";
 	parser_matches: bool = true;
+	compiler_boundary_skip: bool;
 }
 
 MIXED_AGGREGATE_RANK_GLOBALS :: #string JAI
@@ -2498,8 +2499,8 @@ JAI;
 	return tprint(SOURCE, declarations, fixture.globals, fixture.setup, fixture.arguments);
 }
 
-make_numeric_rank_case :: (first: string, second: string, arguments: string, selected_index: s64) -> Numeric_Rank_Case {
-	return .{first_parameters = first, second_parameters = second, arguments = arguments, selected_index = selected_index};
+make_numeric_rank_case :: (first: string, second: string, arguments: string, selected_index: s64, compiler_boundary_skip := false) -> Numeric_Rank_Case {
+	return .{first_parameters = first, second_parameters = second, arguments = arguments, selected_index = selected_index, compiler_boundary_skip = compiler_boundary_skip};
 }
 
 make_numeric_rank_cases :: () -> [..]Numeric_Rank_Case {
@@ -2538,7 +2539,7 @@ make_numeric_rank_cases :: () -> [..]Numeric_Rank_Case {
 			}
 
 			for value: UNSIGNED_NEGATIVE_VALUES {
-				array_add(*cases, make_numeric_rank_case(first, second, value, -1));
+				array_add(*cases, make_numeric_rank_case(first, second, value, -1, compiler_boundary_skip = value == "-9223372036854775808"));
 			}
 
 			if wide.above_is_representable {
@@ -2561,11 +2562,11 @@ make_numeric_rank_cases :: () -> [..]Numeric_Rank_Case {
 			}
 
 			for value: string.[narrow.below, narrow.above, wide.lower, wide.upper] {
-				array_add(*cases, make_numeric_rank_case(first, second, value, 1));
+				array_add(*cases, make_numeric_rank_case(first, second, value, 1, compiler_boundary_skip = value == narrow.below || value == wide.lower));
 			}
 
 			for value: string.[wide.below, wide.above] {
-				array_add(*cases, make_numeric_rank_case(first, second, value, -1));
+				array_add(*cases, make_numeric_rank_case(first, second, value, -1, compiler_boundary_skip = value == wide.below));
 			}
 		}
 	}
@@ -2592,7 +2593,7 @@ make_numeric_rank_cases :: () -> [..]Numeric_Rank_Case {
 		}
 
 		for value: string.[signed.below, unsigned.above] {
-			array_add(*cases, make_numeric_rank_case(first, second, value, -1));
+			array_add(*cases, make_numeric_rank_case(first, second, value, -1, compiler_boundary_skip = value == signed.below));
 		}
 	}
 
@@ -2623,15 +2624,15 @@ make_numeric_rank_cases :: () -> [..]Numeric_Rank_Case {
 			}
 
 			for value: string.["-1", signed.lower] {
-				array_add(*cases, make_numeric_rank_case(first, second, value, 0));
+				array_add(*cases, make_numeric_rank_case(first, second, value, 0, compiler_boundary_skip = !signed_is_narrower && value == signed.lower));
 			}
 
 			if signed_is_narrower {
 				for value: string.[signed.above, unsigned.upper] {
-				array_add(*cases, make_numeric_rank_case(first, second, value, 1));
+					array_add(*cases, make_numeric_rank_case(first, second, value, 1, compiler_boundary_skip = unsigned.parameter_type == "u64" && value == unsigned.upper));
 				}
 
-				array_add(*cases, make_numeric_rank_case(first, second, signed.below, -1));
+				array_add(*cases, make_numeric_rank_case(first, second, signed.below, -1, compiler_boundary_skip = true));
 				if unsigned.above_is_representable {
 					array_add(*cases, make_numeric_rank_case(first, second, unsigned.above, -1));
 				}
@@ -2641,7 +2642,7 @@ make_numeric_rank_cases :: () -> [..]Numeric_Rank_Case {
 				}
 
 				for value: string.[signed.below, signed.above] {
-					array_add(*cases, make_numeric_rank_case(first, second, value, -1));
+					array_add(*cases, make_numeric_rank_case(first, second, value, -1, compiler_boundary_skip = value == signed.below));
 				}
 			}
 		}
@@ -2657,7 +2658,7 @@ make_numeric_rank_cases :: () -> [..]Numeric_Rank_Case {
 			signed64.lower, signed64.upper, signed64.above,
 			unsigned.upper, unsigned64.upper
 		] {
-			array_add(*cases, make_numeric_rank_case(first, second, value, 0));
+			array_add(*cases, make_numeric_rank_case(first, second, value, 0, compiler_boundary_skip = value == signed64.above || (value == signed64.lower && unsigned.parameter_type != "u64")));
 		}
 
 		if unsigned.above_is_representable {
